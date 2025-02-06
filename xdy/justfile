@@ -8,4 +8,4 @@ coverage:
 
 # Run mutation tests.
 mutants:
-	cargo mutants --j8
+	cargo mutants -j8

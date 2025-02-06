@@ -1,3 +1,9 @@
+# Rust artifacts.
 /target
 Cargo.lock
+
+# cargo-mutants artifacts.
+/mutants.out
+
+# Scratch files.
 repl.rs
