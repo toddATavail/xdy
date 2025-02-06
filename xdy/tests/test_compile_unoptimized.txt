@@ -1,0 +1,595 @@
+0
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+1
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 1
+
+-1
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return -1
+
+10
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 10
+
+100
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 100
+
+123456789123456789123456789123456789
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2147483647
+
+987654321987654321987654321987654321
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2147483647
+
+09
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 9
+
+(0)
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+{a}
+=
+Function() r#1 ⚅#0
+	extern[a@0]
+	body:
+		return @0
+
+{alloy}
+=
+Function() r#1 ⚅#0
+	extern[alloy@0]
+	body:
+		return @0
+
+{a0}
+=
+Function() r#1 ⚅#0
+	extern[a0@0]
+	body:
+		return @0
+
+{kebab-case}
+=
+Function() r#1 ⚅#0
+	extern[kebab-case@0]
+	body:
+		return @0
+
+{snake_case}
+=
+Function() r#1 ⚅#0
+	extern[snake_case@0]
+	body:
+		return @0
+
+{qualified.access}
+=
+Function() r#1 ⚅#0
+	extern[qualified.access@0]
+	body:
+		return @0
+
+{dés}
+=
+Function() r#1 ⚅#0
+	extern[dés@0]
+	body:
+		return @0
+
+{an external variable}
+=
+Function() r#1 ⚅#0
+	extern[an external variable@0]
+	body:
+		return @0
+
+{выражение в кости}
+=
+Function() r#1 ⚅#0
+	extern[выражение в кости@0]
+	body:
+		return @0
+
+{έκφραση ζαριών}
+=
+Function() r#1 ⚅#0
+	extern[έκφραση ζαριών@0]
+	body:
+		return @0
+
+a: {a}
+=
+Function(a@0) r#1 ⚅#0
+	extern[]
+	body:
+		return @0
+
+a, an external variable: {an external variable}
+=
+Function(a@0, an external variable@1) r#2 ⚅#0
+	extern[]
+	body:
+		return @1
+
+({a})
+=
+Function() r#1 ⚅#0
+	extern[a@0]
+	body:
+		return @0
+
+[0:5]
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 0:5
+		@0 <- sum rolling record ⚅0
+		return @0
+
+[-10:10]
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range -10:10
+		@0 <- sum rolling record ⚅0
+		return @0
+
+[1d3 + 5 : 55 - 8D4]
+=
+Function() r#5 ⚅#3
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D3
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + 5
+		⚅1 <- roll standard dice 8D4
+		@2 <- sum rolling record ⚅1
+		@3 <- 55 - @2
+		⚅2 <- roll range @1:@3
+		@4 <- sum rolling record ⚅2
+		return @4
+
+1D6
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+1d6
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+2d8
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D8
+		@0 <- sum rolling record ⚅0
+		return @0
+
+20d10
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 20D10
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}D{y}
+=
+Function() r#3 ⚅#1
+	extern[x@0, y@1]
+	body:
+		⚅0 <- roll standard dice @0D@1
+		@2 <- sum rolling record ⚅0
+		return @2
+
+1D[-1, 0, 1]
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 1D[-1, 0, 1]
+		@0 <- sum rolling record ⚅0
+		return @0
+
+(1d6)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+(1)d(6)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+(1d[1, 1, 2, 3, 5, 8])D(1D8)
+=
+Function() r#3 ⚅#3
+	extern[]
+	body:
+		⚅0 <- roll custom dice 1D[1, 1, 2, 3, 5, 8]
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D8
+		@1 <- sum rolling record ⚅1
+		⚅2 <- roll standard dice @0D@1
+		@2 <- sum rolling record ⚅2
+		return @2
+
+3D10 drop lowest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D10
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D10 drop lowest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D10
+		⚅0 <- drop lowest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D10 drop highest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D10
+		⚅0 <- drop highest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D10 drop highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D10
+		⚅0 <- drop highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+10D10 drop highest 2 drop lowest 5
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 10D10
+		⚅0 <- drop highest 2 from ⚅0
+		⚅0 <- drop lowest 5 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+10D10 drop lowest (1 + 3) drop highest {x}
+=
+Function() r#3 ⚅#1
+	extern[x@0]
+	body:
+		⚅0 <- roll standard dice 10D10
+		@1 <- 1 + 3
+		⚅0 <- drop lowest @1 from ⚅0
+		⚅0 <- drop highest @0 from ⚅0
+		@2 <- sum rolling record ⚅0
+		return @2
+
+0 + 0
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 + 0
+		return @0
+
+0 - 0
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 - 0
+		return @0
+
+0 * 0
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 * 0
+		return @0
+
+{a} × {b}
+=
+Function() r#3 ⚅#0
+	extern[a@0, b@1]
+	body:
+		@2 <- @0 * @1
+		return @2
+
+0 / 0
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 / 0
+		return @0
+
+{a} ÷ {b}
+=
+Function() r#3 ⚅#0
+	extern[a@0, b@1]
+	body:
+		@2 <- @0 / @1
+		return @2
+
+{a} % {b}
+=
+Function() r#3 ⚅#0
+	extern[a@0, b@1]
+	body:
+		@2 <- @0 % @1
+		return @2
+
+-10
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return -10
+
+0 + 1 + 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 + 1
+		@1 <- @0 + 2
+		return @1
+
+(0 + 1) + 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 + 1
+		@1 <- @0 + 2
+		return @1
+
+0 + (1 + 2)
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 1 + 2
+		@1 <- 0 + @0
+		return @1
+
+0 + 1 - 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 + 1
+		@1 <- @0 - 2
+		return @1
+
+0 + 1 * 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 1 * 2
+		@1 <- 0 + @0
+		return @1
+
+0 + 1 / 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 1 / 2
+		@1 <- 0 + @0
+		return @1
+
+0 + 1 % 2
+=
+Function() r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 1 % 2
+		@1 <- 0 + @0
+		return @1
+
+0 + 1 ^ 2 ^ {a}
+=
+Function() r#4 ⚅#0
+	extern[a@0]
+	body:
+		@1 <- 2 ^ @0
+		@2 <- 1 ^ @1
+		@3 <- 0 + @2
+		return @3
+
+0 ^ {a} - {a} ^ 2
+=
+Function() r#4 ⚅#0
+	extern[a@0]
+	body:
+		@1 <- 0 ^ @0
+		@2 <- @0 ^ 2
+		@3 <- @1 - @2
+		return @3
+
+0 ^ -{a} - -{a} ^ 2
+=
+Function() r#6 ⚅#0
+	extern[a@0]
+	body:
+		@1 <- -@0
+		@2 <- 0 ^ @1
+		@3 <- @0 ^ 2
+		@4 <- -@3
+		@5 <- @2 - @4
+		return @5
+
+3D6 + 0
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + 0
+		return @1
+
+5 + 3D6
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@1 <- 5 + @0
+		return @1
+
+3D6 + 2D12
+=
+Function() r#3 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 2D12
+		@1 <- sum rolling record ⚅1
+		@2 <- @0 + @1
+		return @2
+
+3 ^ 3D6 + -2D12
+=
+Function() r#5 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@1 <- 3 ^ @0
+		⚅1 <- roll standard dice 2D12
+		@2 <- sum rolling record ⚅1
+		@3 <- -@2
+		@4 <- @1 + @3
+		return @4
+
+(5 + {a})d({b})
+=
+Function() r#4 ⚅#1
+	extern[a@0, b@1]
+	body:
+		@2 <- 5 + @0
+		⚅0 <- roll standard dice @2D@1
+		@3 <- sum rolling record ⚅0
+		return @3
+
+(5 + {a})d({b}) drop lowest 1
+=
+Function() r#4 ⚅#1
+	extern[a@0, b@1]
+	body:
+		@2 <- 5 + @0
+		⚅0 <- roll standard dice @2D@1
+		⚅0 <- drop lowest 1 from ⚅0
+		@3 <- sum rolling record ⚅0
+		return @3
+
+(5 + {a})d({b}) drop highest 1 * 3
+=
+Function() r#5 ⚅#1
+	extern[a@0, b@1]
+	body:
+		@2 <- 5 + @0
+		⚅0 <- roll standard dice @2D@1
+		⚅0 <- drop highest 1 from ⚅0
+		@3 <- sum rolling record ⚅0
+		@4 <- @3 * 3
+		return @4
+
+(5 + {a})d({b}) drop highest 1 % [2:3]
+=
+Function() r#6 ⚅#2
+	extern[a@0, b@1]
+	body:
+		@2 <- 5 + @0
+		⚅0 <- roll standard dice @2D@1
+		⚅0 <- drop highest 1 from ⚅0
+		@3 <- sum rolling record ⚅0
+		⚅1 <- roll range 2:3
+		@4 <- sum rolling record ⚅1
+		@5 <- @3 % @4
+		return @5
+
+x: ({x} + 1) - ({x} + 1)
+=
+Function(x@0) r#4 ⚅#0
+	extern[]
+	body:
+		@1 <- @0 + 1
+		@2 <- @0 + 1
+		@3 <- @1 - @2
+		return @3

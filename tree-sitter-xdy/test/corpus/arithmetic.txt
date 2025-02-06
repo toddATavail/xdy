@@ -1,0 +1,408 @@
+==================
+Arithmetic: 0 + 0
+==================
+
+0 + 0
+
+---
+
+(function
+	(add
+		(constant)
+		(constant)))
+
+==================
+Arithmetic: 0 - 0
+==================
+
+0 - 0
+
+---
+
+(function
+	(sub
+		(constant)
+		(constant)))
+
+==================
+Arithmetic: 0 * 0
+==================
+
+0 * 0
+
+---
+
+(function
+	(mul
+		(constant)
+		(constant)))
+
+======================
+Arithmetic: {a} × {b}
+======================
+
+{a} × {b}
+
+---
+
+(function
+	(mul
+		(variable (identifier))
+		(variable (identifier))))
+
+==================
+Arithmetic: 0 / 0
+==================
+
+0 / 0
+
+---
+
+(function
+	(div
+		(constant)
+		(constant)))
+
+======================
+Arithmetic: {a} ÷ {b}
+======================
+
+{a} ÷ {b}
+
+---
+
+(function
+	(div
+		(variable (identifier))
+		(variable (identifier))))
+
+======================
+Arithmetic: {a} % {b}
+======================
+
+{a} % {b}
+
+---
+
+(function
+	(mod
+		(variable (identifier))
+		(variable (identifier))))
+
+======================
+Arithmetic: -{x}
+======================
+
+-{x}
+
+---
+
+(function
+	(neg
+		(variable (identifier))))
+
+======================================
+Order of Operations: 0 + 1 + 2
+======================================
+
+0 + 1 + 2
+
+---
+
+(function
+	(add
+		(add
+			(constant)
+			(constant))
+		(constant)))
+
+======================================
+Order of Operations: (0 + 1) + 2
+======================================
+
+(0 + 1) + 2
+
+---
+
+(function
+	(add
+		(group
+			(add
+				(constant)
+				(constant)))
+		(constant)))
+
+======================================
+Order of Operations: 0 + (1 + 2)
+======================================
+
+0 + (1 + 2)
+
+---
+
+(function
+	(add
+		(constant)
+		(group
+			(add
+				(constant)
+				(constant)))))
+
+======================================
+Order of Operations: 0 + 1 - 2
+======================================
+
+0 + 1 - 2
+
+---
+
+(function
+	(sub
+		(add
+			(constant)
+			(constant))
+		(constant)))
+
+======================================
+Order of Operations: 0 + 1 * 2
+======================================
+
+0 + 1 * 2
+
+---
+
+(function
+	(add
+		(constant)
+		(mul
+			(constant)
+			(constant))))
+
+======================================
+Order of Operations: 0 + 1 / 2
+======================================
+
+0 + 1 / 2
+
+---
+
+(function
+	(add
+		(constant)
+		(div
+			(constant)
+			(constant))))
+
+======================================
+Order of Operations: 0 + 1 % 2
+======================================
+
+0 + 1 % 2
+
+---
+
+(function
+	(add
+		(constant)
+		(mod
+			(constant)
+			(constant))))
+
+======================================
+Order of Operations: 0 + 1 ^ 2 ^ {a}
+======================================
+
+0 + 1 ^ 2 ^ {a}
+
+---
+
+(function
+	(add
+		(constant)
+		(exp
+			(constant)
+			(exp
+				(constant)
+				(variable (identifier))))))
+
+=======================================
+Order of Operations: 0 ^ {a} - {a} ^ 2
+=======================================
+
+0 ^ {a} - {a} ^ 2
+
+---
+
+(function
+	(sub
+		(exp
+			(constant)
+			(variable (identifier)))
+		(exp
+			(variable (identifier))
+			(constant))))
+
+=========================================
+Order of Operations: 0 ^ -{a} - -{a} ^ 2
+=========================================
+
+0 ^ -{a} - -{a} ^ 2
+
+---
+
+(function
+	(sub
+		(exp
+			(constant)
+			(neg (variable (identifier))))
+		(neg
+			(exp
+				(variable (identifier))
+				(constant)))))
+
+======================================
+Dice Expressions: 3D6 + 0
+======================================
+
+3D6 + 0
+
+---
+
+(function
+	(add
+		(standard_dice
+			(constant)
+			(constant))
+		(constant)))
+
+======================================
+Dice Expressions: 5 + 3D6
+======================================
+
+5 + 3D6
+
+---
+
+(function
+	(add
+		(constant)
+		(standard_dice
+			(constant)
+			(constant))))
+
+======================================
+Dice Expressions: 3D6 + 2D12
+======================================
+
+3D6 + 2D12
+
+---
+
+(function
+	(add
+		(standard_dice
+			(constant)
+			(constant))
+		(standard_dice
+			(constant)
+			(constant))))
+
+======================================
+Dice Expressions: 3 ^ 3D6 + -2D12
+======================================
+
+3 ^ 3D6 + -2D12
+
+---
+
+(function
+	(add
+		(exp
+			(constant)
+			(standard_dice
+				(constant)
+				(constant)))
+		(neg
+			(standard_dice
+				(constant)
+				(constant)))))
+
+======================================
+Dice Expressions: (5 + {a})d({b})
+======================================
+
+(5 + {a})d({b})
+
+---
+
+(function
+	(standard_dice
+		(group
+			(add
+				(constant)
+				(variable (identifier))))
+		(group
+			(variable (identifier)))))
+
+================================================
+Dice Expressions: (5 + {a})d({b}) drop lowest 1
+================================================
+
+(5 + {a})d({b}) drop lowest 1
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice
+			(group
+				(add
+					(constant)
+					(variable (identifier))))
+			(group
+				(variable (identifier))))
+		(constant)))
+
+=====================================================
+Dice Expressions: (5 + {a})d({b}) drop highest 1 * 3
+=====================================================
+
+(5 + {a})d({b}) drop highest 1 * 3
+
+---
+
+(function
+	(mul
+		(drop_highest
+			(standard_dice
+				(group
+					(add
+						(constant)
+						(variable (identifier))))
+				(group
+					(variable (identifier))))
+			(constant))
+		(constant)))
+
+=========================================================
+Dice Expressions: (5 + {a})d({b}) drop highest 1 % [2:3]
+=========================================================
+
+(5 + {a})d({b}) drop highest 1 % [2:3]
+
+---
+
+(function
+	(mod
+		(drop_highest
+			(standard_dice
+				(group
+					(add
+						(constant)
+						(variable (identifier))))
+				(group
+					(variable (identifier))))
+			(constant))
+		(range
+			(constant)
+			(constant))))

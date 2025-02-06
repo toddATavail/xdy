@@ -1,0 +1,218 @@
+==========================
+Dice: 1D6
+==========================
+
+1D6
+
+---
+
+(function (standard_dice (constant) (constant)))
+
+==========================
+Dice: 1d6
+==========================
+
+1d6
+
+---
+
+(function (standard_dice (constant) (constant)))
+
+==========================
+Dice: 2D8
+==========================
+
+2D8
+
+---
+
+(function (standard_dice (constant) (constant)))
+
+==========================
+Dice: 20D10
+==========================
+
+20D10
+
+---
+
+(function (standard_dice (constant) (constant)))
+
+==========================
+Dice: {x}D{y}
+==========================
+
+{x}D{y}
+
+---
+
+(function
+	(standard_dice
+		(variable (identifier))
+		(variable (identifier))))
+
+==========================
+Dice: 1D[-1, 0, 1]
+==========================
+
+1D[-1, 0, 1]
+
+---
+
+(function
+	(custom_dice
+		(constant)
+		(custom_faces
+			(negative_constant)
+			(constant)
+			(constant))))
+
+==========================
+Dice: (1D6)
+==========================
+
+(1D6)
+
+---
+
+(function (group (standard_dice (constant) (constant))))
+
+==========================
+Dice: (1)D(6)
+==========================
+
+(1)D(6)
+
+---
+
+(function (standard_dice (group (constant)) (group (constant))))
+
+===================================
+Dice: (1d[1, 1, 2, 3, 5, 8])D(1D8)
+===================================
+
+(1d[1, 1, 2, 3, 5, 8])D(1D8)
+
+---
+
+(function
+	(standard_dice
+		(group
+			(custom_dice
+				(constant)
+				(custom_faces
+					(constant)
+					(constant)
+					(constant)
+					(constant)
+					(constant)
+					(constant))))
+		(group
+			(standard_dice
+				(constant)
+				(constant)))))
+
+===================================
+No Count: D8
+:error
+===================================
+
+D8
+
+---
+
+==========================
+Dice: 3D10 drop lowest
+==========================
+
+3D10 drop lowest
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice
+			(constant)
+			(constant))))
+
+==========================
+Dice: 3D10 drop lowest 2
+==========================
+
+3D10 drop lowest 2
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice
+			(constant)
+			(constant))
+		(constant)))
+
+==========================
+Dice: 3D10 drop highest
+==========================
+
+3D10 drop highest
+
+---
+
+(function
+	(drop_highest
+		(standard_dice
+			(constant)
+			(constant))))
+
+==========================
+Dice: 3D10 drop highest 2
+==========================
+
+3D10 drop highest 2
+
+---
+
+(function
+	(drop_highest
+		(standard_dice
+			(constant)
+			(constant))
+		(constant)))
+
+=========================================
+Dice: 10D10 drop highest 2 drop lowest 5
+=========================================
+
+10D10 drop highest 2 drop lowest 5
+
+---
+
+(function
+	(drop_lowest
+		(drop_highest
+			(standard_dice
+				(constant)
+				(constant))
+			(constant))
+		(constant)))
+
+=================================================
+Dice: 10D10 drop lowest (1 + 3) drop highest {x}
+=================================================
+
+10D10 drop lowest (1 + 3) drop highest {x}
+
+---
+
+(function
+	(drop_highest
+		(drop_lowest
+			(standard_dice
+				(constant)
+				(constant))
+			(group
+				(add
+					(constant)
+					(constant))))
+		(variable
+			(identifier))))

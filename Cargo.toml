@@ -1,0 +1,26 @@
+[workspace]
+members = ["xdy", "tree-sitter-xdy"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Todd L Smith <todd@availlang.org>"]
+description = "Complex RPG dice expression evaluator with histogram support."
+
+[workspace.dependencies]
+cc = "1.1.8"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+fluent = "0.16.1"
+fluent-syntax = "0.11.1"
+intl-memoizer = "0.5.2"
+locale_config = "0.3.0"
+pretty_assertions = "1.4.0"
+proc-macro2 = "1.0.86"
+rand = "0.8.5"
+rayon = "1.10.0"
+serde = { version = "1.0.204", features = ["derive"] }
+syn = "2.0.72"
+tree-sitter = ">=0.22.6"
+unic-langid = { version = "0.9.5", features = ["macros"] }
+uuid = { version = "1.10.0", features = ["serde", "v4"] }

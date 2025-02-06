@@ -1,0 +1,11 @@
+# Run the benchmarks, which requires defining the `bench` feature.
+bench:
+	cargo bench -F bench
+
+# Produce and view code coverage reports.
+coverage:
+	cargo +nightly llvm-cov --html --branch --open
+
+# Run mutation tests.
+mutants:
+	cargo mutants --j8

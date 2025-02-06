@@ -1,0 +1,39 @@
+=============
+Range: [0:5]
+=============
+
+[0:5]
+
+---
+
+(function (range (constant) (constant)))
+
+================
+Range: [-10:10]
+================
+
+[-10:10]
+
+---
+
+(function
+	(range
+		(neg (constant))
+		(constant)))
+
+===========================
+Range: [1d3 + 5 : 8D4 - 5]
+===========================
+
+[1d3 + 5 : 55 - 8D4]
+
+---
+
+(function
+	(range
+		(add
+			(standard_dice (constant) (constant))
+			(constant))
+		(sub
+			(constant)
+			(standard_dice (constant) (constant)))))

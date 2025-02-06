@@ -1,0 +1,50 @@
+{
+  "name": "tree-sitter-xdy",
+  "version": "0.1.0",
+  "description": "tree-sitter grammar for Basic Roleplaying dice expression language.",
+  "readme": "README.md",
+  "scripts": {
+    "build": "tree-sitter generate && tree-sitter build",
+    "test": "tree-sitter test && cargo test",
+    "install": "node-gyp-build",
+    "prebuildify": "prebuildify --napi --strip"
+  },
+  "keywords": [
+    "xdy",
+    "dice",
+    "rpg"
+  ],
+  "files": [
+    "grammar.js",
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "src/**"
+  ],
+  "author": "Todd L Smith <todd@availlang.org>",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node-addon-api": "^7.1.0",
+    "node-gyp-build": "^4.8.0"
+  },
+  "peerDependencies": {
+    "tree-sitter": "^0.21.0"
+  },
+  "peerDependenciesMeta": {
+    "tree_sitter": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "prebuildify": "^6.0.0",
+    "tree-sitter-cli": "^0.22.6"
+  },
+  "types": "bindings/node",
+  "tree-sitter": [
+    {
+      "scope": "source.dice",
+      "injection-regex": "^dice$"
+    }
+  ]
+}

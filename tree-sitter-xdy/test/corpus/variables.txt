@@ -1,0 +1,140 @@
+==================
+External: a
+==================
+
+{a}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: alloy
+==================
+
+{alloy}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: a0
+==================
+
+{a0}
+
+---
+
+(function (variable (identifier)))
+
+=====================
+External: kebab-case
+=====================
+
+{kebab-case}
+
+---
+
+(function (variable (identifier)))
+
+=====================
+External: snake_case
+=====================
+
+{snake_case}
+
+---
+
+(function (variable (identifier)))
+
+===========================
+External: qualified.access
+===========================
+
+{qualified.access}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: dés
+==================
+
+{dés}
+
+---
+
+(function (variable (identifier)))
+
+===============================
+External: an external variable
+===============================
+
+{an external variable}
+
+---
+
+(function (variable (identifier)))
+
+===============================
+External: выражение в кости
+===============================
+
+{выражение в кости}
+
+---
+
+(function (variable (identifier)))
+
+===============================
+External: έκφραση ζαριών
+===============================
+
+{έκφραση ζαριών}
+
+---
+
+(function (variable (identifier)))
+
+==================
+Parameter: a
+==================
+
+a: {a}
+
+---
+
+(function
+	(parameters (parameter (identifier)))
+	(variable (identifier)))
+
+===================================
+Parameter: a, an external variable
+===================================
+
+a, an external variable: {an external variable}
+
+---
+
+(function
+	(parameters (parameter (identifier)) (parameter (identifier)))
+	(variable (identifier)))
+
+==================
+External: (a)
+==================
+
+({a})
+
+---
+
+(function (group (variable (identifier))))
+
+===================
+Bare identifier: a
+:error
+===================
+
+---

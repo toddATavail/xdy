@@ -1,0 +1,31 @@
+[package]
+name = "xdy"
+version = "0.1.0"
+edition = "2021"
+authors = ["Todd L Smith <todd@availlang.org>"]
+
+[dependencies]
+rand = { workspace = true }
+serde = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-xdy = { path = "../tree-sitter-xdy" }
+
+[dependencies.rayon]
+workspace = true
+optional = true
+
+[features]
+default = ["parallel-histogram"]
+bench = []
+parallel-histogram = ["rayon"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[build-dependencies]
+cc = { workspace = true }
+
+[[bench]]
+name = "benchmarks"
+harness = false

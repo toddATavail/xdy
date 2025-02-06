@@ -1,0 +1,18 @@
+[package]
+name = "tree-sitter-xdy"
+description = "tree-sitter grammar for xDy dice expression language."
+version = "0.1.0"
+keywords = ["incremental", "parsing", "tree-sitter", "dice", "rpg", "xdy"]
+categories = ["parsing"]
+edition = "2021"
+build = "bindings/rust/build.rs"
+include = ["bindings/rust/*", "grammar.js", "queries/*", "src/*"]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter = { workspace = true }
+
+[build-dependencies]
+cc = { workspace = true }
