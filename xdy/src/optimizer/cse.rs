@@ -5,7 +5,7 @@
 //! has been previously computed previously can simply be reused. CSE requires
 //! the function to be in static single assignment (SSA) form.
 
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,

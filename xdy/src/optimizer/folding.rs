@@ -7,14 +7,14 @@
 use std::collections::HashMap;
 
 use crate::{
-	ir::Instruction, Add, AddressingMode, CanAllocate,
-	CanVisitInstructions as _, Div, DropHighest, DropLowest, Exp, Function,
-	Immediate, InstructionVisitor, Mod, Mul, Neg, ProgramCounter,
-	RegisterIndex, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord
+	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
+	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor, Mod,
+	Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	ir::Instruction
 };
 
-use crate::{add, div, exp, r#mod, mul, neg, sub, Optimizer};
+use crate::{Optimizer, add, div, exp, r#mod, mul, neg, sub};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                             Constant folding.                              //
