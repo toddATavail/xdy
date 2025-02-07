@@ -307,7 +307,7 @@ impl CommonSubexpressionEliminator
 	/// # Parameters
 	/// - `inst`: The instruction to canonicalize.
 	/// - `extractor`: A closure that extracts the two source operands from the
-	///   instructrion.
+	///   instruction.
 	/// - `constructor`: A closure that constructs a new instruction with the
 	///   given canonical destination register and source operands.
 	fn canonicalize_binary_op<I>(

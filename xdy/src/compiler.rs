@@ -603,7 +603,7 @@ impl<'src> Compiler<'src>
 		self.instructions.push(instruction);
 	}
 
-	/// Find all external variables that are descendents of the specified node.
+	/// Find all external variables that are descendants of the specified node.
 	///
 	/// # Parameters
 	/// - `node`: The node.

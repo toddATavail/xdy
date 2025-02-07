@@ -1,4 +1,4 @@
-//! This crate provides xDy language support for the [tree-sitter]() parsing
+//! This crate provides xDy language support for the [tree-sitter] parsing
 //! library.
 //!
 //! Typically, you will use the [language] function to add this language to a

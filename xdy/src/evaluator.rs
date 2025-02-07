@@ -184,7 +184,7 @@ where
 ///
 /// Underflows and overflows saturate to the minimum and maximum values of the
 /// `i32` type, and special arithmetic rules for division, remainder, and
-/// exponentation ensure that no undefined behavior occurs. In particular:
+/// exponentiation ensure that no undefined behavior occurs. In particular:
 ///
 /// * Division by zero is treated as zero,
 /// * Zero to the power of zero is treated as one,
@@ -817,7 +817,7 @@ impl From<(i32, i32)> for EvaluationBounds
 
 impl<'eval> From<BoundsEvaluator<'eval>> for EvaluationBounds
 {
-	fn from(eval: BoundsEvaluator<'eval>) -> Self { eval.result }
+	fn from(evaluator: BoundsEvaluator<'eval>) -> Self { evaluator.result }
 }
 
 impl From<EvaluationBounds> for (i32, i32)
@@ -897,11 +897,11 @@ impl Display for Bounds
 
 impl<'eval> From<BoundsEvaluator<'eval>> for Bounds
 {
-	fn from(eval: BoundsEvaluator<'eval>) -> Self
+	fn from(evaluator: BoundsEvaluator<'eval>) -> Self
 	{
 		Self {
-			value: eval.result,
-			count: eval.count
+			value: evaluator.result,
+			count: evaluator.count
 		}
 	}
 }
@@ -2115,8 +2115,8 @@ pub fn r#mod(op1: i32, op2: i32) -> i32
 
 /// Raises the first operand to the power of the second operand, saturating on
 /// overflow. Produces correct answers for base 0 or 1 even for negative
-/// expornents, otherwise treats `x^y` when `y<0` as `0`. This serves as the
-/// definition of exponentation in the dice expression language.
+/// exponents, otherwise treats `x^y` when `y<0` as `0`. This serves as the
+/// definition of exponentiation in the dice expression language.
 ///
 /// # Parameters
 /// - `op1`: The base.

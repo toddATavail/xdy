@@ -1079,17 +1079,17 @@ impl std::ops::Neg for Immediate
 
 impl From<usize> for Immediate
 {
-	fn from(imm: usize) -> Self { Self(imm as i32) }
+	fn from(immediate: usize) -> Self { Self(immediate as i32) }
 }
 
 impl From<Immediate> for i32
 {
-	fn from(imm: Immediate) -> Self { imm.0 }
+	fn from(immediate: Immediate) -> Self { immediate.0 }
 }
 
 impl From<Immediate> for AddressingMode
 {
-	fn from(imm: Immediate) -> Self { Self::Immediate(imm) }
+	fn from(immediate: Immediate) -> Self { Self::Immediate(immediate) }
 }
 
 /// The index of a register in the frame's register set.
@@ -1481,7 +1481,7 @@ pub struct DependencyAnalyzer<'inst>
 	readers: HashMap<AddressingMode, BTreeSet<ProgramCounter>>,
 
 	/// The transitive register and rolling record dependencies, as a map from
-	/// registers to all instructions that contibute to them.
+	/// registers to all instructions that contribute to them.
 	transitive_dependencies:
 		RefCell<Option<HashMap<AddressingMode, BTreeSet<ProgramCounter>>>>,
 

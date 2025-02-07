@@ -2,7 +2,7 @@
 //!
 //! Dice is a simple expression language that allows you to roll
 //! complex dice expressions. It supports parameters and external
-//! variables, range and dice expressions (xDy), discarding of
+//! variables, range and dice expressions (`xDy`), discarding of
 //! lowest and highest dice, and basic arithmetic operations. Rolls
 //! are recorded, so clients may display them alongside the result.
 //! An optimizer is provided to reduce code size and improve execution
@@ -29,14 +29,14 @@ pub use optimizer::*;
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Evaluate the dice expression using the given arguments, environment, and
-/// pseudo-random number generator (pRNG). Missing external variables default
+/// pseudo-random number generator (`pRNG`). Missing external variables default
 /// to zero during evaluation, but all parameters must be bound. Do not optimize
 /// the function before evaluation.
 ///
 /// This is a one-shot convenience function that compiles and evaluates the
 /// dice expression in a single step. If you need to evaluate the same dice
 /// expression multiple times, consider [compiling](compile) the function once
-/// and reusing it with the [Evaluator] type.
+/// and reusing it with the [`Evaluator`] type.
 ///
 /// # Parameters
 /// - `source`: The source code to compile and evaluate.
@@ -77,14 +77,14 @@ where
 }
 
 /// Evaluate the dice expression using the given arguments, environment, and
-/// pseudo-random number generator (pRNG). Missing external variables default
+/// pseudo-random number generator (`pRNG`). Missing external variables default
 /// to zero during evaluation, but all parameters must be bound. Optimize the
 /// function using the [standard optimizer](StandardOptimizer).
 ///
 /// This is a one-shot convenience function that compiles and evaluates the
 /// dice expression in a single step. If you need to evaluate the same dice
 /// expression multiple times, consider [compiling](compile) the function once
-/// and reusing it with the [Evaluator] type.
+/// and reusing it with the [`Evaluator`] type.
 ///
 /// # Parameters
 /// - `source`: The source code to compile and evaluate.

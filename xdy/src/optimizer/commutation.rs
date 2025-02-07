@@ -398,7 +398,7 @@ impl ConstantCommuter<'_>
 	///
 	/// # Type Parameters
 	/// - `C`: The type of commutative instruction to rewrite.
-	/// - `F`: The type of final instruciton to rewrite.
+	/// - `F`: The type of final instruction to rewrite.
 	///
 	/// # Parameters
 	/// - `group`: The group of instructions to rewrite.
@@ -425,7 +425,7 @@ impl ConstantCommuter<'_>
 		{
 			// Extract all of the destination registers from the complete chain,
 			// including the terminal instruction. They are already sorted.
-			let mut dests = instructions
+			let mut targets = instructions
 				.iter()
 				.flat_map(Instruction::destination)
 				.collect::<Vec<_>>();
@@ -436,7 +436,7 @@ impl ConstantCommuter<'_>
 				.collect::<Vec<_>>();
 			// The very first operand is not commutative with the rest, so we
 			// handle it specially. We'll pop it off the front of the list and
-			// reinject it when we emit the final non-commutative instruction.
+			// re-inject it when we emit the final non-commutative instruction.
 			let first_op = ops.remove(0);
 			// The next to last operand is the destination of the last
 			// commutative instruction. We swap it with the last operand so that
@@ -451,20 +451,20 @@ impl ConstantCommuter<'_>
 			// the correct operands, and save it to emit at the end.
 			let first_inst = instructions.remove(0);
 			let terminal = final_constructor(
-				dests.pop().unwrap(),
+				targets.pop().unwrap(),
 				&[first_op, commutative_result]
 			)
 			.into();
 			// Reverse the remaining operands and destinations prior to
 			// traversing the commutative instructions.
 			ops.reverse();
-			dests.reverse();
+			targets.reverse();
 			// Rewrite the commutative instructions in the chain, now that
 			// everything is in the correct order for further optimization.
 			let arity = ops.len() / instructions.len();
 			let mut previous = first_inst.clone();
 			instructions.iter().for_each(|inst| {
-				let dest = dests.pop().unwrap();
+				let dest = targets.pop().unwrap();
 				let ops =
 					(0..arity).map(|_| ops.pop().unwrap()).collect::<Vec<_>>();
 				let new_inst = commutative_constructor(dest, &ops).into();

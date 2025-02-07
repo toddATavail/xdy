@@ -221,4 +221,4 @@ Other language features that I plan to add include:
 
 ### Foreign function interface (FFI)
 
-I plan to expose an FFI that allows `xDy` to be used from other programming languages. This FFI will be designed to be safe and efficient, and will aim to minimize the amount of marshalling and manual resource management required by clients.
+I plan to expose an FFI that allows `xDy` to be used from other programming languages. This FFI will be designed to be safe and efficient, and will aim to minimize the amount of marshaling and manual resource management required by clients.
