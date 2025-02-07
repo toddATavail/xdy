@@ -21,6 +21,7 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering}
 };
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -39,7 +40,8 @@ use crate::{
 /// A histogram of the outcomes of a dice expression, as a map from outcomes to
 /// counts. Counts are `u64` to allow for large numbers of outcomes, and
 /// protected from overflow only by their enormous size.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Histogram(pub HashMap<i32, u64>);
 
 impl Histogram
@@ -253,8 +255,8 @@ where
 	/// outcomes of the dice expression. The iterator will compute the histogram
 	/// lazily, and may be terminated early for any reason, such as exceeding
 	/// the desired maximum number of outcomes or running out of time.
-	/// Afterward, the (potentially incomplete) histogram may be
-	/// [retrieved](histogram) from the builder.
+	/// Afterward, the (potentially incomplete) histogram may be retrieved from
+	/// the builder.
 	///
 	/// # Returns
 	/// An iterator of outcomes.
@@ -272,7 +274,7 @@ where
 /// The complete machine state of a histogram builder during execution. Each
 /// state serves as a continuation of the machine, and may be used to resume
 /// execution. The machine is suspended after every range or die roll, which
-/// only occur **inside** [RollRange], [RollStandardRoll], and [RollCustomDice]
+/// only occur **inside** [RollRange], [RollStandardDice], and [RollCustomDice]
 /// instructions.
 #[derive(Debug, Clone)]
 pub struct EvaluationState<'inst>

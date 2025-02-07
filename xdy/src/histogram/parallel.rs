@@ -236,7 +236,7 @@ thread_local! {
 		RefCell::new(Default::default());
 }
 
-/// An open-ended iterator of [states](HistogramBuilderState), representing the
+/// An open-ended iterator of [states](EvaluationState), representing the
 /// continuations of a histogram builder's execution. Each state represents a
 /// point in the builder's execution where it may be suspended and later
 /// resumed. Each state corresponds to the internal state of a range or roll

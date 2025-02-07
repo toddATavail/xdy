@@ -27,6 +27,8 @@ jobs:
         run: cargo +nightly fmt --all --check
       - name: Run Clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: Check documentation
+        run: cargo doc --no-deps
       - name: Build
         run: cargo build --verbose
       - name: Run tests

@@ -6,7 +6,6 @@ authors = ["Todd L Smith <todd@availlang.org>"]
 
 [dependencies]
 rand = { workspace = true }
-serde = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-xdy = { path = "../tree-sitter-xdy" }
 
@@ -14,10 +13,15 @@ tree-sitter-xdy = { path = "../tree-sitter-xdy" }
 workspace = true
 optional = true
 
+[dependencies.serde]
+workspace = true
+optional = true
+
 [features]
-default = ["parallel-histogram"]
+default = ["parallel-histogram", "serde"]
 bench = []
-parallel-histogram = ["rayon"]
+parallel-histogram = ["dep:rayon"]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 criterion = { workspace = true }

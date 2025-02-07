@@ -6,15 +6,17 @@
 
 use std::{
 	collections::HashMap,
+	error::Error,
 	fmt::{Display, Formatter},
 	num::IntErrorKind
 };
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
 use crate::{
-	CanAllocate as _,
+	CanAllocate as _, Optimizer as _, StandardOptimizer,
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
@@ -22,30 +24,161 @@ use crate::{
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-//                                Compilation.                                //
+//                          Convenient compilation.                           //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Compile an alleged dice expression into a [function](Function).
+/// Compile an alleged dice expression into a [function](Function). Do not
+/// optimize the function.
 ///
 /// # Parameters
 /// - `source`: The source code to compile.
 ///
 /// # Returns
-/// The compiled function, or `None` if the dice expression is invalid.
-pub fn compile(source: &str) -> Option<Function>
+/// The compiled function.
+///
+/// # Errors
+/// [`CompilationFailed`](CompilationError::CompilationFailed) if the function
+/// could not be compiled.
+pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 {
 	let language = tree_sitter_xdy::language();
-	let mut parser = Parser::new();
+	let mut parser = tree_sitter::Parser::new();
 	parser.set_language(&language).unwrap();
 	let tree = parser.parse(source, None).unwrap();
 	let root = tree.root_node();
 	if root.has_error()
 	{
-		return None
+		return Err(CompilationError::CompilationFailed)
+	}
+	Ok(Compiler::new(source.as_bytes()).compile(tree))
+}
+
+/// Compile an alleged dice expression into a [function](Function). Optimize the
+/// function using the [standard optimizer](StandardOptimizer).
+///
+/// # Parameters
+/// - `source`: The source code to compile.
+///
+/// # Returns
+/// The compiled function.
+///
+/// # Errors
+/// * [`CompilationFailed`](CompilationError::CompilationFailed) if the function
+///   could not be compiled.
+/// * [`OptimizationFailed`](CompilationError::OptimizationFailed) if the
+///   function could not be optimized.
+///
+/// # Examples
+/// Compile and optimize a dice expression and evaluate it multiple times:
+///
+/// ```rust
+/// use xdy::{compile, CompilationError, Evaluator};
+///
+/// # fn main() -> Result<(), CompilationError> {
+/// let function = compile("3D6")?;
+/// let mut evaluator = Evaluator::new(function);
+/// let results = (0..10)
+///     .flat_map(|_| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+///     .collect::<Vec<_>>();
+/// assert!(results.len() == 10);
+/// assert!(
+///     results.iter().all(|result| 3 <= result.result && result.result <= 18)
+/// );
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Compile and optimize a dice expression with formal parameters and evaluate
+/// it multiple times with different arguments:
+///
+/// ```rust
+/// use xdy::{compile, CompilationError, Evaluator};
+///
+/// # fn main() -> Result<(), CompilationError> {
+/// let function = compile("x: 1D6 + {x}")?;
+/// let mut evaluator = Evaluator::new(function);
+/// let results = (0..10)
+///    .flat_map(|x| evaluator.evaluate(vec![x], &mut rand::thread_rng()))
+///    .collect::<Vec<_>>();
+/// assert!(results.len() == 10);
+/// (0..10).for_each(|i| {
+///    let x = i as i32;
+///    assert!(1 + x <= results[i].result && results[i].result <= 6 + x);
+/// });
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Compile and optimize a dice expression with environmental variables and
+/// evaluate it multiple times:
+///
+/// ```rust
+/// use xdy::{compile, EvaluationError, Evaluator};
+///
+/// # fn main() -> Result<(), EvaluationError<'static>> {
+/// let function = compile("1D6 + {x}")?;
+/// let mut evaluator = Evaluator::new(function);
+/// evaluator.bind("x", 3)?;
+/// let results = (0..10)
+///    .flat_map(|x| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+///    .collect::<Vec<_>>();
+/// assert!(results.len() == 10);
+/// assert!(
+///     results.iter().all(|result| 4 <= result.result && result.result <= 9)
+/// );
+/// # Ok(())
+/// # }
+/// ```
+pub fn compile(source: &str) -> Result<Function, CompilationError>
+{
+	let language = tree_sitter_xdy::language();
+	let mut parser = tree_sitter::Parser::new();
+	parser.set_language(&language).unwrap();
+	let tree = parser.parse(source, None).unwrap();
+	let root = tree.root_node();
+	if root.has_error()
+	{
+		return Err(CompilationError::CompilationFailed)
 	}
 	let code_generator = Compiler::new(source.as_bytes());
-	Some(code_generator.compile(tree))
+	let function = code_generator.compile(tree);
+	let optimizer = StandardOptimizer::new(Default::default());
+	let function = optimizer
+		.optimize(function)
+		.map_err(|_| CompilationError::OptimizationFailed)?;
+	Ok(function)
 }
+
+/// An error that may occur during the evaluation of a dice expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilationError
+{
+	/// The function could not be compiled.
+	CompilationFailed,
+
+	/// The function could not be optimized.
+	OptimizationFailed
+}
+
+impl Display for CompilationError
+{
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result
+	{
+		match self
+		{
+			CompilationError::CompilationFailed =>
+			{
+				write!(f, "compilation failed")
+			},
+			CompilationError::OptimizationFailed =>
+			{
+				write!(f, "optimization failed")
+			}
+		}
+	}
+}
+
+impl Error for CompilationError {}
 
 ////////////////////////////////////////////////////////////////////////////////
 //                          Syntax tree visitation.                           //
@@ -471,8 +604,6 @@ impl<'src> Compiler<'src>
 	}
 
 	/// Find all external variables that are descendents of the specified node.
-	/// This uses the foreign function interface (FFI) directly, so most of the
-	/// body is `unsafe`.
 	///
 	/// # Parameters
 	/// - `node`: The node.
@@ -877,7 +1008,8 @@ impl Display for Compiler<'_>
 
 /// A function in the intermediate representation. This is the output of a
 /// [compiler](Compiler).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function
 {
 	/// The parameters that the function takes.

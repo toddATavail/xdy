@@ -12,6 +12,7 @@ use std::{
 	fmt::{Display, Formatter}
 };
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
@@ -22,7 +23,8 @@ use crate::RollingRecord;
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Instruction: Roll an inclusive range.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollRange
 {
 	/// The destination rolling record for the results.
@@ -44,7 +46,8 @@ impl Display for RollRange
 }
 
 /// Instruction: Roll a set of standard dice.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollStandardDice
 {
 	/// The destination rolling record for the results.
@@ -70,7 +73,8 @@ impl Display for RollStandardDice
 }
 
 /// Instruction: Roll a set of custom dice.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollCustomDice
 {
 	/// The destination rolling record for the results.
@@ -119,7 +123,8 @@ impl Display for RollCustomDice
 /// in the sum computed by [SumRollingRecord]. A negative count will put back
 /// lowest dice that were previously dropped. The number of dice to drop is
 /// clamped to the number of dice in the record.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropLowest
 {
 	/// The [rolling record](RollingRecord) from which to drop dice.
@@ -146,7 +151,8 @@ impl Display for DropLowest
 /// in the sum computed by [SumRollingRecord]. A negative count will put back
 /// highest dice that were previously dropped. The number of dice to drop is
 /// clamped to the number of dice in the record.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropHighest
 {
 	/// The [rolling record](RollingRecord) from which to drop dice.
@@ -171,7 +177,8 @@ impl Display for DropHighest
 /// Instruction: Compute the result of a [rolling record](RollingRecord),
 /// ignoring any dice marked as dropped by [DropLowest] or [DropHighest].
 /// The summation is clamped to the range of an `i32`.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SumRollingRecord
 {
 	/// The destination register for the result.
@@ -190,7 +197,8 @@ impl Display for SumRollingRecord
 }
 
 /// Instruction: Add two values together, saturating on overflow.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Add
 {
 	/// The destination register for the result.
@@ -212,7 +220,8 @@ impl Display for Add
 }
 
 /// Instruction: Subtract one value from another, saturating on overflow.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sub
 {
 	/// The destination register for the result.
@@ -234,7 +243,8 @@ impl Display for Sub
 }
 
 /// Instruction: Multiply two values together, saturating on overflow.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Mul
 {
 	/// The destination register for the result.
@@ -257,7 +267,8 @@ impl Display for Mul
 
 /// Instruction: Divide one value by another, saturating on overflow. Treat
 /// division by zero as zero.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Div
 {
 	/// The destination register for the result.
@@ -280,7 +291,8 @@ impl Display for Div
 
 /// Instruction: Compute the remainder of dividing one value by another,
 /// saturating on overflow. Treat division by zero as zero.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Mod
 {
 	/// The destination register for the result.
@@ -303,7 +315,8 @@ impl Display for Mod
 
 /// Instruction: Compute the exponentiation of one value by another,
 /// saturating on overflow.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Exp
 {
 	/// The destination register for the result.
@@ -325,7 +338,8 @@ impl Display for Exp
 }
 
 /// Instruction: Compute the negation of a value, saturating on overflow.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Neg
 {
 	/// The destination register for the result.
@@ -344,7 +358,8 @@ impl Display for Neg
 }
 
 /// Instruction: Return a value from the function.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Return
 {
 	/// The return value.
@@ -360,7 +375,8 @@ impl Display for Return
 }
 
 /// An instruction in the intermediate representation of the dice language.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Instruction
 {
 	RollRange(RollRange),
@@ -979,18 +995,8 @@ impl TryFrom<Instruction> for Return
 /// access the operand of an instruction. The operand can be an immediate
 /// constant or a register. Registers are identified by their index into the
 /// frame's register set.
-#[derive(
-	Debug,
-	Clone,
-	Copy,
-	PartialEq,
-	Eq,
-	PartialOrd,
-	Ord,
-	Hash,
-	Serialize,
-	Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddressingMode
 {
 	/// The addressing mode is an immediate constant.
@@ -1017,18 +1023,8 @@ impl Display for AddressingMode
 }
 
 /// An immediate constant value.
-#[derive(
-	Debug,
-	Clone,
-	Copy,
-	PartialEq,
-	Eq,
-	PartialOrd,
-	Ord,
-	Hash,
-	Serialize,
-	Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Immediate(pub i32);
 
 impl Display for Immediate
@@ -1097,19 +1093,8 @@ impl From<Immediate> for AddressingMode
 }
 
 /// The index of a register in the frame's register set.
-#[derive(
-	Debug,
-	Clone,
-	Copy,
-	Default,
-	PartialEq,
-	Eq,
-	PartialOrd,
-	Ord,
-	Hash,
-	Serialize,
-	Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RegisterIndex(pub usize);
 
 impl Display for RegisterIndex
@@ -1136,19 +1121,8 @@ impl From<RegisterIndex> for AddressingMode
 }
 
 /// The index of a rolling record in the frame's rolling record set.
-#[derive(
-	Debug,
-	Clone,
-	Copy,
-	Default,
-	PartialEq,
-	Eq,
-	PartialOrd,
-	Ord,
-	Hash,
-	Serialize,
-	Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecordIndex(pub usize);
 
 impl Display for RollingRecordIndex

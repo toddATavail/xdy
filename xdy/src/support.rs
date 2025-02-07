@@ -64,8 +64,8 @@ pub fn compile_valid(source: &str) -> Function
 {
 	match compile(source)
 	{
-		Some(function) => function,
-		None => panic!("compilation error")
+		Ok(function) => function,
+		Err(e) => panic!("compilation error: {e}")
 	}
 }
 

@@ -15,10 +15,11 @@ use std::{
 use rand::Rng;
 
 use crate::{
-	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, InstructionVisitor, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
+	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
+	CompilationError, Div, DropHighest, DropLowest, Exp, Function,
+	InstructionVisitor, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
+	SumRollingRecord
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -346,7 +347,7 @@ impl Evaluator
 	/// Evaluate the function using the given arguments and pseudo-random number
 	/// generator (pRNG). Be sure to bind all external variables, and seed the
 	/// pRNG if desired, before calling this method. Missing external variables
-	/// default to zero during evaluation, but all parameters myst be bound.
+	/// default to zero during evaluation, but all parameters must be bound.
 	///
 	/// # Parameters
 	/// - `args`: The arguments to the function.
@@ -360,14 +361,13 @@ impl Evaluator
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
-	pub fn evaluate<'s, 'r, R>(
-		&'s mut self,
+	pub fn evaluate<R>(
+		&mut self,
 		args: impl IntoIterator<Item = i32>,
-		rng: &'r mut R
-	) -> Result<Evaluation, EvaluationError<'s>>
+		rng: &mut R
+	) -> Result<Evaluation, EvaluationError<'static>>
 	where
-		R: Rng + ?Sized,
-		'r: 's
+		R: Rng + ?Sized
 	{
 		// Check the argument count.
 		let arity = self.function.arity();
@@ -626,6 +626,14 @@ impl RollingRecordKind<i32>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvaluationError<'error>
 {
+	/// The function could not be compiled. Produced only by the simple
+	/// [one-shot evaluator](crate::evaluate).
+	CompilationFailed,
+
+	/// The function could not be optimized. Produced only by the simple
+	/// [one-shot evaluator](crate::evaluate).
+	OptimizationFailed,
+
 	/// The number of arguments provided to a function does not match the number
 	/// of parameters expected.
 	BadArity
@@ -647,6 +655,14 @@ impl Display for EvaluationError<'_>
 	{
 		match self
 		{
+			EvaluationError::CompilationFailed =>
+			{
+				write!(f, "compilation failed")
+			},
+			EvaluationError::OptimizationFailed =>
+			{
+				write!(f, "optimization failed")
+			},
 			EvaluationError::BadArity { expected, given } =>
 			{
 				write!(
@@ -664,6 +680,18 @@ impl Display for EvaluationError<'_>
 }
 
 impl Error for EvaluationError<'_> {}
+
+impl From<CompilationError> for EvaluationError<'static>
+{
+	fn from(e: CompilationError) -> Self
+	{
+		match e
+		{
+			CompilationError::OptimizationFailed => Self::OptimizationFailed,
+			CompilationError::CompilationFailed => Self::CompilationFailed
+		}
+	}
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //                            Bounds calculation.                             //
@@ -836,8 +864,7 @@ impl RollingRecordKind<EvaluationBounds>
 	}
 }
 
-/// The bounds of a function, as computed by a
-/// [bounds evaluator](BoundsEvaluator).
+/// The bounds of a function, as computed by a bounds evaluator.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Bounds
 {
@@ -913,7 +940,7 @@ impl<'eval> BoundsEvaluator<'eval>
 
 	/// Evaluate the bounds of the function using the given arguments. Missing
 	/// external variables default to zero during evaluation, but all parameters
-	/// myst be bound.
+	/// must be bound.
 	///
 	/// # Parameters
 	/// - `args`: The arguments to the function.
