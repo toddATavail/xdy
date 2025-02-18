@@ -1829,7 +1829,7 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 ////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
-mod test
+mod tests
 {
 	use std::collections::BTreeSet;
 

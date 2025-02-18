@@ -256,6 +256,7 @@ mod evaluator;
 mod histogram;
 mod ir;
 mod optimizer;
+pub mod parser;
 mod primitives;
 #[cfg(any(test, feature = "bench"))]
 pub mod support;
