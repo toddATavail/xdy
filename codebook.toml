@@ -1,6 +1,7 @@
 dictionaries = []
 words = [
     "allocator",
+    "alphanumberic",
     "arity",
     "augend",
     "availlang",
