@@ -2,7 +2,7 @@
 //!
 //! Herein are the test cases for the various parser functions.
 
-use crate::parser::*;
+use crate::{ast::*, parser::*};
 use pretty_assertions::assert_eq;
 
 ////////////////////////////////////////////////////////////////////////////////

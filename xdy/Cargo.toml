@@ -11,6 +11,7 @@ repository = { workspace = true }
 
 [dependencies]
 nom = { workspace = true }
+nom-language = { workspace = true }
 nom_locate = { workspace = true }
 rand = { workspace = true }
 tree-sitter = { workspace = true }

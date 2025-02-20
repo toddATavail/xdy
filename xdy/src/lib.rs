@@ -251,6 +251,7 @@
 //! * `serde`: Implements the `Serialize` and `Deserialize` traits for various
 //!   types. This feature requires the `serde` crate, and is enabled by default.
 
+pub mod ast;
 mod compiler;
 mod evaluator;
 mod histogram;
@@ -258,6 +259,7 @@ mod ir;
 mod optimizer;
 pub mod parser;
 mod primitives;
+pub mod s_expr;
 #[cfg(any(test, feature = "bench"))]
 pub mod support;
 #[cfg(test)]
