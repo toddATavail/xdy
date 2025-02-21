@@ -15,7 +15,7 @@
 //! mul_div_mod ::= exponent {('*' | '×' | '/' | '÷' | '%') exponent}
 //! exponent ::= unary {'^' unary}
 //! unary ::= ('-' unary | primary)
-//! primary ::= range | dice group | CONSTANT | variable
+//! primary ::= range | dice | group | CONSTANT | variable
 //! group ::= '(' expression ')'
 //! variable ::= '{' IDENTIFIER '}'
 //! range ::= '[' expression ':' expression ']'
@@ -47,10 +47,9 @@ pub use combinators::*;
 pub use errors::*;
 
 use nom::{
-	Parser as _, character::complete::multispace0, error::context,
-	sequence::preceded
+	Parser as _, character::complete::multispace0, combinator::all_consuming,
+	error::context, sequence::delimited
 };
-use nom_language::error::{VerboseError, convert_error};
 
 use crate::ast::Function;
 
@@ -74,31 +73,17 @@ use crate::ast::Function;
 pub fn parse(input: &str) -> Result<Function, ParseError>
 {
 	let input = Span::new(input);
-	context("function", preceded(multispace0, function))
-		.parse_complete(input)
-		.map_err(|e| match e
-		{
-			nom::Err::Error(e) => ParseError {
-				message: {
-					let errors = e
-						.errors
-						.into_iter()
-						.map(|(input, error)| (*input.fragment(), error))
-						.collect();
-					convert_error(*input, VerboseError { errors })
-				}
-			},
-			nom::Err::Failure(e) => ParseError {
-				message: {
-					let errors = e
-						.errors
-						.into_iter()
-						.map(|(input, error)| (*input.fragment(), error))
-						.collect();
-					convert_error(*input, VerboseError { errors })
-				}
-			},
-			nom::Err::Incomplete(_) => unreachable!()
-		})
-		.map(|(_, f)| f)
+	all_consuming(delimited(
+		multispace0,
+		context(FUNCTION_CONTEXT, function),
+		multispace0
+	))
+	.parse_complete(input)
+	.map_err(|e| match e
+	{
+		nom::Err::Error(e) => e.into(),
+		nom::Err::Failure(e) => e.into(),
+		nom::Err::Incomplete(_) => unreachable!()
+	})
+	.map(|(_, f)| f)
 }

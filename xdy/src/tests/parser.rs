@@ -249,15 +249,10 @@ fn test_parameters()
 					"Residue not empty for input: {}",
 					input
 				);
+				let result = result.unwrap();
+				assert_eq!(result, expected_str, "Failed for input: {}", input);
 				assert_eq!(
-					result.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-					expected_str,
-					"Failed for input: {}",
-					input
-				);
-				assert_eq!(
-					result.iter().map(|s| *s.fragment()).collect::<Vec<_>>(),
-					expected_ast,
+					result, expected_ast,
 					"AST mismatch for input: {}",
 					input
 				);
@@ -268,8 +263,7 @@ fn test_parameters()
 
 	// Invalid inputs.
 	for input in [
-		"", " ", "x", "x,", "x, ", "x, y", "x, y,", ":x", "x:y", "1, 2, 3:",
-		"x, 1, y:"
+		"x", "x,", "x, ", "x, y", "x, y,", ":x", "x:y", "1, 2, 3:", "x, 1, y:"
 	]
 	{
 		let span = Span::new(input);

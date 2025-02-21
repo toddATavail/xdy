@@ -15,19 +15,29 @@ use nom::{
 	IResult, Parser,
 	branch::alt,
 	bytes::complete::{tag, take_while_m_n, take_while1},
-	character::complete::{char, digit1, multispace0, one_of},
-	combinator::{map, opt, recognize},
+	character::complete::{anychar, char, digit1, multispace0, one_of},
+	combinator::{eof, fail, map, opt, recognize},
 	error::{ErrorKind, FromExternalError, context},
-	multi::{fold_many0, many0, separated_list1},
+	multi::{fold_many0, many0, separated_list0, separated_list1},
 	sequence::{delimited, pair, preceded, separated_pair, terminated}
 };
-use nom_language::error::VerboseError;
 use nom_locate::LocatedSpan;
 
-use crate::ast::{
-	Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
-	DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul, Neg,
-	Range, StandardDice, Sub, Variable
+use crate::{
+	ast::{
+		Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
+		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
+		Neg, Range, StandardDice, Sub, Variable
+	},
+	parser::{CUSTOM_DICE_CONTEXT, NomErrorKind, STANDARD_DICE_CONTEXT}
+};
+
+use super::{
+	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
+	DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT, FUNCTION_BODY_CONTEXT,
+	GROUP_CONTEXT, IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT, NomError,
+	PARAMETER_CONTEXT, RANGE_CONTEXT, RANGE_END_CONTEXT, RANGE_START_CONTEXT,
+	STANDARD_FACES_CONTEXT, VARIABLE_CONTEXT
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -36,9 +46,6 @@ use crate::ast::{
 
 /// The type of a span of text.
 pub type Span<'a> = LocatedSpan<&'a str>;
-
-/// The `nom` error type for the parser.
-pub type NomError<'a> = VerboseError<Span<'a>>;
 
 /// Parse a function definition, without leading whitespace.
 ///
@@ -52,14 +59,10 @@ pub type NomError<'a> = VerboseError<Span<'a>>;
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn function(input: Span) -> IResult<Span, Function, NomError>
 {
-	let (input, parameters) =
-		context("parameters", opt(parameters)).parse_complete(input)?;
+	let (input, parameters) = parameters.parse_complete(input)?;
 	let (input, body) =
-		context("expression", preceded(multispace0, expression))
+		preceded(multispace0, context(FUNCTION_BODY_CONTEXT, expression))
 			.parse_complete(input)?;
-	let parameters = parameters.map(|params| {
-		params.into_iter().map(|param| *param.fragment()).collect()
-	});
 	Ok((input, Function { parameters, body }))
 }
 
@@ -73,16 +76,53 @@ pub fn function(input: Span) -> IResult<Span, Function, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parameters(input: Span) -> IResult<Span, Vec<Span>, NomError>
+pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, NomError>
 {
-	terminated(
-		separated_list1(
-			preceded(multispace0, context(",", char(','))),
-			preceded(multispace0, context("parameter", parameter))
-		),
-		preceded(multispace0, context("parameter list terminator", char(':')))
+	let (input, parameters) = separated_list0(
+		preceded(multispace0, char(',')),
+		preceded(multispace0, parameter)
+	)
+	.parse_complete(input)?;
+	// When we discover a trailing comma, we want to set the expectation that
+	// another parameter should follow (but doesn't).
+	let (input, _) = match terminated(
+		preceded(multispace0, char(',')),
+		context(PARAMETER_CONTEXT, fail::<_, (), NomError>())
 	)
 	.parse_complete(input)
+	{
+		Ok((input, _)) => (input, ()),
+		Err(err) => match err
+		{
+			nom::Err::Error(e) | nom::Err::Failure(e) => {
+				if matches!(e.errors[0].1, NomErrorKind::Nom(ErrorKind::Fail))
+				{
+					Err(nom::Err::Failure(e))
+				}
+				else
+				{
+					Ok((input, ()))
+				}
+			}?,
+			nom::Err::Incomplete(_) => unreachable!()
+		}
+	};
+	match parameters.is_empty()
+	{
+		true => Ok((input, None)),
+		false =>
+		{
+			let (input, _) = preceded(
+				multispace0,
+				context(NEXT_PARAMETER_CONTEXT, char(':'))
+			)
+			.parse_complete(input)?;
+			Ok((
+				input,
+				Some(parameters.iter().map(|p| *p.fragment()).collect())
+			))
+		}
+	}
 }
 
 /// Parse a formal parameter, without leading whitespace.
@@ -112,7 +152,7 @@ pub fn parameter(input: Span) -> IResult<Span, Span, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn expression(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context("addition or subtraction expression", add_sub).parse_complete(input)
+	add_sub(input)
 }
 
 /// Parse an addition or subtraction expression, without leading whitespace.
@@ -127,16 +167,9 @@ pub fn expression(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn add_sub(input: Span) -> IResult<Span, Expression, NomError>
 {
-	let (input, initial) = context(
-		"multiplication, division, or modulo expression",
-		mul_div_mod
-	)
-	.parse_complete(input)?;
+	let (input, initial) = mul_div_mod.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
-		alt((
-			preceded(multispace0, context("+", char('+'))),
-			preceded(multispace0, context("-", char('-')))
-		)),
+		preceded(multispace0, one_of("+-")),
 		preceded(multispace0, mul_div_mod)
 	))
 	.parse_complete(input)?;
@@ -173,14 +206,9 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, NomError>
 {
-	let (input, initial) =
-		context("exponentiation expression", exponent).parse_complete(input)?;
+	let (input, initial) = exponent.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
-		alt((
-			preceded(multispace0, context("* or ×", one_of("*×"))),
-			preceded(multispace0, context("/ or ÷", one_of("/÷"))),
-			preceded(multispace0, context("%", char('%')))
-		)),
+		preceded(multispace0, one_of("*×/÷%")),
 		preceded(multispace0, exponent)
 	))
 	.parse_complete(input)?;
@@ -226,10 +254,9 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn exponent(input: Span) -> IResult<Span, Expression, NomError>
 {
-	let (input, initial) =
-		context("negation expression", unary).parse_complete(input)?;
+	let (input, initial) = unary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
-		preceded(multispace0, context("^", char('^'))),
+		preceded(multispace0, char('^')),
 		preceded(multispace0, unary)
 	))
 	.parse_complete(input)?;
@@ -268,32 +295,14 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn unary(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context(
-		"negation expression or term",
-		alt((
-			map(
-				preceded(
-					context("-", char('-')),
-					preceded(
-						multispace0,
-						context("negation expression", unary)
-					)
-				),
-				|expr| {
-					Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-						operand: Box::new(expr)
-					}))
-				}
-			),
-			preceded(
-				multispace0,
-				context(
-					"constant, variable, range, dice, or parenthesized expression",
-					primary
-				)
-			)
-		))
-	)
+	alt((
+		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(expr)
+			}))
+		}),
+		preceded(multispace0, primary)
+	))
 	.parse_complete(input)
 }
 
@@ -309,19 +318,13 @@ pub fn unary(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn primary(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context(
-		"term",
-		alt((
-			map(context("range expression", range), Expression::Range),
-			map(context("dice expression", dice), Expression::Dice),
-			map(
-				context("parenthesized expression", group),
-				Expression::Group
-			),
-			map(context("variable", variable), Expression::Variable),
-			map(context("constant", constant), Expression::Constant)
-		))
-	)
+	alt((
+		context(RANGE_CONTEXT, map(range, Expression::Range)),
+		context(DICE_CONTEXT, map(dice, Expression::Dice)),
+		context(GROUP_CONTEXT, map(group, Expression::Group)),
+		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(CONSTANT_CONTEXT, map(constant, Expression::Constant))
+	))
 	.parse_complete(input)
 }
 
@@ -338,12 +341,12 @@ pub fn primary(input: Span) -> IResult<Span, Expression, NomError>
 pub fn group(input: Span) -> IResult<Span, Group, NomError>
 {
 	delimited(
-		context("(", char('(')),
+		char('('),
 		map(
-			preceded(multispace0, context("expression", expression)),
+			preceded(multispace0, context(EXPRESSION_CONTEXT, expression)),
 			Box::new
 		),
-		preceded(multispace0, context(")", char(')')))
+		preceded(multispace0, char(')'))
 	)
 	.parse_complete(input)
 	.map(|(input, expression)| (input, Group { expression }))
@@ -362,9 +365,9 @@ pub fn group(input: Span) -> IResult<Span, Group, NomError>
 pub fn variable(input: Span) -> IResult<Span, Variable, NomError>
 {
 	delimited(
-		context("{", char('{')),
-		preceded(multispace0, context("variable", identifier)),
-		preceded(multispace0, context("}", char('}')))
+		char('{'),
+		preceded(multispace0, context(IDENTIFIER_CONTEXT, identifier)),
+		preceded(multispace0, char('}'))
 	)
 	.parse_complete(input)
 	.map(|(input, span)| (input, Variable(span.fragment())))
@@ -383,13 +386,13 @@ pub fn variable(input: Span) -> IResult<Span, Variable, NomError>
 pub fn range(input: Span) -> IResult<Span, Range, NomError>
 {
 	delimited(
-		context("[", char('[')),
+		char('['),
 		separated_pair(
-			preceded(multispace0, context("start expression", expression)),
-			preceded(multispace0, context(":", char(':'))),
-			preceded(multispace0, context("end expression", expression))
+			preceded(multispace0, context(RANGE_START_CONTEXT, expression)),
+			preceded(multispace0, char(':')),
+			preceded(multispace0, context(RANGE_END_CONTEXT, expression))
 		),
-		preceded(multispace0, context("]", char(']')))
+		preceded(multispace0, char(']'))
 	)
 	.parse_complete(input)
 	.map(|(input, (start, end))| {
@@ -416,13 +419,13 @@ pub fn range(input: Span) -> IResult<Span, Range, NomError>
 pub fn dice(input: Span) -> IResult<Span, DiceExpression, NomError>
 {
 	let (input, initial_dice) = alt((
-		map(
-			context("standard dice expression", standard_dice),
-			DiceExpression::Standard
+		context(
+			STANDARD_DICE_CONTEXT,
+			map(standard_dice, DiceExpression::Standard)
 		),
-		map(
-			context("custom dice expression", custom_dice),
-			DiceExpression::Custom
+		context(
+			CUSTOM_DICE_CONTEXT,
+			map(custom_dice, DiceExpression::Custom)
 		)
 	))
 	.parse_complete(input)?;
@@ -437,14 +440,8 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, NomError>
 
 	let (input, final_dice) = fold_many0(
 		alt((
-			map(
-				context("drop lowest expression", drop_lowest),
-				DropType::Lowest
-			),
-			map(
-				context("drop highest expression", drop_highest),
-				DropType::Highest
-			)
+			map(drop_lowest, DropType::Lowest),
+			map(drop_highest, DropType::Highest)
 		)),
 		|| initial_dice.clone(),
 		|acc, t| match t
@@ -480,12 +477,9 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, NomError>
 pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, NomError>
 {
 	separated_pair(
-		context("dice count expression", dice_count),
-		preceded(multispace0, context("d or D", d_operator)),
-		preceded(
-			multispace0,
-			context("standard faces expression", standard_faces)
-		)
+		context(DICE_COUNT_CONTEXT, dice_count),
+		preceded(multispace0, d_operator),
+		preceded(multispace0, context(STANDARD_FACES_CONTEXT, standard_faces))
 	)
 	.parse_complete(input)
 	.map(|(input, (count, faces))| {
@@ -512,12 +506,9 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, NomError>
 pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, NomError>
 {
 	separated_pair(
-		context("dice count expression", dice_count),
-		preceded(multispace0, context("d or D", d_operator)),
-		preceded(
-			multispace0,
-			context("custom faces expression", custom_faces)
-		)
+		context(DICE_COUNT_CONTEXT, dice_count),
+		preceded(multispace0, d_operator),
+		preceded(multispace0, context(CUSTOM_FACES_CONTEXT, custom_faces))
 	)
 	.parse_complete(input)
 	.map(|(input, (count, faces))| {
@@ -543,17 +534,11 @@ pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn dice_count(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context(
-		"dice count",
-		alt((
-			map(context("constant", constant), Expression::Constant),
-			map(context("variable", variable), Expression::Variable),
-			map(
-				context("parenthesized expression", group),
-				Expression::Group
-			)
-		))
-	)
+	alt((
+		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
+		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(GROUP_CONTEXT, map(group, Expression::Group))
+	))
 	.parse_complete(input)
 }
 
@@ -569,17 +554,11 @@ pub fn dice_count(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn standard_faces(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context(
-		"standard die faces",
-		alt((
-			map(context("constant", constant), Expression::Constant),
-			map(context("variable", variable), Expression::Variable),
-			map(
-				context("parenthesized expression", group),
-				Expression::Group
-			)
-		))
-	)
+	alt((
+		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
+		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(GROUP_CONTEXT, map(group, Expression::Group))
+	))
 	.parse_complete(input)
 }
 
@@ -596,12 +575,15 @@ pub fn standard_faces(input: Span) -> IResult<Span, Expression, NomError>
 pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, NomError>
 {
 	delimited(
-		context("[", char('[')),
+		char('['),
 		separated_list1(
-			preceded(multispace0, context(",", char(','))),
-			preceded(multispace0, map(context("constant", constant), |c| c.0))
+			preceded(multispace0, char(',')),
+			preceded(
+				multispace0,
+				context(CONSTANT_CONTEXT, map(constant, |c| c.0))
+			)
 		),
-		preceded(multispace0, context("]", char(']')))
+		preceded(multispace0, char(']'))
 	)
 	.parse_complete(input)
 }
@@ -621,11 +603,11 @@ pub fn drop_lowest(
 ) -> IResult<Span, Option<Box<Expression<'_>>>, NomError>
 {
 	let (input, (_, _, drop)) = (
-		preceded(multispace0, context("drop", tag("drop"))),
-		preceded(multispace0, context("lowest", tag("lowest"))),
+		preceded(multispace0, tag("drop")),
+		preceded(multispace0, tag("lowest")),
 		opt(preceded(
 			multispace0,
-			context("drop expression", drop_expression)
+			context(DROP_EXPRESSION_CONTEXT, drop_expression)
 		))
 	)
 		.parse_complete(input)?;
@@ -647,11 +629,11 @@ pub fn drop_highest(
 ) -> IResult<Span, Option<Box<Expression<'_>>>, NomError>
 {
 	let (input, (_, _, drop)) = (
-		preceded(multispace0, context("drop", tag("drop"))),
-		preceded(multispace0, context("highest", tag("highest"))),
+		preceded(multispace0, tag("drop")),
+		preceded(multispace0, tag("highest")),
 		opt(preceded(
 			multispace0,
-			context("drop expression", drop_expression)
+			context(DROP_EXPRESSION_CONTEXT, drop_expression)
 		))
 	)
 		.parse_complete(input)?;
@@ -670,17 +652,11 @@ pub fn drop_highest(
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn drop_expression(input: Span) -> IResult<Span, Expression, NomError>
 {
-	context(
-		"drop expression",
-		alt((
-			map(context("constant", constant), Expression::Constant),
-			map(context("variable", variable), Expression::Variable),
-			map(
-				context("parenthesized expression", group),
-				Expression::Group
-			)
-		))
-	)
+	alt((
+		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
+		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(GROUP_CONTEXT, map(group, Expression::Group))
+	))
 	.parse_complete(input)
 }
 
@@ -696,13 +672,10 @@ pub fn drop_expression(input: Span) -> IResult<Span, Expression, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn constant(input: Span) -> IResult<Span, Constant, NomError>
 {
-	let (input, constant) = recognize(context(
-		"optional minus sign followed by one or more Arabic digits",
-		pair(opt(char('-')), digit1)
-	))
-	.parse_complete(input)?;
+	let (input, constant) =
+		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
 	let constant = constant.fragment().parse().map_err(|e| {
-		nom::Err::Failure(VerboseError::from_external_error(
+		nom::Err::Failure(NomError::from_external_error(
 			input,
 			ErrorKind::Digit,
 			e
@@ -739,11 +712,8 @@ pub fn d_operator(input: Span) -> IResult<Span, char, NomError>
 pub fn identifier(input: Span) -> IResult<Span, Span, NomError>
 {
 	recognize(pair(
-		context("alphabetic character or underscore", alt((alpha, tag("_")))),
-		many0(context(
-			"alphanumeric character, underscore, or hyphen",
-			alt((alphanumeric1, tag("_"), tag("-")))
-		))
+		alt((alpha, tag("_"))),
+		many0(alt((alphanumeric1, tag("_"), tag("-"))))
 	))
 	.parse_complete(input)
 }
@@ -780,4 +750,23 @@ pub fn alpha(input: Span) -> IResult<Span, Span, NomError>
 pub fn alphanumeric1(input: Span) -> IResult<Span, Span, NomError>
 {
 	take_while1(|c: char| c.is_alphanumeric())(input)
+}
+
+/// Parse an arbitary token. This is used only for error reporting.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed token, or `None` if the input is empty.
+pub fn token(input: Span) -> Option<Span>
+{
+	match alt((eof, recognize(constant), identifier, recognize(anychar)))
+		.parse_complete(input)
+		.unwrap()
+		.1
+	{
+		span if span.fragment().is_empty() => None,
+		span => Some(span)
+	}
 }
