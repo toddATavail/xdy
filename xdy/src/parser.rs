@@ -81,8 +81,8 @@ pub fn parse(input: &str) -> Result<Function, ParseError>
 	.parse_complete(input)
 	.map_err(|e| match e
 	{
-		nom::Err::Error(e) => e.into(),
-		nom::Err::Failure(e) => e.into(),
+		nom::Err::Error(e) => e,
+		nom::Err::Failure(e) => e,
 		nom::Err::Incomplete(_) => unreachable!()
 	})
 	.map(|(_, f)| f)

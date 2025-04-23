@@ -35,9 +35,9 @@ use crate::{
 use super::{
 	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
 	DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT, FUNCTION_BODY_CONTEXT,
-	GROUP_CONTEXT, IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT, NomError,
-	PARAMETER_CONTEXT, RANGE_CONTEXT, RANGE_END_CONTEXT, RANGE_START_CONTEXT,
-	STANDARD_FACES_CONTEXT, VARIABLE_CONTEXT
+	GROUP_CONTEXT, IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT,
+	PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT, RANGE_END_CONTEXT,
+	RANGE_START_CONTEXT, STANDARD_FACES_CONTEXT, VARIABLE_CONTEXT
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -57,7 +57,7 @@ pub type Span<'a> = LocatedSpan<&'a str>;
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn function(input: Span) -> IResult<Span, Function, NomError>
+pub fn function(input: Span) -> IResult<Span, Function, ParseError>
 {
 	let (input, parameters) = parameters.parse_complete(input)?;
 	let (input, body) =
@@ -76,7 +76,7 @@ pub fn function(input: Span) -> IResult<Span, Function, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, NomError>
+pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, ParseError>
 {
 	let (input, parameters) = separated_list0(
 		preceded(multispace0, char(',')),
@@ -87,7 +87,7 @@ pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, NomError>
 	// another parameter should follow (but doesn't).
 	let (input, _) = match terminated(
 		preceded(multispace0, char(',')),
-		context(PARAMETER_CONTEXT, fail::<_, (), NomError>())
+		context(PARAMETER_CONTEXT, fail::<_, (), ParseError>())
 	)
 	.parse_complete(input)
 	{
@@ -135,7 +135,7 @@ pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parameter(input: Span) -> IResult<Span, Span, NomError>
+pub fn parameter(input: Span) -> IResult<Span, Span, ParseError>
 {
 	identifier(input)
 }
@@ -150,7 +150,7 @@ pub fn parameter(input: Span) -> IResult<Span, Span, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn expression(input: Span) -> IResult<Span, Expression, NomError>
+pub fn expression(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	add_sub(input)
 }
@@ -165,7 +165,7 @@ pub fn expression(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn add_sub(input: Span) -> IResult<Span, Expression, NomError>
+pub fn add_sub(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	let (input, initial) = mul_div_mod.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
@@ -204,7 +204,7 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, NomError>
+pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	let (input, initial) = exponent.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
@@ -252,7 +252,7 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn exponent(input: Span) -> IResult<Span, Expression, NomError>
+pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	let (input, initial) = unary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
@@ -293,7 +293,7 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn unary(input: Span) -> IResult<Span, Expression, NomError>
+pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
 		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
@@ -316,7 +316,7 @@ pub fn unary(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn primary(input: Span) -> IResult<Span, Expression, NomError>
+pub fn primary(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
 		context(RANGE_CONTEXT, map(range, Expression::Range)),
@@ -338,7 +338,7 @@ pub fn primary(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn group(input: Span) -> IResult<Span, Group, NomError>
+pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 {
 	delimited(
 		char('('),
@@ -362,7 +362,7 @@ pub fn group(input: Span) -> IResult<Span, Group, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn variable(input: Span) -> IResult<Span, Variable, NomError>
+pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 {
 	delimited(
 		char('{'),
@@ -383,7 +383,7 @@ pub fn variable(input: Span) -> IResult<Span, Variable, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn range(input: Span) -> IResult<Span, Range, NomError>
+pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 {
 	delimited(
 		char('['),
@@ -416,7 +416,7 @@ pub fn range(input: Span) -> IResult<Span, Range, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn dice(input: Span) -> IResult<Span, DiceExpression, NomError>
+pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 {
 	let (input, initial_dice) = alt((
 		context(
@@ -474,7 +474,7 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, NomError>
+pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 {
 	separated_pair(
 		context(DICE_COUNT_CONTEXT, dice_count),
@@ -503,7 +503,7 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, NomError>
+pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, ParseError>
 {
 	separated_pair(
 		context(DICE_COUNT_CONTEXT, dice_count),
@@ -532,7 +532,7 @@ pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn dice_count(input: Span) -> IResult<Span, Expression, NomError>
+pub fn dice_count(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
@@ -552,7 +552,7 @@ pub fn dice_count(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn standard_faces(input: Span) -> IResult<Span, Expression, NomError>
+pub fn standard_faces(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
@@ -572,7 +572,7 @@ pub fn standard_faces(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, NomError>
+pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 {
 	delimited(
 		char('['),
@@ -600,7 +600,7 @@ pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, NomError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn drop_lowest(
 	input: Span
-) -> IResult<Span, Option<Box<Expression<'_>>>, NomError>
+) -> IResult<Span, Option<Box<Expression<'_>>>, ParseError>
 {
 	let (input, (_, _, drop)) = (
 		preceded(multispace0, tag("drop")),
@@ -626,7 +626,7 @@ pub fn drop_lowest(
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn drop_highest(
 	input: Span
-) -> IResult<Span, Option<Box<Expression<'_>>>, NomError>
+) -> IResult<Span, Option<Box<Expression<'_>>>, ParseError>
 {
 	let (input, (_, _, drop)) = (
 		preceded(multispace0, tag("drop")),
@@ -650,7 +650,7 @@ pub fn drop_highest(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn drop_expression(input: Span) -> IResult<Span, Expression, NomError>
+pub fn drop_expression(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
@@ -670,12 +670,12 @@ pub fn drop_expression(input: Span) -> IResult<Span, Expression, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn constant(input: Span) -> IResult<Span, Constant, NomError>
+pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 {
 	let (input, constant) =
 		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
 	let constant = constant.fragment().parse().map_err(|e| {
-		nom::Err::Failure(NomError::from_external_error(
+		nom::Err::Failure(ParseError::from_external_error(
 			input,
 			ErrorKind::Digit,
 			e
@@ -694,7 +694,7 @@ pub fn constant(input: Span) -> IResult<Span, Constant, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn d_operator(input: Span) -> IResult<Span, char, NomError>
+pub fn d_operator(input: Span) -> IResult<Span, char, ParseError>
 {
 	one_of("dD")(input)
 }
@@ -709,7 +709,7 @@ pub fn d_operator(input: Span) -> IResult<Span, char, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn identifier(input: Span) -> IResult<Span, Span, NomError>
+pub fn identifier(input: Span) -> IResult<Span, Span, ParseError>
 {
 	recognize(pair(
 		alt((alpha, tag("_"))),
@@ -732,7 +732,7 @@ pub fn identifier(input: Span) -> IResult<Span, Span, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn alpha(input: Span) -> IResult<Span, Span, NomError>
+pub fn alpha(input: Span) -> IResult<Span, Span, ParseError>
 {
 	take_while_m_n(1, 1, |c: char| c.is_alphabetic())(input)
 }
@@ -747,7 +747,7 @@ pub fn alpha(input: Span) -> IResult<Span, Span, NomError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn alphanumeric1(input: Span) -> IResult<Span, Span, NomError>
+pub fn alphanumeric1(input: Span) -> IResult<Span, Span, ParseError>
 {
 	take_while1(|c: char| c.is_alphanumeric())(input)
 }

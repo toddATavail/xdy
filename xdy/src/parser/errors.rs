@@ -16,80 +16,16 @@ use crate::parser::token;
 use super::Span;
 
 ////////////////////////////////////////////////////////////////////////////////
-//                             Top-level errors.                              //
+//                               Parse errors.                                //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The error type for the outermost [parser](crate::parser::parse). Its payload
-/// is intended to precisely convey the location of the error, describe what was
-/// expected thereat, and summarize the parse context.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseError
-{
-	/// The error message, roughly of the form:
-	///
-	/// ```text
-	/// Parse error @ 1:5 (byte 4): expected identifier, but found `123`
-	///   x: {123}
-	///       ^
-	/// ```
-	pub message: String,
-
-	/// The parse trace, roughly of the form:
-	///
-	/// ```no_run
-	/// # let trace = vec!
-	/// [
-	///     "function `x: {123}`",
-	///     "function body `{123}`",
-	///     "variable `123}`",
-	///     "identifier `123}"
-	/// ]
-	/// # ;
-	/// ```
-	///
-	/// And rendered as:
-	///
-	/// ```text
-	/// function `x: {123}`
-	/// ⤷ function body `{123}`
-	///   ⤷ variable `123}`
-	///     ⤷ identifier `123}`
-	/// ```
-	pub trace: Vec<String>
-}
-
-impl Display for ParseError
-{
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
-	{
-		// Only output the message, not the complete trace.
-		write!(f, "{}", self.message)
-	}
-}
-
-impl Error for ParseError {}
-
-impl From<NomError<'_>> for ParseError
-{
-	fn from(error: NomError) -> Self
-	{
-		Self {
-			message: error.to_string(),
-			trace: Vec::new() // TODO
-		}
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//                              Internal errors.                              //
-////////////////////////////////////////////////////////////////////////////////
-
-/// The error type for `nom` errors, designed as an improvement over
+/// A parse error, compatible with `nom`'s requirements. The error type is
+/// designed as an improvement over
 /// [VerboseError](nom_language::error::VerboseError), at least because it
 /// preserves the rightmost _parse error_ of an [`alt`](nom::branch::alt)
 /// combinator rather than the one produced by the rightmost _alternative_.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NomError<'a>
+pub struct ParseError<'a>
 {
 	/// The errors accumulated during parsing, in reverse order, i.e., the last
 	/// error is the outermost error.
@@ -111,7 +47,7 @@ pub enum NomErrorKind<'a>
 	/// when merging errors at equivalent parse positions. Each element of the
 	/// vector represents an aborted parse that failed at the same parse
 	/// position.
-	Synthetic(Vec<NomError<'a>>),
+	Synthetic(Vec<ParseError<'a>>),
 
 	/// The character expected by the [`char`](nom::character::complete::char)
 	/// combinator.
@@ -167,6 +103,8 @@ impl NomErrorKind<'_>
 			{
 				ErrorKind::Eof =>
 				{
+					// TODO: This isn't right yet; may need to add handling to
+					// `function` combinator.
 					expected_for_classifier(INCOMPLETE_FUNCTION_BODY_CONTEXT)
 						.iter()
 						.for_each(|c| {
@@ -184,9 +122,9 @@ impl NomErrorKind<'_>
 	}
 }
 
-impl Error for NomError<'_> {}
+impl Error for ParseError<'_> {}
 
-impl<'a> nom::error::ParseError<Span<'a>> for NomError<'a>
+impl<'a> nom::error::ParseError<Span<'a>> for ParseError<'a>
 {
 	fn from_error_kind(input: Span<'a>, kind: ErrorKind) -> Self
 	{
@@ -239,7 +177,7 @@ impl<'a> nom::error::ParseError<Span<'a>> for NomError<'a>
 	}
 }
 
-impl<'a> nom::error::ContextError<Span<'a>> for NomError<'a>
+impl<'a> nom::error::ContextError<Span<'a>> for ParseError<'a>
 {
 	fn add_context(input: Span<'a>, ctx: &'static str, mut other: Self)
 	-> Self
@@ -249,7 +187,7 @@ impl<'a> nom::error::ContextError<Span<'a>> for NomError<'a>
 	}
 }
 
-impl<'a, E> nom::error::FromExternalError<Span<'a>, E> for NomError<'a>
+impl<'a, E> nom::error::FromExternalError<Span<'a>, E> for ParseError<'a>
 {
 	fn from_external_error(input: Span<'a>, kind: ErrorKind, _e: E) -> Self
 	{
@@ -257,7 +195,7 @@ impl<'a, E> nom::error::FromExternalError<Span<'a>, E> for NomError<'a>
 	}
 }
 
-impl Display for NomError<'_>
+impl Display for ParseError<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
@@ -283,16 +221,17 @@ impl Display for NomError<'_>
 		writeln!(
 			f,
 			"{}, but found {}",
-			// The `unwrap` is safe because expectations is guaranteed to be
+			// The `unwrap` is safe because `expectations` is guaranteed to be
 			// nonempty.
 			expected(&expectations).unwrap(),
 			token(rightmost).map_or(Cow::Borrowed("end of input"), |t| {
 				Cow::Owned(format!("`{}`", t.fragment()))
 			})
 		)?;
-		// Write the source fragment.
-		writeln!(f, "  {}", self.errors.last().unwrap().0.fragment())?;
-		// Write the error locator.
+		// Output the full line containing the error.
+		let line = String::from_utf8_lossy(rightmost.get_line_beginning());
+		writeln!(f, "  {}", line)?;
+		// Output the visual locator for the error.
 		write!(f, "  {}^", " ".repeat(column - 1))
 	}
 }
