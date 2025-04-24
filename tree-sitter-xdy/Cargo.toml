@@ -7,6 +7,7 @@ authors = { workspace = true }
 license = { workspace = true }
 keywords = ["dice", "rpg", "xdy", "parsing", "tree-sitter"]
 categories = { workspace = true }
+repository = { workspace = true }
 build = "bindings/rust/build.rs"
 include = ["bindings/rust/*", "grammar.js", "queries/*", "src/*"]
 

@@ -7,11 +7,12 @@ authors = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 rand = { workspace = true }
 tree-sitter = { workspace = true }
-tree-sitter-xdy = { path = "../tree-sitter-xdy" }
+tree-sitter-xdy = "=0.7.0"
 
 [dependencies.rayon]
 workspace = true

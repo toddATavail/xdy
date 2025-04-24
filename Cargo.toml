@@ -10,6 +10,7 @@ authors = ["Todd L Smith <todd@availlang.org>"]
 license = "BSD-3-Clause"
 keywords = ["dice", "rpg", "xdy", "parsing"]
 categories = ["compilers", "parsing", "game-development", "mathematics"]
+repository = "https://github.com/toddATavail/xdy"
 
 [workspace.dependencies]
 cc = "1.1.8"

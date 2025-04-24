@@ -1,5 +1,11 @@
 # xDy: Once-and-for-all dice expression compiler
 
+[<img alt="github" src="https://img.shields.io/badge/github-toddATavail/xdy-abda724?logo=github" height="20">](https://github.com/toddATavail/xdy)
+[![Latest version](https://img.shields.io/crates/v/xdy.svg)](https://crates.io/crates/xdy)
+[![Documentation](https://docs.rs/xdy/badge.svg)](https://docs.rs/xdy)
+[![Build Status](https://github.com/toddATavail/xdy/workflows/Rust/badge.svg)](https://github.com/toddATavail/xdy/actions/workflows/rust.yml)
+[![BSD](https://img.shields.io/badge/license-BSD3-blue.svg)](https://github.com/toddATavail/xdy/blob/master/LICENSE)
+
 `xDy` is an extremely fast dice expression compiler that can be used to generate pseudorandom numbers. It is designed for use within a variety of applications, such as role-playing games (RPGs) and simulations, but also suits other applications that must introduce controlled randomness or generate specific probability distributions. It is written in Rust for maximum performance, safety, and portability.
 
 * [Overview](#overview)
