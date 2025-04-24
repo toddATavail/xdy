@@ -1,10 +1,17 @@
 //! # Intermediate representation
 //!
-//! The intermediate representation (IR) of the dice language. The instruction
-//! set specifies a simple register transfer language (RTL) for the dice
-//! language. There is no control flow, so the language is purely functional.
-//! No control flow graph (CFG) is necessary, as all instructions reside within
-//! a single basic block.
+//! The intermediate representation (IR) of `xDy` expresses a simple register
+//! transfer language. It supports [immediate](AddressingMode::Immediate) and
+//! [register](AddressingMode::Register) [addressing modes](AddressingMode).
+//! There are two types of register: [`i32`](RegisterIndex) and
+//! [rolling&#32;record](RollingRecordIndex). The
+//! [program&#32;counter](ProgramCounter) is a special register that holds the
+//! [function](Function)-relative index of the currently executing instruction.
+//! The result register is a special register that holds the result of the
+//! current evaluation; it is written by the [return](Return) instruction.
+//! The [evaluator](Evaluator) executes a target function's
+//! [instructions](Instruction) sequentially. There are no control flow
+//! instructions, making the IR purely functional.
 
 use std::{
 	cell::{Ref, RefCell},
@@ -16,7 +23,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
-use crate::RollingRecord;
+use crate::{Evaluator, Function, RollingRecord};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Instruction set.                              //

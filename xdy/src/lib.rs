@@ -253,6 +253,7 @@ mod evaluator;
 mod histogram;
 mod ir;
 mod optimizer;
+mod primitives;
 #[cfg(any(test, feature = "bench"))]
 pub mod support;
 #[cfg(test)]
@@ -263,6 +264,7 @@ pub use evaluator::*;
 pub use histogram::*;
 pub use ir::*;
 pub use optimizer::*;
+pub use primitives::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 //                           Convenient evaluation.                           //
