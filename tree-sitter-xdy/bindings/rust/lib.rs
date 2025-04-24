@@ -21,7 +21,7 @@
 
 use tree_sitter::Language;
 
-extern "C" {
+unsafe extern "C" {
 	fn tree_sitter_xdy() -> Language;
 }
 

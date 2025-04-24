@@ -3,10 +3,13 @@ members = ["xdy", "tree-sitter-xdy"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
-authors = ["Todd L Smith <todd@availlang.org>"]
 description = "Complex RPG dice expression evaluator with histogram support."
+version = "0.7.0"
+edition = "2024"
+authors = ["Todd L Smith <todd@availlang.org>"]
+license = "BSD-3-Clause"
+keywords = ["dice", "rpg", "xdy", "parsing"]
+categories = ["compilers", "parsing", "game-development", "mathematics"]
 
 [workspace.dependencies]
 cc = "1.1.8"
