@@ -76,9 +76,9 @@
 //!
 //! ```rust
 //! use xdy::evaluate;
-//! use rand::thread_rng;
+//! use rand::rng;
 //!
-//! let result = evaluate("1d6", vec![], vec![], &mut thread_rng()).unwrap();
+//! let result = evaluate("1d6", vec![], vec![], &mut rng()).unwrap();
 //!
 //! assert!(1 <= result.result && result.result <= 6);
 //! assert!(result.records.len() == 1);
@@ -91,9 +91,9 @@
 //!
 //! ```rust
 //! use xdy::evaluate;
-//! use rand::thread_rng;
+//! use rand::rng;
 //!
-//! let result = evaluate("x: {x}D6", vec![3], vec![], &mut thread_rng()).unwrap();
+//! let result = evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 //!
 //! assert!(3 <= result.result && result.result <= 18);
 //! assert!(result.records.len() == 1);
@@ -108,10 +108,10 @@
 //!
 //! ```rust
 //! use xdy::evaluate;
-//! use rand::thread_rng;
+//! use rand::rng;
 //!
 //! let result =
-//!     evaluate("{x}D6", vec![], vec![("x", 3)], &mut thread_rng()).unwrap();
+//!     evaluate("{x}D6", vec![], vec![("x", 3)], &mut rng()).unwrap();
 //!
 //! assert!(3 <= result.result && result.result <= 18);
 //! assert!(result.records.len() == 1);
@@ -125,9 +125,9 @@
 //!
 //! ```rust
 //! use xdy::evaluate;
-//! use rand::thread_rng;
+//! use rand::rng;
 //!
-//! let result = evaluate("1d6 + 2d8 - 1d10", vec![], vec![], &mut thread_rng()).unwrap();
+//! let result = evaluate("1d6 + 2d8 - 1d10", vec![], vec![], &mut rng()).unwrap();
 //!
 //! assert!(-7 <= result.result && result.result <= 21);
 //! assert!(result.records.len() == 3);
@@ -149,11 +149,12 @@
 //!
 //! ```rust
 //! use xdy::{compile, Evaluator};
+//! use rand::rng;
 //!
 //! let function = compile("3D6")?;
 //! let mut evaluator = Evaluator::new(function);
 //! let results = (0..10)
-//!     .flat_map(|_| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+//!     .flat_map(|_| evaluator.evaluate(vec![], &mut rng()))
 //!     .collect::<Vec<_>>();
 //!
 //! assert!(results.len() == 10);
@@ -166,11 +167,12 @@
 //!
 //! ```rust
 //! use xdy::{compile, Evaluator};
+//! use rand::rng;
 //!
 //! let function = compile("x: 1D6 + {x}")?;
 //! let mut evaluator = Evaluator::new(function);
 //! let results = (0..10)
-//!    .flat_map(|x| evaluator.evaluate(vec![x], &mut rand::thread_rng()))
+//!    .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
 //!    .collect::<Vec<_>>();
 //!
 //! assert!(results.len() == 10);
@@ -186,12 +188,13 @@
 //!
 //! ```rust
 //! use xdy::{compile, Evaluator};
+//! use rand::rng;
 //!
 //! let function = compile("1D6 + {x}")?;
 //! let mut evaluator = Evaluator::new(function);
 //! evaluator.bind("x", 3)?;
 //! let results = (0..10)
-//!    .flat_map(|x| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+//!    .flat_map(|x| evaluator.evaluate(vec![], &mut rng()))
 //!    .collect::<Vec<_>>();
 //!
 //! assert!(results.len() == 10);
@@ -353,9 +356,9 @@ where
 ///
 /// ```rust
 /// use xdy::evaluate;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
-/// let result = evaluate("1D6", vec![], vec![], &mut thread_rng()).unwrap();
+/// let result = evaluate("1D6", vec![], vec![], &mut rng()).unwrap();
 /// assert!(1 <= result.result && result.result <= 6);
 /// assert!(result.records.len() == 1);
 /// assert!(result.records[0].results.len() == 1);
@@ -367,10 +370,10 @@ where
 ///
 /// ```rust
 /// use xdy::evaluate;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let result =
-///     evaluate("x: {x}D6", vec![3], vec![], &mut thread_rng()).unwrap();
+///     evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 /// assert!(3 <= result.result && result.result <= 18);
 /// assert!(result.records.len() == 1);
 /// assert!(result.records[0].results.len() == 3);
@@ -384,10 +387,10 @@ where
 ///
 /// ```rust
 /// use xdy::evaluate;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let result =
-///     evaluate("{x}D6", vec![], vec![("x", 3)], &mut thread_rng()).unwrap();
+///     evaluate("{x}D6", vec![], vec![("x", 3)], &mut rng()).unwrap();
 /// assert!(3 <= result.result && result.result <= 18);
 /// assert!(result.records.len() == 1);
 /// assert!(result.records[0].results.len() == 3);
@@ -400,9 +403,9 @@ where
 ///
 /// ```rust
 /// use xdy::evaluate;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
-/// let result = evaluate("1D6 + 2D8 - 1D10", vec![], vec![], &mut thread_rng()).unwrap();
+/// let result = evaluate("1D6 + 2D8 - 1D10", vec![], vec![], &mut rng()).unwrap();
 /// assert!(-7 <= result.result && result.result <= 21);
 /// assert!(result.records.len() == 3);
 /// assert!(result.records[0].results.len() == 1);

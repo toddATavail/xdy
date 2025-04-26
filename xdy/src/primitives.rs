@@ -33,9 +33,9 @@ use crate::{RollingRecord, RollingRecordKind};
 ///
 /// ```rust
 /// # use core::ops::RangeInclusive;
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_range};
-/// let rolling_record = roll_range(&mut thread_rng(), 1..=6);
+/// let rolling_record = roll_range(&mut rng(), 1..=6);
 /// assert_eq!(rolling_record.results.len(), 1);
 /// assert!(rolling_record.results[0] >= 1 && rolling_record.results[0] <= 6);
 /// ```
@@ -43,9 +43,9 @@ use crate::{RollingRecord, RollingRecordKind};
 /// Use an empty range:
 /// ```rust
 /// # use core::ops::RangeInclusive;
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_range};
-/// let rolling_record = roll_range(&mut thread_rng(), 6..=1);
+/// let rolling_record = roll_range(&mut rng(), 6..=1);
 /// assert_eq!(rolling_record.results.len(), 1);
 /// assert_eq!(rolling_record.results[0], 0);
 /// ```
@@ -56,7 +56,7 @@ where
 	let (start, end) = range.into_inner();
 	let result = match end < start
 	{
-		false => rng.gen_range(start..=end),
+		false => rng.random_range(start..=end),
 		true => 0
 	};
 	RollingRecord {
@@ -83,9 +83,9 @@ where
 /// Generate a roll of 3 six-sided dice (i.e., `3D6`):
 ///
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
-/// let rolling_record = roll_standard_dice(&mut thread_rng(), 3, 6);
+/// let rolling_record = roll_standard_dice(&mut rng(), 3, 6);
 /// assert_eq!(rolling_record.results.len(), 3);
 /// rolling_record.results.iter().for_each(|&result| {
 ///     assert!(result >= 1 && result <= 6);
@@ -94,26 +94,26 @@ where
 ///
 /// Roll no dice:
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
-/// let rolling_record = roll_standard_dice(&mut thread_rng(), 0, 6);
+/// let rolling_record = roll_standard_dice(&mut rng(), 0, 6);
 /// assert_eq!(rolling_record.results.len(), 0);
 ///
-/// let rolling_record = roll_standard_dice(&mut thread_rng(), -1, 6);
+/// let rolling_record = roll_standard_dice(&mut rng(), -1, 6);
 /// assert_eq!(rolling_record.results.len(), 0);
 /// ```
 ///
 /// Use dice with no faces:
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
-/// let rolling_record = roll_standard_dice(&mut thread_rng(), 3, 0);
+/// let rolling_record = roll_standard_dice(&mut rng(), 3, 0);
 /// assert_eq!(rolling_record.results.len(), 3);
 /// rolling_record.results.iter().for_each(|&result| {
 ///    assert_eq!(result, 0);
 /// });
 ///
-/// let rolling_record = roll_standard_dice(&mut thread_rng(), 3, -1);
+/// let rolling_record = roll_standard_dice(&mut rng(), 3, -1);
 /// assert_eq!(rolling_record.results.len(), 3);
 /// rolling_record.results.iter().for_each(|&result| {
 ///   assert_eq!(result, 0);
@@ -130,7 +130,7 @@ where
 	let results = (0..count)
 		.map(|_| match faces <= 0
 		{
-			false => rng.gen_range(1..=faces),
+			false => rng.random_range(1..=faces),
 			true => 0
 		})
 		.collect::<Vec<_>>();
@@ -159,9 +159,9 @@ where
 /// `3D[-1,0,1]`):
 ///
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
-/// let rolling_record = roll_custom_dice(&mut thread_rng(), 3, vec![-1, 0, 1]);
+/// let rolling_record = roll_custom_dice(&mut rng(), 3, vec![-1, 0, 1]);
 /// assert_eq!(rolling_record.results.len(), 3);
 /// rolling_record.results.iter().for_each(|&result| {
 ///    assert!(result >= -1 && result <= 1);
@@ -170,20 +170,20 @@ where
 ///
 /// Roll no dice:
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
-/// let rolling_record = roll_custom_dice(&mut thread_rng(), 0, vec![1, 2, 3]);
+/// let rolling_record = roll_custom_dice(&mut rng(), 0, vec![1, 2, 3]);
 /// assert_eq!(rolling_record.results.len(), 0);
 ///
-/// let rolling_record = roll_custom_dice(&mut thread_rng(), -1, vec![1, 2, 3]);
+/// let rolling_record = roll_custom_dice(&mut rng(), -1, vec![1, 2, 3]);
 /// assert_eq!(rolling_record.results.len(), 0);
 /// ```
 ///
 /// Use dice with no faces:
 /// ```rust
-/// # use rand::{Rng, thread_rng};
+/// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
-/// let rolling_record = roll_custom_dice(&mut thread_rng(), 3, vec![]);
+/// let rolling_record = roll_custom_dice(&mut rng(), 3, vec![]);
 /// assert_eq!(rolling_record.results.len(), 3);
 /// rolling_record.results.iter().for_each(|&result| {
 ///   assert_eq!(result, 0);
@@ -201,7 +201,7 @@ where
 	let results = (0..count)
 		.map(|_| match faces.is_empty()
 		{
-			false => faces[rng.gen_range(0..face_count)],
+			false => faces[rng.random_range(0..face_count)],
 			true => 0
 		})
 		.collect::<Vec<_>>();
@@ -230,9 +230,9 @@ impl RollingRecord
 	/// Roll `3D12` and drop the lowest result:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 3, 12);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
 	/// rolling_record.drop_lowest(1);
 	/// assert_eq!(rolling_record.results.len(), 3);
 	/// assert_eq!(rolling_record.lowest_dropped, 1);
@@ -241,9 +241,9 @@ impl RollingRecord
 	/// Roll `3D12`, but try to drop `4` results:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 3, 12);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
 	/// rolling_record.drop_lowest(4);
 	/// assert_eq!(rolling_record.results.len(), 3);
 	/// assert_eq!(rolling_record.lowest_dropped, 3);
@@ -286,9 +286,9 @@ impl RollingRecord
 	/// Roll `5D8` and drop the highest result:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 5, 8);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
 	/// rolling_record.drop_highest(1);
 	/// assert_eq!(rolling_record.results.len(), 5);
 	/// assert_eq!(rolling_record.highest_dropped, 1);
@@ -297,9 +297,9 @@ impl RollingRecord
 	/// Roll `5D8`, but try to drop `7` results:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 5, 8);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
 	/// rolling_record.drop_highest(7);
 	/// assert_eq!(rolling_record.results.len(), 5);
 	/// assert_eq!(rolling_record.highest_dropped, 5);
@@ -344,9 +344,9 @@ impl RollingRecord
 	/// Roll `4D6`, drop the lowest and highest die, leaving the middle two:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 4, 6);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
 	/// rolling_record.drop_lowest(1);
 	/// rolling_record.drop_highest(1);
 	/// assert_eq!(rolling_record.lowest_dropped, 1);
@@ -390,9 +390,9 @@ impl RollingRecord
 	/// Roll `5D12` and sum the results:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 5, 12);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 12);
 	/// let sum = rolling_record.sum();
 	/// assert!(sum >= 5 && sum <= 60);
 	/// ```
@@ -400,9 +400,9 @@ impl RollingRecord
 	/// Roll `4D6`, drop the lowest and highest die, and sum the middle die:
 	///
 	/// ```rust
-	/// # use rand::{Rng, thread_rng};
+	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut thread_rng(), 4, 6);
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
 	/// rolling_record.drop_lowest(1);
 	/// rolling_record.drop_highest(1);
 	/// let sum = rolling_record.sum();

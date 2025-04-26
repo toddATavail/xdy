@@ -73,12 +73,13 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 ///
 /// ```rust
 /// use xdy::{compile, CompilationError, Evaluator};
+/// use rand::rng;
 ///
 /// # fn main() -> Result<(), CompilationError> {
 /// let function = compile("3D6")?;
 /// let mut evaluator = Evaluator::new(function);
 /// let results = (0..10)
-///     .flat_map(|_| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+///     .flat_map(|_| evaluator.evaluate(vec![], &mut rng()))
 ///     .collect::<Vec<_>>();
 /// assert!(results.len() == 10);
 /// assert!(
@@ -93,12 +94,13 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 ///
 /// ```rust
 /// use xdy::{compile, CompilationError, Evaluator};
+/// use rand::rng;
 ///
 /// # fn main() -> Result<(), CompilationError> {
 /// let function = compile("x: 1D6 + {x}")?;
 /// let mut evaluator = Evaluator::new(function);
 /// let results = (0..10)
-///    .flat_map(|x| evaluator.evaluate(vec![x], &mut rand::thread_rng()))
+///    .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
 ///    .collect::<Vec<_>>();
 /// assert!(results.len() == 10);
 /// (0..10).for_each(|i| {
@@ -114,13 +116,14 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 ///
 /// ```rust
 /// use xdy::{compile, EvaluationError, Evaluator};
+/// use rand::rng;
 ///
 /// # fn main() -> Result<(), EvaluationError<'static>> {
 /// let function = compile("1D6 + {x}")?;
 /// let mut evaluator = Evaluator::new(function);
 /// evaluator.bind("x", 3)?;
 /// let results = (0..10)
-///    .flat_map(|x| evaluator.evaluate(vec![], &mut rand::thread_rng()))
+///    .flat_map(|x| evaluator.evaluate(vec![], &mut rng()))
 ///    .collect::<Vec<_>>();
 /// assert!(results.len() == 10);
 /// assert!(

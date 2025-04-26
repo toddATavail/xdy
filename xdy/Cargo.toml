@@ -12,7 +12,7 @@ repository = { workspace = true }
 [dependencies]
 rand = { workspace = true }
 tree-sitter = { workspace = true }
-tree-sitter-xdy = "=0.7.0"
+tree-sitter-xdy = "=0.8.0"
 
 [dependencies.rayon]
 workspace = true

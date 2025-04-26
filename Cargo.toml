@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 description = "Complex RPG dice expression evaluator with histogram support."
-version = "0.7.1-dev"
+version = "0.8.0"
 edition = "2024"
 authors = ["Todd L Smith <todd@availlang.org>"]
 license = "BSD-3-Clause"
@@ -16,10 +16,10 @@ repository = "https://github.com/toddATavail/xdy"
 cc = "1.1.8"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 pretty_assertions = "1.4.0"
-proc-macro2 = "1.0.86"
-rand = "0.8.5"
-rayon = "1.10.0"
-serde = { version = "1.0.204", features = ["derive"] }
+proc-macro2 = "1.0"
+rand = "0.9"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
 syn = "2.0.72"
-tree-sitter = ">=0.22.6"
+tree-sitter = "0.25.3"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
