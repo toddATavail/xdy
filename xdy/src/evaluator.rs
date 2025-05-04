@@ -14,6 +14,8 @@ use std::{
 };
 
 use rand::Rng;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
@@ -32,6 +34,7 @@ use crate::{
 /// a set of dice. [`RollStandardDice`] and [`RollCustomDice`] both populate a
 /// [`RollingRecord`] in the frame's rolling record set.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecord
 {
 	/// The kind of rolling record.
@@ -107,6 +110,7 @@ impl Display for RollingRecord
 
 /// The kind of rolling record.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RollingRecordKind<T>
 {
 	/// An uninitialized rolling record.
@@ -192,6 +196,7 @@ where
 /// * Zero to the power of zero is treated as one,
 /// * Bases raised to negative exponents are treated as zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluator
 {
 	/// The function to evaluate.
@@ -227,6 +232,7 @@ where
 /// The result of a dice expression evaluation. The result includes the final
 /// value of the expression and the rolling records of the dice subexpressions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluation
 {
 	/// The result of the entire dice expression.
