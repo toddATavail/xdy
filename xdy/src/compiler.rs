@@ -1011,7 +1011,7 @@ impl Display for Compiler<'_>
 
 /// A function in the intermediate representation. This is the output of a
 /// [compiler](Compiler).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function
 {
