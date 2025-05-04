@@ -9,6 +9,7 @@ use std::{
 	collections::{HashMap, HashSet},
 	error::Error,
 	fmt::{Display, Formatter},
+	hash::{Hash, Hasher},
 	ops::RangeInclusive
 };
 
@@ -190,7 +191,7 @@ where
 /// * Division by zero is treated as zero,
 /// * Zero to the power of zero is treated as one,
 /// * Bases raised to negative exponents are treated as zero.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evaluator
 {
 	/// The function to evaluate.
@@ -406,6 +407,15 @@ impl Evaluator
 			state.pc.allocate();
 		}
 		Ok(state.into())
+	}
+}
+
+impl Hash for Evaluator
+{
+	fn hash<H: Hasher>(&self, state: &mut H)
+	{
+		self.function.hash(state);
+		self.environment.iter().for_each(|entry| entry.hash(state));
 	}
 }
 
