@@ -22,8 +22,8 @@ use crate::{
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function,
 	InstructionVisitor, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return,
 	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
-	SumRollingRecord, add, div, exp, r#mod, mul, neg, roll_custom_dice,
-	roll_range, roll_standard_dice, sub
+	SumRollingRecord, add, div, exp, r#mod, mul, neg, parser::ParseError,
+	roll_custom_dice, roll_range, roll_standard_dice, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -642,12 +642,12 @@ impl RollingRecordKind<i32>
 
 /// An error that may occur during the evaluation of a dice expression. Note
 /// that evaluation itself never causes an error, but setup may fail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvaluationError<'error>
 {
-	/// The function could not be compiled. Produced only by the simple
+	/// The source code could not be parsed. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
-	CompilationFailed,
+	CompilationFailed(ParseError<'error>),
 
 	/// The function could not be optimized. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
@@ -674,9 +674,9 @@ impl Display for EvaluationError<'_>
 	{
 		match self
 		{
-			EvaluationError::CompilationFailed =>
+			EvaluationError::CompilationFailed(e) =>
 			{
-				write!(f, "compilation failed")
+				write!(f, "{}", e)
 			},
 			EvaluationError::OptimizationFailed =>
 			{
@@ -700,14 +700,17 @@ impl Display for EvaluationError<'_>
 
 impl Error for EvaluationError<'_> {}
 
-impl From<CompilationError> for EvaluationError<'static>
+impl<'a> From<CompilationError<'a>> for EvaluationError<'a>
 {
-	fn from(e: CompilationError) -> Self
+	fn from(e: CompilationError<'a>) -> Self
 	{
 		match e
 		{
-			CompilationError::OptimizationFailed => Self::OptimizationFailed,
-			CompilationError::CompilationFailed => Self::CompilationFailed
+			CompilationError::CompilationFailed(e) =>
+			{
+				Self::CompilationFailed(e)
+			},
+			CompilationError::OptimizationFailed => Self::OptimizationFailed
 		}
 	}
 }

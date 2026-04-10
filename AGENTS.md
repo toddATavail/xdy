@@ -26,7 +26,7 @@ Match existing patterns. Check `rustfmt.toml` and nearby files. Prioritize codeb
 
 ## Banners
 
-Never hand-write 80-column Rust comment banners. Use the `banner` MCP tool (provided by banners-mcp) to generate them. Call it with the text and paste the result. This eliminates centering errors.
+Never hand-write 80-column Rust comment banners. Use the `banner` MCP tool (provided by `banners-mcp`) to generate them. Call it with the text and paste the result. This eliminates centering errors.
 
 ## Documentation
 

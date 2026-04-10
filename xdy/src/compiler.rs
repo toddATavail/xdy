@@ -17,10 +17,12 @@ use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
 use crate::{
 	CanAllocate as _, Optimizer as _, StandardOptimizer,
+	codegen::CodeGenerator,
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
-	}
+	},
+	parser::{self, ParseError}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,20 +39,15 @@ use crate::{
 /// The compiled function.
 ///
 /// # Errors
-/// [`CompilationFailed`](CompilationError::CompilationFailed) if the function
-/// could not be compiled.
-pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
+/// [`CompilationFailed`](CompilationError::CompilationFailed) if the source
+/// code could not be parsed.
+pub fn compile_unoptimized(
+	source: &str
+) -> Result<Function, CompilationError<'_>>
 {
-	let language = tree_sitter_xdy::language();
-	let mut parser = tree_sitter::Parser::new();
-	parser.set_language(&language).unwrap();
-	let tree = parser.parse(source, None).unwrap();
-	let root = tree.root_node();
-	if root.has_error()
-	{
-		return Err(CompilationError::CompilationFailed)
-	}
-	Ok(Compiler::new(source.as_bytes()).compile(tree))
+	let ast =
+		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
+	Ok(CodeGenerator::generate(&ast))
 }
 
 /// Compile an alleged dice expression into a [function](Function). Optimize the
@@ -75,7 +72,7 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 /// use xdy::{compile, CompilationError, Evaluator};
 /// use rand::rng;
 ///
-/// # fn main() -> Result<(), CompilationError> {
+/// # fn main() -> Result<(), CompilationError<'static>> {
 /// let function = compile("3D6")?;
 /// let mut evaluator = Evaluator::new(function);
 /// let results = (0..10)
@@ -96,7 +93,7 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 /// use xdy::{compile, CompilationError, Evaluator};
 /// use rand::rng;
 ///
-/// # fn main() -> Result<(), CompilationError> {
+/// # fn main() -> Result<(), CompilationError<'static>> {
 /// let function = compile("x: 1D6 + {x}")?;
 /// let mut evaluator = Evaluator::new(function);
 /// let results = (0..10)
@@ -132,19 +129,11 @@ pub fn compile_unoptimized(source: &str) -> Result<Function, CompilationError>
 /// # Ok(())
 /// # }
 /// ```
-pub fn compile(source: &str) -> Result<Function, CompilationError>
+pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 {
-	let language = tree_sitter_xdy::language();
-	let mut parser = tree_sitter::Parser::new();
-	parser.set_language(&language).unwrap();
-	let tree = parser.parse(source, None).unwrap();
-	let root = tree.root_node();
-	if root.has_error()
-	{
-		return Err(CompilationError::CompilationFailed)
-	}
-	let code_generator = Compiler::new(source.as_bytes());
-	let function = code_generator.compile(tree);
+	let ast =
+		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
+	let function = CodeGenerator::generate(&ast);
 	let optimizer = StandardOptimizer::new(Default::default());
 	let function = optimizer
 		.optimize(function)
@@ -152,26 +141,29 @@ pub fn compile(source: &str) -> Result<Function, CompilationError>
 	Ok(function)
 }
 
-/// An error that may occur during the evaluation of a dice expression.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompilationError
+/// An error that may occur during compilation of a dice expression.
+///
+/// # Type Parameters
+/// - `'a`: The lifetime of the source code that was being compiled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompilationError<'a>
 {
-	/// The function could not be compiled.
-	CompilationFailed,
+	/// The source code could not be parsed.
+	CompilationFailed(ParseError<'a>),
 
 	/// The function could not be optimized.
 	OptimizationFailed
 }
 
-impl Display for CompilationError
+impl Display for CompilationError<'_>
 {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result
 	{
 		match self
 		{
-			CompilationError::CompilationFailed =>
+			CompilationError::CompilationFailed(e) =>
 			{
-				write!(f, "compilation failed")
+				write!(f, "{}", e)
 			},
 			CompilationError::OptimizationFailed =>
 			{
@@ -181,7 +173,7 @@ impl Display for CompilationError
 	}
 }
 
-impl Error for CompilationError {}
+impl Error for CompilationError<'_> {}
 
 ////////////////////////////////////////////////////////////////////////////////
 //                          Syntax tree visitation.                           //

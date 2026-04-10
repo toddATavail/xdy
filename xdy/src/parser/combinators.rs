@@ -19,7 +19,9 @@ use nom::{
 	bytes::complete::{tag, take_while_m_n, take_while1},
 	character::complete::{anychar, char, digit1, multispace0, one_of},
 	combinator::{eof, fail, map, opt, recognize},
-	error::{ErrorKind, FromExternalError, context},
+	error::{
+		ErrorKind, FromExternalError, ParseError as NomParseError, context
+	},
 	multi::{fold_many0, many0, separated_list0, separated_list1},
 	sequence::{delimited, pair, preceded, separated_pair, terminated}
 };
@@ -259,6 +261,7 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	alt((
+		negative_overflowed_constant,
 		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(expr)
@@ -267,6 +270,68 @@ pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 		preceded(multispace0, exponent)
 	))
 	.parse_complete(input)
+}
+
+/// Parse a negated constant whose absolute value overflows positive `i32`. This
+/// handles the `i32::MIN` boundary correctly: the `constant` combinator clamps
+/// positive overflow to [`i32::MAX`], which loses the ability to represent
+/// [`i32::MIN`] via [`i32::saturating_neg`]. By parsing the sign and digits as
+/// a unit, the combined value is parsed as a negative `i32` directly.
+///
+/// This combinator only activates for values that overflow positive `i32`,
+/// so it does not change the AST shape for ordinary negative constants like
+/// `-5` (which remain as `Neg(Constant(5))`).
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed constant expression.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input does not match a negated overflow constant.
+fn negative_overflowed_constant(
+	input: Span
+) -> IResult<Span, Expression, ParseError>
+{
+	let (after_sign, _) = char('-')(input)?;
+	let (after_ws, _) = multispace0(after_sign)?;
+	let (remaining, digits) = digit1(after_ws)?;
+	// Bail if followed by a dice operator, so that expressions like
+	// `-2147483648D6` are parsed as `Neg(Dice(…))` rather than
+	// `Constant(…)` with unparsed `D6`.
+	if remaining.fragment().starts_with('d')
+		|| remaining.fragment().starts_with('D')
+	{
+		return Err(nom::Err::Error(NomParseError::from_error_kind(
+			input,
+			ErrorKind::Digit
+		)));
+	}
+	// Only activate for values that overflow positive i32; smaller values
+	// should fall through to the general `Neg(Constant(…))` path.
+	match digits.fragment().parse::<i32>()
+	{
+		Ok(_) => Err(nom::Err::Error(NomParseError::from_error_kind(
+			input,
+			ErrorKind::Digit
+		))),
+		Err(e) if e.kind() == &IntErrorKind::PosOverflow =>
+		{
+			let text = format!("-{}", digits.fragment());
+			let value = match text.parse::<i32>()
+			{
+				Ok(v) => v,
+				Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
+				Err(_) => unreachable!()
+			};
+			Ok((remaining, Expression::Constant(Constant(value))))
+		},
+		Err(_) => Err(nom::Err::Error(NomParseError::from_error_kind(
+			input,
+			ErrorKind::Digit
+		)))
+	}
 }
 
 /// Parse an exponentiation expression, without leading whitespace.

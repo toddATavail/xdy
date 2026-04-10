@@ -26,8 +26,8 @@ use crate::{
 
 /// A commuter that shuffles the immediate operands of commutative instructions
 /// to the front in order to simplify constant folding and strength reduction.
-/// The standard optimizer applies this pass to a [function](crate::Function) before
-/// folding constants or reducing strength.
+/// The standard optimizer applies this pass to a [function](crate::Function)
+/// before folding constants or reducing strength.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstantCommuter<'inst>
 {
