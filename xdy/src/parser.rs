@@ -1,6 +1,6 @@
 //! # Parser
 //!
-//! Herein is the parser for the `xDy` language. [`parse`](crate::parser::parse)
+//! Herein is the parser for the `xDy` language. [`parse`]
 //! is the main entry point, which discards leading whitespace before parsing a
 //! [function](Function). The recognized grammar is as follows, in Extended
 //! Backus-Naur Form (EBNF), where non-terminals are in lowercase and terminals
@@ -70,7 +70,7 @@ use crate::ast::Function;
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parse(input: &str) -> Result<Function, ParseError>
+pub fn parse(input: &str) -> Result<Function<'_>, ParseError<'_>>
 {
 	let input = Span::new(input);
 	all_consuming(delimited(

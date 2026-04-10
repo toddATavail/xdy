@@ -424,13 +424,13 @@ fn test_expression()
 		(
 			"-2 ^ 3",
 			"-2 ^ 3",
-			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(2)))
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(Expression::Arithmetic(
+					ArithmeticExpression::Exp(Exp {
+						left: Box::new(Expression::Constant(Constant(2))),
+						right: Box::new(Expression::Constant(Constant(3)))
 					})
-				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				))
 			}))
 		),
 		(
@@ -613,15 +613,17 @@ fn test_add_sub()
 		(
 			"-2^-3",
 			"-2 ^ -3",
-			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(2)))
-					})
-				)),
-				right: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(3)))
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(Expression::Arithmetic(
+					ArithmeticExpression::Exp(Exp {
+						left: Box::new(Expression::Constant(Constant(2))),
+						right: Box::new(Expression::Arithmetic(
+							ArithmeticExpression::Neg(Neg {
+								operand: Box::new(Expression::Constant(
+									Constant(3)
+								))
+							})
+						))
 					})
 				))
 			}))
@@ -1141,15 +1143,17 @@ fn test_mul_div_mod()
 		(
 			"-2^-3",
 			"-2 ^ -3",
-			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(2)))
-					})
-				)),
-				right: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(3)))
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(Expression::Arithmetic(
+					ArithmeticExpression::Exp(Exp {
+						left: Box::new(Expression::Constant(Constant(2))),
+						right: Box::new(Expression::Arithmetic(
+							ArithmeticExpression::Neg(Neg {
+								operand: Box::new(Expression::Constant(
+									Constant(3)
+								))
+							})
+						))
 					})
 				))
 			}))
@@ -1431,93 +1435,21 @@ fn test_mul_div_mod()
 	}
 }
 
-/// Ensure that [`exponent`] behaves as expected.
+/// Ensure that [`exponent`] behaves as expected. Note that `exponent` calls
+/// `primary` directly; negation is handled by `unary`, which sits above
+/// `exponent` in the precedence tower.
 #[test]
 fn test_exponent()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		(
-			"-5",
-			"-5",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Constant(Constant(5)))
-			}))
-		),
-		(
-			"- - 5",
-			"--5",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(5)))
-					})
-				))
-			}))
-		),
-		(
-			"-{x}",
-			"-{x}",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Variable(Variable("x")))
-			}))
-		),
-		(
-			"-(1 + 2)",
-			"-(1 + 2)",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Group(Group {
-					expression: Box::new(Expression::Arithmetic(
-						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
-						})
-					))
-				}))
-			}))
-		),
-		(
-			"-3d6",
-			"-3D6",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Dice(DiceExpression::Standard(
-					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
-					}
-				)))
-			}))
-		),
 		("2", "2", Expression::Constant(Constant(2))),
-		(
-			"-2",
-			"-2",
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Constant(Constant(2)))
-			}))
-		),
 		(
 			"2^3",
 			"2 ^ 3",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
 				left: Box::new(Expression::Constant(Constant(2))),
 				right: Box::new(Expression::Constant(Constant(3)))
-			}))
-		),
-		(
-			"-2^-3",
-			"-2 ^ -3",
-			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(2)))
-					})
-				)),
-				right: Box::new(Expression::Arithmetic(
-					ArithmeticExpression::Neg(Neg {
-						operand: Box::new(Expression::Constant(Constant(3)))
-					})
-				))
 			}))
 		),
 		(
@@ -2949,7 +2881,14 @@ fn test_constant()
 		("9999", "9999", Constant(9999)),
 		("-9999", "-9999", Constant(-9999)),
 		("2147483647", "2147483647", Constant(2147483647)), // i32::MAX
-		("-2147483648", "-2147483648", Constant(-2147483648))  // i32::MIN
+		("-2147483648", "-2147483648", Constant(-2147483648)), // i32::MIN
+		("2147483648", "2147483647", Constant(2147483647)), // Saturates
+		("-2147483649", "-2147483648", Constant(-2147483648)), // Saturates
+		(
+			"123456789123456789123456789123456789",
+			"2147483647",
+			Constant(2147483647)
+		)  /* massive overflow saturates */
 	]
 	{
 		let span = Span::new(input);
@@ -2979,18 +2918,7 @@ fn test_constant()
 	}
 
 	// Invalid inputs.
-	for input in [
-		"",
-		" ",
-		" 42",
-		"a",
-		"+42",
-		"2147483648",  // i32::MAX + 1
-		"-2147483649", // i32::MIN - 1
-		"--42",
-		"a42",
-		"42a"
-	]
+	for input in ["", " ", " 42", "a", "+42", "--42", "a42", "42a"]
 	{
 		let span = Span::new(input);
 		let result = constant(span);

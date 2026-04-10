@@ -11,6 +11,8 @@
 //!
 //! All combinators expect the input to be free of leading whitespace.
 
+use std::num::IntErrorKind;
+
 use nom::{
 	IResult, Parser,
 	branch::alt,
@@ -76,7 +78,9 @@ pub fn function(input: Span) -> IResult<Span, Function, ParseError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parameters(input: Span) -> IResult<Span, Option<Vec<&str>>, ParseError>
+pub fn parameters(
+	input: Span<'_>
+) -> IResult<Span<'_>, Option<Vec<&str>>, ParseError<'_>>
 {
 	let (input, parameters) = separated_list0(
 		preceded(multispace0, char(',')),
@@ -206,10 +210,10 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 {
-	let (input, initial) = exponent.parse_complete(input)?;
+	let (input, initial) = unary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, one_of("*×/÷%")),
-		preceded(multispace0, exponent)
+		preceded(multispace0, unary)
 	))
 	.parse_complete(input)?;
 
@@ -252,9 +256,34 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
+pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
+{
+	alt((
+		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(expr)
+			}))
+		}),
+		preceded(multispace0, exponent)
+	))
+	.parse_complete(input)
+}
+
+/// Parse an exponentiation expression, without leading whitespace.
+/// Exponentiation binds tighter than unary negation, so `-a^2` is `-(a^2)`, not
+/// `(-a)^2`.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed expression.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 {
-	let (input, initial) = unary.parse_complete(input)?;
+	let (input, initial) = primary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, char('^')),
 		preceded(multispace0, unary)
@@ -281,29 +310,6 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 		)),
 		None => Ok((input, initial))
 	}
-}
-
-/// Parse a unary expression, without leading whitespace.
-///
-/// # Parameters
-/// - `input`: The input text to parse.
-///
-/// # Returns
-/// The parsed expression.
-///
-/// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
-{
-	alt((
-		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(expr)
-			}))
-		}),
-		preceded(multispace0, primary)
-	))
-	.parse_complete(input)
 }
 
 /// Parse a primary expression, without leading whitespace.
@@ -599,8 +605,8 @@ pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn drop_lowest(
-	input: Span
-) -> IResult<Span, Option<Box<Expression<'_>>>, ParseError>
+	input: Span<'_>
+) -> IResult<Span<'_>, Option<Box<Expression<'_>>>, ParseError<'_>>
 {
 	let (input, (_, _, drop)) = (
 		preceded(multispace0, tag("drop")),
@@ -625,8 +631,8 @@ pub fn drop_lowest(
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn drop_highest(
-	input: Span
-) -> IResult<Span, Option<Box<Expression<'_>>>, ParseError>
+	input: Span<'_>
+) -> IResult<Span<'_>, Option<Box<Expression<'_>>>, ParseError<'_>>
 {
 	let (input, (_, _, drop)) = (
 		preceded(multispace0, tag("drop")),
@@ -674,13 +680,20 @@ pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 {
 	let (input, constant) =
 		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
-	let constant = constant.fragment().parse().map_err(|e| {
-		nom::Err::Failure(ParseError::from_external_error(
-			input,
-			ErrorKind::Digit,
-			e
-		))
-	})?;
+	let constant = match constant.fragment().parse::<i32>()
+	{
+		Ok(value) => value,
+		Err(e) if e.kind() == &IntErrorKind::PosOverflow => i32::MAX,
+		Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
+		Err(e) =>
+		{
+			return Err(nom::Err::Failure(ParseError::from_external_error(
+				input,
+				ErrorKind::Digit,
+				e
+			)))
+		},
+	};
 	Ok((input, Constant(constant)))
 }
 
@@ -711,11 +724,51 @@ pub fn d_operator(input: Span) -> IResult<Span, char, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn identifier(input: Span) -> IResult<Span, Span, ParseError>
 {
-	recognize(pair(
+	// Identifiers may contain inline whitespace (e.g., "an external
+	// variable"), but must not include trailing whitespace. We greedily
+	// match the full identifier including any inline whitespace, then
+	// trim trailing whitespace by rewinding the input span.
+	let (remaining, span) = recognize(pair(
 		alt((alpha, tag("_"))),
-		many0(alt((alphanumeric1, tag("_"), tag("-"))))
+		many0(alt((
+			alphanumeric1,
+			tag("_"),
+			tag("-"),
+			tag("."),
+			recognize(take_while_m_n(1, 1, |c: char| {
+				c.is_whitespace() && !matches!(c, '\n' | '\r')
+			}))
+		)))
 	))
-	.parse_complete(input)
+	.parse_complete(input)?;
+	let trimmed = span.fragment().trim_end();
+	if trimmed.len() < span.fragment().len()
+	{
+		// Rewind the input to just after the trimmed identifier, giving back
+		// the trailing whitespace to the remaining input.
+		let trail = span.fragment().len() - trimmed.len();
+		let new_remaining = unsafe {
+			Span::new_from_raw_offset(
+				remaining.location_offset() - trail,
+				remaining.location_line(),
+				&input.fragment()[trimmed.len()..],
+				()
+			)
+		};
+		let trimmed_span = unsafe {
+			Span::new_from_raw_offset(
+				span.location_offset(),
+				span.location_line(),
+				trimmed,
+				()
+			)
+		};
+		Ok((new_remaining, trimmed_span))
+	}
+	else
+	{
+		Ok((remaining, span))
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

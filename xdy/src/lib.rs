@@ -252,6 +252,7 @@
 //!   types. This feature requires the `serde` crate, and is enabled by default.
 
 pub mod ast;
+mod codegen;
 mod compiler;
 mod evaluator;
 mod histogram;

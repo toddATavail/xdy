@@ -55,7 +55,7 @@ Don't go dark. Surface: unexpected complexity, discovered bugs, requirement ambi
 
 ## Commit Hygiene
 
-Close relevant beads before commit. One logical change per commit.
+Close relevant beads before commit. One logical change per commit. Never insert `Co-Authored-By` or any AI attribution lines in commit messages.
 
 ## Session Completion
 

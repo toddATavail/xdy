@@ -32,7 +32,7 @@ pub struct ParseError<'a>
 	pub errors: Vec<(Span<'a>, NomErrorKind<'a>)>
 }
 
-/// The error kind for [`NomError`].
+/// The error kind for [`ParseError`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NomErrorKind<'a>
 {
