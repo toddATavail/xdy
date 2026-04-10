@@ -13,7 +13,7 @@ use std::{
 	ops::RangeInclusive
 };
 
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
