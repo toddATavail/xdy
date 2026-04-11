@@ -103,13 +103,7 @@ impl NomErrorKind<'_>
 			{
 				ErrorKind::Eof =>
 				{
-					// TODO: This isn't right yet; may need to add handling to
-					// `function` combinator.
-					expected_for_classifier(INCOMPLETE_FUNCTION_BODY_CONTEXT)
-						.iter()
-						.for_each(|c| {
-							expectations.push(Cow::Borrowed(*c));
-						})
+					expectations.push(Cow::Borrowed("end of input"));
 				},
 				_ =>
 				{
@@ -320,17 +314,6 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		{
 			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
 		},
-		INCOMPLETE_FUNCTION_BODY_CONTEXT => &[
-			"end of input",
-			"`+`",
-			"`-`",
-			"`*`",
-			"`×`",
-			"`/`",
-			"`÷`",
-			"`%`",
-			"`^`"
-		],
 		EXPRESSION_CONTEXT =>
 		{
 			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
@@ -355,6 +338,14 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		VARIABLE_CONTEXT => &["`{`"],
 		IDENTIFIER_CONTEXT => &["identifier"],
 		CONSTANT_CONTEXT => &["integer"],
+		CLOSING_PAREN_CONTEXT => &["`)`"],
+		CLOSING_BRACKET_CONTEXT => &["`]`"],
+		CLOSING_BRACE_CONTEXT => &["`}`"],
+		RIGHT_OPERAND_CONTEXT =>
+		{
+			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
+		},
+		DROP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		unexpected =>
 		{
 			unreachable!("unexpected context classifier: {}", unexpected)
@@ -377,10 +368,6 @@ pub(crate) const NEXT_PARAMETER_CONTEXT: &str = "next parameter";
 
 /// Context classifier for a function body.
 pub(crate) const FUNCTION_BODY_CONTEXT: &str = "function body";
-
-/// Context classifier for an incomplete function body.
-pub(crate) const INCOMPLETE_FUNCTION_BODY_CONTEXT: &str =
-	"incomplete function body";
 
 /// Context classifier for the `expression` production rule.
 pub(crate) const EXPRESSION_CONTEXT: &str = "expression";
@@ -426,3 +413,18 @@ pub(crate) const IDENTIFIER_CONTEXT: &str = "identifier";
 
 /// Context classifier for the `CONSTANT` production rule.
 pub(crate) const CONSTANT_CONTEXT: &str = "constant";
+
+/// Context classifier for a missing closing parenthesis.
+pub(crate) const CLOSING_PAREN_CONTEXT: &str = "closing paren";
+
+/// Context classifier for a missing closing bracket.
+pub(crate) const CLOSING_BRACKET_CONTEXT: &str = "closing bracket";
+
+/// Context classifier for a missing closing brace.
+pub(crate) const CLOSING_BRACE_CONTEXT: &str = "closing brace";
+
+/// Context classifier for a missing right operand of a binary operator.
+pub(crate) const RIGHT_OPERAND_CONTEXT: &str = "right operand";
+
+/// Context classifier for a missing drop direction (`lowest` or `highest`).
+pub(crate) const DROP_DIRECTION_CONTEXT: &str = "drop direction";

@@ -254,6 +254,7 @@
 pub mod ast;
 mod codegen;
 mod compiler;
+pub mod diagnostics;
 mod evaluator;
 mod histogram;
 mod ir;

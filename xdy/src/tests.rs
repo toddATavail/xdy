@@ -6,6 +6,7 @@
 //! print rendition.
 
 mod compiler;
+mod diagnostics;
 mod evaluator;
 mod histogram;
 mod optimizer;

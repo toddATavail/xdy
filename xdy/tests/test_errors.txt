@@ -1,0 +1,273 @@
+3D6 +
+=
+kind: MissingRightOperand
+span: 4..5
+message: expected operand after `+`
+suggestion: 3D6 + 0
+placeholder: 6..7 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 3D6
+
+(3D6
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `)` to close `(`
+suggestion: (3D6)
+
+{x
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+suggestion: {x}
+
+[1:6
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `]` to close `[`
+suggestion: [1:6]
+
+3D
+=
+kind: MissingDiceFaces
+span: 1..2
+message: expected face count after `D`
+suggestion: 3D6
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+3d
+=
+kind: MissingDiceFaces
+span: 1..2
+message: expected face count after `d`
+suggestion: 3d6
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+4D6 drop
+=
+kind: IncompleteDropClause
+span: 4..8
+message: expected `lowest` or `highest` after `drop`
+suggestion: 4D6 drop lowest
+placeholder: 9..15 "direction" [lowest, highest]
+
+xD6
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}D6
+suggestion: {xD6}
+
+abcD12
+=
+kind: BareIdentifier
+span: 0..3
+message: bare identifier `abc` is not valid here; variables must be wrapped in `{}`
+suggestion: {abc}D12
+suggestion: {abcD12}
+
++ 3D6
+=
+kind: MissingLeftOperand
+span: 0..1
+message: expected operand before `+`
+suggestion: 0 + 3D6
+placeholder: 0..1 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 3D6
+
+3D6)
+=
+kind: TrailingInput
+span: 3..4
+message: unexpected `)` after expression
+suggestion: 3D6
+
+3D6 hello
+=
+kind: TrailingInput
+span: 4..9
+message: unexpected `hello` after expression
+suggestion: 3D6
+
+3d6 + (2d4
+=
+kind: UnclosedDelimiter
+span: 6..7
+message: expected `)` to close `(`
+suggestion: 3d6 + (2d4)
+
+1 + * 2
+=
+kind: MissingRightOperand
+span: 2..4
+message: expected operand after `+`
+suggestion: 1 + 0 * 2
+placeholder: 4..5 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 1 * 2
+
+3D6 + + 1D3 -
+=
+kind: MissingRightOperand
+span: 4..6
+message: expected operand after `+`
+suggestion: 3D6 + 0 + 1D3 -
+placeholder: 6..7 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 3D6 + 1D3 -
+---
+kind: MissingRightOperand
+span: 12..13
+message: expected operand after `-`
+suggestion: 3D6 + 0 + 1D3 - 0
+placeholder: 16..17 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 3D6 + 0 + 1D3
+
+<empty>
+=
+kind: EmptyExpression
+span: 0..0
+message: expected expression
+suggestion: 0
+placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expression]
+
+4 + hello
+=
+kind: BareIdentifier
+span: 4..9
+message: bare identifier `hello` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {hello}
+
+hello
+=
+kind: IncompleteParameterDefinition
+span: 0..5
+message: expected `:` and expression body after parameter
+suggestion: hello: 0
+placeholder: 7..8 "expression" [integer, {variable}, (expression), dice expression]
+suggestion: {hello}
+
+x, y
+=
+kind: IncompleteParameterDefinition
+span: 0..4
+message: expected `:` and expression body after parameters
+suggestion: x, y: 0
+placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expression]
+
+(
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `)` to close `(`
+suggestion: (0)
+placeholder: 1..2 "expression" [integer, {variable}, (expression), dice expression]
+
+[
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `]` to close `[`
+suggestion: [0:0]
+placeholder: 1..2 "range start" [integer, {variable}, (expression), dice expression]
+placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
+
+{
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+suggestion: {x}
+placeholder: 1..2 "identifier" [identifier]
+
+[1:
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `]` to close `[`
+suggestion: [1:0]
+placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
+
+3D[
+=
+kind: UnclosedDelimiter
+span: 2..3
+message: expected `]` to close `[`
+suggestion: 3D[0]
+placeholder: 3..4 "face value" [integer]
+
+3D[1,2
+=
+kind: UnclosedDelimiter
+span: 2..3
+message: expected `]` to close `[`
+suggestion: 3D[1,2]
+
+3D6 + 2D
+=
+kind: MissingDiceFaces
+span: 7..8
+message: expected face count after `D`
+suggestion: 3D6 + 2D6
+placeholder: 8..9 "face count" [integer, {variable}, (expression)]
+
+hello * 3
+=
+kind: IncompleteParameterDefinition
+span: 0..6
+message: expected `:` and expression body after parameter
+suggestion: {hello} * 3
+suggestion: hello : 0
+placeholder: 8..9 "expression" [integer, {variable}, (expression), dice expression]
+
+dD6
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `d` is not valid here; variables must be wrapped in `{}`
+suggestion: {d}D6
+suggestion: {dD6}
+
+_xD6
+=
+kind: BareIdentifier
+span: 0..2
+message: bare identifier `_x` is not valid here; variables must be wrapped in `{}`
+suggestion: {_x}D6
+suggestion: {_xD6}
+
+dropD6
+=
+kind: BareIdentifier
+span: 0..4
+message: bare identifier `drop` is not valid here; variables must be wrapped in `{}`
+suggestion: {drop}D6
+suggestion: {dropD6}
+
+xd
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}d
+suggestion: {xd}
+---
+kind: MissingDiceFaces
+span: 1..2
+message: expected face count after `d`
+suggestion: {x}d6
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+
+aD
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `a` is not valid here; variables must be wrapped in `{}`
+suggestion: {a}D
+suggestion: {aD}
+---
+kind: MissingDiceFaces
+span: 1..2
+message: expected face count after `D`
+suggestion: {a}D6
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]

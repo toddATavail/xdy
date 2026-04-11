@@ -291,3 +291,247 @@ pub fn read_histogram_test_cases(source: &'static str)
 	}
 	test_cases
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                         Error diagnostic support.                          //
+////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+/// An expected placeholder in an error test case.
+#[derive(Debug)]
+pub struct ExpectedPlaceholder
+{
+	/// The byte range in the corrected source.
+	pub span: (usize, usize),
+
+	/// The description of the placeholder.
+	pub description: &'static str,
+
+	/// The valid kinds for this placeholder.
+	pub valid_kinds: Vec<&'static str>
+}
+
+/// An expected suggestion in an error test case.
+#[derive(Debug)]
+pub struct ExpectedSuggestion
+{
+	/// The corrected source string.
+	pub corrected_source: &'static str,
+
+	/// The expected placeholders.
+	pub placeholders: Vec<ExpectedPlaceholder>
+}
+
+/// An expected diagnostic in an error test case.
+#[derive(Debug)]
+pub struct ExpectedDiagnostic
+{
+	/// The diagnostic kind name (e.g., "MissingRightOperand").
+	pub kind: &'static str,
+
+	/// The byte range in the original source.
+	pub span: (usize, usize),
+
+	/// The expected message.
+	pub message: &'static str,
+
+	/// The expected suggestions.
+	pub suggestions: Vec<ExpectedSuggestion>
+}
+
+/// An error test case.
+#[derive(Debug)]
+pub struct ErrorTestCase
+{
+	/// The broken source input.
+	pub source: &'static str,
+
+	/// The expected diagnostics.
+	pub expected_diagnostics: Vec<ExpectedDiagnostic>
+}
+
+/// Parse error test cases from a test case file. The file is expected to
+/// conform to the following grammar:
+///
+/// ```text
+/// file ::= cases? ;
+/// cases ::= case ("\n\n" case)* ;
+/// case ::= source "\n=\n" diagnostics ;
+/// source ::= [^\n]* ;
+/// diagnostics ::= diagnostic ("---\n" diagnostic)* ;
+/// diagnostic ::= kind span message suggestion? ;
+/// kind ::= "kind:" IDENTIFIER "\n" ;
+/// span ::= "span:" USIZE ".." USIZE "\n" ;
+/// message ::= "message:" [^\n]* "\n" ;
+/// suggestion ::= "suggestion:" [^\n]* "\n" placeholder* ;
+/// placeholder ::= "placeholder:" USIZE ".." USIZE
+///     '"' [^"]* '"' "[" kinds "]" "\n" ;
+/// kinds ::= IDENTIFIER ("," IDENTIFIER)* ;
+/// ```
+///
+/// # Parameters
+/// - `source`: The contents of a test case file.
+///
+/// # Returns
+/// The test cases.
+///
+/// # Panics
+/// If the test case file is incorrectly formatted.
+pub fn read_error_test_cases(
+	source: &'static str
+) -> Vec<ErrorTestCase>
+{
+	let mut test_cases = Vec::new();
+	for block in source.split("\n\n")
+	{
+		let block = block.trim();
+		if block.is_empty()
+		{
+			continue;
+		}
+		let parts: Vec<&str> = block.splitn(2, "\n=\n").collect();
+		assert!(
+			parts.len() == 2,
+			"malformed test case block: {:?}",
+			block
+		);
+		let test_source = match parts[0]
+		{
+			"<empty>" => "",
+			other => other
+		};
+		let diagnostics_text = parts[1];
+
+		let mut expected_diagnostics = Vec::new();
+		for diag_block in diagnostics_text.split("\n---\n")
+		{
+			expected_diagnostics.push(
+				parse_expected_diagnostic(diag_block.trim())
+			);
+		}
+
+		test_cases.push(ErrorTestCase {
+			source: test_source,
+			expected_diagnostics
+		});
+	}
+	test_cases
+}
+
+/// Parse a single expected diagnostic from its text representation.
+///
+/// # Parameters
+/// - `text`: The text of one diagnostic section.
+///
+/// # Returns
+/// The parsed expected diagnostic.
+///
+/// # Panics
+/// If the text is malformed.
+fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
+{
+	let mut kind = None;
+	let mut span = None;
+	let mut message = None;
+	let mut suggestions: Vec<ExpectedSuggestion> = Vec::new();
+	let mut current_suggestion: Option<&'static str> = None;
+	let mut current_placeholders: Vec<ExpectedPlaceholder> = Vec::new();
+
+	for line in text.lines()
+	{
+		let line = line.trim();
+		if let Some(rest) = line.strip_prefix("kind:")
+		{
+			kind = Some(rest.trim());
+		}
+		else if let Some(rest) = line.strip_prefix("span:")
+		{
+			let parts: Vec<&str> = rest.trim().split("..").collect();
+			span = Some((
+				parts[0].parse::<usize>().unwrap(),
+				parts[1].parse::<usize>().unwrap()
+			));
+		}
+		else if let Some(rest) = line.strip_prefix("message:")
+		{
+			message = Some(rest.trim());
+		}
+		else if let Some(rest) = line.strip_prefix("suggestion:")
+		{
+			// Flush the previous suggestion, if any.
+			if let Some(src) = current_suggestion
+			{
+				suggestions.push(ExpectedSuggestion {
+					corrected_source: src,
+					placeholders: std::mem::take(
+						&mut current_placeholders
+					)
+				});
+			}
+			current_suggestion = Some(rest.trim());
+		}
+		else if let Some(rest) = line.strip_prefix("placeholder:")
+		{
+			current_placeholders
+				.push(parse_expected_placeholder(rest.trim()));
+		}
+	}
+	// Flush the last suggestion.
+	if let Some(src) = current_suggestion
+	{
+		suggestions.push(ExpectedSuggestion {
+			corrected_source: src,
+			placeholders: std::mem::take(&mut current_placeholders)
+		});
+	}
+
+	ExpectedDiagnostic {
+		kind: kind.expect("missing kind"),
+		span: span.expect("missing span"),
+		message: message.expect("missing message"),
+		suggestions
+	}
+}
+
+/// Parse a placeholder specification from its text representation.
+///
+/// Expected format: `start..end "description" [kind1, kind2, ...]`
+///
+/// # Parameters
+/// - `text`: The placeholder text.
+///
+/// # Returns
+/// The parsed expected placeholder.
+///
+/// # Panics
+/// If the text is malformed.
+fn parse_expected_placeholder(text: &'static str) -> ExpectedPlaceholder
+{
+	// Parse span: "start..end"
+	let span_end = text.find(' ').unwrap();
+	let span_parts: Vec<&str> = text[..span_end].split("..").collect();
+	let span = (
+		span_parts[0].parse::<usize>().unwrap(),
+		span_parts[1].parse::<usize>().unwrap()
+	);
+
+	// Parse description: "..."
+	let rest = text[span_end..].trim();
+	let desc_start = rest.find('"').unwrap() + 1;
+	let desc_end = rest[desc_start..].find('"').unwrap() + desc_start;
+	let description = &rest[desc_start..desc_end];
+
+	// Parse valid kinds: [kind1, kind2, ...]
+	let kinds_start = rest.find('[').unwrap() + 1;
+	let kinds_end = rest.find(']').unwrap();
+	let valid_kinds: Vec<&str> = rest[kinds_start..kinds_end]
+		.split(',')
+		.map(|s| s.trim())
+		.collect();
+
+	ExpectedPlaceholder {
+		span,
+		description,
+		valid_kinds
+	}
+}

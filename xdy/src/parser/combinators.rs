@@ -18,12 +18,12 @@ use nom::{
 	branch::alt,
 	bytes::complete::{tag, take_while_m_n, take_while1},
 	character::complete::{anychar, char, digit1, multispace0, one_of},
-	combinator::{eof, fail, map, opt, recognize},
+	combinator::{cut, eof, fail, map, opt, recognize},
 	error::{
 		ErrorKind, FromExternalError, ParseError as NomParseError, context
 	},
 	multi::{fold_many0, many0, separated_list0, separated_list1},
-	sequence::{delimited, pair, preceded, separated_pair, terminated}
+	sequence::{pair, preceded, separated_pair, terminated}
 };
 use nom_locate::LocatedSpan;
 
@@ -33,15 +33,17 @@ use crate::{
 		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
 		Neg, Range, StandardDice, Sub, Variable
 	},
-	parser::{CUSTOM_DICE_CONTEXT, NomErrorKind, STANDARD_DICE_CONTEXT}
+	parser::NomErrorKind
 };
 
 use super::{
+	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT,
 	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
-	DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT, FUNCTION_BODY_CONTEXT,
-	GROUP_CONTEXT, IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT,
-	PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT, RANGE_END_CONTEXT,
-	RANGE_START_CONTEXT, STANDARD_FACES_CONTEXT, VARIABLE_CONTEXT
+	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT,
+	FUNCTION_BODY_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
+	NEXT_PARAMETER_CONTEXT, PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT,
+	RANGE_END_CONTEXT, RANGE_START_CONTEXT, RIGHT_OPERAND_CONTEXT,
+	STANDARD_FACES_CONTEXT, VARIABLE_CONTEXT
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -176,7 +178,10 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, ParseError>
 	let (input, initial) = mul_div_mod.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, one_of("+-")),
-		preceded(multispace0, mul_div_mod)
+		cut(preceded(
+			multispace0,
+			context(RIGHT_OPERAND_CONTEXT, mul_div_mod)
+		))
 	))
 	.parse_complete(input)?;
 
@@ -215,7 +220,10 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 	let (input, initial) = unary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, one_of("*×/÷%")),
-		preceded(multispace0, unary)
+		cut(preceded(
+			multispace0,
+			context(RIGHT_OPERAND_CONTEXT, unary)
+		))
 	))
 	.parse_complete(input)?;
 
@@ -351,7 +359,10 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 	let (input, initial) = primary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, char('^')),
-		preceded(multispace0, unary)
+		cut(preceded(
+			multispace0,
+			context(RIGHT_OPERAND_CONTEXT, unary)
+		))
 	))
 	.parse_complete(input)?;
 	let exponents =
@@ -411,16 +422,18 @@ pub fn primary(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 {
-	delimited(
-		char('('),
-		map(
-			preceded(multispace0, context(EXPRESSION_CONTEXT, expression)),
-			Box::new
-		),
-		preceded(multispace0, char(')'))
-	)
-	.parse_complete(input)
-	.map(|(input, expression)| (input, Group { expression }))
+	let (input, _) = char('(').parse_complete(input)?;
+	let (input, expression) = cut(preceded(
+		multispace0,
+		context(EXPRESSION_CONTEXT, expression)
+	))
+	.parse_complete(input)?;
+	let (input, _) = cut(preceded(
+		multispace0,
+		context(CLOSING_PAREN_CONTEXT, char(')'))
+	))
+	.parse_complete(input)?;
+	Ok((input, Group { expression: Box::new(expression) }))
 }
 
 /// Parse a variable reference, without leading whitespace.
@@ -435,13 +448,18 @@ pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 {
-	delimited(
-		char('{'),
-		preceded(multispace0, context(IDENTIFIER_CONTEXT, identifier)),
-		preceded(multispace0, char('}'))
-	)
-	.parse_complete(input)
-	.map(|(input, span)| (input, Variable(span.fragment())))
+	let (input, _) = char('{').parse_complete(input)?;
+	let (input, span) = cut(preceded(
+		multispace0,
+		context(IDENTIFIER_CONTEXT, identifier)
+	))
+	.parse_complete(input)?;
+	let (input, _) = cut(preceded(
+		multispace0,
+		context(CLOSING_BRACE_CONTEXT, char('}'))
+	))
+	.parse_complete(input)?;
+	Ok((input, Variable(span.fragment())))
 }
 
 /// Parse a range expression, without leading whitespace.
@@ -456,25 +474,31 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 {
-	delimited(
-		char('['),
-		separated_pair(
-			preceded(multispace0, context(RANGE_START_CONTEXT, expression)),
-			preceded(multispace0, char(':')),
-			preceded(multispace0, context(RANGE_END_CONTEXT, expression))
-		),
-		preceded(multispace0, char(']'))
-	)
-	.parse_complete(input)
-	.map(|(input, (start, end))| {
-		(
-			input,
-			Range {
-				start: Box::new(start),
-				end: Box::new(end)
-			}
-		)
-	})
+	let (input, _) = char('[').parse_complete(input)?;
+	let (input, start) = cut(preceded(
+		multispace0,
+		context(RANGE_START_CONTEXT, expression)
+	))
+	.parse_complete(input)?;
+	let (input, _) =
+		cut(preceded(multispace0, char(':'))).parse_complete(input)?;
+	let (input, end) = cut(preceded(
+		multispace0,
+		context(RANGE_END_CONTEXT, expression)
+	))
+	.parse_complete(input)?;
+	let (input, _) = cut(preceded(
+		multispace0,
+		context(CLOSING_BRACKET_CONTEXT, char(']'))
+	))
+	.parse_complete(input)?;
+	Ok((
+		input,
+		Range {
+			start: Box::new(start),
+			end: Box::new(end)
+		}
+	))
 }
 
 /// Parse a dice expression, without leading whitespace.
@@ -489,39 +513,53 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 {
-	let (input, initial_dice) = alt((
-		context(
-			STANDARD_DICE_CONTEXT,
-			map(standard_dice, DiceExpression::Standard)
-		),
-		context(
-			CUSTOM_DICE_CONTEXT,
-			map(custom_dice, DiceExpression::Custom)
-		)
+	// Parse the common prefix shared by standard and custom dice.
+	let (input, count) =
+		context(DICE_COUNT_CONTEXT, dice_count).parse_complete(input)?;
+	let (input, _) =
+		preceded(multispace0, d_operator).parse_complete(input)?;
+	// After the `d`/`D` operator, we're committed to a dice expression.
+	let (input, initial_dice) = cut(preceded(
+		multispace0,
+		alt((
+			context(
+				STANDARD_FACES_CONTEXT,
+				map(standard_faces, {
+					let count = count.clone();
+					move |faces| {
+						DiceExpression::Standard(StandardDice {
+							count: Box::new(count.clone()),
+							faces: Box::new(faces)
+						})
+					}
+				})
+			),
+			context(
+				CUSTOM_FACES_CONTEXT,
+				map(custom_faces, move |faces| {
+					DiceExpression::Custom(CustomDice {
+						count: Box::new(count.clone()),
+						faces
+					})
+				})
+			)
+		))
 	))
 	.parse_complete(input)?;
 
-	// Transient types for differentiating between drop-lowest and drop-highest
-	// drop expressions.
-	enum DropType<'a>
-	{
-		Lowest(Option<Box<Expression<'a>>>),
-		Highest(Option<Box<Expression<'a>>>)
-	}
-
 	let (input, final_dice) = fold_many0(
-		alt((
-			map(drop_lowest, DropType::Lowest),
-			map(drop_highest, DropType::Highest)
-		)),
+		drop_clause,
 		|| initial_dice.clone(),
-		|acc, t| match t
+		|acc, (direction, drop)| match direction
 		{
-			DropType::Lowest(drop) => DiceExpression::DropLowest(DropLowest {
-				dice: Box::new(acc),
-				drop
-			}),
-			DropType::Highest(drop) =>
+			DropDirection::Lowest =>
+			{
+				DiceExpression::DropLowest(DropLowest {
+					dice: Box::new(acc),
+					drop
+				})
+			},
+			DropDirection::Highest =>
 			{
 				DiceExpression::DropHighest(DropHighest {
 					dice: Box::new(acc),
@@ -645,18 +683,69 @@ pub fn standard_faces(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 {
-	delimited(
-		char('['),
-		separated_list1(
-			preceded(multispace0, char(',')),
-			preceded(
-				multispace0,
-				context(CONSTANT_CONTEXT, map(constant, |c| c.0))
-			)
-		),
-		preceded(multispace0, char(']'))
-	)
-	.parse_complete(input)
+	let (input, _) = char('[').parse_complete(input)?;
+	let (input, faces) = cut(separated_list1(
+		preceded(multispace0, char(',')),
+		preceded(
+			multispace0,
+			context(CONSTANT_CONTEXT, map(constant, |c| c.0))
+		)
+	))
+	.parse_complete(input)?;
+	let (input, _) = cut(preceded(
+		multispace0,
+		context(CLOSING_BRACKET_CONTEXT, char(']'))
+	))
+	.parse_complete(input)?;
+	Ok((input, faces))
+}
+
+/// The direction of a drop clause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DropDirection
+{
+	Lowest,
+	Highest
+}
+
+/// Parse a drop clause (`drop lowest [N]` or `drop highest [N]`), without
+/// leading whitespace.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed drop direction and optional drop count.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+fn drop_clause(
+	input: Span<'_>
+) -> IResult<
+	Span<'_>,
+	(DropDirection, Option<Box<Expression<'_>>>),
+	ParseError<'_>
+>
+{
+	let (input, _) =
+		preceded(multispace0, tag("drop")).parse_complete(input)?;
+	let (input, direction) = cut(preceded(
+		multispace0,
+		context(
+			DROP_DIRECTION_CONTEXT,
+			alt((
+				map(tag("lowest"), |_| DropDirection::Lowest),
+				map(tag("highest"), |_| DropDirection::Highest)
+			))
+		)
+	))
+	.parse_complete(input)?;
+	let (input, drop) = opt(preceded(
+		multispace0,
+		context(DROP_EXPRESSION_CONTEXT, drop_expression)
+	))
+	.parse_complete(input)?;
+	Ok((input, (direction, drop.map(Box::new))))
 }
 
 /// Parse a drop-lowest expression, without leading whitespace.
