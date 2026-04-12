@@ -3,14 +3,42 @@
 //! The code generator walks the abstract syntax tree (AST) produced by the
 //! [parser](crate::parser) and emits the
 //! [intermediate&#32;representation](crate::ir) (IR) consumed by the rest of
-//! the compilation pipeline. It is an internal component of the
-//! [`Compiler`](crate::Compiler) and is not exposed as part of the public API.
+//! the compilation pipeline.
+//!
+//! The [`CodeGenerator`] implements the [`ASTVisitor`] trait, producing an
+//! [`AddressingMode`] from each node. Users who want to walk the AST for their
+//! own purposes can implement [`ASTVisitor`] directly; the [`CodeGenerator`]
+//! serves as the reference implementation.
+//!
+//! # Usage
+//!
+//! Most users should use the top-level [`compile()`](crate::compile) and
+//! [`evaluate()`](crate::evaluate) functions, which handle the full pipeline
+//! automatically. The code generator is exposed for advanced users who want to
+//! drive the pipeline manually — e.g., to insert custom AST analysis or
+//! transformation passes between parsing and code generation.
+//!
+//! ```
+//! use xdy::{Evaluator, Optimizer, Passes, StandardOptimizer};
+//! use xdy::codegen::CodeGenerator;
+//!
+//! let ast = xdy::parser::parse("2d6 + 3").unwrap();
+//! let function = CodeGenerator::generate(&ast);
+//! let optimized = StandardOptimizer::new(Passes::all())
+//!     .optimize(function)
+//!     .unwrap();
+//! let mut rng = rand::rng();
+//! let evaluation = Evaluator::new(optimized).evaluate([], &mut rng).unwrap();
+//! ```
 
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 use crate::{
 	CanAllocate as _,
-	ast::{self, ArithmeticExpression, Constant, DiceExpression, Expression},
+	ast::{
+		self, ASTVisitor, ArithmeticExpression, Constant, DiceExpression,
+		Expression
+	},
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
@@ -29,7 +57,7 @@ use crate::{
 /// then copies them into owned strings when assembling the output
 /// [`Function`](crate::Function). This keeps the generation phase zero-copy
 /// while producing a self-contained output.
-pub(crate) struct CodeGenerator<'a>
+pub struct CodeGenerator<'a>
 {
 	/// The instructions emitted by the code generator.
 	instructions: Vec<Instruction>,
@@ -52,12 +80,26 @@ impl<'a> CodeGenerator<'a>
 {
 	/// Generate IR for the specified AST function.
 	///
+	/// This is equivalent to calling
+	/// [`compile_unoptimized()`](crate::compile_unoptimized) after parsing, but
+	/// gives the caller access to the AST between parsing and code generation.
+	///
 	/// # Parameters
 	/// - `ast`: The parsed function definition.
 	///
 	/// # Returns
 	/// The compiled function in intermediate representation.
-	pub(crate) fn generate(ast: &'a ast::Function<'a>) -> crate::Function
+	///
+	/// # Examples
+	///
+	/// ```
+	/// use xdy::codegen::CodeGenerator;
+	///
+	/// let ast = xdy::parser::parse("2d6 + 3").unwrap();
+	/// let function = CodeGenerator::generate(&ast);
+	/// assert_eq!(function.arity(), 0);
+	/// ```
+	pub fn generate(ast: &'a ast::Function<'a>) -> crate::Function
 	{
 		let mut codegen = Self {
 			instructions: Vec::new(),
@@ -66,27 +108,7 @@ impl<'a> CodeGenerator<'a>
 			arity: 0,
 			variables: HashMap::new()
 		};
-		// Register formal parameters first, in declaration order.
-		if let Some(ref parameters) = ast.parameters
-		{
-			for &param in parameters
-			{
-				codegen.variable(param);
-			}
-			codegen.arity = codegen.variables.len();
-		}
-		// Discover and register external variables before generating the body,
-		// so that their register allocation order is deterministic
-		// (depth-first, left-to-right through the AST).
-		let externals = discover_externals(&ast.body);
-		for external in externals
-		{
-			codegen.variable(external);
-		}
-		// Generate the body.
-		let return_value = codegen.generate_expression(&ast.body);
-		codegen.emit(Instruction::r#return(return_value));
-		// Assemble the output function.
+		let _ = codegen.visit_function(ast);
 		codegen.finish()
 	}
 
@@ -178,228 +200,30 @@ impl<'a> CodeGenerator<'a>
 		self.instructions.push(instruction);
 	}
 
-	/// Generate IR for an expression.
+	/// Accept an expression and ensure the result is not an unsummed rolling
+	/// record. If the expression produces a
+	/// [`RollingRecord`](AddressingMode::RollingRecord), emit a
+	/// [`SumRollingRecord`](crate::ir::SumRollingRecord) instruction to reduce
+	/// it to a register.
 	///
 	/// # Parameters
-	/// - `expr`: The expression.
+	/// - `expr`: The expression to accept.
 	///
 	/// # Returns
-	/// The addressing mode for the result of the expression.
-	fn generate_expression(
-		&mut self,
-		expr: &'a Expression<'a>
-	) -> AddressingMode
+	/// The [`AddressingMode`] for the result.
+	fn accept_expression(&mut self, expr: &'a Expression<'a>)
+	-> AddressingMode
 	{
-		match expr
+		let value = expr.accept(self).unwrap();
+		match value
 		{
-			Expression::Constant(c) => self.generate_constant(c),
-			Expression::Variable(v) => self.generate_variable(v),
-			Expression::Group(g) => self.generate_expression(&g.expression),
-			Expression::Range(r) => self.generate_range(r),
-			Expression::Dice(d) =>
+			AddressingMode::RollingRecord(record) =>
 			{
-				let record = self.generate_dice_expression(d);
 				let sum = self.allocate_register();
 				self.emit(Instruction::sum_rolling_record(sum, record));
 				sum.into()
 			},
-			Expression::Arithmetic(a) => self.generate_arithmetic(a)
-		}
-	}
-
-	/// Generate IR for a constant.
-	///
-	/// # Parameters
-	/// - `constant`: The constant.
-	///
-	/// # Returns
-	/// The addressing mode for the constant value.
-	#[inline]
-	fn generate_constant(&self, constant: &Constant) -> AddressingMode
-	{
-		Immediate(constant.0).into()
-	}
-
-	/// Generate IR for a variable reference.
-	///
-	/// # Parameters
-	/// - `variable`: The variable reference.
-	///
-	/// # Returns
-	/// The addressing mode for the variable's register.
-	fn generate_variable(
-		&mut self,
-		variable: &'a ast::Variable<'a>
-	) -> AddressingMode
-	{
-		let register = self.variable(variable.0);
-		AddressingMode::Register(register)
-	}
-
-	/// Generate IR for a range expression.
-	///
-	/// # Parameters
-	/// - `range`: The range expression.
-	///
-	/// # Returns
-	/// The addressing mode for the result of the range.
-	fn generate_range(&mut self, range: &'a ast::Range<'a>) -> AddressingMode
-	{
-		let start = self.generate_expression(&range.start);
-		let end = self.generate_expression(&range.end);
-		let dest = self.allocate_rolling_record();
-		self.emit(Instruction::roll_range(dest, start, end));
-		let sum = self.allocate_register();
-		self.emit(Instruction::sum_rolling_record(sum, dest));
-		sum.into()
-	}
-
-	/// Generate IR for a dice expression. Returns the rolling record index,
-	/// leaving it to the caller to decide whether to sum.
-	///
-	/// # Parameters
-	/// - `dice`: The dice expression.
-	///
-	/// # Returns
-	/// The rolling record index holding the dice results.
-	fn generate_dice_expression(
-		&mut self,
-		dice: &'a DiceExpression<'a>
-	) -> RollingRecordIndex
-	{
-		match dice
-		{
-			DiceExpression::Standard(d) => self.generate_standard_dice(d),
-			DiceExpression::Custom(d) => self.generate_custom_dice(d),
-			DiceExpression::DropLowest(d) => self.generate_drop_lowest(d),
-			DiceExpression::DropHighest(d) => self.generate_drop_highest(d)
-		}
-	}
-
-	/// Generate IR for a standard dice expression.
-	///
-	/// # Parameters
-	/// - `dice`: The standard dice expression.
-	///
-	/// # Returns
-	/// The rolling record index holding the dice results.
-	fn generate_standard_dice(
-		&mut self,
-		dice: &'a ast::StandardDice<'a>
-	) -> RollingRecordIndex
-	{
-		let count = self.generate_expression(&dice.count);
-		let faces = self.generate_expression(&dice.faces);
-		let dest = self.allocate_rolling_record();
-		self.emit(Instruction::roll_standard_dice(dest, count, faces));
-		dest
-	}
-
-	/// Generate IR for a custom dice expression.
-	///
-	/// # Parameters
-	/// - `dice`: The custom dice expression.
-	///
-	/// # Returns
-	/// The rolling record index holding the dice results.
-	fn generate_custom_dice(
-		&mut self,
-		dice: &'a ast::CustomDice<'a>
-	) -> RollingRecordIndex
-	{
-		let count = self.generate_expression(&dice.count);
-		let dest = self.allocate_rolling_record();
-		self.emit(Instruction::roll_custom_dice(
-			dest,
-			count,
-			dice.faces.clone()
-		));
-		dest
-	}
-
-	/// Generate IR for a drop-lowest expression.
-	///
-	/// # Parameters
-	/// - `drop`: The drop-lowest expression.
-	///
-	/// # Returns
-	/// The rolling record index holding the dice results after dropping.
-	fn generate_drop_lowest(
-		&mut self,
-		drop: &'a ast::DropLowest<'a>
-	) -> RollingRecordIndex
-	{
-		let record = self.generate_dice_expression(&drop.dice);
-		let count = match &drop.drop
-		{
-			Some(expr) => self.generate_expression(expr),
-			None => Immediate(1).into()
-		};
-		self.emit(Instruction::drop_lowest(record, count));
-		record
-	}
-
-	/// Generate IR for a drop-highest expression.
-	///
-	/// # Parameters
-	/// - `drop`: The drop-highest expression.
-	///
-	/// # Returns
-	/// The rolling record index holding the dice results after dropping.
-	fn generate_drop_highest(
-		&mut self,
-		drop: &'a ast::DropHighest<'a>
-	) -> RollingRecordIndex
-	{
-		let record = self.generate_dice_expression(&drop.dice);
-		let count = match &drop.drop
-		{
-			Some(expr) => self.generate_expression(expr),
-			None => Immediate(1).into()
-		};
-		self.emit(Instruction::drop_highest(record, count));
-		record
-	}
-
-	/// Generate IR for an arithmetic expression.
-	///
-	/// # Parameters
-	/// - `arith`: The arithmetic expression.
-	///
-	/// # Returns
-	/// The addressing mode for the result.
-	fn generate_arithmetic(
-		&mut self,
-		arith: &'a ArithmeticExpression<'a>
-	) -> AddressingMode
-	{
-		match arith
-		{
-			ArithmeticExpression::Add(a) =>
-			{
-				self.generate_binary(&a.left, &a.right, Instruction::add)
-			},
-			ArithmeticExpression::Sub(s) =>
-			{
-				self.generate_binary(&s.left, &s.right, Instruction::sub)
-			},
-			ArithmeticExpression::Mul(m) =>
-			{
-				self.generate_binary(&m.left, &m.right, Instruction::mul)
-			},
-			ArithmeticExpression::Div(d) =>
-			{
-				self.generate_binary(&d.left, &d.right, Instruction::div)
-			},
-			ArithmeticExpression::Mod(m) =>
-			{
-				self.generate_binary(&m.left, &m.right, Instruction::r#mod)
-			},
-			ArithmeticExpression::Exp(e) =>
-			{
-				self.generate_binary(&e.left, &e.right, Instruction::exp)
-			},
-			ArithmeticExpression::Neg(n) => self.generate_neg(n)
+			other => other
 		}
 	}
 
@@ -411,7 +235,7 @@ impl<'a> CodeGenerator<'a>
 	/// - `constructor`: The instruction constructor.
 	///
 	/// # Returns
-	/// The addressing mode for the result.
+	/// The [`AddressingMode`] for the result register.
 	fn generate_binary(
 		&mut self,
 		left: &'a Expression<'a>,
@@ -423,33 +247,219 @@ impl<'a> CodeGenerator<'a>
 		) -> Instruction
 	) -> AddressingMode
 	{
-		let op1 = self.generate_expression(left);
-		let op2 = self.generate_expression(right);
+		let op1 = self.accept_expression(left);
+		let op2 = self.accept_expression(right);
 		let dest = self.allocate_register();
 		self.emit(constructor(dest, op1, op2));
 		dest.into()
 	}
+}
 
-	/// Generate IR for a negation expression. If the operand is a constant,
-	/// fold the negation into a single immediate to preserve the ability to
-	/// represent `i32::MIN`.
-	///
-	/// # Parameters
-	/// - `neg`: The negation expression.
-	///
-	/// # Returns
-	/// The addressing mode for the result.
-	fn generate_neg(&mut self, neg: &'a ast::Neg<'a>) -> AddressingMode
+////////////////////////////////////////////////////////////////////////////////
+//                       ASTVisitor for CodeGenerator.                        //
+////////////////////////////////////////////////////////////////////////////////
+
+impl<'a> ASTVisitor<'a> for CodeGenerator<'a>
+{
+	type Output = AddressingMode;
+	type Error = Infallible;
+
+	fn visit_function(
+		&mut self,
+		node: &'a ast::Function<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		// Register formal parameters first, in declaration order.
+		if let Some(ref parameters) = node.parameters
+		{
+			for &param in parameters
+			{
+				self.variable(param);
+			}
+			self.arity = self.variables.len();
+		}
+		// Discover and register external variables before generating the body,
+		// so that their register allocation order is deterministic
+		// (depth-first, left-to-right through the AST).
+		let externals = discover_externals(&node.body);
+		for external in externals
+		{
+			self.variable(external);
+		}
+		// Generate the body.
+		let return_value = self.accept_expression(&node.body);
+		self.emit(Instruction::r#return(return_value));
+		Ok(return_value)
+	}
+
+	fn visit_group(
+		&mut self,
+		node: &'a ast::Group<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.accept_expression(&node.expression))
+	}
+
+	fn visit_constant(
+		&mut self,
+		node: &Constant
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(Immediate(node.0).into())
+	}
+
+	fn visit_variable(
+		&mut self,
+		node: &'a ast::Variable<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let register = self.variable(node.0);
+		Ok(register.into())
+	}
+
+	fn visit_range(
+		&mut self,
+		node: &'a ast::Range<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let start = self.accept_expression(&node.start);
+		let end = self.accept_expression(&node.end);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_range(dest, start, end));
+		let sum = self.allocate_register();
+		self.emit(Instruction::sum_rolling_record(sum, dest));
+		Ok(sum.into())
+	}
+
+	fn visit_standard_dice(
+		&mut self,
+		node: &'a ast::StandardDice<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let count = self.accept_expression(&node.count);
+		let faces = self.accept_expression(&node.faces);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_standard_dice(dest, count, faces));
+		Ok(dest.into())
+	}
+
+	fn visit_custom_dice(
+		&mut self,
+		node: &'a ast::CustomDice<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let count = self.accept_expression(&node.count);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_custom_dice(
+			dest,
+			count,
+			node.faces.clone()
+		));
+		Ok(dest.into())
+	}
+
+	fn visit_drop_lowest(
+		&mut self,
+		node: &'a ast::DropLowest<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = node
+			.dice
+			.accept(self)
+			.unwrap()
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = match &node.drop
+		{
+			Some(expr) => self.accept_expression(expr),
+			None => Immediate(1).into()
+		};
+		self.emit(Instruction::drop_lowest(record, count));
+		Ok(record.into())
+	}
+
+	fn visit_drop_highest(
+		&mut self,
+		node: &'a ast::DropHighest<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = node
+			.dice
+			.accept(self)
+			.unwrap()
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = match &node.drop
+		{
+			Some(expr) => self.accept_expression(expr),
+			None => Immediate(1).into()
+		};
+		self.emit(Instruction::drop_highest(record, count));
+		Ok(record.into())
+	}
+
+	fn visit_add(
+		&mut self,
+		node: &'a ast::Add<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::add))
+	}
+
+	fn visit_sub(
+		&mut self,
+		node: &'a ast::Sub<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::sub))
+	}
+
+	fn visit_mul(
+		&mut self,
+		node: &'a ast::Mul<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::mul))
+	}
+
+	fn visit_div(
+		&mut self,
+		node: &'a ast::Div<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::div))
+	}
+
+	fn visit_mod(
+		&mut self,
+		node: &'a ast::Mod<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::r#mod))
+	}
+
+	fn visit_exp(
+		&mut self,
+		node: &'a ast::Exp<'a>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::exp))
+	}
+
+	fn visit_neg(
+		&mut self,
+		node: &'a ast::Neg<'a>
+	) -> Result<AddressingMode, Infallible>
 	{
 		// Fold negation of constants into a single immediate.
-		if let Expression::Constant(Constant(n)) = neg.operand.as_ref()
+		if let Expression::Constant(Constant(n)) = node.operand.as_ref()
 		{
-			return Immediate(n.saturating_neg()).into();
+			return Ok(Immediate(n.saturating_neg()).into());
 		}
-		let op = self.generate_expression(&neg.operand);
+		let op = self.accept_expression(&node.operand);
 		let dest = self.allocate_register();
 		self.emit(Instruction::neg(dest, op));
-		dest.into()
+		Ok(dest.into())
 	}
 }
 

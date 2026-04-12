@@ -220,10 +220,7 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 	let (input, initial) = unary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, one_of("*×/÷%")),
-		cut(preceded(
-			multispace0,
-			context(RIGHT_OPERAND_CONTEXT, unary)
-		))
+		cut(preceded(multispace0, context(RIGHT_OPERAND_CONTEXT, unary)))
 	))
 	.parse_complete(input)?;
 
@@ -359,10 +356,7 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 	let (input, initial) = primary.parse_complete(input)?;
 	let (input, remainder) = many0(pair(
 		preceded(multispace0, char('^')),
-		cut(preceded(
-			multispace0,
-			context(RIGHT_OPERAND_CONTEXT, unary)
-		))
+		cut(preceded(multispace0, context(RIGHT_OPERAND_CONTEXT, unary)))
 	))
 	.parse_complete(input)?;
 	let exponents =
@@ -433,7 +427,12 @@ pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 		context(CLOSING_PAREN_CONTEXT, char(')'))
 	))
 	.parse_complete(input)?;
-	Ok((input, Group { expression: Box::new(expression) }))
+	Ok((
+		input,
+		Group {
+			expression: Box::new(expression)
+		}
+	))
 }
 
 /// Parse a variable reference, without leading whitespace.
@@ -516,8 +515,7 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 	// Parse the common prefix shared by standard and custom dice.
 	let (input, count) =
 		context(DICE_COUNT_CONTEXT, dice_count).parse_complete(input)?;
-	let (input, _) =
-		preceded(multispace0, d_operator).parse_complete(input)?;
+	let (input, _) = preceded(multispace0, d_operator).parse_complete(input)?;
 	// After the `d`/`D` operator, we're committed to a dice expression.
 	let (input, initial_dice) = cut(preceded(
 		multispace0,
@@ -552,20 +550,14 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 		|| initial_dice.clone(),
 		|acc, (direction, drop)| match direction
 		{
-			DropDirection::Lowest =>
-			{
-				DiceExpression::DropLowest(DropLowest {
-					dice: Box::new(acc),
-					drop
-				})
-			},
-			DropDirection::Highest =>
-			{
-				DiceExpression::DropHighest(DropHighest {
-					dice: Box::new(acc),
-					drop
-				})
-			},
+			DropDirection::Lowest => DiceExpression::DropLowest(DropLowest {
+				dice: Box::new(acc),
+				drop
+			}),
+			DropDirection::Highest => DiceExpression::DropHighest(DropHighest {
+				dice: Box::new(acc),
+				drop
+			})
 		}
 	)
 	.parse_complete(input)?;

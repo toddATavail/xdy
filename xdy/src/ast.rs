@@ -129,6 +129,38 @@ pub enum Expression<'a>
 	Arithmetic(ArithmeticExpression<'a>)
 }
 
+impl<'a> Expression<'a>
+{
+	/// Dispatch this expression to the appropriate method on the given
+	/// [`ASTVisitor`]. Enum variants that are themselves enums
+	/// ([`Dice`](Self::Dice), [`Arithmetic`](Self::Arithmetic)) delegate to
+	/// their own [`accept()`](DiceExpression::accept) methods.
+	///
+	/// # Parameters
+	/// - `visitor`: The visitor to dispatch to.
+	///
+	/// # Returns
+	/// The value produced by the visitor.
+	///
+	/// # Errors
+	/// Propagates any error returned by the visitor.
+	pub fn accept<V: ASTVisitor<'a>>(
+		&'a self,
+		visitor: &mut V
+	) -> Result<V::Output, V::Error>
+	{
+		match self
+		{
+			Expression::Group(g) => visitor.visit_group(g),
+			Expression::Constant(c) => visitor.visit_constant(c),
+			Expression::Variable(v) => visitor.visit_variable(v),
+			Expression::Range(r) => visitor.visit_range(r),
+			Expression::Dice(d) => d.accept(visitor),
+			Expression::Arithmetic(a) => a.accept(visitor)
+		}
+	}
+}
+
 impl Display for Expression<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
@@ -255,6 +287,34 @@ pub enum DiceExpression<'a>
 
 	/// A drop-highest expression.
 	DropHighest(DropHighest<'a>)
+}
+
+impl<'a> DiceExpression<'a>
+{
+	/// Dispatch this dice expression to the appropriate method on the given
+	/// [`ASTVisitor`].
+	///
+	/// # Parameters
+	/// - `visitor`: The visitor to dispatch to.
+	///
+	/// # Returns
+	/// The value produced by the visitor.
+	///
+	/// # Errors
+	/// Propagates any error returned by the visitor.
+	pub fn accept<V: ASTVisitor<'a>>(
+		&'a self,
+		visitor: &mut V
+	) -> Result<V::Output, V::Error>
+	{
+		match self
+		{
+			DiceExpression::Standard(d) => visitor.visit_standard_dice(d),
+			DiceExpression::Custom(d) => visitor.visit_custom_dice(d),
+			DiceExpression::DropLowest(d) => visitor.visit_drop_lowest(d),
+			DiceExpression::DropHighest(d) => visitor.visit_drop_highest(d)
+		}
+	}
 }
 
 impl Display for DiceExpression<'_>
@@ -401,6 +461,136 @@ impl Display for Neg<'_>
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//                                AST visitor.                                //
+////////////////////////////////////////////////////////////////////////////////
+
+/// A visitor for walking the abstract syntax tree (AST).
+///
+/// Each method visits a single AST node type and returns a value of the
+/// associated [`Output`](Self::Output) type. The enum types ([`Expression`],
+/// [`DiceExpression`], [`ArithmeticExpression`]) are not visited directly —
+/// they provide [`accept()`](Expression::accept) methods that dispatch to the
+/// appropriate visitor method.
+///
+/// The [`CodeGenerator`](crate::codegen::CodeGenerator) is the reference
+/// implementation of this trait.
+///
+/// # Type parameters
+/// - `'a`: The lifetime of the borrowed source text within the AST.
+///
+/// # Associated types
+/// - `Output`: The value produced by visiting a node.
+/// - `Error`: The error type returned on failure.
+pub trait ASTVisitor<'a>
+{
+	/// The value produced by visiting a node.
+	type Output;
+
+	/// The error type returned on failure.
+	type Error;
+
+	/// Visit a [function](Function) definition.
+	fn visit_function(
+		&mut self,
+		node: &'a Function<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [group](Group) (parenthesized expression).
+	fn visit_group(
+		&mut self,
+		node: &'a Group<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [constant](Constant) value.
+	fn visit_constant(
+		&mut self,
+		node: &Constant
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [variable](Variable) reference.
+	fn visit_variable(
+		&mut self,
+		node: &'a Variable<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [range](Range) expression.
+	fn visit_range(
+		&mut self,
+		node: &'a Range<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [standard dice](StandardDice) expression.
+	fn visit_standard_dice(
+		&mut self,
+		node: &'a StandardDice<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [custom dice](CustomDice) expression.
+	fn visit_custom_dice(
+		&mut self,
+		node: &'a CustomDice<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [drop-lowest](DropLowest) expression.
+	fn visit_drop_lowest(
+		&mut self,
+		node: &'a DropLowest<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [drop-highest](DropHighest) expression.
+	fn visit_drop_highest(
+		&mut self,
+		node: &'a DropHighest<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit an [addition](Add) expression.
+	fn visit_add(
+		&mut self,
+		node: &'a Add<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [subtraction](Sub) expression.
+	fn visit_sub(
+		&mut self,
+		node: &'a Sub<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [multiplication](Mul) expression.
+	fn visit_mul(
+		&mut self,
+		node: &'a Mul<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [division](Div) expression.
+	fn visit_div(
+		&mut self,
+		node: &'a Div<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [modulo](Mod) expression.
+	fn visit_mod(
+		&mut self,
+		node: &'a Mod<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit an [exponentiation](Exp) expression.
+	fn visit_exp(
+		&mut self,
+		node: &'a Exp<'a>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [negation](Neg) expression.
+	fn visit_neg(
+		&mut self,
+		node: &'a Neg<'a>
+	) -> Result<Self::Output, Self::Error>;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                          Arithmetic expressions.                           //
+////////////////////////////////////////////////////////////////////////////////
+
 /// An arithmetic expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArithmeticExpression<'a>
@@ -425,6 +615,37 @@ pub enum ArithmeticExpression<'a>
 
 	/// A negation expression.
 	Neg(Neg<'a>)
+}
+
+impl<'a> ArithmeticExpression<'a>
+{
+	/// Dispatch this arithmetic expression to the appropriate method on the
+	/// given [`ASTVisitor`].
+	///
+	/// # Parameters
+	/// - `visitor`: The visitor to dispatch to.
+	///
+	/// # Returns
+	/// The value produced by the visitor.
+	///
+	/// # Errors
+	/// Propagates any error returned by the visitor.
+	pub fn accept<V: ASTVisitor<'a>>(
+		&'a self,
+		visitor: &mut V
+	) -> Result<V::Output, V::Error>
+	{
+		match self
+		{
+			ArithmeticExpression::Add(a) => visitor.visit_add(a),
+			ArithmeticExpression::Sub(s) => visitor.visit_sub(s),
+			ArithmeticExpression::Mul(m) => visitor.visit_mul(m),
+			ArithmeticExpression::Div(d) => visitor.visit_div(d),
+			ArithmeticExpression::Mod(m) => visitor.visit_mod(m),
+			ArithmeticExpression::Exp(e) => visitor.visit_exp(e),
+			ArithmeticExpression::Neg(n) => visitor.visit_neg(n)
+		}
+	}
 }
 
 impl Display for ArithmeticExpression<'_>

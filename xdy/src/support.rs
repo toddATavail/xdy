@@ -377,9 +377,7 @@ pub struct ErrorTestCase
 ///
 /// # Panics
 /// If the test case file is incorrectly formatted.
-pub fn read_error_test_cases(
-	source: &'static str
-) -> Vec<ErrorTestCase>
+pub fn read_error_test_cases(source: &'static str) -> Vec<ErrorTestCase>
 {
 	let mut test_cases = Vec::new();
 	for block in source.split("\n\n")
@@ -390,11 +388,7 @@ pub fn read_error_test_cases(
 			continue;
 		}
 		let parts: Vec<&str> = block.splitn(2, "\n=\n").collect();
-		assert!(
-			parts.len() == 2,
-			"malformed test case block: {:?}",
-			block
-		);
+		assert!(parts.len() == 2, "malformed test case block: {:?}", block);
 		let test_source = match parts[0]
 		{
 			"<empty>" => "",
@@ -405,9 +399,8 @@ pub fn read_error_test_cases(
 		let mut expected_diagnostics = Vec::new();
 		for diag_block in diagnostics_text.split("\n---\n")
 		{
-			expected_diagnostics.push(
-				parse_expected_diagnostic(diag_block.trim())
-			);
+			expected_diagnostics
+				.push(parse_expected_diagnostic(diag_block.trim()));
 		}
 
 		test_cases.push(ErrorTestCase {
@@ -463,17 +456,14 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 			{
 				suggestions.push(ExpectedSuggestion {
 					corrected_source: src,
-					placeholders: std::mem::take(
-						&mut current_placeholders
-					)
+					placeholders: std::mem::take(&mut current_placeholders)
 				});
 			}
 			current_suggestion = Some(rest.trim());
 		}
 		else if let Some(rest) = line.strip_prefix("placeholder:")
 		{
-			current_placeholders
-				.push(parse_expected_placeholder(rest.trim()));
+			current_placeholders.push(parse_expected_placeholder(rest.trim()));
 		}
 	}
 	// Flush the last suggestion.
