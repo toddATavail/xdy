@@ -10,9 +10,13 @@ use crate::{Function, Optimizer as _, Passes, StandardOptimizer, compile};
 //                            Compilation support.                            //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A compilation test case is a pair of a source code string and an expected
-/// output string.
-pub type CompilationTestCase = (&'static str, &'static str);
+/// A test case is a pair of a source code string and an expected output
+/// string. This type is shared by compilation tests, parse tests, and any
+/// other test suite that uses the `{source}\n=\n{expected}` file format.
+pub type TestCase = (&'static str, &'static str);
+
+/// A compilation test case.
+pub type CompilationTestCase = TestCase;
 
 /// Parse the compilation test cases from a test case file. The file is expected
 /// to contain a series of blocks of the form:

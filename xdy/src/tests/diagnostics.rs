@@ -1,8 +1,9 @@
 //! # Diagnostic test cases
 //!
 //! Herein are the data-driven test cases for the diagnostics module. The actual
-//! test cases are stored in `../../tests/test_errors.txt`, which comprises a
-//! series of broken source expressions and their expected diagnostics.
+//! test cases are stored in `../../tests/test_parser_errors.txt`, which
+//! comprises a series of broken source expressions and their expected
+//! diagnostics.
 
 use std::collections::HashSet;
 
@@ -42,15 +43,16 @@ fn kind_name(kind: &DiagnosticKind) -> &'static str
 }
 
 /// Test that the diagnostics module produces the expected diagnostics for each
-/// test case in `test_errors.txt`.
+/// test case in `test_parser_errors.txt`.
 #[test]
 fn test_error_diagnostics()
 {
-	let test_cases =
-		read_error_test_cases(include_str!("../../tests/test_errors.txt"));
+	let test_cases = read_error_test_cases(include_str!(
+		"../../tests/test_parser_errors.txt"
+	));
 	assert!(
 		!test_cases.is_empty(),
-		"no test cases found in test_errors.txt"
+		"no test cases found in test_parser_errors.txt"
 	);
 
 	let mut seen = HashSet::new();
@@ -223,8 +225,9 @@ fn test_error_diagnostics()
 #[test]
 fn test_corrected_sources_parse()
 {
-	let test_cases =
-		read_error_test_cases(include_str!("../../tests/test_errors.txt"));
+	let test_cases = read_error_test_cases(include_str!(
+		"../../tests/test_parser_errors.txt"
+	));
 	for case in &test_cases
 	{
 		let result = diagnostics::diagnose(case.source);

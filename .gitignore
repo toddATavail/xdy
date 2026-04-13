@@ -4,6 +4,7 @@ Cargo.lock
 
 # cargo-mutants artifacts.
 /mutants.out
+/mutants.out.old
 
 # Scratch files.
 repl.rs

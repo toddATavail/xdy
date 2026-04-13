@@ -6,7 +6,8 @@
 //! for testing and debugging.
 
 use std::{
-	fmt::{self, Write},
+	error::Error,
+	fmt::{self, Display, Formatter, Write},
 	ops::Deref
 };
 
@@ -224,7 +225,7 @@ impl SExpressible for &[&str]
 				{
 					write!(f, " ")?;
 				}
-				write!(f, "{}", item)?;
+				write_ident(f, item)?;
 			}
 			write!(f, "]")
 		}
@@ -236,7 +237,8 @@ impl SExpressible for &[&str]
 			{
 				// Note that we don't care how long the item is, because we
 				// can't split it across multiple lines anyway.
-				write!(f, "\n{}{}", "\t".repeat(options.indent + 1), item)?;
+				write!(f, "\n{}", "\t".repeat(options.indent + 1))?;
+				write_ident(f, item)?;
 			}
 			write!(f, "\n{}]", "\t".repeat(options.indent))
 		}
@@ -247,7 +249,7 @@ impl SExpressible for &[&str]
 		// The delimiters and interposed spaces consume one character each. Note
 		// that there are one fewer interposed spaces than items, so the
 		// constant term is 1 after accounting for brackets (not 2).
-		self.iter().copied().map(str::len).sum::<usize>() + self.len() + 1
+		self.iter().copied().map(ident_size).sum::<usize>() + self.len() + 1
 	}
 }
 
@@ -409,6 +411,47 @@ where
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                         Identifier quoting support.                        //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Answer whether the given identifier requires quoting in S-expression
+/// format. An identifier needs quoting if it contains whitespace or
+/// delimiter characters that would be ambiguous during parsing.
+fn needs_quoting(ident: &str) -> bool
+{
+	ident.contains(|c: char| {
+		c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"')
+	})
+}
+
+/// Write an identifier, quoting it with double quotes if necessary.
+fn write_ident(f: &mut dyn Write, ident: &str) -> fmt::Result
+{
+	if needs_quoting(ident)
+	{
+		write!(f, "\"{}\"", ident)
+	}
+	else
+	{
+		write!(f, "{}", ident)
+	}
+}
+
+/// Answer the S-expression size of an identifier, accounting for quotes if
+/// necessary.
+fn ident_size(ident: &str) -> usize
+{
+	if needs_quoting(ident)
+	{
+		ident.len() + 2
+	}
+	else
+	{
+		ident.len()
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                        Abstract syntax tree (AST).                         //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -499,11 +542,17 @@ impl SExpressible for Constant
 
 	fn size_s_expr(&self) -> usize
 	{
-		// Count the number of characters required to represent the value,
-		// taking care to account correctly for negative numbers.
-		(self.0.abs() as f64).log10().floor() as usize
-			+ if self.0 < 0 { 1 } else { 0 }
-			+ 1
+		// The exact character count of the decimal representation. Using
+		// `ilog10` on the absolute value would panic on `i32::MIN`, so we
+		// format directly.
+		if self.0 == 0
+		{
+			1
+		}
+		else
+		{
+			format!("{}", self.0).len()
+		}
 	}
 }
 
@@ -516,11 +565,12 @@ impl SExpressible for Variable<'_>
 		_options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		// Variables cannot be split, so we just write the variable.
-		write!(f, "{}", self.0)
+		// Variables cannot be split, so we just write the variable, quoting
+		// it if it contains whitespace or delimiter characters.
+		write_ident(f, self.0)
 	}
 
-	fn size_s_expr(&self) -> usize { self.0.len() }
+	fn size_s_expr(&self) -> usize { ident_size(self.0) }
 }
 
 impl SExpressible for Range<'_>
@@ -966,4 +1016,446 @@ impl SExpressible for ArithmeticExpression<'_>
 			ArithmeticExpression::Neg(neg) => neg.size_s_expr()
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                            S-expression reader.                            //
+////////////////////////////////////////////////////////////////////////////////
+
+/// An error encountered while reading an S-expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SExprError
+{
+	/// A description of the error.
+	pub message: String,
+
+	/// The byte offset in the input where the error was detected.
+	pub offset: usize
+}
+
+impl Display for SExprError
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		write!(
+			f,
+			"S-expression error at byte {}: {}",
+			self.offset, self.message
+		)
+	}
+}
+
+impl Error for SExprError {}
+
+/// A cursor into an S-expression string being parsed.
+struct SExprReader<'src>
+{
+	/// The full input string.
+	input: &'src str,
+
+	/// The current byte offset.
+	pos: usize
+}
+
+impl<'src> SExprReader<'src>
+{
+	/// Create a new reader at the beginning of the given input.
+	fn new(input: &'src str) -> Self { Self { input, pos: 0 } }
+
+	/// Answer the remaining unread input.
+	fn remaining(&self) -> &'src str { &self.input[self.pos..] }
+
+	/// Skip whitespace characters.
+	fn skip_whitespace(&mut self)
+	{
+		while self.pos < self.input.len()
+			&& self.input.as_bytes()[self.pos].is_ascii_whitespace()
+		{
+			self.pos += 1;
+		}
+	}
+
+	/// Consume and return the next character, or `None` if at end of input.
+	fn next_char(&mut self) -> Option<char>
+	{
+		let c = self.remaining().chars().next()?;
+		self.pos += c.len_utf8();
+		Some(c)
+	}
+
+	/// Peek at the next character without consuming it.
+	fn peek(&self) -> Option<char> { self.remaining().chars().next() }
+
+	/// Expect and consume a specific character, or return an error.
+	fn expect_char(&mut self, expected: char) -> Result<(), SExprError>
+	{
+		self.skip_whitespace();
+		match self.next_char()
+		{
+			Some(c) if c == expected => Ok(()),
+			Some(c) => Err(SExprError {
+				message: format!("expected '{}', found '{}'", expected, c),
+				offset: self.pos - c.len_utf8()
+			}),
+			None => Err(SExprError {
+				message: format!("expected '{}', found end of input", expected),
+				offset: self.pos
+			})
+		}
+	}
+
+	/// Read a word: a contiguous sequence of non-whitespace, non-delimiter
+	/// characters. Delimiters are `(`, `)`, `[`, `]`.
+	fn read_word(&mut self) -> Result<&'src str, SExprError>
+	{
+		self.skip_whitespace();
+		let start = self.pos;
+		while self.pos < self.input.len()
+		{
+			let c = self.input.as_bytes()[self.pos];
+			if c.is_ascii_whitespace()
+				|| c == b'(' || c == b')'
+				|| c == b'[' || c == b']'
+			{
+				break;
+			}
+			self.pos += 1;
+		}
+		if self.pos == start
+		{
+			Err(SExprError {
+				message: "expected a word".to_string(),
+				offset: self.pos
+			})
+		}
+		else
+		{
+			Ok(&self.input[start..self.pos])
+		}
+	}
+
+	/// Read an identifier: either a bare word or a double-quoted string.
+	/// Quoted strings may contain whitespace and delimiter characters.
+	fn read_ident(&mut self) -> Result<&'src str, SExprError>
+	{
+		self.skip_whitespace();
+		if self.peek() == Some('"')
+		{
+			self.next_char(); // consume opening quote
+			let start = self.pos;
+			while self.pos < self.input.len()
+				&& self.input.as_bytes()[self.pos] != b'"'
+			{
+				self.pos += 1;
+			}
+			if self.pos >= self.input.len()
+			{
+				return Err(SExprError {
+					message: "unterminated quoted identifier".to_string(),
+					offset: start - 1
+				});
+			}
+			let ident = &self.input[start..self.pos];
+			self.pos += 1; // consume closing quote
+			Ok(ident)
+		}
+		else
+		{
+			self.read_word()
+		}
+	}
+
+	/// Read an integer literal.
+	fn read_integer(&mut self) -> Result<i32, SExprError>
+	{
+		let word = self.read_word()?;
+		word.parse::<i32>().map_err(|e| SExprError {
+			message: format!("invalid integer '{}': {}", word, e),
+			offset: self.pos - word.len()
+		})
+	}
+
+	/// Read a parameter list: `[` ident* `]`.
+	fn read_params(&mut self) -> Result<Option<Vec<&'src str>>, SExprError>
+	{
+		self.skip_whitespace();
+		self.expect_char('[')?;
+		let mut params = Vec::new();
+		loop
+		{
+			self.skip_whitespace();
+			if self.peek() == Some(']')
+			{
+				self.next_char();
+				break;
+			}
+			params.push(self.read_ident()?);
+		}
+		if params.is_empty()
+		{
+			Ok(None)
+		}
+		else
+		{
+			Ok(Some(params))
+		}
+	}
+
+	/// Read a custom faces list: `[` integer+ `]`.
+	fn read_faces(&mut self) -> Result<Vec<i32>, SExprError>
+	{
+		self.skip_whitespace();
+		self.expect_char('[')?;
+		let mut faces = Vec::new();
+		loop
+		{
+			self.skip_whitespace();
+			if self.peek() == Some(']')
+			{
+				self.next_char();
+				break;
+			}
+			faces.push(self.read_integer()?);
+		}
+		if faces.is_empty()
+		{
+			Err(SExprError {
+				message: "custom dice faces list must not be empty".to_string(),
+				offset: self.pos
+			})
+		}
+		else
+		{
+			Ok(faces)
+		}
+	}
+
+	/// Read an expression.
+	fn read_expr(&mut self) -> Result<Expression<'src>, SExprError>
+	{
+		self.skip_whitespace();
+		match self.peek()
+		{
+			Some('(') =>
+			{
+				self.next_char();
+				self.skip_whitespace();
+				let keyword = self.read_word()?;
+				let expr = match keyword
+				{
+					"add" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Add(Add {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"sub" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"mul" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"div" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Div(Div {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"mod" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"exp" => self.read_binary(|l, r| {
+						Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
+							left: Box::new(l),
+							right: Box::new(r)
+						}))
+					})?,
+					"neg" =>
+					{
+						let operand = self.read_expr()?;
+						Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+							operand: Box::new(operand)
+						}))
+					},
+					"standard-dice" =>
+					{
+						let count = self.read_expr()?;
+						let faces = self.read_expr()?;
+						Expression::Dice(DiceExpression::Standard(
+							StandardDice {
+								count: Box::new(count),
+								faces: Box::new(faces)
+							}
+						))
+					},
+					"custom-dice" =>
+					{
+						let count = self.read_expr()?;
+						let faces = self.read_faces()?;
+						Expression::Dice(DiceExpression::Custom(CustomDice {
+							count: Box::new(count),
+							faces
+						}))
+					},
+					"drop-lowest" =>
+					{
+						let dice = self.read_dice_expr()?;
+						let drop = self.read_expr()?;
+						Expression::Dice(DiceExpression::DropLowest(
+							DropLowest {
+								dice: Box::new(dice),
+								drop: Some(Box::new(drop))
+							}
+						))
+					},
+					"drop-highest" =>
+					{
+						let dice = self.read_dice_expr()?;
+						let drop = self.read_expr()?;
+						Expression::Dice(DiceExpression::DropHighest(
+							DropHighest {
+								dice: Box::new(dice),
+								drop: Some(Box::new(drop))
+							}
+						))
+					},
+					"range" =>
+					{
+						let start = self.read_expr()?;
+						let end = self.read_expr()?;
+						Expression::Range(Range {
+							start: Box::new(start),
+							end: Box::new(end)
+						})
+					},
+					"function" =>
+					{
+						return Err(SExprError {
+							message: "unexpected 'function' inside expression"
+								.to_string(),
+							offset: self.pos - keyword.len()
+						});
+					},
+					_ =>
+					{
+						return Err(SExprError {
+							message: format!("unknown keyword '{}'", keyword),
+							offset: self.pos - keyword.len()
+						});
+					}
+				};
+				self.expect_char(')')?;
+				Ok(expr)
+			},
+			Some(c) if c == '-' || c.is_ascii_digit() =>
+			{
+				let value = self.read_integer()?;
+				Ok(Expression::Constant(Constant(value)))
+			},
+			Some(_) =>
+			{
+				let name = self.read_ident()?;
+				Ok(Expression::Variable(Variable(name)))
+			},
+			None => Err(SExprError {
+				message: "expected expression, found end of input".to_string(),
+				offset: self.pos
+			})
+		}
+	}
+
+	/// Read a dice expression (the first argument to `drop-lowest`/
+	/// `drop-highest`). This expects an S-expression that evaluates to a
+	/// [`DiceExpression`], not a general [`Expression`].
+	fn read_dice_expr(&mut self) -> Result<DiceExpression<'src>, SExprError>
+	{
+		let expr = self.read_expr()?;
+		match expr
+		{
+			Expression::Dice(d) => Ok(d),
+			_ => Err(SExprError {
+				message: "expected dice expression as first argument to \
+					drop-lowest/drop-highest"
+					.to_string(),
+				offset: self.pos
+			})
+		}
+	}
+
+	/// Read two subexpressions and combine them with the given constructor.
+	fn read_binary(
+		&mut self,
+		f: impl FnOnce(Expression<'src>, Expression<'src>) -> Expression<'src>
+	) -> Result<Expression<'src>, SExprError>
+	{
+		let left = self.read_expr()?;
+		let right = self.read_expr()?;
+		Ok(f(left, right))
+	}
+
+	/// Read a complete function: `(function params body)`.
+	fn read_function(&mut self) -> Result<Function<'src>, SExprError>
+	{
+		self.skip_whitespace();
+		self.expect_char('(')?;
+		self.skip_whitespace();
+		let keyword = self.read_word()?;
+		if keyword != "function"
+		{
+			return Err(SExprError {
+				message: format!("expected 'function', found '{}'", keyword),
+				offset: self.pos - keyword.len()
+			});
+		}
+		let parameters = self.read_params()?;
+		let body = self.read_expr()?;
+		self.expect_char(')')?;
+		self.skip_whitespace();
+		if self.pos != self.input.len()
+		{
+			return Err(SExprError {
+				message: format!("trailing input: '{}'", self.remaining()),
+				offset: self.pos
+			});
+		}
+		Ok(Function { parameters, body })
+	}
+}
+
+/// Parse an S-expression string into a [`Function`].
+///
+/// The S-expression format mirrors the output of
+/// [`SExpressible::to_s_expr`]: `(function [params...] body)`. Constants
+/// are bare integers, variables are bare identifiers, groups are
+/// transparent (not represented), and compound expressions use keywords
+/// like `add`, `neg`, `standard-dice`, etc.
+///
+/// # Parameters
+/// - `input`: The S-expression string to parse.
+///
+/// # Returns
+/// The parsed function.
+///
+/// # Errors
+/// * [`SExprError`] if the input is not a valid S-expression.
+///
+/// # Examples
+/// ```
+/// use xdy::s_expr::read_s_expr;
+///
+/// let f = read_s_expr("(function [] 42)").unwrap();
+/// assert_eq!(f.parameters, None);
+/// ```
+pub fn read_s_expr(input: &str) -> Result<Function<'_>, SExprError>
+{
+	SExprReader::new(input).read_function()
 }
