@@ -642,6 +642,13 @@ impl RollingRecordKind<i32>
 
 /// An error that may occur during the evaluation of a dice expression. Note
 /// that evaluation itself never causes an error, but setup may fail.
+///
+/// # Lifetimes
+/// - `'error`: The lifetime of the source text or external variable name that
+///   caused the error. For [`CompilationFailed`](Self::CompilationFailed), this
+///   is the source code; for
+///   [`UnrecognizedExternal`](Self::UnrecognizedExternal), it is the variable
+///   name passed to [`Evaluator::bind()`](crate::Evaluator::bind).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvaluationError<'error>
 {
@@ -700,9 +707,9 @@ impl Display for EvaluationError<'_>
 
 impl Error for EvaluationError<'_> {}
 
-impl<'a> From<CompilationError<'a>> for EvaluationError<'a>
+impl<'src> From<CompilationError<'src>> for EvaluationError<'src>
 {
-	fn from(e: CompilationError<'a>) -> Self
+	fn from(e: CompilationError<'src>) -> Self
 	{
 		match e
 		{

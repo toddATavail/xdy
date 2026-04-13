@@ -14,8 +14,6 @@ nom = { workspace = true }
 nom-language = { workspace = true }
 nom_locate = { workspace = true }
 rand = { workspace = true }
-tree-sitter = { workspace = true }
-tree-sitter-xdy = "=0.8.0"
 
 [dependencies.rayon]
 workspace = true
@@ -34,9 +32,6 @@ serde = ["dep:serde"]
 [dev-dependencies]
 criterion = { workspace = true }
 pretty_assertions = { workspace = true }
-
-[build-dependencies]
-cc = { workspace = true }
 
 [[bench]]
 name = "benchmarks"

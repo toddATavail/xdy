@@ -24,17 +24,21 @@ use super::Span;
 /// [VerboseError](nom_language::error::VerboseError), at least because it
 /// preserves the rightmost _parse error_ of an [`alt`](nom::branch::alt)
 /// combinator rather than the one produced by the rightmost _alternative_.
+///
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text being parsed. Error spans
+///   reference slices of the original input.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ParseError<'a>
+pub struct ParseError<'src>
 {
 	/// The errors accumulated during parsing, in reverse order, i.e., the last
 	/// error is the outermost error.
-	pub errors: Vec<(Span<'a>, NomErrorKind<'a>)>
+	pub errors: Vec<(Span<'src>, NomErrorKind<'src>)>
 }
 
 /// The error kind for [`ParseError`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum NomErrorKind<'a>
+pub enum NomErrorKind<'src>
 {
 	/// The label provided by the [`context`](nom::error::context) combinator,
 	/// which is used to understand the context of the failed parse. Each label
@@ -47,7 +51,7 @@ pub enum NomErrorKind<'a>
 	/// when merging errors at equivalent parse positions. Each element of the
 	/// vector represents an aborted parse that failed at the same parse
 	/// position.
-	Synthetic(Vec<ParseError<'a>>),
+	Synthetic(Vec<ParseError<'src>>),
 
 	/// The character expected by the [`char`](nom::character::complete::char)
 	/// combinator.
@@ -118,22 +122,22 @@ impl NomErrorKind<'_>
 
 impl Error for ParseError<'_> {}
 
-impl<'a> nom::error::ParseError<Span<'a>> for ParseError<'a>
+impl<'src> nom::error::ParseError<Span<'src>> for ParseError<'src>
 {
-	fn from_error_kind(input: Span<'a>, kind: ErrorKind) -> Self
+	fn from_error_kind(input: Span<'src>, kind: ErrorKind) -> Self
 	{
 		Self {
 			errors: vec![(input, NomErrorKind::Nom(kind))]
 		}
 	}
 
-	fn append(input: Span<'a>, kind: ErrorKind, mut other: Self) -> Self
+	fn append(input: Span<'src>, kind: ErrorKind, mut other: Self) -> Self
 	{
 		other.errors.push((input, NomErrorKind::Nom(kind)));
 		other
 	}
 
-	fn from_char(input: Span<'a>, c: char) -> Self
+	fn from_char(input: Span<'src>, c: char) -> Self
 	{
 		Self {
 			errors: vec![(input, NomErrorKind::Char(c))]
@@ -171,19 +175,22 @@ impl<'a> nom::error::ParseError<Span<'a>> for ParseError<'a>
 	}
 }
 
-impl<'a> nom::error::ContextError<Span<'a>> for ParseError<'a>
+impl<'src> nom::error::ContextError<Span<'src>> for ParseError<'src>
 {
-	fn add_context(input: Span<'a>, ctx: &'static str, mut other: Self)
-	-> Self
+	fn add_context(
+		input: Span<'src>,
+		ctx: &'static str,
+		mut other: Self
+	) -> Self
 	{
 		other.errors.push((input, NomErrorKind::Context(ctx)));
 		other
 	}
 }
 
-impl<'a, E> nom::error::FromExternalError<Span<'a>, E> for ParseError<'a>
+impl<'src, E> nom::error::FromExternalError<Span<'src>, E> for ParseError<'src>
 {
-	fn from_external_error(input: Span<'a>, kind: ErrorKind, _e: E) -> Self
+	fn from_external_error(input: Span<'src>, kind: ErrorKind, _e: E) -> Self
 	{
 		Self::from_error_kind(input, kind)
 	}

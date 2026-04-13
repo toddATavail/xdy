@@ -17,14 +17,19 @@ use std::fmt::{self, Display, Formatter};
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A function definition.
+///
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text from which this AST was parsed.
+///   Parameter names and variable identifiers are borrowed directly from the
+///   source.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Function<'a>
+pub struct Function<'src>
 {
 	/// The formal parameters of the function, if any.
-	pub parameters: Option<Vec<&'a str>>,
+	pub parameters: Option<Vec<&'src str>>,
 
 	/// The body of the function.
-	pub body: Expression<'a>
+	pub body: Expression<'src>
 }
 
 impl Display for Function<'_>
@@ -49,10 +54,10 @@ impl Display for Function<'_>
 
 /// A parenthesized expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Group<'a>
+pub struct Group<'src>
 {
 	/// The expression inside the parentheses.
-	pub expression: Box<Expression<'a>>
+	pub expression: Box<Expression<'src>>
 }
 
 impl Display for Group<'_>
@@ -77,7 +82,7 @@ impl Display for Constant
 
 /// A variable reference.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Variable<'a>(pub &'a str);
+pub struct Variable<'src>(pub &'src str);
 
 impl Display for Variable<'_>
 {
@@ -89,13 +94,13 @@ impl Display for Variable<'_>
 
 /// A range expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Range<'a>
+pub struct Range<'src>
 {
 	/// The start of the range.
-	pub start: Box<Expression<'a>>,
+	pub start: Box<Expression<'src>>,
 
 	/// The end of the range.
-	pub end: Box<Expression<'a>>
+	pub end: Box<Expression<'src>>
 }
 
 impl Display for Range<'_>
@@ -107,29 +112,34 @@ impl Display for Range<'_>
 }
 
 /// An arbitrary expression.
+///
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text. Inherited from the enclosing
+///   [`Function`]; individual expression nodes borrow variable names from the
+///   source.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expression<'a>
+pub enum Expression<'src>
 {
 	/// A parenthesized expression.
-	Group(Group<'a>),
+	Group(Group<'src>),
 
 	/// A constant value.
 	Constant(Constant),
 
 	/// A variable reference.
-	Variable(Variable<'a>),
+	Variable(Variable<'src>),
 
 	/// A range expression.
-	Range(Range<'a>),
+	Range(Range<'src>),
 
 	/// A dice expression.
-	Dice(DiceExpression<'a>),
+	Dice(DiceExpression<'src>),
 
 	/// An arithmetic expression.
-	Arithmetic(ArithmeticExpression<'a>)
+	Arithmetic(ArithmeticExpression<'src>)
 }
 
-impl<'a> Expression<'a>
+impl<'src> Expression<'src>
 {
 	/// Dispatch this expression to the appropriate method on the given
 	/// [`ASTVisitor`]. Enum variants that are themselves enums
@@ -144,8 +154,8 @@ impl<'a> Expression<'a>
 	///
 	/// # Errors
 	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'a>>(
-		&'a self,
+	pub fn accept<V: ASTVisitor<'src>>(
+		&'src self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{
@@ -179,13 +189,13 @@ impl Display for Expression<'_>
 
 /// A standard dice expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StandardDice<'a>
+pub struct StandardDice<'src>
 {
 	/// The number of dice to roll.
-	pub count: Box<Expression<'a>>,
+	pub count: Box<Expression<'src>>,
 
 	/// The number of faces on each die, starting at 1.
-	pub faces: Box<Expression<'a>>
+	pub faces: Box<Expression<'src>>
 }
 
 impl Display for StandardDice<'_>
@@ -198,10 +208,10 @@ impl Display for StandardDice<'_>
 
 /// A custom dice expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CustomDice<'a>
+pub struct CustomDice<'src>
 {
 	/// The number of dice to roll.
-	pub count: Box<Expression<'a>>,
+	pub count: Box<Expression<'src>>,
 
 	/// The faces themselves.
 	pub faces: Vec<i32>
@@ -226,13 +236,13 @@ impl Display for CustomDice<'_>
 
 /// A drop-lowest expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DropLowest<'a>
+pub struct DropLowest<'src>
 {
 	/// The dice expression.
-	pub dice: Box<DiceExpression<'a>>,
+	pub dice: Box<DiceExpression<'src>>,
 
 	/// The number of dice to drop. Defaults to 1.
-	pub drop: Option<Box<Expression<'a>>>
+	pub drop: Option<Box<Expression<'src>>>
 }
 
 impl Display for DropLowest<'_>
@@ -250,13 +260,13 @@ impl Display for DropLowest<'_>
 
 /// A drop-highest expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DropHighest<'a>
+pub struct DropHighest<'src>
 {
 	/// The dice expression.
-	pub dice: Box<DiceExpression<'a>>,
+	pub dice: Box<DiceExpression<'src>>,
 
 	/// The number of dice to drop. Defaults to 1.
-	pub drop: Option<Box<Expression<'a>>>
+	pub drop: Option<Box<Expression<'src>>>
 }
 
 impl Display for DropHighest<'_>
@@ -274,22 +284,22 @@ impl Display for DropHighest<'_>
 
 /// A dice expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiceExpression<'a>
+pub enum DiceExpression<'src>
 {
 	/// A standard dice expression.
-	Standard(StandardDice<'a>),
+	Standard(StandardDice<'src>),
 
 	/// A custom dice expression.
-	Custom(CustomDice<'a>),
+	Custom(CustomDice<'src>),
 
 	/// A drop-lowest expression.
-	DropLowest(DropLowest<'a>),
+	DropLowest(DropLowest<'src>),
 
 	/// A drop-highest expression.
-	DropHighest(DropHighest<'a>)
+	DropHighest(DropHighest<'src>)
 }
 
-impl<'a> DiceExpression<'a>
+impl<'src> DiceExpression<'src>
 {
 	/// Dispatch this dice expression to the appropriate method on the given
 	/// [`ASTVisitor`].
@@ -302,8 +312,8 @@ impl<'a> DiceExpression<'a>
 	///
 	/// # Errors
 	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'a>>(
-		&'a self,
+	pub fn accept<V: ASTVisitor<'src>>(
+		&'src self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{
@@ -333,13 +343,13 @@ impl Display for DiceExpression<'_>
 
 /// An addition expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Add<'a>
+pub struct Add<'src>
 {
 	/// The augend.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The addend.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Add<'_>
@@ -352,13 +362,13 @@ impl Display for Add<'_>
 
 /// A subtraction expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sub<'a>
+pub struct Sub<'src>
 {
 	/// The minuend.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The subtrahend.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Sub<'_>
@@ -371,13 +381,13 @@ impl Display for Sub<'_>
 
 /// A multiplication expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mul<'a>
+pub struct Mul<'src>
 {
 	/// The multiplicand.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The multiplier.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Mul<'_>
@@ -390,13 +400,13 @@ impl Display for Mul<'_>
 
 /// A division expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Div<'a>
+pub struct Div<'src>
 {
 	/// The dividend.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The divisor.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Div<'_>
@@ -409,13 +419,13 @@ impl Display for Div<'_>
 
 /// A modulo expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mod<'a>
+pub struct Mod<'src>
 {
 	/// The dividend.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The divisor.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Mod<'_>
@@ -428,13 +438,13 @@ impl Display for Mod<'_>
 
 /// An exponentiation expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Exp<'a>
+pub struct Exp<'src>
 {
 	/// The base.
-	pub left: Box<Expression<'a>>,
+	pub left: Box<Expression<'src>>,
 
 	/// The exponent.
-	pub right: Box<Expression<'a>>
+	pub right: Box<Expression<'src>>
 }
 
 impl Display for Exp<'_>
@@ -447,10 +457,10 @@ impl Display for Exp<'_>
 
 /// A negation expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Neg<'a>
+pub struct Neg<'src>
 {
 	/// The operand.
-	pub operand: Box<Expression<'a>>
+	pub operand: Box<Expression<'src>>
 }
 
 impl Display for Neg<'_>
@@ -473,16 +483,16 @@ impl Display for Neg<'_>
 /// they provide [`accept()`](Expression::accept) methods that dispatch to the
 /// appropriate visitor method.
 ///
-/// The [`CodeGenerator`](crate::codegen::CodeGenerator) is the reference
-/// implementation of this trait.
+/// The [`Compiler`](crate::Compiler) is the reference implementation of this
+/// trait.
 ///
 /// # Type parameters
-/// - `'a`: The lifetime of the borrowed source text within the AST.
+/// - `'src`: The lifetime of the borrowed source text within the AST.
 ///
 /// # Associated types
 /// - `Output`: The value produced by visiting a node.
 /// - `Error`: The error type returned on failure.
-pub trait ASTVisitor<'a>
+pub trait ASTVisitor<'src>
 {
 	/// The value produced by visiting a node.
 	type Output;
@@ -493,13 +503,13 @@ pub trait ASTVisitor<'a>
 	/// Visit a [function](Function) definition.
 	fn visit_function(
 		&mut self,
-		node: &'a Function<'a>
+		node: &'src Function<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [group](Group) (parenthesized expression).
 	fn visit_group(
 		&mut self,
-		node: &'a Group<'a>
+		node: &'src Group<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [constant](Constant) value.
@@ -511,79 +521,79 @@ pub trait ASTVisitor<'a>
 	/// Visit a [variable](Variable) reference.
 	fn visit_variable(
 		&mut self,
-		node: &'a Variable<'a>
+		node: &'src Variable<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [range](Range) expression.
 	fn visit_range(
 		&mut self,
-		node: &'a Range<'a>
+		node: &'src Range<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [standard dice](StandardDice) expression.
 	fn visit_standard_dice(
 		&mut self,
-		node: &'a StandardDice<'a>
+		node: &'src StandardDice<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [custom dice](CustomDice) expression.
 	fn visit_custom_dice(
 		&mut self,
-		node: &'a CustomDice<'a>
+		node: &'src CustomDice<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [drop-lowest](DropLowest) expression.
 	fn visit_drop_lowest(
 		&mut self,
-		node: &'a DropLowest<'a>
+		node: &'src DropLowest<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [drop-highest](DropHighest) expression.
 	fn visit_drop_highest(
 		&mut self,
-		node: &'a DropHighest<'a>
+		node: &'src DropHighest<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit an [addition](Add) expression.
 	fn visit_add(
 		&mut self,
-		node: &'a Add<'a>
+		node: &'src Add<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [subtraction](Sub) expression.
 	fn visit_sub(
 		&mut self,
-		node: &'a Sub<'a>
+		node: &'src Sub<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [multiplication](Mul) expression.
 	fn visit_mul(
 		&mut self,
-		node: &'a Mul<'a>
+		node: &'src Mul<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [division](Div) expression.
 	fn visit_div(
 		&mut self,
-		node: &'a Div<'a>
+		node: &'src Div<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [modulo](Mod) expression.
 	fn visit_mod(
 		&mut self,
-		node: &'a Mod<'a>
+		node: &'src Mod<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit an [exponentiation](Exp) expression.
 	fn visit_exp(
 		&mut self,
-		node: &'a Exp<'a>
+		node: &'src Exp<'src>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [negation](Neg) expression.
 	fn visit_neg(
 		&mut self,
-		node: &'a Neg<'a>
+		node: &'src Neg<'src>
 	) -> Result<Self::Output, Self::Error>;
 }
 
@@ -593,31 +603,31 @@ pub trait ASTVisitor<'a>
 
 /// An arithmetic expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ArithmeticExpression<'a>
+pub enum ArithmeticExpression<'src>
 {
 	/// An addition expression.
-	Add(Add<'a>),
+	Add(Add<'src>),
 
 	/// A subtraction expression.
-	Sub(Sub<'a>),
+	Sub(Sub<'src>),
 
 	/// A multiplication expression.
-	Mul(Mul<'a>),
+	Mul(Mul<'src>),
 
 	/// A division expression.
-	Div(Div<'a>),
+	Div(Div<'src>),
 
 	/// A modulo expression.
-	Mod(Mod<'a>),
+	Mod(Mod<'src>),
 
 	/// An exponentiation expression.
-	Exp(Exp<'a>),
+	Exp(Exp<'src>),
 
 	/// A negation expression.
-	Neg(Neg<'a>)
+	Neg(Neg<'src>)
 }
 
-impl<'a> ArithmeticExpression<'a>
+impl<'src> ArithmeticExpression<'src>
 {
 	/// Dispatch this arithmetic expression to the appropriate method on the
 	/// given [`ASTVisitor`].
@@ -630,8 +640,8 @@ impl<'a> ArithmeticExpression<'a>
 	///
 	/// # Errors
 	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'a>>(
-		&'a self,
+	pub fn accept<V: ASTVisitor<'src>>(
+		&'src self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{

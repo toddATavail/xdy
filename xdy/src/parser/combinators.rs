@@ -51,7 +51,10 @@ use super::{
 ////////////////////////////////////////////////////////////////////////////////
 
 /// The type of a span of text.
-pub type Span<'a> = LocatedSpan<&'a str>;
+///
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text being parsed.
+pub type Span<'src> = LocatedSpan<&'src str>;
 
 /// Parse a function definition, without leading whitespace.
 ///

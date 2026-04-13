@@ -3,21 +3,48 @@
 //! The dice language compiles to an [intermediate representation](crate::ir)
 //! (IR). The IR is generated using static single assignment (SSA) form, where
 //! all registers have a uniform type, `i32`.
+//!
+//! The [`Compiler`] implements the [`ASTVisitor`](crate::ast::ASTVisitor)
+//! trait, producing an [`AddressingMode`] from each node. Users who want to
+//! walk the AST for their own purposes can implement [`ASTVisitor`] directly;
+//! the [`Compiler`] serves as the reference implementation.
+//!
+//! # Usage
+//!
+//! Most users should use the top-level [`compile()`] and [`evaluate()`]
+//! functions, which handle the full pipeline automatically. The compiler is
+//! exposed for advanced users who want to drive the pipeline manually — e.g.,
+//! to insert custom AST analysis or transformation passes between parsing and
+//! code generation.
+//!
+//! ```
+//! use xdy::{Compiler, Evaluator, Optimizer, Passes, StandardOptimizer};
+//!
+//! let ast = xdy::parser::parse("2d6 + 3").unwrap();
+//! let function = Compiler::compile(&ast);
+//! let optimized = StandardOptimizer::new(Passes::all())
+//!     .optimize(function)
+//!     .unwrap();
+//! let mut rng = rand::rng();
+//! let evaluation = Evaluator::new(optimized).evaluate([], &mut rng).unwrap();
+//! ```
 
 use std::{
 	collections::HashMap,
+	convert::Infallible,
 	error::Error,
-	fmt::{Display, Formatter},
-	num::IntErrorKind
+	fmt::{Display, Formatter}
 };
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
 use crate::{
 	CanAllocate as _, Optimizer as _, StandardOptimizer,
-	codegen::CodeGenerator,
+	ast::{
+		self, ASTVisitor, ArithmeticExpression, Constant, DiceExpression,
+		Expression
+	},
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
@@ -47,7 +74,7 @@ pub fn compile_unoptimized(
 {
 	let ast =
 		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
-	Ok(CodeGenerator::generate(&ast))
+	Ok(Compiler::compile(&ast))
 }
 
 /// Compile an alleged dice expression into a [function](Function). Optimize the
@@ -133,7 +160,7 @@ pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 {
 	let ast =
 		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
-	let function = CodeGenerator::generate(&ast);
+	let function = Compiler::compile(&ast);
 	let optimizer = StandardOptimizer::new(Default::default());
 	let function = optimizer
 		.optimize(function)
@@ -143,13 +170,13 @@ pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 
 /// An error that may occur during compilation of a dice expression.
 ///
-/// # Type Parameters
-/// - `'a`: The lifetime of the source code that was being compiled.
+/// # Lifetimes
+/// - `'src`: The lifetime of the source code that was being compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompilationError<'a>
+pub enum CompilationError<'src>
 {
 	/// The source code could not be parsed.
-	CompilationFailed(ParseError<'a>),
+	CompilationFailed(ParseError<'src>),
 
 	/// The function could not be optimized.
 	OptimizationFailed
@@ -176,269 +203,26 @@ impl Display for CompilationError<'_>
 impl Error for CompilationError<'_> {}
 
 ////////////////////////////////////////////////////////////////////////////////
-//                          Syntax tree visitation.                           //
+//                                 Compiler.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A visitor for the syntax tree produced by the dice language parser. Each
-/// method visits a specific type of node in the syntax tree, and is responsible
-/// for visiting any interesting children of that node.
+/// A compiler that walks the abstract syntax tree (AST) and emits intermediate
+/// representation (IR) code. The IR represents the body of a single
+/// [function](Function).
 ///
-/// # Type Parameters
-/// - `E`: The type of error that can occur while visiting the syntax tree.
-pub trait SyntaxTreeVisitor<E>
-{
-	/// Visit a "function" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "function" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "function" node.
-	fn visit_function(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "parameters" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "parameters" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "parameters" node.
-	fn visit_parameters(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "parameter" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "parameter" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "parameter" node.
-	fn visit_parameter(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "variable" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "variable" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "variable" node.
-	fn visit_variable(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "group" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "group" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "group" node.
-	fn visit_group(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "range" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "range" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "range" node.
-	fn visit_range(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "standard_dice" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "standard_dice" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "standard_dice" node.
-	fn visit_standard_dice(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "custom_dice" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "custom_dice" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "custom_dice" node.
-	fn visit_custom_dice(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "custom_faces" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "custom_faces" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "custom_faces" node.
-	fn visit_custom_faces(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "custom_face" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "custom_face" node.
-	///
-	/// Visit a "drop_lowest" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "drop_lowest" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "drop_lowest" node.
-	fn visit_drop_lowest(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "drop_highest" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "drop_highest" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "drop_highest" node.
-	fn visit_drop_highest(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "add" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "add" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "add" node.
-	fn visit_add(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "sub" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "sub" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "sub" node.
-	fn visit_sub(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "mul" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "mul" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "mul" node.
-	fn visit_mul(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "div" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "div" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "div" node.
-	fn visit_div(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "mod" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "mod" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "mod" node.
-	fn visit_mod(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit an "exp" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "exp" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "exp" node.
-	fn visit_exp(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "neg" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "neg" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "neg" node.
-	fn visit_neg(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "constant" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "constant" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "constant" node.
-	fn visit_constant(&mut self, node: &Node) -> Result<(), E>;
-
-	/// Visit a "negative_constant" node in the syntax tree.
-	///
-	/// # Parameters
-	/// - `node`: The "negative_constant" node.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the "negative_constant" node.
-	fn visit_negative_constant(&mut self, node: &Node) -> Result<(), E>;
-}
-
-/// Provides the ability to apply a [visitor](SyntaxTreeVisitor).
+/// The compiler borrows variable names from the AST during generation, then
+/// copies them into owned strings when assembling the output [`Function`]. This
+/// keeps the generation phase zero-copy while producing a self-contained
+/// output.
 ///
-/// # Type Parameters
-/// - `V`: The type of visitor to apply.
-/// - `E`: The type of error that can occur while visiting.
-pub trait CanVisitSyntaxTree<V, E>
-where
-	V: SyntaxTreeVisitor<E>
-{
-	/// Apply the specified [visitor](SyntaxTreeVisitor) to the receiver.
-	///
-	/// # Parameters
-	/// - `visitor`: The visitor to apply.
-	///
-	/// # Errors
-	/// An error if one occurs while visiting the receiver.
-	fn visit(&self, node: &mut V) -> Result<(), E>;
-}
-
-impl<V, E> CanVisitSyntaxTree<V, E> for Node<'_>
-where
-	V: SyntaxTreeVisitor<E>
-{
-	fn visit(&self, visitor: &mut V) -> Result<(), E>
-	{
-		match self.kind()
-		{
-			"function" => visitor.visit_function(self),
-			"parameters" => visitor.visit_parameters(self),
-			"parameter" => visitor.visit_parameter(self),
-			"variable" => visitor.visit_variable(self),
-			"range" => visitor.visit_range(self),
-			"group" => visitor.visit_group(self),
-			"standard_dice" => visitor.visit_standard_dice(self),
-			"custom_dice" => visitor.visit_custom_dice(self),
-			"custom_faces" => visitor.visit_custom_faces(self),
-			"drop_lowest" => visitor.visit_drop_lowest(self),
-			"drop_highest" => visitor.visit_drop_highest(self),
-			"add" => visitor.visit_add(self),
-			"sub" => visitor.visit_sub(self),
-			"mul" => visitor.visit_mul(self),
-			"div" => visitor.visit_div(self),
-			"mod" => visitor.visit_mod(self),
-			"exp" => visitor.visit_exp(self),
-			"neg" => visitor.visit_neg(self),
-			"constant" => visitor.visit_constant(self),
-			"negative_constant" => visitor.visit_negative_constant(self),
-			kind => unreachable!("Unexpected node kind: {}", kind)
-		}
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//                              Code generation.                              //
-////////////////////////////////////////////////////////////////////////////////
-
-/// A compiler for the dice syntax tree, capable of walking the syntax tree and
-/// generating intermediate representation (IR) code. The IR code represents the
-/// body of a single function.
-#[derive(Debug)]
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text from which the AST was parsed.
+///   Variable names are borrowed from the AST (and transitively from the source
+///   text) during compilation, then copied into owned strings when assembling
+///   the output [`Function`].
 pub struct Compiler<'src>
 {
-	/// The source code.
-	source: &'src [u8],
-
-	/// The instructions emitted by the code generator.
+	/// The instructions emitted by the compiler.
 	instructions: Vec<Instruction>,
 
 	/// The next register to allocate.
@@ -447,61 +231,68 @@ pub struct Compiler<'src>
 	/// The next rolling record to allocate.
 	next_rolling_record: RollingRecordIndex,
 
-	/// The arity of the function.
+	/// The arity of the function, i.e., the number of formal parameters.
 	arity: usize,
 
-	/// The parameters and external variables.
-	variables: HashMap<String, RegisterIndex>,
-
-	/// The expression map, mapping node identifiers to registers.
-	expressions: HashMap<usize, AddressingMode>
+	/// The parameters and external variables, mapped to their register
+	/// indices.
+	variables: HashMap<&'src str, RegisterIndex>
 }
 
 impl<'src> Compiler<'src>
 {
-	/// Create a new code generator.
+	/// Compile the specified AST into a [`Function`] in intermediate
+	/// representation (IR).
+	///
+	/// This is equivalent to calling [`compile_unoptimized()`] after parsing,
+	/// but gives the caller access to the AST between parsing and compilation.
 	///
 	/// # Parameters
-	/// - `source`: The source code.
+	/// - `ast`: The parsed function definition.
 	///
 	/// # Returns
-	/// The new code generator.
-	pub fn new(source: &'src [u8]) -> Self
+	/// The compiled function in intermediate representation.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// use xdy::Compiler;
+	///
+	/// let ast = xdy::parser::parse("2d6 + 3").unwrap();
+	/// let function = Compiler::compile(&ast);
+	/// assert_eq!(function.arity(), 0);
+	/// ```
+	pub fn compile(ast: &'src ast::Function<'src>) -> Function
 	{
-		Self {
-			source,
+		let mut compiler = Self {
 			instructions: Vec::new(),
 			next_register: RegisterIndex(0),
 			next_rolling_record: RollingRecordIndex(0),
 			arity: 0,
-			variables: HashMap::new(),
-			expressions: HashMap::new()
-		}
+			variables: HashMap::new()
+		};
+		let _ = compiler.visit_function(ast);
+		compiler.finish()
 	}
 
-	/// Compile the specified syntax tree into a [function](Function) in
-	/// intermediate representation (IR).
-	///
-	/// # Parameters
-	/// - `tree`: The root of the syntax tree.
+	/// Assemble the output [`Function`] from the accumulated state.
 	///
 	/// # Returns
-	/// The generated code.
-	pub fn compile(mut self, tree: Tree) -> Function
+	/// The compiled function.
+	fn finish(self) -> Function
 	{
-		tree.root_node().visit(&mut self).unwrap();
 		let mut parameters = Vec::new();
 		let mut externals = Vec::new();
-		for binding in &self.variables
+		for (name, register) in &self.variables
 		{
-			match binding.1.0 >= self.arity
+			match register.0 >= self.arity
 			{
-				false => parameters.push(binding),
-				true => externals.push(binding)
+				false => parameters.push((name, register)),
+				true => externals.push((name, register))
 			}
 		}
-		parameters.sort_by_key(|(_, register)| **register);
-		externals.sort_by_key(|(_, register)| **register);
+		parameters.sort_by_key(|(_, register)| register.0);
+		externals.sort_by_key(|(_, register)| register.0);
 		let parameters = parameters
 			.into_iter()
 			.map(|(name, _)| name.to_string())
@@ -519,23 +310,23 @@ impl<'src> Compiler<'src>
 		}
 	}
 
-	/// Get the register index for the specified parameter or external variable,
-	/// allocating a new register if necessary.
+	/// Get the register index for the specified variable, allocating a new
+	/// register if necessary.
 	///
 	/// # Parameters
-	/// - `parameter`: The parameter.
+	/// - `name`: The variable name.
 	///
 	/// # Returns
-	/// The register index for the specified parameter.
-	fn variable(&mut self, parameter: &'_ str) -> RegisterIndex
+	/// The register index for the variable.
+	fn variable(&mut self, name: &'src str) -> RegisterIndex
 	{
-		match self.variables.get(parameter)
+		match self.variables.get(name)
 		{
 			Some(&register) => register,
 			None =>
 			{
 				let register = self.allocate_register();
-				self.variables.insert(parameter.to_string(), register);
+				self.variables.insert(name, register);
 				register
 			}
 		}
@@ -561,447 +352,430 @@ impl<'src> Compiler<'src>
 		self.next_rolling_record.allocate()
 	}
 
-	/// Memoize the addressing mode for the specified expression.
-	///
-	/// # Parameters
-	/// - `expression`: The expression to memoize.
-	/// - `mode`: The addressing mode to push.
-	#[inline]
-	fn memoize(&mut self, expression: &Node<'_>, mode: AddressingMode)
-	{
-		let _ = self.expressions.insert(expression.id(), mode);
-	}
-
-	/// Get the addressing mode for the specified expression.
-	///
-	/// # Parameters
-	/// - `expression`: The expression.
-	///
-	/// # Returns
-	/// The addressing mode for the specified expression.
-	///
-	/// # Panics
-	/// Panics if the addressing mode for the specified expression is not
-	/// memoized.
-	#[inline]
-	fn expression(&self, expression: &Node<'_>) -> AddressingMode
-	{
-		self.expressions[&expression.id()]
-	}
-
 	/// Emit an instruction.
 	///
 	/// # Parameters
 	/// - `instruction`: The instruction to emit.
+	#[inline]
 	fn emit(&mut self, instruction: Instruction)
 	{
 		self.instructions.push(instruction);
 	}
 
-	/// Find all external variables that are descendants of the specified node.
+	/// Accept an expression and ensure the result is not an unsummed rolling
+	/// record. If the expression produces a
+	/// [`RollingRecord`](AddressingMode::RollingRecord), emit a
+	/// [`SumRollingRecord`](crate::ir::SumRollingRecord) instruction to reduce
+	/// it to a register.
 	///
 	/// # Parameters
-	/// - `node`: The node.
+	/// - `expr`: The expression to accept.
 	///
 	/// # Returns
-	/// The external variables.
-	fn find_externals(&self, node: Node<'_>) -> Vec<&str>
-	{
-		let language = tree_sitter_xdy::language();
-		let query = Query::new(
-			&language,
-			"(variable identifier: (identifier) @external)"
-		)
-		.unwrap();
-		let mut cursor = QueryCursor::new();
-		cursor
-			.captures(&query, node, self.source)
-			.map(|(capture, _)| {
-				assert_eq!(capture.captures.len(), 1);
-				let capture = capture.captures[0].node;
-				let identifier = capture.utf8_text(self.source).unwrap();
-				identifier
-			})
-			.copied()
-			.collect()
-	}
-}
-
-impl SyntaxTreeVisitor<()> for Compiler<'_>
-{
-	fn visit_function(&mut self, node: &Node) -> Result<(), ()>
-	{
-		let parameters = node.child_by_field_name("parameters");
-		if let Some(parameters) = parameters
-		{
-			parameters.visit(self).unwrap();
-		}
-		let body = node.child_by_field_name("body").unwrap();
-		// Register all of the external variables before visiting the body.
-		let externals = self
-			.find_externals(body)
-			.iter()
-			.map(|s| s.to_string())
-			.collect::<Vec<_>>();
-		for external in externals
-		{
-			self.variable(&external);
-		}
-		body.visit(self).unwrap();
-		// The last instruction in the function is always a return instruction.
-		let return_value = self.expression(&body);
-		self.emit(Instruction::r#return(return_value));
-		Ok(())
-	}
-
-	fn visit_parameters(&mut self, node: &Node) -> Result<(), ()>
-	{
-		for parameter in
-			node.children_by_field_name("parameter", &mut node.walk())
-		{
-			parameter.visit(self).unwrap();
-		}
-		// The arity of the function is the number of parameters, and the
-		// variable map can only contain parameters at this point.
-		self.arity = self.variables.len();
-		Ok(())
-	}
-
-	fn visit_parameter(&mut self, node: &Node) -> Result<(), ()>
-	{
-		let parameter = node.utf8_text(self.source).unwrap();
-		// Allocate a register for the parameter. We don't need the register
-		// index, so we're just doing this for the side effect.
-		self.variable(parameter);
-		Ok(())
-	}
-
-	fn visit_variable(&mut self, node: &Node) -> Result<(), ()>
-	{
-		let identifier = node.child_by_field_name("identifier").unwrap();
-		let identifier = identifier.utf8_text(self.source).unwrap();
-		let register = self.variable(identifier);
-		self.memoize(node, AddressingMode::Register(register));
-		Ok(())
-	}
-
-	fn visit_group(&mut self, node: &Node) -> Result<(), ()>
-	{
-		let expression = node.child_by_field_name("expression").unwrap();
-		expression.visit(self).unwrap();
-		let expression = self.expression(&expression);
-		self.memoize(node, expression);
-		Ok(())
-	}
-
-	fn visit_range(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// Visit the children first.
-		let start = node.child_by_field_name("start").unwrap();
-		start.visit(self).unwrap();
-		let end = node.child_by_field_name("end").unwrap();
-		end.visit(self).unwrap();
-		// Emit the instruction to calculate the range. Ranges aren't subject
-		// to drop expressions, so we can compute the sum unconditionally.
-		let dest = self.allocate_rolling_record();
-		let start = self.expression(&start);
-		let end = self.expression(&end);
-		self.emit(Instruction::roll_range(dest, start, end));
-		let sum = self.allocate_register();
-		self.emit(Instruction::sum_rolling_record(sum, dest));
-		// Record the sum register as the result of the whole range expression.
-		self.memoize(node, sum.into());
-		Ok(())
-	}
-
-	fn visit_standard_dice(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// Visit the children first.
-		let count = node.child_by_field_name("count").unwrap();
-		count.visit(self).unwrap();
-		let faces = node.child_by_field_name("faces").unwrap();
-		faces.visit(self).unwrap();
-		// Emit the instruction to roll the dice.
-		let dest = self.allocate_rolling_record();
-		let count = self.expression(&count);
-		let faces = self.expression(&faces);
-		self.emit(Instruction::roll_standard_dice(dest, count, faces));
-		self.emit_dice_expression_epilogue(node, dest)
-	}
-
-	fn visit_custom_dice(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// Visit the children first.
-		let count = node.child_by_field_name("count").unwrap();
-		count.visit(self).unwrap();
-		let faces = node.child_by_field_name("faces").unwrap();
-		faces.visit(self).unwrap();
-		// Collect the custom faces.
-		let faces = faces
-			.children_by_field_name("face", &mut node.walk())
-			.map(|face| Immediate::try_from(self.expression(&face)).unwrap().0)
-			.collect();
-		// Emit the instruction to roll the dice.
-		let dest = self.allocate_rolling_record();
-		let count = self.expression(&count);
-		self.emit(Instruction::roll_custom_dice(dest, count, faces));
-		self.emit_dice_expression_epilogue(node, dest)
-	}
-
-	fn visit_custom_faces(&mut self, node: &Node) -> Result<(), ()>
-	{
-		for face in node.children_by_field_name("face", &mut node.walk())
-		{
-			face.visit(self).unwrap();
-		}
-		Ok(())
-	}
-
-	fn visit_drop_lowest(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// Visit the children first.
-		let dice = node.child_by_field_name("dice").unwrap();
-		dice.visit(self).unwrap();
-		let drop = if let Some(drop) = node.child_by_field_name("drop")
-		{
-			drop.visit(self).unwrap();
-			self.expression(&drop)
-		}
-		else
-		{
-			// If no drop expression is provided, drop one die.
-			Immediate(1).into()
-		};
-		// Emit the instruction to drop the lowest dice.
-		let dice = self.expression(&dice).try_into().unwrap();
-		self.emit(Instruction::drop_lowest(dice, drop));
-		self.emit_dice_expression_epilogue(node, dice)
-	}
-
-	fn visit_drop_highest(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// Visit the children first.
-		let dice = node.child_by_field_name("dice").unwrap();
-		dice.visit(self).unwrap();
-		let drop = if let Some(drop) = node.child_by_field_name("drop")
-		{
-			drop.visit(self).unwrap();
-			self.expression(&drop)
-		}
-		else
-		{
-			// If no drop expression is provided, drop one die.
-			Immediate(1).into()
-		};
-		// Emit the instruction to drop the highest dice.
-		let dice = self.expression(&dice).try_into().unwrap();
-		self.emit(Instruction::drop_highest(dice, drop));
-		self.emit_dice_expression_epilogue(node, dice)
-	}
-
-	#[inline]
-	fn visit_add(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::add)
-	}
-
-	#[inline]
-	fn visit_sub(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::sub)
-	}
-
-	#[inline]
-	fn visit_mul(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::mul)
-	}
-
-	#[inline]
-	fn visit_div(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::div)
-	}
-
-	#[inline]
-	fn visit_mod(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::r#mod)
-	}
-
-	#[inline]
-	fn visit_exp(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_binary_expression(node, Instruction::exp)
-	}
-
-	fn visit_neg(&mut self, node: &Node) -> Result<(), ()>
-	{
-		// If the negation is applied to a constant, we must simplify it here,
-		// otherwise we lose the opportunity to capture i32::MIN.
-		let op = node.child_by_field_name("op").unwrap();
-		if op.kind() == "constant"
-		{
-			// Be sure to include the sign in the constant lexeme.
-			self.visit_any_constant(node).unwrap();
-			return Ok(());
-		}
-		// Otherwise, visit the operand normally.
-		op.visit(self).unwrap();
-		let dest = self.allocate_register();
-		let op = self.expression(&op);
-		self.emit(Instruction::neg(dest, op));
-		self.memoize(node, dest.into());
-		Ok(())
-	}
-
-	#[inline]
-	fn visit_constant(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_any_constant(node)
-	}
-
-	#[inline]
-	fn visit_negative_constant(&mut self, node: &Node) -> Result<(), ()>
-	{
-		self.visit_any_constant(node)
-	}
-}
-
-impl Compiler<'_>
-{
-	/// Visits any kind of constant node to generate code. Saturate the constant
-	/// to the maximum or minimum value if it overflows.
-	///
-	/// # Parameters
-	/// - `node`: The constant node to visit.
-	fn visit_any_constant(&mut self, node: &Node) -> Result<(), ()>
-	{
-		let constant = node.utf8_text(self.source).unwrap();
-		let constant = match constant.parse::<i32>()
-		{
-			Ok(constant) => constant,
-			Err(e) if e.kind() == &IntErrorKind::PosOverflow => i32::MAX,
-			Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
-			Err(_) => unreachable!()
-		};
-		let constant = Immediate(constant);
-		self.memoize(node, constant.into());
-		Ok(())
-	}
-
-	/// Emit an appropriate epilogue for a dice expression. If the specified
-	/// node is inside a drop expression, the result of the dice expression is
-	/// the rolling record itself. Otherwise, the result is the sum of the
-	/// rolling record.
-	fn emit_dice_expression_epilogue(
+	/// The [`AddressingMode`] for the result.
+	fn accept_expression(
 		&mut self,
-		node: &Node,
-		record: RollingRecordIndex
-	) -> Result<(), ()>
+		expr: &'src Expression<'src>
+	) -> AddressingMode
 	{
-		// Unless we're inside a drop expression, we need to sum the result.
-		match node.parent().unwrap().kind()
+		let value = expr.accept(self).unwrap();
+		match value
 		{
-			"drop_lowest" | "drop_highest" =>
-			{
-				// Record the rolling record as the result of the dice
-				// expression.
-				self.memoize(node, record.into());
-			},
-			_ =>
+			AddressingMode::RollingRecord(record) =>
 			{
 				let sum = self.allocate_register();
 				self.emit(Instruction::sum_rolling_record(sum, record));
-				// Record the sum register as the result of the dice expression.
-				self.memoize(node, sum.into());
-			}
+				sum.into()
+			},
+			other => other
 		}
-		Ok(())
 	}
 
-	/// Visits a binary expression node to generate code.
+	/// Generate IR for a binary arithmetic expression.
 	///
 	/// # Parameters
-	/// - `node`: The binary expression node to visit.
-	fn visit_binary_expression(
+	/// - `left`: The left operand.
+	/// - `right`: The right operand.
+	/// - `constructor`: The instruction constructor.
+	///
+	/// # Returns
+	/// The [`AddressingMode`] for the result register.
+	fn generate_binary(
 		&mut self,
-		node: &Node,
-		selector: impl FnOnce(
+		left: &'src Expression<'src>,
+		right: &'src Expression<'src>,
+		constructor: fn(
 			RegisterIndex,
 			AddressingMode,
 			AddressingMode
 		) -> Instruction
-	) -> Result<(), ()>
+	) -> AddressingMode
 	{
-		// Visit the children first.
-		let op1 = node.child_by_field_name("op1").unwrap();
-		op1.visit(self).unwrap();
-		let op2 = node.child_by_field_name("op2").unwrap();
-		op2.visit(self).unwrap();
-		// Emit the instruction to add the values.
+		let op1 = self.accept_expression(left);
+		let op2 = self.accept_expression(right);
 		let dest = self.allocate_register();
-		let op1 = self.expression(&op1);
-		let op2 = self.expression(&op2);
-		self.emit(selector(dest, op1, op2));
-		// Record the destination register.
-		self.memoize(node, dest.into());
-		Ok(())
+		self.emit(constructor(dest, op1, op2));
+		dest.into()
 	}
 }
 
-impl Display for Compiler<'_>
+////////////////////////////////////////////////////////////////////////////////
+//                          ASTVisitor for Compiler.                          //
+////////////////////////////////////////////////////////////////////////////////
+
+impl<'src> ASTVisitor<'src> for Compiler<'src>
 {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result
+	type Output = AddressingMode;
+	type Error = Infallible;
+
+	fn visit_function(
+		&mut self,
+		node: &'src ast::Function<'src>
+	) -> Result<AddressingMode, Infallible>
 	{
-		writeln!(f, "CodeGenerator[")?;
-		writeln!(f, "\t{:?},", String::from_utf8_lossy(self.source))?;
-		write!(f, "Function(")?;
-		let mut first = true;
-		for (parameter, register) in self.variables.iter()
+		// Register formal parameters first, in declaration order.
+		if let Some(ref parameters) = node.parameters
 		{
-			let register = register.0;
-			if register < self.arity
+			for &param in parameters
 			{
-				if !first
-				{
-					write!(f, ", ")?;
-				}
-				write!(f, "{}@{}", parameter, register)?;
-				first = false;
+				self.variable(param);
 			}
+			self.arity = self.variables.len();
 		}
-		writeln!(
-			f,
-			"] r#{} ⚅#{}",
-			self.next_register.0, self.next_rolling_record.0
-		)?;
-		write!(f, "\textern[")?;
-		let mut first = true;
-		for (external, register) in self.variables.iter()
+		// Discover and register external variables before generating the body,
+		// so that their register allocation order is deterministic
+		// (depth-first, left-to-right through the AST).
+		let externals = discover_externals(&node.body);
+		for external in externals
 		{
-			let register = register.0;
-			if register < self.arity
-			{
-				if !first
-				{
-					write!(f, ", ")?;
-				}
-				write!(f, "{}@{}", external, register)?;
-				first = false;
-			}
+			self.variable(external);
 		}
-		writeln!(f, "]")?;
-		writeln!(f, "\tbody:")?;
-		for instruction in &self.instructions
+		// Generate the body.
+		let return_value = self.accept_expression(&node.body);
+		self.emit(Instruction::r#return(return_value));
+		Ok(return_value)
+	}
+
+	fn visit_group(
+		&mut self,
+		node: &'src ast::Group<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.accept_expression(&node.expression))
+	}
+
+	fn visit_constant(
+		&mut self,
+		node: &Constant
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(Immediate(node.0).into())
+	}
+
+	fn visit_variable(
+		&mut self,
+		node: &'src ast::Variable<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let register = self.variable(node.0);
+		Ok(register.into())
+	}
+
+	fn visit_range(
+		&mut self,
+		node: &'src ast::Range<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let start = self.accept_expression(&node.start);
+		let end = self.accept_expression(&node.end);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_range(dest, start, end));
+		let sum = self.allocate_register();
+		self.emit(Instruction::sum_rolling_record(sum, dest));
+		Ok(sum.into())
+	}
+
+	fn visit_standard_dice(
+		&mut self,
+		node: &'src ast::StandardDice<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let count = self.accept_expression(&node.count);
+		let faces = self.accept_expression(&node.faces);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_standard_dice(dest, count, faces));
+		Ok(dest.into())
+	}
+
+	fn visit_custom_dice(
+		&mut self,
+		node: &'src ast::CustomDice<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let count = self.accept_expression(&node.count);
+		let dest = self.allocate_rolling_record();
+		self.emit(Instruction::roll_custom_dice(
+			dest,
+			count,
+			node.faces.clone()
+		));
+		Ok(dest.into())
+	}
+
+	fn visit_drop_lowest(
+		&mut self,
+		node: &'src ast::DropLowest<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = node
+			.dice
+			.accept(self)
+			.unwrap()
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = match &node.drop
 		{
-			writeln!(f, "\t\t{}", instruction)?;
+			Some(expr) => self.accept_expression(expr),
+			None => Immediate(1).into()
+		};
+		self.emit(Instruction::drop_lowest(record, count));
+		Ok(record.into())
+	}
+
+	fn visit_drop_highest(
+		&mut self,
+		node: &'src ast::DropHighest<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = node
+			.dice
+			.accept(self)
+			.unwrap()
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = match &node.drop
+		{
+			Some(expr) => self.accept_expression(expr),
+			None => Immediate(1).into()
+		};
+		self.emit(Instruction::drop_highest(record, count));
+		Ok(record.into())
+	}
+
+	fn visit_add(
+		&mut self,
+		node: &'src ast::Add<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::add))
+	}
+
+	fn visit_sub(
+		&mut self,
+		node: &'src ast::Sub<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::sub))
+	}
+
+	fn visit_mul(
+		&mut self,
+		node: &'src ast::Mul<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::mul))
+	}
+
+	fn visit_div(
+		&mut self,
+		node: &'src ast::Div<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::div))
+	}
+
+	fn visit_mod(
+		&mut self,
+		node: &'src ast::Mod<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::r#mod))
+	}
+
+	fn visit_exp(
+		&mut self,
+		node: &'src ast::Exp<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		Ok(self.generate_binary(&node.left, &node.right, Instruction::exp))
+	}
+
+	fn visit_neg(
+		&mut self,
+		node: &'src ast::Neg<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		// Fold negation of constants into a single immediate.
+		if let Expression::Constant(Constant(n)) = node.operand.as_ref()
+		{
+			return Ok(Immediate(n.saturating_neg()).into());
 		}
-		Ok(())
+		let op = self.accept_expression(&node.operand);
+		let dest = self.allocate_register();
+		self.emit(Instruction::neg(dest, op));
+		Ok(dest.into())
 	}
 }
 
-/// A function in the intermediate representation. This is the output of a
+////////////////////////////////////////////////////////////////////////////////
+//                        External variable discovery.                        //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Discover all external variable references in the given expression, in
+/// depth-first, left-to-right order. This ensures deterministic register
+/// allocation.
+///
+/// # Parameters
+/// - `expr`: The expression to search.
+///
+/// # Returns
+/// The variable names, in discovery order, with duplicates included (the caller
+/// is expected to deduplicate via the variable map).
+fn discover_externals<'src>(expr: &'src Expression<'src>) -> Vec<&'src str>
+{
+	let mut externals = Vec::new();
+	collect_variables(expr, &mut externals);
+	externals
+}
+
+/// Recursively collect variable references from the given expression.
+///
+/// # Parameters
+/// - `expr`: The expression to search.
+/// - `out`: The accumulator for variable names.
+fn collect_variables<'src>(
+	expr: &'src Expression<'src>,
+	out: &mut Vec<&'src str>
+)
+{
+	match expr
+	{
+		Expression::Variable(v) =>
+		{
+			out.push(v.0);
+		},
+		Expression::Group(g) =>
+		{
+			collect_variables(&g.expression, out);
+		},
+		Expression::Range(r) =>
+		{
+			collect_variables(&r.start, out);
+			collect_variables(&r.end, out);
+		},
+		Expression::Dice(d) =>
+		{
+			collect_dice_variables(d, out);
+		},
+		Expression::Arithmetic(a) =>
+		{
+			collect_arithmetic_variables(a, out);
+		},
+		Expression::Constant(_) =>
+		{}
+	}
+}
+
+/// Recursively collect variable references from a dice expression.
+///
+/// # Parameters
+/// - `dice`: The dice expression to search.
+/// - `out`: The accumulator for variable names.
+fn collect_dice_variables<'src>(
+	dice: &'src DiceExpression<'src>,
+	out: &mut Vec<&'src str>
+)
+{
+	match dice
+	{
+		DiceExpression::Standard(d) =>
+		{
+			collect_variables(&d.count, out);
+			collect_variables(&d.faces, out);
+		},
+		DiceExpression::Custom(d) =>
+		{
+			collect_variables(&d.count, out);
+		},
+		DiceExpression::DropLowest(d) =>
+		{
+			collect_dice_variables(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				collect_variables(drop, out);
+			}
+		},
+		DiceExpression::DropHighest(d) =>
+		{
+			collect_dice_variables(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				collect_variables(drop, out);
+			}
+		}
+	}
+}
+
+/// Recursively collect variable references from an arithmetic expression.
+///
+/// # Parameters
+/// - `arith`: The arithmetic expression to search.
+/// - `out`: The accumulator for variable names.
+fn collect_arithmetic_variables<'src>(
+	arith: &'src ArithmeticExpression<'src>,
+	out: &mut Vec<&'src str>
+)
+{
+	match arith
+	{
+		ArithmeticExpression::Add(a) =>
+		{
+			collect_variables(&a.left, out);
+			collect_variables(&a.right, out);
+		},
+		ArithmeticExpression::Sub(s) =>
+		{
+			collect_variables(&s.left, out);
+			collect_variables(&s.right, out);
+		},
+		ArithmeticExpression::Mul(m) =>
+		{
+			collect_variables(&m.left, out);
+			collect_variables(&m.right, out);
+		},
+		ArithmeticExpression::Div(d) =>
+		{
+			collect_variables(&d.left, out);
+			collect_variables(&d.right, out);
+		},
+		ArithmeticExpression::Mod(m) =>
+		{
+			collect_variables(&m.left, out);
+			collect_variables(&m.right, out);
+		},
+		ArithmeticExpression::Exp(e) =>
+		{
+			collect_variables(&e.left, out);
+			collect_variables(&e.right, out);
+		},
+		ArithmeticExpression::Neg(n) =>
+		{
+			collect_variables(&n.operand, out);
+		}
+	}
+}
+
+/// A function in the intermediate representation. This is the output of the
 /// [compiler](Compiler).
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

@@ -52,6 +52,7 @@ Don't go dark. Surface: unexpected complexity, discovered bugs, requirement ambi
 - **No speculative refactoring**: Bug fixes don't need surrounding "improvements"
 - **Dependencies require approval**: Adding crates is a design decision
 - **Tests must pass**: Fix or explain failures before review
+- **Run `just verify` before presenting work for review**: This runs fmt, clippy, and tests in one shot. Do not announce readiness until it passes.
 
 ## Commit Hygiene
 
