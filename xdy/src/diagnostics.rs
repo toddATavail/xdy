@@ -30,7 +30,7 @@
 //! ```
 //!
 //! Each fix inserts, removes, or wraps characters in the source string, making
-//! progress toward a clean parse. An [`OffsetMap`] tracks cumulative
+//! progress toward a clean parse. An `OffsetMap` tracks cumulative
 //! adjustments so that diagnostic spans are mapped back to positions in the
 //! original source. The loop terminates when parsing succeeds or when an
 //! unfixable error is encountered.
@@ -274,7 +274,7 @@ pub struct DiagnoseResult
 	pub diagnostics: Vec<Diagnostic>,
 
 	/// The fully corrected source string, if all errors were fixable. This
-	/// string will parse cleanly via [`parser::parse`](crate::parser::parse).
+	/// string will parse cleanly via [`parser::parse`].
 	pub corrected_source: Option<String>
 }
 

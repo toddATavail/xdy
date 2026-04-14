@@ -80,6 +80,22 @@ pub fn compile_unoptimized(
 /// Compile an alleged dice expression into a [function](Function). Optimize the
 /// function using the [standard optimizer](StandardOptimizer).
 ///
+/// # Pipeline
+///
+/// This function drives the full compilation pipeline:
+///
+/// ```mermaid
+/// graph LR
+///     A["Source Code<br/><code>&amp;str</code>"] --> B["Parser<br/><code>parser::parse</code>"]
+///     B --> C["AST<br/><code>ast::Function</code>"]
+///     C --> D["Compiler<br/><code>Compiler::compile</code>"]
+///     D --> E["IR<br/><code>Function</code>"]
+///     E --> F["Optimizer<br/><code>StandardOptimizer</code>"]
+///     F --> G["Optimized IR<br/><code>Function</code>"]
+///     style A fill:#f9f,stroke:#333,color:#000
+///     style G fill:#9f9,stroke:#333,color:#000
+/// ```
+///
 /// # Parameters
 /// - `source`: The source code to compile.
 ///
@@ -156,6 +172,7 @@ pub fn compile_unoptimized(
 /// # Ok(())
 /// # }
 /// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 {
 	let ast =

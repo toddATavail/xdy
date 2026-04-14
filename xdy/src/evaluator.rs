@@ -195,6 +195,38 @@ where
 /// * Division by zero is treated as zero,
 /// * Zero to the power of zero is treated as one,
 /// * Bases raised to negative exponents are treated as zero.
+///
+/// # Virtual machine model
+///
+/// The evaluator is a simple register machine with two register files:
+///
+/// ```mermaid
+/// graph TD
+///     subgraph VM["Evaluator VM"]
+///         direction TB
+///         PC["Program Counter"]
+///         subgraph RF["Register Bank (i32)"]
+///             R0["@0: param/extern"]
+///             R1["@1: param/extern"]
+///             RN["@N: computed"]
+///         end
+///         subgraph RR["Rolling Record Bank"]
+///             RR0["⚅0: dice/range results"]
+///             RR1["⚅1: dice/range results"]
+///         end
+///         RES["Result Register"]
+///     end
+///     F["Function (IR)"] --> PC
+///     RNG["pRNG"] --> RR
+///     ARGS["Arguments"] --> RF
+///     ENV["Environment"] --> RF
+///     VM --> OUT["Evaluation"]
+///     style VM fill:#e8f4fd,stroke:#333,color:#000
+///     style RF fill:#d4edda,stroke:#333,color:#000
+///     style RR fill:#fff3cd,stroke:#333,color:#000
+///     style OUT fill:#9f9,stroke:#333,color:#000
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluator

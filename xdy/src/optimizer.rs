@@ -61,6 +61,25 @@ pub trait Optimizer<E>
 /// a [function](Function). The passes are applied in sequence, and the
 /// optimizer continues to apply passes until no further changes are made to the
 /// function.
+///
+/// # Fixed-point optimization loop
+///
+/// ```mermaid
+/// graph TD
+///     A["Input Function"] --> B["CSE"]
+///     B --> C["Constant Commuting"]
+///     C --> D["Constant Folding"]
+///     D --> E["Strength Reduction"]
+///     E --> F["Dead Code Elimination"]
+///     F --> G{"Changed?"}
+///     G -- Yes --> B
+///     G -- No --> H["Register Coalescing"]
+///     H --> I["Optimized Function"]
+///     style A fill:#f9f,stroke:#333,color:#000
+///     style I fill:#9f9,stroke:#333,color:#000
+///     style G fill:#ff9,stroke:#333,color:#000
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub struct StandardOptimizer(Passes);
 
 impl StandardOptimizer

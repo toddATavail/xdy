@@ -7,36 +7,32 @@
 //! are in uppercase:
 //!
 //! ```text
-//! function ::= [parameters] expression
-//! parameters ::= parameter {',' parameter} ':'
-//! parameter ::= IDENTIFIER
-//! expression ::= add_sub
-//! add_sub ::= mul_div_mod {('+' | '-') mul_div_mod}
-//! mul_div_mod ::= exponent {('*' | '×' | '/' | '÷' | '%') exponent}
-//! exponent ::= unary {'^' unary}
-//! unary ::= ('-' unary | primary)
-//! primary ::= range | dice | group | CONSTANT | variable
-//! group ::= '(' expression ')'
-//! variable ::= '{' IDENTIFIER '}'
-//! range ::= '[' expression ':' expression ']'
-//! dice ::= (standard_dice | custom_dice) (drop_lowest | drop_highest)*
-//! standard_dice ::= dice_count D_OPERATOR standard_faces
-//! custom_dice ::= dice_count D_OPERATOR custom_faces
-//! dice_count ::= CONSTANT | variable | group
+//! function       ::= parameters? expression
+//! parameters     ::= parameter (',' parameter)* ':'
+//! parameter      ::= IDENTIFIER
+//! expression     ::= add_sub
+//! add_sub        ::= mul_div_mod (('+' | '-') mul_div_mod)*
+//! mul_div_mod    ::= unary (('*' | '/' | '%') unary)*
+//! unary          ::= '-' unary | exponent
+//! exponent       ::= primary ('^' unary)?
+//! primary        ::= range | dice | group | variable | CONSTANT
+//! group          ::= '(' expression ')'
+//! variable       ::= '{' IDENTIFIER '}'
+//! range          ::= '[' expression ':' expression ']'
+//! dice           ::= base_dice drop_clause*
+//! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
+//! dice_count     ::= CONSTANT | variable | group
 //! standard_faces ::= CONSTANT | variable | group
-//! custom_faces ::= '[' CONSTANT {',' CONSTANT} ']'
-//! drop_lowest ::= 'drop' 'lowest' [drop_expression]
-//! drop_highest ::= 'drop' 'highest' [drop_expression]
-//! drop_expression ::= CONSTANT | variable | group
-//! CONSTANT ::= ['-'] {DIGIT}
-//! D_OPERATOR ::= 'd' | 'D'
-//! IDENTIFIER ::= {ALPHA1 | '_'} {ALPHANUMBERIC1 | '_' | '-'}
-//! DIGIT ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-//! ALPHA1 ::= ? any alphabetic character ?
-//! ALPHANUMBERIC1 ::= ? any alphanumeric character ?
-//! WHITESPACE ::= ? any whitespace, permitted between tokens ?
+//! custom_faces   ::= '[' CONSTANT (',' CONSTANT)* ']'
+//! drop_clause    ::= 'drop' ('lowest' | 'highest') drop_expression?
+//! drop_expression::= CONSTANT | variable | group
+//! CONSTANT       ::= '-'? DIGIT+
+//! D_OPERATOR     ::= 'd' | 'D'
+//! IDENTIFIER     ::= (ALPHA | '_') (ALPHANUMERIC | '_' | '-')*
 //! ```
 //!
+//! The following railroad diagram is generated from the EBNF grammar above:
+#![doc = include_str!("../doc/xdy.svg")]
 //! Parsing is based on the [`nom`] library, which provides a combinator-based
 //! approach to parsing.
 

@@ -13,8 +13,10 @@ categories = ["compilers", "parsing", "game-development", "mathematics"]
 repository = "https://github.com/toddATavail/xdy"
 
 [workspace.dependencies]
+aquamarine = "0.6"
 cc = "1.1.8"
 criterion = { version = "0.8.2", features = ["html_reports"] }
+ebnsf = "0.1"
 nom = "8.0.0"
 nom-language = "0.1.0"
 nom_locate = "5.0.0"

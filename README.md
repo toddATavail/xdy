@@ -16,6 +16,7 @@
 * [Performance](#performance)
 * [Safety](#safety)
 * [Cargo features](#cargo-features)
+* [Project structure](#project-structure)
 * [Planned work](#planned-work)
 
 ## Overview
@@ -216,6 +217,15 @@ Only 3 pathological cases (deeply right-nested with repeated subexpressions) sho
 
 * `parallel-histogram`: Enables parallel computation of probability distributions. This feature requires the `rayon` crate, and is enabled by default.
 * `serde`: Implements the `Serialize` and `Deserialize` traits for various types. This feature requires the `serde` crate, and is enabled by default.
+
+## Project structure
+
+The workspace comprises two crates:
+
+| Crate | Description |
+|-------|-------------|
+| [`xdy`](xdy/) | The main crate: parser, compiler, optimizer, evaluator, histogram engine, and diagnostics. See the [crate README](xdy/README.md) for an architectural deep-dive, including the instruction set reference, virtual machine model, and optimizer internals. |
+| [`tree-sitter-xdy`](tree-sitter-xdy/) | A tree-sitter grammar for the xDy language. Preserved for editor integration (syntax highlighting, code folding) but no longer used by the compilation pipeline. |
 
 ## Planned work
 

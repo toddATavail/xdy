@@ -10,10 +10,14 @@ categories = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+aquamarine = { workspace = true }
 nom = { workspace = true }
 nom-language = { workspace = true }
 nom_locate = { workspace = true }
 rand = { workspace = true }
+
+[build-dependencies]
+ebnsf = { workspace = true }
 
 [dependencies.rayon]
 workspace = true

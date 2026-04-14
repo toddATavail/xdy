@@ -1,17 +1,34 @@
 //! # Intermediate representation
 //!
-//! The intermediate representation (IR) of `xDy` expresses a simple register
-//! transfer language. It supports [immediate](AddressingMode::Immediate) and
-//! [register](AddressingMode::Register) [addressing modes](AddressingMode).
-//! There are two types of register: [`i32`](RegisterIndex) and
-//! [rolling&#32;record](RollingRecordIndex). The
-//! [program&#32;counter](ProgramCounter) is a special register that holds the
-//! [function](Function)-relative index of the currently executing instruction.
-//! The result register is a special register that holds the result of the
-//! current evaluation; it is written by the [return](Return) instruction.
-//! The [evaluator](Evaluator) executes a target function's
-//! [instructions](Instruction) sequentially. There are no control flow
-//! instructions, making the IR purely functional.
+//! The intermediate representation (IR) of the dice language. The instruction
+//! set specifies a simple register transfer language (RTL) for the dice
+//! language. There is no control flow, so the language is purely functional.
+//! No control flow graph (CFG) is necessary, as all instructions reside within
+//! a single basic block.
+//!
+//! # Instruction set architecture
+//!
+//! The ISA has 14 instructions across four categories:
+//!
+//! | Category | Instructions | Destination | Sources |
+//! |----------|-------------|-------------|---------|
+//! | **Roll** | `RollRange`, `RollStandardDice`, `RollCustomDice` | `⚅N` | addressing modes |
+//! | **Drop** | `DropLowest`, `DropHighest` | `⚅N` | addressing mode |
+//! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
+//! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Neg` | `@N` | addressing modes |
+//! | **Control** | `Return` | — | addressing mode |
+//!
+//! # Addressing modes
+//!
+//! Each operand uses one of three addressing modes:
+//!
+//! * **Immediate** — a constant `i32` value, embedded directly in the
+//!   instruction.
+//! * **Register** (`@N`) — an index into the register bank. The register bank
+//!   holds `i32` values for parameters, external variables, and computed
+//!   intermediates.
+//! * **RollingRecord** (`⚅N`) — an index into the rolling record bank. Rolling
+//!   records hold the individual results of dice rolls and range selections.
 
 use std::{
 	cell::{Ref, RefCell},
@@ -23,7 +40,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
-use crate::{Evaluator, Function, RollingRecord};
+use crate::RollingRecord;
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Instruction set.                              //
