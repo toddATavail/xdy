@@ -315,6 +315,7 @@ pub struct ExpectedPlaceholder
 	pub valid_kinds: Vec<&'static str>
 }
 
+#[cfg(test)]
 /// An expected suggestion in an error test case.
 #[derive(Debug)]
 pub struct ExpectedSuggestion
@@ -326,6 +327,7 @@ pub struct ExpectedSuggestion
 	pub placeholders: Vec<ExpectedPlaceholder>
 }
 
+#[cfg(test)]
 /// An expected diagnostic in an error test case.
 #[derive(Debug)]
 pub struct ExpectedDiagnostic
@@ -343,6 +345,7 @@ pub struct ExpectedDiagnostic
 	pub suggestions: Vec<ExpectedSuggestion>
 }
 
+#[cfg(test)]
 /// An error test case.
 #[derive(Debug)]
 pub struct ErrorTestCase
@@ -354,6 +357,7 @@ pub struct ErrorTestCase
 	pub expected_diagnostics: Vec<ExpectedDiagnostic>
 }
 
+#[cfg(test)]
 /// Parse error test cases from a test case file. The file is expected to
 /// conform to the following grammar:
 ///
@@ -415,6 +419,7 @@ pub fn read_error_test_cases(source: &'static str) -> Vec<ErrorTestCase>
 	test_cases
 }
 
+#[cfg(test)]
 /// Parse a single expected diagnostic from its text representation.
 ///
 /// # Parameters
@@ -487,6 +492,7 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 	}
 }
 
+#[cfg(test)]
 /// Parse a placeholder specification from its text representation.
 ///
 /// Expected format: `start..end "description" [kind1, kind2, ...]`

@@ -195,11 +195,20 @@ x, y, z: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
 
 This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2023 MacBook Pro, `xDy` compiled and optimized this expression with mean time `22.664 µs` and evaluated it with mean time `216.89 ns`. Furthermore, the serial probability distribution calculation took mean time `394.85 µs` and the parallel calculation took mean time `291.46 µs`.
 
+The switch from `tree-sitter` to `nom` for parsing delivered a substantial performance improvement across the full compilation pipeline (parse + compile + optimize). Benchmarking 316 expressions across all language features:
+
+* **99% of expressions are faster** (313 of 316 cases improved by more than 1%)
+* **Median improvement: 62%**, with simple expressions up to 89% faster
+* **Aggregate pipeline speedup: 48%** across the entire benchmark corpus
+* Constants improved 76%, variables 66%, dice 62%, ranges 60%, drop expressions 58%
+
+Only 3 pathological cases (deeply right-nested with repeated subexpressions) showed regressions, attributable to optimizer behavior on the different AST structure. See [`benches/reports/comparison.md`](xdy/benches/reports/comparison.md) for the full comparison.
+
 `xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer can also reorder commutative operations and operands to improve opportunities for constant folding and strength reduction. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
 
 ## Safety
 
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. `unsafe` code is limited to the `tree-sitter` dependency, and pertains exclusively to foreign function interfaces (FFIs) that are not exposed to users of the main crate.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains no `unsafe` code.
 
 ## Cargo features
 
@@ -209,10 +218,6 @@ This dice expression involves argument binding, custom dice, and dropping values
 * `serde`: Implements the `Serialize` and `Deserialize` traits for various types. This feature requires the `serde` crate, and is enabled by default.
 
 ## Planned work
-
-### Error reporting
-
-Sadly, I discovered that `tree-sitter` does not support good syntax error reporting until _after_ all of the happy paths were working. I plan to introduce another parser that can provide better error messages if and only if `tree-sitter` fails to parse a dice expression.
 
 ### Macros
 
