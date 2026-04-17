@@ -10,6 +10,7 @@ Cargo.lock
 repl.rs
 
 # Beads / Dolt files (added by bd init)
+.beads/
 .dolt/
 *.db
 .beads-credential-key

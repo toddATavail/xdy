@@ -194,7 +194,11 @@ assert!(
 x, y, z: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
 ```
 
-This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2023 MacBook Pro, `xDy` compiled and optimized this expression with mean time `22.664 µs` and evaluated it with mean time `216.89 ns`. Furthermore, the serial probability distribution calculation took mean time `394.85 µs` and the parallel calculation took mean time `291.46 µs`.
+This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2026 MacBook Pro, `xDy` compiled and optimized this expression with mean time `4.357 µs` and evaluated it with mean time `146.22 ns`. Furthermore, the serial probability distribution calculation took mean time `1028.95 µs` and the parallel calculation took mean time `376.83 µs`.
+
+`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer can also reorder commutative operations and operands to improve opportunities for constant folding and strength reduction. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
+
+### `nom` > `tree-sitter`
 
 The switch from `tree-sitter` to `nom` for parsing delivered a substantial performance improvement across the full compilation pipeline (parse + compile + optimize). Benchmarking 316 expressions across all language features:
 
@@ -204,8 +208,6 @@ The switch from `tree-sitter` to `nom` for parsing delivered a substantial perfo
 * Constants improved 76%, variables 66%, dice 62%, ranges 60%, drop expressions 58%
 
 Only 3 pathological cases (deeply right-nested with repeated subexpressions) showed regressions, attributable to optimizer behavior on the different AST structure. See [`benches/reports/comparison.md`](xdy/benches/reports/comparison.md) for the full comparison.
-
-`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer can also reorder commutative operations and operands to improve opportunities for constant folding and strength reduction. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
 
 ## Safety
 
