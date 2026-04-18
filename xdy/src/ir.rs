@@ -1656,14 +1656,12 @@ impl<'inst> DependencyAnalyzer<'inst>
 					// the readers of its destination to the worklist.
 					let dependency = &self.instructions[pc.0];
 					if let Some(dest) = dependency.destination()
+						&& let Some(readers) = self.readers.get(&dest)
 					{
-						if let Some(readers) = self.readers.get(&dest)
-						{
-							// Only registers and rolling records that do not
-							// represent parameters or external variables have
-							// readers.
-							to_visit.extend(readers.iter().clone());
-						}
+						// Only registers and rolling records that do not
+						// represent parameters or external variables have
+						// readers.
+						to_visit.extend(readers.iter().clone());
 					}
 				}
 			}

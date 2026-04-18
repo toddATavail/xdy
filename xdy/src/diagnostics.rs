@@ -342,95 +342,85 @@ fn analyze_error(
 		});
 
 	// Pattern: closing delimiter expected at EOF → unclosed delimiter.
-	if at_eof
+	if at_eof && let Some((opener, closer)) = expects_delimiter
 	{
-		if let Some((opener, closer)) = expects_delimiter
-		{
-			let opener_pos = find_unmatched_opener(source, opener, closer, pos);
-			return make_unclosed_delimiter(
-				source, opener, closer, opener_pos, pos, offset_map
-			);
-		}
+		let opener_pos = find_unmatched_opener(source, opener, closer, pos);
+		return make_unclosed_delimiter(
+			source, opener, closer, opener_pos, pos, offset_map
+		);
 	}
 
 	// Pattern: expression expected, and the text at the error position is an
 	// identifier → bare identifier in expression context.
-	if expects_expression && !at_eof
-	{
-		if let Some(diag) =
+	if expects_expression
+		&& !at_eof
+		&& let Some(diag) =
 			detect_bare_identifier_at_pos(source, pos, offset_map)
-		{
-			return diag;
-		}
+	{
+		return diag;
 	}
 
 	// Pattern: expression or identifier expected after delimiter/operator.
 	let expects_identifier =
 		expectations.iter().any(|e| e.as_ref() == "identifier");
-	if expects_expression || expects_identifier
+	if (expects_expression || expects_identifier)
+		&& let Some((prev, prev_pos)) = find_preceding_char(source, pos)
 	{
-		if let Some((prev, prev_pos)) = find_preceding_char(source, pos)
+		if prev == 'd' || prev == 'D'
 		{
-			if prev == 'd' || prev == 'D'
-			{
-				return make_missing_dice_faces(
-					source, prev_pos, pos, offset_map
-				);
-			}
-			if "+-*×/÷%^".contains(prev)
-			{
-				return make_missing_right_operand(
-					source, prev, prev_pos, pos, offset_map
-				);
-			}
-			// Opening delimiter with no expression inside:
-			// e.g., `(` → `(0)`, `[` → `[0:0]`, `{` → `{x}`.
-			if prev == '(' || prev == '[' || prev == '{'
-			{
-				return make_incomplete_delimited(
-					source, prev, prev_pos, pos, offset_map
-				);
-			}
-			// After `:` inside a range, e.g., `[1:` → insert end expression and
-			// `]`.
-			if prev == ':'
-			{
-				if let Some(bracket_pos) = source[..prev_pos].rfind('[')
-				{
-					let orig_bracket = offset_map.to_original(bracket_pos);
-					let mut corrected = source[..pos].to_string();
-					let p_start = corrected.len();
-					corrected.push('0');
-					let p_end = corrected.len();
-					corrected.push(']');
-					corrected.push_str(&source[pos..]);
-					return Diagnostic {
-						kind: DiagnosticKind::UnclosedDelimiter {
-							opener: '[',
-							expected_closer: ']'
-						},
-						span: SourceSpan {
-							start: orig_bracket,
-							end: orig_bracket + 1
-						},
-						message: "expected `]` to close `[`".into(),
-						suggestions: vec![Suggestion {
-							description: "insert range end \
+			return make_missing_dice_faces(source, prev_pos, pos, offset_map);
+		}
+		if "+-*×/÷%^".contains(prev)
+		{
+			return make_missing_right_operand(
+				source, prev, prev_pos, pos, offset_map
+			);
+		}
+		// Opening delimiter with no expression inside:
+		// e.g., `(` → `(0)`, `[` → `[0:0]`, `{` → `{x}`.
+		if prev == '(' || prev == '[' || prev == '{'
+		{
+			return make_incomplete_delimited(
+				source, prev, prev_pos, pos, offset_map
+			);
+		}
+		// After `:` inside a range, e.g., `[1:` → insert end expression and
+		// `]`.
+		if prev == ':'
+			&& let Some(bracket_pos) = source[..prev_pos].rfind('[')
+		{
+			let orig_bracket = offset_map.to_original(bracket_pos);
+			let mut corrected = source[..pos].to_string();
+			let p_start = corrected.len();
+			corrected.push('0');
+			let p_end = corrected.len();
+			corrected.push(']');
+			corrected.push_str(&source[pos..]);
+			return Diagnostic {
+				kind: DiagnosticKind::UnclosedDelimiter {
+					opener: '[',
+					expected_closer: ']'
+				},
+				span: SourceSpan {
+					start: orig_bracket,
+					end: orig_bracket + 1
+				},
+				message: "expected `]` to close `[`".into(),
+				suggestions: vec![Suggestion {
+					description: "insert range end \
 								and `]`"
-								.into(),
-							corrected_source: corrected,
-							placeholders: vec![Placeholder {
-								span: SourceSpan {
-									start: p_start,
-									end: p_end
-								},
-								description: "range end",
-								valid_kinds: OPERAND_KINDS
-							}]
-						}]
-					};
-				}
-			}
+						.into(),
+					corrected_source: corrected,
+					placeholders: vec![Placeholder {
+						span: SourceSpan {
+							start: p_start,
+							end: p_end
+						},
+						description: "range end",
+						valid_kinds: OPERAND_KINDS
+					}]
+				}]
+			};
 		}
 	}
 
@@ -476,11 +466,9 @@ fn analyze_error(
 	if expectations
 		.iter()
 		.any(|e| e.as_ref() == "`,`" || e.as_ref() == "`:`")
+		&& let Some(diag) = detect_incomplete_parameter(source, pos, offset_map)
 	{
-		if let Some(diag) = detect_incomplete_parameter(source, pos, offset_map)
-		{
-			return diag;
-		}
+		return diag;
 	}
 
 	// Pattern: end of input from all_consuming → trailing input.

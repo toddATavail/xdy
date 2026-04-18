@@ -178,21 +178,19 @@ impl InstructionVisitor<()> for StrengthReducer
 			}
 		}
 		if let AddressingMode::Immediate(Immediate(1)) = roll.count
+			&& contiguous
 		{
-			if contiguous
-			{
-				// There's exactly one face and the allegedly custom faces are
-				// actually a contiguous range, so we can perform the
-				// replacement.
-				let dest = self.next_rolling_record();
-				self.replace(roll.dest, dest);
-				self.emit(RollRange {
-					dest,
-					start: Immediate(faces[0]).into(),
-					end: Immediate(faces[faces.len() - 1]).into()
-				});
-				return Ok(());
-			}
+			// There's exactly one face and the allegedly custom faces are
+			// actually a contiguous range, so we can perform the
+			// replacement.
+			let dest = self.next_rolling_record();
+			self.replace(roll.dest, dest);
+			self.emit(RollRange {
+				dest,
+				start: Immediate(faces[0]).into(),
+				end: Immediate(faces[faces.len() - 1]).into()
+			});
+			return Ok(());
 		}
 		if contiguous && faces[0] == 1
 		{
