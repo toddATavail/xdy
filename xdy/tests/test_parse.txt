@@ -136,7 +136,7 @@ a, an external variable: {an external variable}
 
 3D10 drop lowest
 =
-(function [] (drop-lowest (standard-dice 3 10) 1))
+(function [] (drop-lowest (standard-dice 3 10)))
 
 3D10 drop lowest 2
 =
@@ -144,7 +144,7 @@ a, an external variable: {an external variable}
 
 3D10 drop highest
 =
-(function [] (drop-highest (standard-dice 3 10) 1))
+(function [] (drop-highest (standard-dice 3 10)))
 
 3D10 drop highest 2
 =
@@ -328,7 +328,7 @@ x: ({x} + 1) - ({x} + 1)
 
 -2147483648d6 drop lowest
 =
-(function [] (neg (drop-lowest (standard-dice 2147483647 6) 1)))
+(function [] (neg (drop-lowest (standard-dice 2147483647 6))))
 
 -3d6
 =
