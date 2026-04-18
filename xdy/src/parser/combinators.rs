@@ -32,7 +32,7 @@ use crate::{
 		Neg, Parameter, Range, StandardDice, Sub, Variable
 	},
 	parser::NomErrorKind,
-	span::SourceSpan
+	span::{SourceSpan, Spanned}
 };
 
 use super::{
@@ -67,16 +67,18 @@ pub type Span<'src> = LocatedSpan<&'src str>;
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn function(input: Span) -> IResult<Span, Function, ParseError>
 {
+	let start = input.location_offset();
 	let (input, parameters) = parameters.parse_complete(input)?;
 	let (input, body) =
 		preceded(multispace0, context(FUNCTION_BODY_CONTEXT, expression))
 			.parse_complete(input)?;
+	let end = input.location_offset();
 	Ok((
 		input,
 		Function {
 			parameters,
 			body,
-			span: SourceSpan::default()
+			span: SourceSpan { start, end }
 		}
 	))
 }
@@ -141,7 +143,10 @@ pub fn parameters(
 						.iter()
 						.map(|p| Parameter {
 							name: p.fragment(),
-							span: SourceSpan::default()
+							span: SourceSpan {
+								start: p.location_offset(),
+								end: p.location_offset() + p.fragment().len()
+							}
 						})
 						.collect()
 				)
@@ -204,22 +209,26 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, ParseError>
 
 	Ok((
 		input,
-		remainder
-			.into_iter()
-			.fold(initial, |acc, (op, expr)| match op
+		remainder.into_iter().fold(initial, |acc, (op, expr)| {
+			let span = SourceSpan {
+				start: acc.span().start,
+				end: expr.span().end
+			};
+			match op
 			{
 				'+' => Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(acc),
 					right: Box::new(expr),
-					span: SourceSpan::default()
+					span
 				})),
 				'-' => Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
 					left: Box::new(acc),
 					right: Box::new(expr),
-					span: SourceSpan::default()
+					span
 				})),
 				_ => unreachable!()
-			})
+			}
+		})
 	))
 }
 
@@ -245,16 +254,19 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 
 	Ok((
 		input,
-		remainder
-			.into_iter()
-			.fold(initial, |acc, (op, expr)| match op
+		remainder.into_iter().fold(initial, |acc, (op, expr)| {
+			let span = SourceSpan {
+				start: acc.span().start,
+				end: expr.span().end
+			};
+			match op
 			{
 				'*' | '×' =>
 				{
 					Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 						left: Box::new(acc),
 						right: Box::new(expr),
-						span: SourceSpan::default()
+						span
 					}))
 				},
 				'/' | '÷' =>
@@ -262,16 +274,17 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 					Expression::Arithmetic(ArithmeticExpression::Div(Div {
 						left: Box::new(acc),
 						right: Box::new(expr),
-						span: SourceSpan::default()
+						span
 					}))
 				},
 				'%' => Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
 					left: Box::new(acc),
 					right: Box::new(expr),
-					span: SourceSpan::default()
+					span
 				})),
 				_ => unreachable!()
-			})
+			}
+		})
 	))
 }
 
@@ -287,17 +300,42 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 {
-	alt((
-		negative_constant,
-		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
-			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(expr),
-				span: SourceSpan::default()
-			}))
-		}),
-		preceded(multispace0, exponent)
+	alt((negative_constant, negation, preceded(multispace0, exponent)))
+		.parse_complete(input)
+}
+
+/// Parse the general negation path of a [unary](unary) expression: a leading
+/// `-`, optional whitespace, and a [unary](unary) operand.
+///
+/// Factored out of [`unary`] so that the span start offset can be captured
+/// before the leading `-` is consumed without running afoul of the lifetime
+/// elision rules that govern inline closures inside [`alt`](nom::branch::alt).
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed [`Neg`] expression, with its span covering the `-` through the
+/// end of the operand.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input does not begin with `-` followed by a
+///   parseable unary expression.
+fn negation(
+	input: Span<'_>
+) -> IResult<Span<'_>, Expression<'_>, ParseError<'_>>
+{
+	let start = input.location_offset();
+	let (input, expr) = preceded(char('-'), preceded(multispace0, unary))
+		.parse_complete(input)?;
+	let end = expr.span().end;
+	Ok((
+		input,
+		Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+			operand: Box::new(expr),
+			span: SourceSpan { start, end }
+		}))
 	))
-	.parse_complete(input)
 }
 
 /// Parse a negated constant, producing `Constant(-N)` directly rather than
@@ -322,6 +360,7 @@ pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input does not match a negated constant.
 fn negative_constant(input: Span) -> IResult<Span, Expression, ParseError>
 {
+	let start = input.location_offset();
 	let (after_sign, _) = char('-')(input)?;
 	let (after_ws, _) = multispace0(after_sign)?;
 	let (remaining, digits) = digit1(after_ws)?;
@@ -339,6 +378,7 @@ fn negative_constant(input: Span) -> IResult<Span, Expression, ParseError>
 			ErrorKind::Digit
 		)));
 	}
+	let end = remaining.location_offset();
 	// Parse the complete signed constant, including the leading `-`.
 	let text = format!("-{}", digits.fragment());
 	let value = match text.parse::<i32>()
@@ -351,7 +391,7 @@ fn negative_constant(input: Span) -> IResult<Span, Expression, ParseError>
 		remaining,
 		Expression::Constant(Constant {
 			value,
-			span: SourceSpan::default()
+			span: SourceSpan { start, end }
 		})
 	))
 }
@@ -381,14 +421,21 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 	// pair — the recursive call consumes all subsequent `^` operators.
 	match remainder.into_iter().next()
 	{
-		Some((_, expr)) => Ok((
-			input,
-			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(initial),
-				right: Box::new(expr),
-				span: SourceSpan::default()
-			}))
-		)),
+		Some((_, expr)) =>
+		{
+			let span = SourceSpan {
+				start: initial.span().start,
+				end: expr.span().end
+			};
+			Ok((
+				input,
+				Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
+					left: Box::new(initial),
+					right: Box::new(expr),
+					span
+				}))
+			))
+		},
 		None => Ok((input, initial))
 	}
 }
@@ -427,6 +474,7 @@ pub fn primary(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 {
+	let start = input.location_offset();
 	let (input, _) = char('(').parse_complete(input)?;
 	let (input, expression) = cut(preceded(
 		multispace0,
@@ -438,11 +486,12 @@ pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 		context(CLOSING_PAREN_CONTEXT, char(')'))
 	))
 	.parse_complete(input)?;
+	let end = input.location_offset();
 	Ok((
 		input,
 		Group {
 			expression: Box::new(expression),
-			span: SourceSpan::default()
+			span: SourceSpan { start, end }
 		}
 	))
 }
@@ -459,8 +508,9 @@ pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 {
+	let start = input.location_offset();
 	let (input, _) = char('{').parse_complete(input)?;
-	let (input, span) = cut(preceded(
+	let (input, name) = cut(preceded(
 		multispace0,
 		context(IDENTIFIER_CONTEXT, identifier)
 	))
@@ -470,11 +520,12 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 		context(CLOSING_BRACE_CONTEXT, char('}'))
 	))
 	.parse_complete(input)?;
+	let end = input.location_offset();
 	Ok((
 		input,
 		Variable {
-			name: span.fragment(),
-			span: SourceSpan::default()
+			name: name.fragment(),
+			span: SourceSpan { start, end }
 		}
 	))
 }
@@ -491,6 +542,7 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 {
+	let span_start = input.location_offset();
 	let (input, _) = char('[').parse_complete(input)?;
 	let (input, start) = cut(preceded(
 		multispace0,
@@ -509,12 +561,16 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 		context(CLOSING_BRACKET_CONTEXT, char(']'))
 	))
 	.parse_complete(input)?;
+	let span_end = input.location_offset();
 	Ok((
 		input,
 		Range {
 			start: Box::new(start),
 			end: Box::new(end),
-			span: SourceSpan::default()
+			span: SourceSpan {
+				start: span_start,
+				end: span_end
+			}
 		}
 	))
 }
@@ -532,10 +588,15 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 {
 	// Parse the common prefix shared by standard and custom dice.
+	let dice_start = input.location_offset();
 	let (input, count) =
 		context(DICE_COUNT_CONTEXT, dice_count).parse_complete(input)?;
 	let (input, _) = preceded(multispace0, d_operator).parse_complete(input)?;
-	// After the `d`/`D` operator, we're committed to a dice expression.
+	// After the `d`/`D` operator, we're committed to a dice expression. For
+	// standard dice, the face expression carries its own span (so the wrapper's
+	// span falls out of its children); for custom dice the face list is a bare
+	// `Vec<i32>`, so we patch the wrapper's span from the outer offsets after
+	// parsing completes.
 	let (input, initial_dice) = cut(preceded(
 		multispace0,
 		alt((
@@ -544,10 +605,14 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 				map(standard_faces, {
 					let count = count.clone();
 					move |faces| {
+						let span = SourceSpan {
+							start: count.span().start,
+							end: faces.span().end
+						};
 						DiceExpression::Standard(StandardDice {
 							count: Box::new(count.clone()),
 							faces: Box::new(faces),
-							span: SourceSpan::default()
+							span
 						})
 					}
 				})
@@ -565,22 +630,46 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 		))
 	))
 	.parse_complete(input)?;
+	// Patch the CustomDice span now that we have the post-parse offset.
+	let initial_dice = match initial_dice
+	{
+		DiceExpression::Custom(dice) => DiceExpression::Custom(CustomDice {
+			span: SourceSpan {
+				start: dice_start,
+				end: input.location_offset()
+			},
+			..dice
+		}),
+		other => other
+	};
 
 	let (input, final_dice) = fold_many0(
 		drop_clause,
 		|| initial_dice.clone(),
-		|acc, (direction, drop)| match direction
-		{
-			DropDirection::Lowest => DiceExpression::DropLowest(DropLowest {
-				dice: Box::new(acc),
-				drop,
-				span: SourceSpan::default()
-			}),
-			DropDirection::Highest => DiceExpression::DropHighest(DropHighest {
-				dice: Box::new(acc),
-				drop,
-				span: SourceSpan::default()
-			})
+		|acc, (direction, drop, clause_span)| {
+			let span = SourceSpan {
+				start: acc.span().start,
+				end: clause_span.end
+			};
+			match direction
+			{
+				DropDirection::Lowest =>
+				{
+					DiceExpression::DropLowest(DropLowest {
+						dice: Box::new(acc),
+						drop,
+						span
+					})
+				},
+				DropDirection::Highest =>
+				{
+					DiceExpression::DropHighest(DropHighest {
+						dice: Box::new(acc),
+						drop,
+						span
+					})
+				},
+			}
 		}
 	)
 	.parse_complete(input)?;
@@ -607,12 +696,16 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 	)
 	.parse_complete(input)
 	.map(|(input, (count, faces))| {
+		let span = SourceSpan {
+			start: count.span().start,
+			end: faces.span().end
+		};
 		(
 			input,
 			StandardDice {
 				count: Box::new(count),
 				faces: Box::new(faces),
-				span: SourceSpan::default()
+				span
 			}
 		)
 	})
@@ -630,22 +723,22 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, ParseError>
 {
-	separated_pair(
+	let start = input.location_offset();
+	let (input, (count, faces)) = separated_pair(
 		context(DICE_COUNT_CONTEXT, dice_count),
 		preceded(multispace0, d_operator),
 		preceded(multispace0, context(CUSTOM_FACES_CONTEXT, custom_faces))
 	)
-	.parse_complete(input)
-	.map(|(input, (count, faces))| {
-		(
-			input,
-			CustomDice {
-				count: Box::new(count),
-				faces,
-				span: SourceSpan::default()
-			}
-		)
-	})
+	.parse_complete(input)?;
+	let end = input.location_offset();
+	Ok((
+		input,
+		CustomDice {
+			count: Box::new(count),
+			faces,
+			span: SourceSpan { start, end }
+		}
+	))
 }
 
 /// Parse a dice count expression, without leading whitespace.
@@ -732,7 +825,13 @@ enum DropDirection
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed drop direction and optional drop count.
+/// A triple `(direction, drop, span)`:
+/// - `direction`: [`DropDirection::Lowest`] or [`DropDirection::Highest`].
+/// - `drop`: the optional drop-count expression.
+/// - `span`: the [source span](SourceSpan) of the clause itself, starting at
+///   `drop` and extending through the drop count (or the direction keyword if
+///   no count is given). Does not include any leading whitespace preceding
+///   `drop`.
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
@@ -740,12 +839,13 @@ fn drop_clause(
 	input: Span<'_>
 ) -> IResult<
 	Span<'_>,
-	(DropDirection, Option<Box<Expression<'_>>>),
+	(DropDirection, Option<Box<Expression<'_>>>, SourceSpan),
 	ParseError<'_>
 >
 {
-	let (input, _) =
-		preceded(multispace0, tag("drop")).parse_complete(input)?;
+	let (input, _) = multispace0.parse_complete(input)?;
+	let start = input.location_offset();
+	let (input, _) = tag("drop").parse_complete(input)?;
 	let (input, direction) = cut(preceded(
 		multispace0,
 		context(
@@ -762,7 +862,11 @@ fn drop_clause(
 		context(DROP_EXPRESSION_CONTEXT, drop_expression)
 	))
 	.parse_complete(input)?;
-	Ok((input, (direction, drop.map(Box::new))))
+	let end = input.location_offset();
+	Ok((
+		input,
+		(direction, drop.map(Box::new), SourceSpan { start, end })
+	))
 }
 
 /// Parse a drop-lowest expression, without leading whitespace.
@@ -849,9 +953,9 @@ pub fn drop_expression(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 {
-	let (input, constant) =
+	let (input, recognized) =
 		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
-	let constant = match constant.fragment().parse::<i32>()
+	let value = match recognized.fragment().parse::<i32>()
 	{
 		Ok(value) => value,
 		Err(e) if e.kind() == &IntErrorKind::PosOverflow => i32::MAX,
@@ -861,11 +965,13 @@ pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 		// produce `Ok`, `PosOverflow`, or `NegOverflow`.
 		Err(_) => unreachable!()
 	};
+	let start = recognized.location_offset();
+	let end = start + recognized.fragment().len();
 	Ok((
 		input,
 		Constant {
-			value: constant,
-			span: SourceSpan::default()
+			value,
+			span: SourceSpan { start, end }
 		}
 	))
 }

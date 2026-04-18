@@ -2,7 +2,11 @@
 //!
 //! Herein are the test cases for the various parser functions.
 
-use crate::{ast::*, parser::*, span::SourceSpan};
+use crate::{
+	ast::*,
+	parser::*,
+	span::{SourceSpan, Spanned}
+};
 use pretty_assertions::assert_eq;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -323,7 +327,8 @@ fn test_function()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -409,8 +414,12 @@ fn test_parameters()
 					"Failed for input: {}",
 					input
 				);
+				let result_untethered: Vec<Parameter<'_>> =
+					result.iter().map(Spanned::untethered).collect();
+				let expected_untethered: Vec<Parameter<'_>> =
+					expected_ast.iter().map(Spanned::untethered).collect();
 				assert_eq!(
-					result, expected_ast,
+					result_untethered, expected_untethered,
 					"AST mismatch for input: {}",
 					input
 				);
@@ -793,7 +802,8 @@ fn test_expression()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -1671,7 +1681,8 @@ fn test_add_sub()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -2254,7 +2265,8 @@ fn test_mul_div_mod()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -2458,7 +2470,8 @@ fn test_exponent()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -2688,7 +2701,8 @@ fn test_unary()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -2809,7 +2823,8 @@ fn test_primary()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -3018,7 +3033,8 @@ fn test_group()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -3282,7 +3298,8 @@ fn test_range()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -3557,7 +3574,8 @@ fn test_dice()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -3739,7 +3757,8 @@ fn test_standard_dice()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -3906,7 +3925,8 @@ fn test_custom_dice()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -4003,7 +4023,8 @@ fn test_dice_count()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -4094,7 +4115,8 @@ fn test_standard_faces()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -4336,7 +4358,8 @@ fn test_drop_expression()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -4463,7 +4486,8 @@ fn test_constant()
 					input
 				);
 				assert_eq!(
-					result, expected_ast,
+					result.untethered(),
+					expected_ast.untethered(),
 					"AST mismatch for input: {}",
 					input
 				);
@@ -4809,4 +4833,106 @@ fn test_identifier_trailing_whitespace()
 	let (residue, result) = identifier(span).unwrap();
 	assert_eq!(*result.fragment(), "baz");
 	assert_eq!(*residue.fragment(), ")");
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                        Source span position tests.                         //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Shorthand for building a [`SourceSpan`] from a pair of offsets.
+fn span(start: usize, end: usize) -> SourceSpan { SourceSpan { start, end } }
+
+/// A [`Constant`]'s span covers exactly its numeric literal.
+#[test]
+fn test_constant_span()
+{
+	let (_, result) = constant(Span::new("42")).unwrap();
+	assert_eq!(result.span, span(0, 2));
+}
+
+/// A [`Neg`] from a negative constant literal covers the leading `-` as well
+/// as the digits.
+#[test]
+fn test_negative_constant_span()
+{
+	let (_, result) = expression(Span::new("-123")).unwrap();
+	assert_eq!(result.span(), span(0, 4));
+}
+
+/// A binary [`Add`] derives its span from its children: start of `left` through
+/// end of `right`. Whitespace inside the expression is *included* (because
+/// `right.span().end` is past the last operand character), but whitespace
+/// *outside* the binary op is not.
+#[test]
+fn test_binary_op_span_from_children()
+{
+	let (_, result) = expression(Span::new("1 + 22")).unwrap();
+	assert_eq!(result.span(), span(0, 6));
+	match result
+	{
+		Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
+		{
+			assert_eq!(add.left.span(), span(0, 1));
+			assert_eq!(add.right.span(), span(4, 6));
+			assert_eq!(add.span, span(0, 6));
+		},
+		other => panic!("expected Add, got {:?}", other)
+	}
+}
+
+/// A [`Group`]'s span includes its delimiters; the inner expression's span does
+/// not.
+#[test]
+fn test_group_span_includes_delimiters()
+{
+	let (_, result) = expression(Span::new("(1 + 2)")).unwrap();
+	match result
+	{
+		Expression::Group(group) =>
+		{
+			assert_eq!(group.span, span(0, 7));
+			assert_eq!(group.expression.span(), span(1, 6));
+		},
+		other => panic!("expected Group, got {:?}", other)
+	}
+}
+
+/// A [`DropLowest`]'s span extends from the start of the inner dice to the end
+/// of the drop clause. The inner [`StandardDice`]'s own span covers only the
+/// dice, not the drop clause.
+#[test]
+fn test_drop_clause_extends_wrapper_span()
+{
+	let (_, result) = dice(Span::new("3d6 drop lowest")).unwrap();
+	match result
+	{
+		DiceExpression::DropLowest(drop) =>
+		{
+			assert_eq!(drop.span, span(0, 15));
+			match drop.dice.as_ref()
+			{
+				DiceExpression::Standard(std_dice) =>
+				{
+					assert_eq!(std_dice.span, span(0, 3));
+				},
+				other => panic!("expected StandardDice, got {:?}", other)
+			}
+			assert!(drop.drop.is_none());
+		},
+		other => panic!("expected DropLowest, got {:?}", other)
+	}
+}
+
+/// Each [`Parameter`] carries the span of its identifier, and the enclosing
+/// [`Function`] covers the whole source.
+#[test]
+fn test_parameter_and_function_spans()
+{
+	let source = "x, y: 1";
+	let (_, result) = function(Span::new(source)).unwrap();
+	assert_eq!(result.span, span(0, 7));
+	let parameters = result.parameters.as_ref().unwrap();
+	assert_eq!(parameters[0].span, span(0, 1));
+	assert_eq!(parameters[1].span, span(3, 4));
+	assert_eq!(result.body.span(), span(6, 7));
 }
