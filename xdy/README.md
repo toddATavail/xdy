@@ -29,7 +29,7 @@ Source code flows through a six-stage pipeline. The `compile()` convenience func
 
 ```mermaid
 graph LR
-    A["Source Code<br/><code>&str</code>"] --> B["Parser<br/><code>parser::parse</code>"]
+    A["Source Code<br/><code>&str</code>"] --> B["Parser<br/><code>Parser::parse</code>"]
     B --> C["AST<br/><code>ast::Function</code>"]
     C --> D["Compiler<br/><code>Compiler::compile</code>"]
     D --> E["Unoptimized IR<br/><code>Function</code>"]

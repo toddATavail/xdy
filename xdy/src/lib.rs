@@ -266,14 +266,17 @@ mod span;
 pub mod support;
 #[cfg(test)]
 mod tests;
+mod validator;
 
 pub use compiler::*;
 pub use evaluator::*;
 pub use histogram::*;
 pub use ir::*;
 pub use optimizer::*;
+pub use parser::Parser;
 pub use primitives::*;
 pub use span::*;
+pub use validator::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 //                           Convenient evaluation.                           //
@@ -301,8 +304,10 @@ pub use span::*;
 /// The result of the evaluation.
 ///
 /// # Errors
-/// * [`CompilationFailed`](EvaluationError::CompilationFailed) if the function
-///   could not be compiled.
+/// * [`ParseError`](EvaluationError::ParseError) if the source code could not
+///   be parsed.
+/// * [`DuplicateParameter`](EvaluationError::DuplicateParameter) if the
+///   function declares the same formal parameter name more than once.
 /// * [`BadArity`](EvaluationError::BadArity) if the number of arguments
 ///   provided disagrees with the number of formal parameters in the function
 ///   signature.
@@ -349,8 +354,12 @@ where
 /// The result of the evaluation.
 ///
 /// # Errors
-/// * [`CompilationFailed`](EvaluationError::CompilationFailed) if the function
-///   could not be compiled.
+/// * [`ParseError`](EvaluationError::ParseError) if the source code could not
+///   be parsed.
+/// * [`DuplicateParameter`](EvaluationError::DuplicateParameter) if the
+///   function declares the same formal parameter name more than once.
+/// * [`OptimizationFailed`](EvaluationError::OptimizationFailed) if the
+///   function could not be optimized.
 /// * [`BadArity`](EvaluationError::BadArity) if the number of arguments
 ///   provided disagrees with the number of formal parameters in the function
 ///   signature.

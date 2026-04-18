@@ -1,7 +1,7 @@
 //! # Parser
 //!
-//! Herein is the parser for the `xDy` language. [`parse`]
-//! is the main entry point, which discards leading whitespace before parsing a
+//! Herein is the parser for the `xDy` language. [`Parser::parse`] is the main
+//! entry point, which discards leading whitespace before parsing a
 //! [function](Function). The recognized grammar is as follows, in Extended
 //! Backus-Naur Form (EBNF), where non-terminals are in lowercase and terminals
 //! are in uppercase:
@@ -53,33 +53,42 @@ use crate::ast::Function;
 //                                  Parser.                                   //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Parse a function definition, discarding leading whitespace. This is the
-/// intended high-level entry point for the parser. The individual parser
-/// combinators are available for low-level uses, but not recommended for
-/// most clients.
-///
-/// # Parameters
-/// - `input`: The input text to parse.
-///
-/// # Returns
-/// The parsed function definition.
-///
-/// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn parse(input: &str) -> Result<Function<'_>, ParseError<'_>>
+/// The `xDy` parser. Use [`Parser::parse`] as the high-level entry point; the
+/// individual parser combinators exposed by this module are available for
+/// low-level uses but are not recommended for most clients.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Parser;
+
+impl Parser
 {
-	let input = Span::new(input);
-	all_consuming(delimited(
-		multispace0,
-		context(FUNCTION_CONTEXT, function),
-		multispace0
-	))
-	.parse_complete(input)
-	.map_err(|e| match e
+	/// Parse a function definition, discarding leading whitespace. This is the
+	/// intended high-level entry point for the parser. The individual parser
+	/// combinators are available for low-level uses, but not recommended for
+	/// most clients.
+	///
+	/// # Parameters
+	/// - `input`: The input text to parse.
+	///
+	/// # Returns
+	/// The parsed function definition.
+	///
+	/// # Errors
+	/// * [`Err`](nom::Err) if the input could not be parsed.
+	pub fn parse(input: &str) -> Result<Function<'_>, ParseError<'_>>
 	{
-		nom::Err::Error(e) => e,
-		nom::Err::Failure(e) => e,
-		nom::Err::Incomplete(_) => unreachable!()
-	})
-	.map(|(_, f)| f)
+		let input = Span::new(input);
+		all_consuming(delimited(
+			multispace0,
+			context(FUNCTION_CONTEXT, function),
+			multispace0
+		))
+		.parse_complete(input)
+		.map_err(|e| match e
+		{
+			nom::Err::Error(e) => e,
+			nom::Err::Failure(e) => e,
+			nom::Err::Incomplete(_) => unreachable!()
+		})
+		.map(|(_, f)| f)
+	}
 }

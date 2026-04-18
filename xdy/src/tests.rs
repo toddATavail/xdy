@@ -11,3 +11,4 @@ mod evaluator;
 mod histogram;
 mod optimizer;
 mod parser;
+mod validator;

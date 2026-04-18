@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use pretty_assertions::assert_eq;
 
 use crate::{
+	Parser,
 	diagnostics::{self, DiagnosticKind},
-	parser,
 	support::read_error_test_cases
 };
 
@@ -154,7 +154,7 @@ fn test_error_diagnostics()
 				if case.expected_diagnostics.len() == 1
 				{
 					assert!(
-						parser::parse(&suggestion.corrected_source).is_ok(),
+						Parser::parse(&suggestion.corrected_source).is_ok(),
 						"case {}: {:?} — suggestion {} {:?} does \
 						 not parse cleanly",
 						index + 1,
@@ -234,7 +234,7 @@ fn test_corrected_sources_parse()
 		if let Some(corrected) = &result.corrected_source
 		{
 			assert!(
-				parser::parse(corrected).is_ok(),
+				Parser::parse(corrected).is_ok(),
 				"corrected source for {:?} does not parse: {:?}",
 				case.source,
 				corrected

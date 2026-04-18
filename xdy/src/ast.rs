@@ -1,7 +1,7 @@
 //! # Abstract syntax tree (AST)
 //!
 //! The abstract syntax tree (AST) represents the structure of a semantically
-//! correct `xDy` program. The [parser](crate::parser::parse) generates the AST
+//! correct `xDy` program. The [parser](crate::Parser::parse) generates the AST
 //! from the source code, and due to the simple rules of the dice language, the
 //! AST is guaranteed to be semantically correct. The [compiler](crate::compile)
 //! walks the AST to generate `xDy`'s intermediate representation (IR), which

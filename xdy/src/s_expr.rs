@@ -181,7 +181,7 @@ pub struct SExpressibleOptions
 	/// hand-authored s-expressions in the test corpus. Setting this to `true`
 	/// (alongside [`with_spans`](Self::with_spans)) enables lossless
 	/// round-trip through the S-expression format, because [`Group`] is
-	/// load-bearing for the AST's [`Display`](std::fmt::Display) fidelity.
+	/// load-bearing for the AST's [`Display`] fidelity.
 	pub with_groups: bool
 }
 
@@ -547,7 +547,7 @@ where
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                         Identifier quoting support.                        //
+//                        Identifier quoting support.                         //
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Answer whether the given identifier requires quoting in S-expression

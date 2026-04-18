@@ -23,7 +23,7 @@
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
-//! │ parse(current_source)                                │
+//! │ Parser::parse(current_source)                        │
 //! │   ├─ success → return diagnostics + corrected_source │
 //! │   └─ error → analyze → apply fix → loop              │
 //! └──────────────────────────────────────────────────────┘
@@ -37,10 +37,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use crate::{
-	parser::{self, ParseError},
-	span::SourceSpan
-};
+use crate::{Parser, parser::ParseError, span::SourceSpan};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                   Types.                                   //
@@ -254,7 +251,7 @@ pub struct DiagnoseResult
 	pub diagnostics: Vec<Diagnostic>,
 
 	/// The fully corrected source string, if all errors were fixable. This
-	/// string will parse cleanly via [`parser::parse`].
+	/// string will parse cleanly via [`Parser::parse`].
 	pub corrected_source: Option<String>
 }
 
@@ -738,7 +735,7 @@ fn detect_incomplete_parameter(
 		{
 			let mut candidate = fix.clone();
 			candidate.push_str(trailing);
-			parser::parse(&candidate).is_ok()
+			Parser::parse(&candidate).is_ok()
 		}
 		else
 		{
@@ -1510,7 +1507,7 @@ impl OffsetMap
 /// assert!(result.corrected_source.is_some());
 /// // The corrected source parses cleanly.
 /// assert!(
-///     xdy::parser::parse(
+///     xdy::Parser::parse(
 ///         result.corrected_source.as_ref().unwrap()
 ///     ).is_ok()
 /// );
@@ -1518,7 +1515,7 @@ impl OffsetMap
 pub fn diagnose(source: &str) -> DiagnoseResult
 {
 	// Fast path: if the source parses cleanly, no diagnostics needed.
-	if parser::parse(source).is_ok()
+	if Parser::parse(source).is_ok()
 	{
 		return DiagnoseResult {
 			diagnostics: vec![],
@@ -1535,7 +1532,7 @@ pub fn diagnose(source: &str) -> DiagnoseResult
 
 	for _ in 0..max_iterations
 	{
-		match parser::parse(&current_source)
+		match Parser::parse(&current_source)
 		{
 			Ok(_) =>
 			{
@@ -1582,7 +1579,7 @@ pub fn diagnose(source: &str) -> DiagnoseResult
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                            OffsetMap unit tests.                           //
+//                           OffsetMap unit tests.                            //
 ////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]

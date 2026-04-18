@@ -4,7 +4,7 @@
 //! production rules of the language, such that each combinator recognizes a
 //! specific production rule. Direct usage of the combinators is not necessary
 //! for most uses of `xDy`. Even if you need direct access to the abstract
-//! syntax tree (AST), use [parse](crate::parser::parse) instead. For typical
+//! syntax tree (AST), use [parse](crate::Parser::parse) instead. For typical
 //! usage of `xDy`, try [compile](crate::compile) or
 //! [evaluate](crate::evaluate). Nonetheless, the combinators are public and may
 //! be used directly for advanced use cases.

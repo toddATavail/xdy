@@ -18,9 +18,9 @@
 //! code generation.
 //!
 //! ```
-//! use xdy::{Compiler, Evaluator, Optimizer, Passes, StandardOptimizer};
+//! use xdy::{Compiler, Evaluator, Optimizer, Parser, Passes, StandardOptimizer};
 //!
-//! let ast = xdy::parser::parse("2d6 + 3").unwrap();
+//! let ast = Parser::parse("2d6 + 3").unwrap();
 //! let function = Compiler::compile(&ast);
 //! let optimized = StandardOptimizer::new(Passes::all())
 //!     .optimize(function)
@@ -40,7 +40,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	CanAllocate as _, Optimizer as _, StandardOptimizer,
+	CanAllocate as _, Optimizer as _, Parser, SourceSpan, StandardOptimizer,
+	Validator,
 	ast::{
 		self, ASTVisitor, ArithmeticExpression, Constant, DiceExpression,
 		Expression
@@ -49,7 +50,7 @@ use crate::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
 	},
-	parser::{self, ParseError}
+	parser::ParseError
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,14 +67,16 @@ use crate::{
 /// The compiled function.
 ///
 /// # Errors
-/// [`CompilationFailed`](CompilationError::CompilationFailed) if the source
-/// code could not be parsed.
+/// * [`ParseError`](CompilationError::ParseError) if the source code could not
+///   be parsed.
+/// * [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
+///   function declares the same formal parameter name more than once.
 pub fn compile_unoptimized(
 	source: &str
 ) -> Result<Function, CompilationError<'_>>
 {
-	let ast =
-		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
+	let ast = Parser::parse(source).map_err(CompilationError::ParseError)?;
+	Validator::validate(&ast)?;
 	Ok(Compiler::compile(&ast))
 }
 
@@ -86,7 +89,7 @@ pub fn compile_unoptimized(
 ///
 /// ```mermaid
 /// graph LR
-///     A["Source Code<br/><code>&amp;str</code>"] --> B["Parser<br/><code>parser::parse</code>"]
+///     A["Source Code<br/><code>&amp;str</code>"] --> B["Parser<br/><code>Parser::parse</code>"]
 ///     B --> C["AST<br/><code>ast::Function</code>"]
 ///     C --> D["Compiler<br/><code>Compiler::compile</code>"]
 ///     D --> E["IR<br/><code>Function</code>"]
@@ -103,8 +106,10 @@ pub fn compile_unoptimized(
 /// The compiled function.
 ///
 /// # Errors
-/// * [`CompilationFailed`](CompilationError::CompilationFailed) if the function
-///   could not be compiled.
+/// * [`ParseError`](CompilationError::ParseError) if the source code could not
+///   be parsed.
+/// * [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
+///   function declares the same formal parameter name more than once.
 /// * [`OptimizationFailed`](CompilationError::OptimizationFailed) if the
 ///   function could not be optimized.
 ///
@@ -175,8 +180,8 @@ pub fn compile_unoptimized(
 #[cfg_attr(doc, aquamarine::aquamarine)]
 pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 {
-	let ast =
-		parser::parse(source).map_err(CompilationError::CompilationFailed)?;
+	let ast = Parser::parse(source).map_err(CompilationError::ParseError)?;
+	Validator::validate(&ast)?;
 	let function = Compiler::compile(&ast);
 	let optimizer = StandardOptimizer::new(Default::default());
 	let function = optimizer
@@ -193,7 +198,21 @@ pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 pub enum CompilationError<'src>
 {
 	/// The source code could not be parsed.
-	CompilationFailed(ParseError<'src>),
+	ParseError(ParseError<'src>),
+
+	/// A formal parameter name was declared more than once in the function
+	/// signature.
+	DuplicateParameter
+	{
+		/// The duplicated parameter name, borrowed from the source text.
+		name: &'src str,
+
+		/// The span of the first occurrence of the name in the parameter list.
+		first: SourceSpan,
+
+		/// The span of the duplicate occurrence that triggered the error.
+		duplicate: SourceSpan
+	},
 
 	/// The function could not be optimized.
 	OptimizationFailed
@@ -205,9 +224,21 @@ impl Display for CompilationError<'_>
 	{
 		match self
 		{
-			CompilationError::CompilationFailed(e) =>
+			CompilationError::ParseError(e) =>
 			{
 				write!(f, "{}", e)
+			},
+			CompilationError::DuplicateParameter {
+				name,
+				first,
+				duplicate
+			} =>
+			{
+				write!(
+					f,
+					"duplicate parameter '{}' at {} (first declared at {})",
+					name, duplicate, first
+				)
 			},
 			CompilationError::OptimizationFailed =>
 			{
@@ -273,9 +304,9 @@ impl<'src> Compiler<'src>
 	/// # Examples
 	///
 	/// ```
-	/// use xdy::Compiler;
+	/// use xdy::{Compiler, Parser};
 	///
-	/// let ast = xdy::parser::parse("2d6 + 3").unwrap();
+	/// let ast = Parser::parse("2d6 + 3").unwrap();
 	/// let function = Compiler::compile(&ast);
 	/// assert_eq!(function.arity(), 0);
 	/// ```

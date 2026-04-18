@@ -21,9 +21,9 @@ use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function,
 	InstructionVisitor, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return,
-	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
-	SumRollingRecord, add, div, exp, r#mod, mul, neg, parser::ParseError,
-	roll_custom_dice, roll_range, roll_standard_dice, sub
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	SourceSpan, Sub, SumRollingRecord, add, div, exp, r#mod, mul, neg,
+	parser::ParseError, roll_custom_dice, roll_range, roll_standard_dice, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -677,16 +677,30 @@ impl RollingRecordKind<i32>
 ///
 /// # Lifetimes
 /// - `'error`: The lifetime of the source text or external variable name that
-///   caused the error. For [`CompilationFailed`](Self::CompilationFailed), this
-///   is the source code; for
-///   [`UnrecognizedExternal`](Self::UnrecognizedExternal), it is the variable
-///   name passed to [`Evaluator::bind()`](crate::Evaluator::bind).
+///   caused the error. For [`ParseError`](Self::ParseError), this is the source
+///   code; for [`UnrecognizedExternal`](Self::UnrecognizedExternal), it is the
+///   variable name passed to [`Evaluator::bind()`](crate::Evaluator::bind).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvaluationError<'error>
 {
 	/// The source code could not be parsed. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
-	CompilationFailed(ParseError<'error>),
+	ParseError(ParseError<'error>),
+
+	/// A formal parameter name was declared more than once in the function
+	/// signature. Produced only by the simple
+	/// [one-shot evaluator](crate::evaluate).
+	DuplicateParameter
+	{
+		/// The duplicated parameter name, borrowed from the source text.
+		name: &'error str,
+
+		/// The span of the first occurrence of the name in the parameter list.
+		first: SourceSpan,
+
+		/// The span of the duplicate occurrence that triggered the error.
+		duplicate: SourceSpan
+	},
 
 	/// The function could not be optimized. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
@@ -713,9 +727,21 @@ impl Display for EvaluationError<'_>
 	{
 		match self
 		{
-			EvaluationError::CompilationFailed(e) =>
+			EvaluationError::ParseError(e) =>
 			{
 				write!(f, "{}", e)
+			},
+			EvaluationError::DuplicateParameter {
+				name,
+				first,
+				duplicate
+			} =>
+			{
+				write!(
+					f,
+					"duplicate parameter '{}' at {} (first declared at {})",
+					name, duplicate, first
+				)
 			},
 			EvaluationError::OptimizationFailed =>
 			{
@@ -745,9 +771,15 @@ impl<'src> From<CompilationError<'src>> for EvaluationError<'src>
 	{
 		match e
 		{
-			CompilationError::CompilationFailed(e) =>
-			{
-				Self::CompilationFailed(e)
+			CompilationError::ParseError(e) => Self::ParseError(e),
+			CompilationError::DuplicateParameter {
+				name,
+				first,
+				duplicate
+			} => Self::DuplicateParameter {
+				name,
+				first,
+				duplicate
 			},
 			CompilationError::OptimizationFailed => Self::OptimizationFailed
 		}

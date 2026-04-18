@@ -4707,7 +4707,7 @@ fn test_parse_to_s_expr()
 	for (index, (source, expected)) in test_cases.iter().enumerate()
 	{
 		assert!(seen.insert(source), "duplicate test case: {}", source);
-		let ast = match parse(source)
+		let ast = match Parser::parse(source)
 		{
 			Ok(f) => f,
 			Err(e) => panic!(
@@ -4781,7 +4781,7 @@ fn test_s_expr_lossless_roundtrip()
 		.with_groups(true);
 	for (index, (source, _expected)) in test_cases.iter().enumerate()
 	{
-		let ast = match parse(source)
+		let ast = match Parser::parse(source)
 		{
 			Ok(f) => f,
 			Err(e) => panic!(
@@ -4825,7 +4825,7 @@ fn test_s_expr_default_options_omit_span_metadata_and_groups()
 {
 	use crate::s_expr::{SExpressible as _, SExpressibleOptions};
 
-	let ast = parse("(2 + 3) * 4").unwrap();
+	let ast = Parser::parse("(2 + 3) * 4").unwrap();
 	let output = ast.to_s_expr(SExpressibleOptions::default());
 	assert!(
 		!output.contains('^'),
@@ -4847,7 +4847,7 @@ fn test_s_expr_synthetic_spans_are_suppressed()
 {
 	use crate::s_expr::{SExpressible as _, SExpressibleOptions};
 
-	let ast = parse("{x} + 1").unwrap().untethered();
+	let ast = Parser::parse("{x} + 1").unwrap().untethered();
 	let opts = SExpressibleOptions::default()
 		.with_spans(true)
 		.with_groups(true);
@@ -4866,7 +4866,7 @@ fn test_s_expr_writer_emits_span_prefixes()
 {
 	use crate::s_expr::{SExpressible as _, SExpressibleOptions};
 
-	let ast = parse("42").unwrap();
+	let ast = Parser::parse("42").unwrap();
 	let opts = SExpressibleOptions::default().with_spans(true);
 	let output = ast.to_s_expr(opts);
 	assert_eq!(
