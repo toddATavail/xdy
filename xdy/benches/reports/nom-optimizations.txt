@@ -1,0 +1,2543 @@
+    Finished `bench` profile [optimized] target(s) in 0.16s
+     Running benches/benchmarks.rs (target/release/deps/benchmarks-45da9b8b9e41b808)
+Benchmarking optimizations/case 0: 0
+Benchmarking optimizations/case 0: 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 0: 0: Collecting 100 samples in estimated 1.0057 s (677k iterations)
+Benchmarking optimizations/case 0: 0: Analyzing
+optimizations/case 0: 0 time:   [1.6874 µs 1.6902 µs 1.6929 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 1: 1
+Benchmarking optimizations/case 1: 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 1: 1: Collecting 100 samples in estimated 1.0042 s (545k iterations)
+Benchmarking optimizations/case 1: 1: Analyzing
+optimizations/case 1: 1 time:   [1.5069 µs 1.5084 µs 1.5101 µs]
+Found 16 outliers among 100 measurements (16.00%)
+  16 (16.00%) high severe
+Benchmarking optimizations/case 2: -1
+Benchmarking optimizations/case 2: -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 2: -1: Collecting 100 samples in estimated 1.0001 s (848k iterations)
+Benchmarking optimizations/case 2: -1: Analyzing
+optimizations/case 2: -1
+                        time:   [1.0561 µs 1.0574 µs 1.0590 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 3: 10
+Benchmarking optimizations/case 3: 10: Warming up for 3.0000 s
+Benchmarking optimizations/case 3: 10: Collecting 100 samples in estimated 1.0002 s (662k iterations)
+Benchmarking optimizations/case 3: 10: Analyzing
+optimizations/case 3: 10
+                        time:   [1.3236 µs 1.3512 µs 1.3809 µs]
+Benchmarking optimizations/case 4: 100
+Benchmarking optimizations/case 4: 100: Warming up for 3.0000 s
+Benchmarking optimizations/case 4: 100: Collecting 100 samples in estimated 1.0031 s (758k iterations)
+Benchmarking optimizations/case 4: 100: Analyzing
+optimizations/case 4: 100
+                        time:   [1.3169 µs 1.3410 µs 1.3659 µs]
+Benchmarking optimizations/case 5: 123456789123456789123456789123456789
+Benchmarking optimizations/case 5: 123456789123456789123456789123456789: Warming up for 3.0000 s
+Benchmarking optimizations/case 5: 123456789123456789123456789123456789: Collecting 100 samples in estimated 1.0032 s (682k iterations)
+Benchmarking optimizations/case 5: 123456789123456789123456789123456789: Analyzing
+optimizations/case 5: 123456789123456789123456789123456789
+                        time:   [1.2568 µs 1.2720 µs 1.2879 µs]
+Benchmarking optimizations/case 6: 987654321987654321987654321987654321
+Benchmarking optimizations/case 6: 987654321987654321987654321987654321: Warming up for 3.0000 s
+Benchmarking optimizations/case 6: 987654321987654321987654321987654321: Collecting 100 samples in estimated 1.0038 s (656k iterations)
+Benchmarking optimizations/case 6: 987654321987654321987654321987654321: Analyzing
+optimizations/case 6: 987654321987654321987654321987654321
+                        time:   [1.3268 µs 1.3438 µs 1.3586 µs]
+Benchmarking optimizations/case 7: 09
+Benchmarking optimizations/case 7: 09: Warming up for 3.0000 s
+Benchmarking optimizations/case 7: 09: Collecting 100 samples in estimated 1.0012 s (667k iterations)
+Benchmarking optimizations/case 7: 09: Analyzing
+optimizations/case 7: 09
+                        time:   [1.4115 µs 1.4331 µs 1.4509 µs]
+Benchmarking optimizations/case 8: (0)
+Benchmarking optimizations/case 8: (0): Warming up for 3.0000 s
+Benchmarking optimizations/case 8: (0): Collecting 100 samples in estimated 1.0082 s (394k iterations)
+Benchmarking optimizations/case 8: (0): Analyzing
+optimizations/case 8: (0)
+                        time:   [2.3220 µs 2.3583 µs 2.3955 µs]
+Benchmarking optimizations/case 9: {a}
+Benchmarking optimizations/case 9: {a}: Warming up for 3.0000 s
+Benchmarking optimizations/case 9: {a}: Collecting 100 samples in estimated 1.0049 s (510k iterations)
+Benchmarking optimizations/case 9: {a}: Analyzing
+optimizations/case 9: {a}
+                        time:   [1.9615 µs 1.9981 µs 2.0331 µs]
+Benchmarking optimizations/case 10: {alloy}
+Benchmarking optimizations/case 10: {alloy}: Warming up for 3.0000 s
+Benchmarking optimizations/case 10: {alloy}: Collecting 100 samples in estimated 1.0007 s (515k iterations)
+Benchmarking optimizations/case 10: {alloy}: Analyzing
+optimizations/case 10: {alloy}
+                        time:   [1.9830 µs 2.0211 µs 2.0612 µs]
+Found 43 outliers among 100 measurements (43.00%)
+  21 (21.00%) low mild
+  13 (13.00%) high mild
+  9 (9.00%) high severe
+Benchmarking optimizations/case 11: {a0}
+Benchmarking optimizations/case 11: {a0}: Warming up for 3.0000 s
+Benchmarking optimizations/case 11: {a0}: Collecting 100 samples in estimated 1.0048 s (485k iterations)
+Benchmarking optimizations/case 11: {a0}: Analyzing
+optimizations/case 11: {a0}
+                        time:   [1.9497 µs 1.9855 µs 2.0192 µs]
+Benchmarking optimizations/case 12: {kebab-case}
+Benchmarking optimizations/case 12: {kebab-case}: Warming up for 3.0000 s
+Benchmarking optimizations/case 12: {kebab-case}: Collecting 100 samples in estimated 1.0096 s (465k iterations)
+Benchmarking optimizations/case 12: {kebab-case}: Analyzing
+optimizations/case 12: {kebab-case}
+                        time:   [1.7640 µs 1.7804 µs 1.7964 µs]
+Found 20 outliers among 100 measurements (20.00%)
+  6 (6.00%) high mild
+  14 (14.00%) high severe
+Benchmarking optimizations/case 13: {snake_case}
+Benchmarking optimizations/case 13: {snake_case}: Warming up for 3.0000 s
+Benchmarking optimizations/case 13: {snake_case}: Collecting 100 samples in estimated 1.0005 s (520k iterations)
+Benchmarking optimizations/case 13: {snake_case}: Analyzing
+optimizations/case 13: {snake_case}
+                        time:   [1.6889 µs 1.6929 µs 1.6978 µs]
+Benchmarking optimizations/case 14: {qualified.access}
+Benchmarking optimizations/case 14: {qualified.access}: Warming up for 3.0000 s
+Benchmarking optimizations/case 14: {qualified.access}: Collecting 100 samples in estimated 1.0054 s (545k iterations)
+Benchmarking optimizations/case 14: {qualified.access}: Analyzing
+optimizations/case 14: {qualified.access}
+                        time:   [1.7750 µs 1.7843 µs 1.7950 µs]
+Found 18 outliers among 100 measurements (18.00%)
+  9 (9.00%) high mild
+  9 (9.00%) high severe
+Benchmarking optimizations/case 15: {dés}
+Benchmarking optimizations/case 15: {dés}: Warming up for 3.0000 s
+Benchmarking optimizations/case 15: {dés}: Collecting 100 samples in estimated 1.0005 s (556k iterations)
+Benchmarking optimizations/case 15: {dés}: Analyzing
+optimizations/case 15: {dés}
+                        time:   [1.6952 µs 1.7063 µs 1.7183 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 16: {an external variable}
+Benchmarking optimizations/case 16: {an external variable}: Warming up for 3.0000 s
+Benchmarking optimizations/case 16: {an external variable}: Collecting 100 samples in estimated 1.0079 s (409k iterations)
+Benchmarking optimizations/case 16: {an external variable}: Analyzing
+optimizations/case 16: {an external variable}
+                        time:   [1.9830 µs 1.9935 µs 2.0064 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 17: {выражение в кости}
+Benchmarking optimizations/case 17: {выражение в кости}: Warming up for 3.0000 s
+Benchmarking optimizations/case 17: {выражение в кости}: Collecting 100 samples in estimated 1.0054 s (343k iterations)
+Benchmarking optimizations/case 17: {выражение в кости}: Analyzing
+optimizations/case 17: {выражение в кости}
+                        time:   [3.1297 µs 3.1831 µs 3.2283 µs]
+Benchmarking optimizations/case 18: {έκφραση ζαριών}
+Benchmarking optimizations/case 18: {έκφραση ζαριών}: Warming up for 3.0000 s
+Benchmarking optimizations/case 18: {έκφραση ζαριών}: Collecting 100 samples in estimated 1.0114 s (308k iterations)
+Benchmarking optimizations/case 18: {έκφραση ζαριών}: Analyzing
+optimizations/case 18: {έκφραση ζαριών}
+                        time:   [2.5824 µs 2.6309 µs 2.6882 µs]
+Benchmarking optimizations/case 19: a: {a}
+Benchmarking optimizations/case 19: a: {a}: Warming up for 3.0000 s
+Benchmarking optimizations/case 19: a: {a}: Collecting 100 samples in estimated 1.0009 s (616k iterations)
+Benchmarking optimizations/case 19: a: {a}: Analyzing
+optimizations/case 19: a: {a}
+                        time:   [1.5395 µs 1.5503 µs 1.5611 µs]
+Benchmarking optimizations/case 20: a, an external variable: {an external variable}
+Benchmarking optimizations/case 20: a, an external variable: {an external variable}: Warming up for 3.0000 s
+Benchmarking optimizations/case 20: a, an external variable: {an external variable}: Collecting 100 samples in estimated 1.0082 s (424k iterations)
+Benchmarking optimizations/case 20: a, an external variable: {an external variable}: Analyzing
+optimizations/case 20: a, an external variable: {an external variable}
+                        time:   [2.3558 µs 2.3587 µs 2.3620 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  6 (6.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 21: ({a})
+Benchmarking optimizations/case 21: ({a}): Warming up for 3.0000 s
+Benchmarking optimizations/case 21: ({a}): Collecting 100 samples in estimated 1.0060 s (399k iterations)
+Benchmarking optimizations/case 21: ({a}): Analyzing
+optimizations/case 21: ({a})
+                        time:   [2.5161 µs 2.5218 µs 2.5279 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 22: [0:5]
+Benchmarking optimizations/case 22: [0:5]: Warming up for 3.0000 s
+Benchmarking optimizations/case 22: [0:5]: Collecting 100 samples in estimated 1.0127 s (369k iterations)
+Benchmarking optimizations/case 22: [0:5]: Analyzing
+optimizations/case 22: [0:5]
+                        time:   [2.7483 µs 2.7508 µs 2.7534 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+Benchmarking optimizations/case 23: [-10:10]
+Benchmarking optimizations/case 23: [-10:10]: Warming up for 3.0000 s
+Benchmarking optimizations/case 23: [-10:10]: Collecting 100 samples in estimated 1.0025 s (404k iterations)
+Benchmarking optimizations/case 23: [-10:10]: Analyzing
+optimizations/case 23: [-10:10]
+                        time:   [2.4916 µs 2.4943 µs 2.4969 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 24: [1d3 + 5 : 55 - 8D4]
+Benchmarking optimizations/case 24: [1d3 + 5 : 55 - 8D4]: Warming up for 3.0000 s
+Benchmarking optimizations/case 24: [1d3 + 5 : 55 - 8D4]: Collecting 100 samples in estimated 1.0396 s (71k iterations)
+Benchmarking optimizations/case 24: [1d3 + 5 : 55 - 8D4]: Analyzing
+optimizations/case 24: [1d3 + 5 : 55 - 8D4]
+                        time:   [14.235 µs 14.300 µs 14.370 µs]
+Found 12 outliers among 100 measurements (12.00%)
+  3 (3.00%) high mild
+  9 (9.00%) high severe
+Benchmarking optimizations/case 25: 2d8
+Benchmarking optimizations/case 25: 2d8: Warming up for 3.0000 s
+Benchmarking optimizations/case 25: 2d8: Collecting 100 samples in estimated 1.0096 s (460k iterations)
+Benchmarking optimizations/case 25: 2d8: Analyzing
+optimizations/case 25: 2d8
+                        time:   [2.2340 µs 2.2452 µs 2.2554 µs]
+Benchmarking optimizations/case 26: 20d10
+Benchmarking optimizations/case 26: 20d10: Warming up for 3.0000 s
+Benchmarking optimizations/case 26: 20d10: Collecting 100 samples in estimated 1.0004 s (404k iterations)
+Benchmarking optimizations/case 26: 20d10: Analyzing
+optimizations/case 26: 20d10
+                        time:   [2.5464 µs 2.5497 µs 2.5531 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 27: {x}D{y}
+Benchmarking optimizations/case 27: {x}D{y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 27: {x}D{y}: Collecting 100 samples in estimated 1.0088 s (247k iterations)
+Benchmarking optimizations/case 27: {x}D{y}: Analyzing
+optimizations/case 27: {x}D{y}
+                        time:   [2.8492 µs 2.8689 µs 2.8920 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 28: 1D[-1, 0, 1]
+Benchmarking optimizations/case 28: 1D[-1, 0, 1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 28: 1D[-1, 0, 1]: Collecting 100 samples in estimated 1.0049 s (263k iterations)
+Benchmarking optimizations/case 28: 1D[-1, 0, 1]: Analyzing
+optimizations/case 28: 1D[-1, 0, 1]
+                        time:   [3.7280 µs 3.7494 µs 3.7738 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 29: (1d6)
+Benchmarking optimizations/case 29: (1d6): Warming up for 3.0000 s
+Benchmarking optimizations/case 29: (1d6): Collecting 100 samples in estimated 1.0149 s (227k iterations)
+Benchmarking optimizations/case 29: (1d6): Analyzing
+optimizations/case 29: (1d6)
+                        time:   [5.3250 µs 5.3935 µs 5.4595 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 30: (1)d(6)
+Benchmarking optimizations/case 30: (1)d(6): Warming up for 3.0000 s
+Benchmarking optimizations/case 30: (1)d(6): Collecting 100 samples in estimated 1.0201 s (146k iterations)
+Benchmarking optimizations/case 30: (1)d(6): Analyzing
+optimizations/case 30: (1)d(6)
+                        time:   [7.0224 µs 7.0606 µs 7.0903 µs]
+Benchmarking optimizations/case 31: (1d[1, 1, 2, 3, 5, 8])D(1D8)
+Benchmarking optimizations/case 31: (1d[1, 1, 2, 3, 5, 8])D(1D8): Warming up for 3.0000 s
+Benchmarking optimizations/case 31: (1d[1, 1, 2, 3, 5, 8])D(1D8): Collecting 100 samples in estimated 1.0678 s (66k iterations)
+Benchmarking optimizations/case 31: (1d[1, 1, 2, 3, 5, 8])D(1D8): Analyzing
+optimizations/case 31: (1d[1, 1, 2, 3, 5, 8])D(1D8)
+                        time:   [13.917 µs 14.169 µs 14.411 µs]
+Found 14 outliers among 100 measurements (14.00%)
+  10 (10.00%) low severe
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 32: 3D10 drop lowest
+Benchmarking optimizations/case 32: 3D10 drop lowest: Warming up for 3.0000 s
+Benchmarking optimizations/case 32: 3D10 drop lowest: Collecting 100 samples in estimated 1.0035 s (303k iterations)
+Benchmarking optimizations/case 32: 3D10 drop lowest: Analyzing
+optimizations/case 32: 3D10 drop lowest
+                        time:   [2.9578 µs 2.9873 µs 3.0182 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 33: 3D10 drop lowest 2
+Benchmarking optimizations/case 33: 3D10 drop lowest 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 33: 3D10 drop lowest 2: Collecting 100 samples in estimated 1.0053 s (348k iterations)
+Benchmarking optimizations/case 33: 3D10 drop lowest 2: Analyzing
+optimizations/case 33: 3D10 drop lowest 2
+                        time:   [2.6526 µs 2.6692 µs 2.6884 µs]
+Found 12 outliers among 100 measurements (12.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  8 (8.00%) high severe
+Benchmarking optimizations/case 34: 10D10 drop lowest (3 + 3)
+Benchmarking optimizations/case 34: 10D10 drop lowest (3 + 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 34: 10D10 drop lowest (3 + 3): Collecting 100 samples in estimated 1.0151 s (172k iterations)
+Benchmarking optimizations/case 34: 10D10 drop lowest (3 + 3): Analyzing
+optimizations/case 34: 10D10 drop lowest (3 + 3)
+                        time:   [5.6953 µs 5.7383 µs 5.7815 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 35: 3D10 drop highest
+Benchmarking optimizations/case 35: 3D10 drop highest: Warming up for 3.0000 s
+Benchmarking optimizations/case 35: 3D10 drop highest: Collecting 100 samples in estimated 1.0083 s (328k iterations)
+Benchmarking optimizations/case 35: 3D10 drop highest: Analyzing
+optimizations/case 35: 3D10 drop highest
+                        time:   [2.8491 µs 2.8678 µs 2.8863 µs]
+Benchmarking optimizations/case 36: 3D10 drop highest 2
+Benchmarking optimizations/case 36: 3D10 drop highest 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 36: 3D10 drop highest 2: Collecting 100 samples in estimated 1.0058 s (354k iterations)
+Benchmarking optimizations/case 36: 3D10 drop highest 2: Analyzing
+optimizations/case 36: 3D10 drop highest 2
+                        time:   [2.6728 µs 2.6948 µs 2.7182 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 37: 10D10 drop highest (3 + 3)
+Benchmarking optimizations/case 37: 10D10 drop highest (3 + 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 37: 10D10 drop highest (3 + 3): Collecting 100 samples in estimated 1.0074 s (141k iterations)
+Benchmarking optimizations/case 37: 10D10 drop highest (3 + 3): Analyzing
+optimizations/case 37: 10D10 drop highest (3 + 3)
+                        time:   [7.3150 µs 7.4131 µs 7.5052 µs]
+Found 16 outliers among 100 measurements (16.00%)
+  2 (2.00%) low severe
+  1 (1.00%) high mild
+  13 (13.00%) high severe
+Benchmarking optimizations/case 38: 10D10 drop highest 2 drop lowest 5
+Benchmarking optimizations/case 38: 10D10 drop highest 2 drop lowest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 38: 10D10 drop highest 2 drop lowest 5: Collecting 100 samples in estimated 1.0130 s (252k iterations)
+Benchmarking optimizations/case 38: 10D10 drop highest 2 drop lowest 5: Analyzing
+optimizations/case 38: 10D10 drop highest 2 drop lowest 5
+                        time:   [3.2730 µs 3.3010 µs 3.3262 µs]
+Benchmarking optimizations/case 39: 10D10 drop lowest (1 + 3) drop highest {x}
+Benchmarking optimizations/case 39: 10D10 drop lowest (1 + 3) drop highest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 39: 10D10 drop lowest (1 + 3) drop highest {x}: Collecting 100 samples in estimated 1.0408 s (116k iterations)
+Benchmarking optimizations/case 39: 10D10 drop lowest (1 + 3) drop highest {x}: Analyzing
+optimizations/case 39: 10D10 drop lowest (1 + 3) drop highest {x}
+                        time:   [7.3632 µs 7.4288 µs 7.4949 µs]
+Found 15 outliers among 100 measurements (15.00%)
+  2 (2.00%) low mild
+  13 (13.00%) high mild
+Benchmarking optimizations/case 40: 0 + 0
+Benchmarking optimizations/case 40: 0 + 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 40: 0 + 0: Collecting 100 samples in estimated 1.0064 s (298k iterations)
+Benchmarking optimizations/case 40: 0 + 0: Analyzing
+optimizations/case 40: 0 + 0
+                        time:   [2.9785 µs 3.0439 µs 3.1182 µs]
+Benchmarking optimizations/case 41: 0 - 0
+Benchmarking optimizations/case 41: 0 - 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 41: 0 - 0: Collecting 100 samples in estimated 1.0026 s (313k iterations)
+Benchmarking optimizations/case 41: 0 - 0: Analyzing
+optimizations/case 41: 0 - 0
+                        time:   [2.8874 µs 2.9251 µs 2.9663 µs]
+Benchmarking optimizations/case 42: 0 * 0
+Benchmarking optimizations/case 42: 0 * 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 42: 0 * 0: Collecting 100 samples in estimated 1.0011 s (308k iterations)
+Benchmarking optimizations/case 42: 0 * 0: Analyzing
+optimizations/case 42: 0 * 0
+                        time:   [2.4704 µs 2.4941 µs 2.5196 µs]
+Benchmarking optimizations/case 43: {a} × {b}
+Benchmarking optimizations/case 43: {a} × {b}: Warming up for 3.0000 s
+Benchmarking optimizations/case 43: {a} × {b}: Collecting 100 samples in estimated 1.0026 s (258k iterations)
+Benchmarking optimizations/case 43: {a} × {b}: Analyzing
+optimizations/case 43: {a} × {b}
+                        time:   [4.1251 µs 4.1693 µs 4.2041 µs]
+Benchmarking optimizations/case 44: 0 / 0
+Benchmarking optimizations/case 44: 0 / 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 44: 0 / 0: Collecting 100 samples in estimated 1.0121 s (333k iterations)
+Benchmarking optimizations/case 44: 0 / 0: Analyzing
+optimizations/case 44: 0 / 0
+                        time:   [2.8331 µs 2.8404 µs 2.8472 µs]
+Benchmarking optimizations/case 45: {a} ÷ {b}
+Benchmarking optimizations/case 45: {a} ÷ {b}: Warming up for 3.0000 s
+Benchmarking optimizations/case 45: {a} ÷ {b}: Collecting 100 samples in estimated 1.0148 s (283k iterations)
+Benchmarking optimizations/case 45: {a} ÷ {b}: Analyzing
+optimizations/case 45: {a} ÷ {b}
+                        time:   [3.6115 µs 3.6898 µs 3.7587 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 46: {a} % {b}
+Benchmarking optimizations/case 46: {a} % {b}: Warming up for 3.0000 s
+Benchmarking optimizations/case 46: {a} % {b}: Collecting 100 samples in estimated 1.0095 s (283k iterations)
+Benchmarking optimizations/case 46: {a} % {b}: Analyzing
+optimizations/case 46: {a} % {b}
+                        time:   [3.5210 µs 3.5898 µs 3.6624 µs]
+Benchmarking optimizations/case 47: -10
+Benchmarking optimizations/case 47: -10: Warming up for 3.0000 s
+Benchmarking optimizations/case 47: -10: Collecting 100 samples in estimated 1.0002 s (1.2M iterations)
+Benchmarking optimizations/case 47: -10: Analyzing
+optimizations/case 47: -10
+                        time:   [743.60 ns 747.76 ns 751.91 ns]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 48: 0 + 1 + 2
+Benchmarking optimizations/case 48: 0 + 1 + 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 48: 0 + 1 + 2: Collecting 100 samples in estimated 1.0075 s (298k iterations)
+Benchmarking optimizations/case 48: 0 + 1 + 2: Analyzing
+optimizations/case 48: 0 + 1 + 2
+                        time:   [3.2477 µs 3.2670 µs 3.2885 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 49: (0 + 1) + 2
+Benchmarking optimizations/case 49: (0 + 1) + 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 49: (0 + 1) + 2: Collecting 100 samples in estimated 1.0018 s (217k iterations)
+Benchmarking optimizations/case 49: (0 + 1) + 2: Analyzing
+optimizations/case 49: (0 + 1) + 2
+                        time:   [4.5514 µs 4.5565 µs 4.5623 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 50: 0 + (1 + 2)
+Benchmarking optimizations/case 50: 0 + (1 + 2): Warming up for 3.0000 s
+Benchmarking optimizations/case 50: 0 + (1 + 2): Collecting 100 samples in estimated 1.0148 s (222k iterations)
+Benchmarking optimizations/case 50: 0 + (1 + 2): Analyzing
+optimizations/case 50: 0 + (1 + 2)
+                        time:   [4.5278 µs 4.5309 µs 4.5342 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 51: 0 + 1 - 2
+Benchmarking optimizations/case 51: 0 + 1 - 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 51: 0 + 1 - 2: Collecting 100 samples in estimated 1.0108 s (318k iterations)
+Benchmarking optimizations/case 51: 0 + 1 - 2: Analyzing
+optimizations/case 51: 0 + 1 - 2
+                        time:   [3.1562 µs 3.1596 µs 3.1633 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 52: 0 + 1 * 2
+Benchmarking optimizations/case 52: 0 + 1 * 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 52: 0 + 1 * 2: Collecting 100 samples in estimated 1.0041 s (313k iterations)
+Benchmarking optimizations/case 52: 0 + 1 * 2: Analyzing
+optimizations/case 52: 0 + 1 * 2
+                        time:   [3.1912 µs 3.1965 µs 3.2027 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 53: 0 + 1 / 2
+Benchmarking optimizations/case 53: 0 + 1 / 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 53: 0 + 1 / 2: Collecting 100 samples in estimated 1.0070 s (323k iterations)
+Benchmarking optimizations/case 53: 0 + 1 / 2: Analyzing
+optimizations/case 53: 0 + 1 / 2
+                        time:   [3.0937 µs 3.0967 µs 3.0996 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking optimizations/case 54: 0 + 1 % 2
+Benchmarking optimizations/case 54: 0 + 1 % 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 54: 0 + 1 % 2: Collecting 100 samples in estimated 1.0130 s (338k iterations)
+Benchmarking optimizations/case 54: 0 + 1 % 2: Analyzing
+optimizations/case 54: 0 + 1 % 2
+                        time:   [2.9786 µs 2.9814 µs 2.9845 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 55: 0 + 1 ^ 2 ^ {a}
+Benchmarking optimizations/case 55: 0 + 1 ^ 2 ^ {a}: Warming up for 3.0000 s
+Benchmarking optimizations/case 55: 0 + 1 ^ 2 ^ {a}: Collecting 100 samples in estimated 1.0034 s (227k iterations)
+Benchmarking optimizations/case 55: 0 + 1 ^ 2 ^ {a}: Analyzing
+optimizations/case 55: 0 + 1 ^ 2 ^ {a}
+                        time:   [4.3228 µs 4.3275 µs 4.3323 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 56: 0 ^ {a} - {a} ^ 2
+Benchmarking optimizations/case 56: 0 ^ {a} - {a} ^ 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 56: 0 ^ {a} - {a} ^ 2: Collecting 100 samples in estimated 1.0358 s (141k iterations)
+Benchmarking optimizations/case 56: 0 ^ {a} - {a} ^ 2: Analyzing
+optimizations/case 56: 0 ^ {a} - {a} ^ 2
+                        time:   [7.2041 µs 7.2110 µs 7.2186 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 57: 0 ^ -{a} - -{a} ^ 2
+Benchmarking optimizations/case 57: 0 ^ -{a} - -{a} ^ 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 57: 0 ^ -{a} - -{a} ^ 2: Collecting 100 samples in estimated 1.0446 s (101k iterations)
+Benchmarking optimizations/case 57: 0 ^ -{a} - -{a} ^ 2: Analyzing
+optimizations/case 57: 0 ^ -{a} - -{a} ^ 2
+                        time:   [10.092 µs 10.101 µs 10.111 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 58: 3D6 + 0
+Benchmarking optimizations/case 58: 3D6 + 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 58: 3D6 + 0: Collecting 100 samples in estimated 1.0041 s (232k iterations)
+Benchmarking optimizations/case 58: 3D6 + 0: Analyzing
+optimizations/case 58: 3D6 + 0
+                        time:   [4.1386 µs 4.1486 µs 4.1629 µs]
+Found 15 outliers among 100 measurements (15.00%)
+  2 (2.00%) high mild
+  13 (13.00%) high severe
+Benchmarking optimizations/case 59: 5 + 3D6
+Benchmarking optimizations/case 59: 5 + 3D6: Warming up for 3.0000 s
+Benchmarking optimizations/case 59: 5 + 3D6: Collecting 100 samples in estimated 1.0182 s (283k iterations)
+Benchmarking optimizations/case 59: 5 + 3D6: Analyzing
+optimizations/case 59: 5 + 3D6
+                        time:   [3.3857 µs 3.4054 µs 3.4288 µs]
+Benchmarking optimizations/case 60: 3D6 + 2D12
+Benchmarking optimizations/case 60: 3D6 + 2D12: Warming up for 3.0000 s
+Benchmarking optimizations/case 60: 3D6 + 2D12: Collecting 100 samples in estimated 1.0044 s (192k iterations)
+Benchmarking optimizations/case 60: 3D6 + 2D12: Analyzing
+optimizations/case 60: 3D6 + 2D12
+                        time:   [5.0951 µs 5.1307 µs 5.1723 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  4 (4.00%) high mild
+  5 (5.00%) high severe
+Benchmarking optimizations/case 61: 3 ^ 3D6 + -2D12
+Benchmarking optimizations/case 61: 3 ^ 3D6 + -2D12: Warming up for 3.0000 s
+Benchmarking optimizations/case 61: 3 ^ 3D6 + -2D12: Collecting 100 samples in estimated 1.0183 s (141k iterations)
+Benchmarking optimizations/case 61: 3 ^ 3D6 + -2D12: Analyzing
+optimizations/case 61: 3 ^ 3D6 + -2D12
+                        time:   [6.8246 µs 6.8818 µs 6.9424 µs]
+Found 13 outliers among 100 measurements (13.00%)
+  12 (12.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 62: (5 + {a})d({b})
+Benchmarking optimizations/case 62: (5 + {a})d({b}): Warming up for 3.0000 s
+Benchmarking optimizations/case 62: (5 + {a})d({b}): Collecting 100 samples in estimated 1.0080 s (172k iterations)
+Benchmarking optimizations/case 62: (5 + {a})d({b}): Analyzing
+optimizations/case 62: (5 + {a})d({b})
+                        time:   [5.5987 µs 5.6389 µs 5.6805 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 63: (5 + {a})d({b}) drop lowest 1
+Benchmarking optimizations/case 63: (5 + {a})d({b}) drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 63: (5 + {a})d({b}) drop lowest 1: Collecting 100 samples in estimated 1.0178 s (157k iterations)
+Benchmarking optimizations/case 63: (5 + {a})d({b}) drop lowest 1: Analyzing
+optimizations/case 63: (5 + {a})d({b}) drop lowest 1
+                        time:   [6.2955 µs 6.3299 µs 6.3637 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 64: (5 + {a})d({b}) drop highest 1 * 3
+Benchmarking optimizations/case 64: (5 + {a})d({b}) drop highest 1 * 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 64: (5 + {a})d({b}) drop highest 1 * 3: Collecting 100 samples in estimated 1.0517 s (86k iterations)
+Benchmarking optimizations/case 64: (5 + {a})d({b}) drop highest 1 * 3: Analyzing
+optimizations/case 64: (5 + {a})d({b}) drop highest 1 * 3
+                        time:   [11.553 µs 11.630 µs 11.715 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 65: (5 + {a})d({b}) drop highest 1 % [2:3]
+Benchmarking optimizations/case 65: (5 + {a})d({b}) drop highest 1 % [2:3]: Warming up for 3.0000 s
+Benchmarking optimizations/case 65: (5 + {a})d({b}) drop highest 1 % [2:3]: Collecting 100 samples in estimated 1.0208 s (101k iterations)
+Benchmarking optimizations/case 65: (5 + {a})d({b}) drop highest 1 % [2:3]: Analyzing
+optimizations/case 65: (5 + {a})d({b}) drop highest 1 % [2:3]
+                        time:   [9.9924 µs 10.062 µs 10.129 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking optimizations/case 66: x: ({x} + 1) - ({x} + 1)
+Benchmarking optimizations/case 66: x: ({x} + 1) - ({x} + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 66: x: ({x} + 1) - ({x} + 1): Collecting 100 samples in estimated 1.0172 s (121k iterations)
+Benchmarking optimizations/case 66: x: ({x} + 1) - ({x} + 1): Analyzing
+optimizations/case 66: x: ({x} + 1) - ({x} + 1)
+                        time:   [8.1567 µs 8.2055 µs 8.2558 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 67: x: 1 + {x}
+Benchmarking optimizations/case 67: x: 1 + {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 67: x: 1 + {x}: Collecting 100 samples in estimated 1.0089 s (318k iterations)
+Benchmarking optimizations/case 67: x: 1 + {x}: Analyzing
+optimizations/case 67: x: 1 + {x}
+                        time:   [3.0522 µs 3.0736 µs 3.0960 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 68: x: {x} + 1 + 1
+Benchmarking optimizations/case 68: x: {x} + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 68: x: {x} + 1 + 1: Collecting 100 samples in estimated 1.0201 s (157k iterations)
+Benchmarking optimizations/case 68: x: {x} + 1 + 1: Analyzing
+optimizations/case 68: x: {x} + 1 + 1
+                        time:   [6.1699 µs 6.2044 µs 6.2382 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking optimizations/case 69: x: 1 + 1 + {x} + 1 + 1
+Benchmarking optimizations/case 69: x: 1 + 1 + {x} + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 69: x: 1 + 1 + {x} + 1 + 1: Collecting 100 samples in estimated 1.0205 s (86k iterations)
+Benchmarking optimizations/case 69: x: 1 + 1 + {x} + 1 + 1: Analyzing
+optimizations/case 69: x: 1 + 1 + {x} + 1 + 1
+                        time:   [10.166 µs 10.219 µs 10.274 µs]
+Found 11 outliers among 100 measurements (11.00%)
+  3 (3.00%) high mild
+  8 (8.00%) high severe
+Benchmarking optimizations/case 70: x: {x} + {x} + {x} + 1 + 1 + 1
+Benchmarking optimizations/case 70: x: {x} + {x} + {x} + 1 + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 70: x: {x} + {x} + {x} + 1 + 1 + 1: Collecting 100 samples in estimated 1.0749 s (61k iterations)
+Benchmarking optimizations/case 70: x: {x} + {x} + {x} + 1 + 1 + 1: Analyzing
+optimizations/case 70: x: {x} + {x} + {x} + 1 + 1 + 1
+                        time:   [16.829 µs 16.914 µs 16.991 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 71: x: {x} + 1 + {x} + 1 + {x} + 1
+Benchmarking optimizations/case 71: x: {x} + 1 + {x} + 1 + {x} + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 71: x: {x} + 1 + {x} + 1 + {x} + 1: Collecting 100 samples in estimated 1.0441 s (56k iterations)
+Benchmarking optimizations/case 71: x: {x} + 1 + {x} + 1 + {x} + 1: Analyzing
+optimizations/case 71: x: {x} + 1 + {x} + 1 + {x} + 1
+                        time:   [17.026 µs 17.147 µs 17.261 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  3 (3.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 72: x: 1 + 1 + 1 + 1 - 1 + 1 + 1 + 1
+Benchmarking optimizations/case 72: x: 1 + 1 + 1 + 1 - 1 + 1 + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 72: x: 1 + 1 + 1 + 1 - 1 + 1 + 1 + 1: Collecting 100 samples in estimated 1.0449 s (111k iterations)
+Benchmarking optimizations/case 72: x: 1 + 1 + 1 + 1 - 1 + 1 + 1 + 1: Analyzing
+optimizations/case 72: x: 1 + 1 + 1 + 1 - 1 + 1 + 1 + 1
+                        time:   [9.1219 µs 9.1654 µs 9.2088 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) low mild
+  4 (4.00%) high mild
+Benchmarking optimizations/case 73: x: ({x} + {x} + {x}) + (1 + 1 + 1)
+Benchmarking optimizations/case 73: x: ({x} + {x} + {x}) + (1 + 1 + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 73: x: ({x} + {x} + {x}) + (1 + 1 + 1): Collecting 100 samples in estimated 1.0330 s (40k iterations)
+Benchmarking optimizations/case 73: x: ({x} + {x} + {x}) + (1 + 1 + 1): Analyzing
+optimizations/case 73: x: ({x} + {x} + {x}) + (1 + 1 + 1)
+                        time:   [21.393 µs 21.529 µs 21.669 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high mild
+Benchmarking optimizations/case 74: x: ({x} + {x} + {x}) - (1 + 1 + 1)
+Benchmarking optimizations/case 74: x: ({x} + {x} + {x}) - (1 + 1 + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 74: x: ({x} + {x} + {x}) - (1 + 1 + 1): Collecting 100 samples in estimated 1.0188 s (56k iterations)
+Benchmarking optimizations/case 74: x: ({x} + {x} + {x}) - (1 + 1 + 1): Analyzing
+optimizations/case 74: x: ({x} + {x} + {x}) - (1 + 1 + 1)
+                        time:   [15.616 µs 15.684 µs 15.755 µs]
+Found 18 outliers among 100 measurements (18.00%)
+  7 (7.00%) low mild
+  9 (9.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 75: x: ({x} + 1 + {x}) - (1 + {x} + 1)
+Benchmarking optimizations/case 75: x: ({x} + 1 + {x}) - (1 + {x} + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 75: x: ({x} + 1 + {x}) - (1 + {x} + 1): Collecting 100 samples in estimated 1.0637 s (45k iterations)
+Benchmarking optimizations/case 75: x: ({x} + 1 + {x}) - (1 + {x} + 1): Analyzing
+optimizations/case 75: x: ({x} + 1 + {x}) - (1 + {x} + 1)
+                        time:   [21.191 µs 21.395 µs 21.631 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 76: x: ({x} + ({x} + ({x} + (1 + (1 + 1)))))
+Benchmarking optimizations/case 76: x: ({x} + ({x} + ({x} + (1 + (1 + 1))))): Warming up for 3.0000 s
+Benchmarking optimizations/case 76: x: ({x} + ({x} + ({x} + (1 + (1 + 1))))): Collecting 100 samples in estimated 1.1508 s (15k iterations)
+Benchmarking optimizations/case 76: x: ({x} + ({x} + ({x} + (1 + (1 + 1))))): Analyzing
+optimizations/case 76: x: ({x} + ({x} + ({x} + (1 + (1 + 1)))))
+                        time:   [74.331 µs 74.644 µs 74.956 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 77: x: {x} * 1
+Benchmarking optimizations/case 77: x: {x} * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 77: x: {x} * 1: Collecting 100 samples in estimated 1.0112 s (323k iterations)
+Benchmarking optimizations/case 77: x: {x} * 1: Analyzing
+optimizations/case 77: x: {x} * 1
+                        time:   [2.9436 µs 2.9626 µs 2.9817 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  5 (5.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 78: x: 1 * {x}
+Benchmarking optimizations/case 78: x: 1 * {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 78: x: 1 * {x}: Collecting 100 samples in estimated 1.0015 s (328k iterations)
+Benchmarking optimizations/case 78: x: 1 * {x}: Analyzing
+optimizations/case 78: x: 1 * {x}
+                        time:   [2.9166 µs 2.9308 µs 2.9458 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 79: x: {x} * 1 * 1
+Benchmarking optimizations/case 79: x: {x} * 1 * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 79: x: {x} * 1 * 1: Collecting 100 samples in estimated 1.0116 s (242k iterations)
+Benchmarking optimizations/case 79: x: {x} * 1 * 1: Analyzing
+optimizations/case 79: x: {x} * 1 * 1
+                        time:   [3.8529 µs 3.8745 µs 3.8960 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 80: x: 1 * 1 * {x} * 1 * 1
+Benchmarking optimizations/case 80: x: 1 * 1 * {x} * 1 * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 80: x: 1 * 1 * {x} * 1 * 1: Collecting 100 samples in estimated 1.0209 s (146k iterations)
+Benchmarking optimizations/case 80: x: 1 * 1 * {x} * 1 * 1: Analyzing
+optimizations/case 80: x: 1 * 1 * {x} * 1 * 1
+                        time:   [5.9988 µs 6.0300 µs 6.0590 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 81: x: {x} * {x} * {x} * 1 * 1 * 1
+Benchmarking optimizations/case 81: x: {x} * {x} * {x} * 1 * 1 * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 81: x: {x} * {x} * {x} * 1 * 1 * 1: Collecting 100 samples in estimated 1.0424 s (81k iterations)
+Benchmarking optimizations/case 81: x: {x} * {x} * {x} * 1 * 1 * 1: Analyzing
+optimizations/case 81: x: {x} * {x} * {x} * 1 * 1 * 1
+                        time:   [11.291 µs 11.358 µs 11.424 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 82: x: {x} * 1 * {x} * 1 * {x} * 1
+Benchmarking optimizations/case 82: x: {x} * 1 * {x} * 1 * {x} * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 82: x: {x} * 1 * {x} * 1 * {x} * 1: Collecting 100 samples in estimated 1.0062 s (71k iterations)
+Benchmarking optimizations/case 82: x: {x} * 1 * {x} * 1 * {x} * 1: Analyzing
+optimizations/case 82: x: {x} * 1 * {x} * 1 * {x} * 1
+                        time:   [11.592 µs 11.702 µs 11.827 µs]
+Benchmarking optimizations/case 83: x: 1 * 1 * 1 * 1 - 1 * 1 * 1 * 1
+Benchmarking optimizations/case 83: x: 1 * 1 * 1 * 1 - 1 * 1 * 1 * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 83: x: 1 * 1 * 1 * 1 - 1 * 1 * 1 * 1: Collecting 100 samples in estimated 1.0235 s (111k iterations)
+Benchmarking optimizations/case 83: x: 1 * 1 * 1 * 1 - 1 * 1 * 1 * 1: Analyzing
+optimizations/case 83: x: 1 * 1 * 1 * 1 - 1 * 1 * 1 * 1
+                        time:   [7.9996 µs 8.0903 µs 8.1881 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+Benchmarking optimizations/case 84: x: ({x} * {x} * {x}) * (1 * 1 * 1)
+Benchmarking optimizations/case 84: x: ({x} * {x} * {x}) * (1 * 1 * 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 84: x: ({x} * {x} * {x}) * (1 * 1 * 1): Collecting 100 samples in estimated 1.0045 s (56k iterations)
+Benchmarking optimizations/case 84: x: ({x} * {x} * {x}) * (1 * 1 * 1): Analyzing
+optimizations/case 84: x: ({x} * {x} * {x}) * (1 * 1 * 1)
+                        time:   [15.655 µs 15.746 µs 15.840 µs]
+Benchmarking optimizations/case 85: x: ({x} * {x} * {x}) - (1 * 1 * 1)
+Benchmarking optimizations/case 85: x: ({x} * {x} * {x}) - (1 * 1 * 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 85: x: ({x} * {x} * {x}) - (1 * 1 * 1): Collecting 100 samples in estimated 1.0672 s (66k iterations)
+Benchmarking optimizations/case 85: x: ({x} * {x} * {x}) - (1 * 1 * 1): Analyzing
+optimizations/case 85: x: ({x} * {x} * {x}) - (1 * 1 * 1)
+                        time:   [14.673 µs 14.750 µs 14.837 µs]
+Benchmarking optimizations/case 86: x: ({x} * 1 * {x}) - (1 * {x} * 1)
+Benchmarking optimizations/case 86: x: ({x} * 1 * {x}) - (1 * {x} * 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 86: x: ({x} * 1 * {x}) - (1 * {x} * 1): Collecting 100 samples in estimated 1.0216 s (76k iterations)
+Benchmarking optimizations/case 86: x: ({x} * 1 * {x}) - (1 * {x} * 1): Analyzing
+optimizations/case 86: x: ({x} * 1 * {x}) - (1 * {x} * 1)
+                        time:   [13.356 µs 13.375 µs 13.395 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 87: x: ({x} * ({x} * ({x} * (1 * (1 * 1)))))
+Benchmarking optimizations/case 87: x: ({x} * ({x} * ({x} * (1 * (1 * 1))))): Warming up for 3.0000 s
+Benchmarking optimizations/case 87: x: ({x} * ({x} * ({x} * (1 * (1 * 1))))): Collecting 100 samples in estimated 1.2679 s (20k iterations)
+Benchmarking optimizations/case 87: x: ({x} * ({x} * ({x} * (1 * (1 * 1))))): Analyzing
+optimizations/case 87: x: ({x} * ({x} * ({x} * (1 * (1 * 1)))))
+                        time:   [61.892 µs 61.987 µs 62.085 µs]
+Benchmarking optimizations/case 88: x: {x} + {x} + 1 * {x} * 1 * 1
+Benchmarking optimizations/case 88: x: {x} + {x} + 1 * {x} * 1 * 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 88: x: {x} + {x} + 1 * {x} * 1 * 1: Collecting 100 samples in estimated 1.0017 s (91k iterations)
+Benchmarking optimizations/case 88: x: {x} + {x} + 1 * {x} * 1 * 1: Analyzing
+optimizations/case 88: x: {x} + {x} + 1 * {x} * 1 * 1
+                        time:   [10.983 µs 11.000 µs 11.017 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 89: x: {x} + {x} + 1 * {x} * 1 * 1 + 1 + 1
+Benchmarking optimizations/case 89: x: {x} + {x} + 1 * {x} * 1 * 1 + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 89: x: {x} + {x} + 1 * {x} * 1 * 1 + 1 + 1: Collecting 100 samples in estimated 1.0414 s (71k iterations)
+Benchmarking optimizations/case 89: x: {x} + {x} + 1 * {x} * 1 * 1 + 1 + 1: Analyzing
+optimizations/case 89: x: {x} + {x} + 1 * {x} * 1 * 1 + 1 + 1
+                        time:   [14.658 µs 14.679 µs 14.701 µs]
+Benchmarking optimizations/case 90: x: {x} - 1 - 2 - 3 - 4 - 5
+Benchmarking optimizations/case 90: x: {x} - 1 - 2 - 3 - 4 - 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 90: x: {x} - 1 - 2 - 3 - 4 - 5: Collecting 100 samples in estimated 1.0358 s (126k iterations)
+Benchmarking optimizations/case 90: x: {x} - 1 - 2 - 3 - 4 - 5: Analyzing
+optimizations/case 90: x: {x} - 1 - 2 - 3 - 4 - 5
+                        time:   [8.1934 µs 8.2037 µs 8.2143 µs]
+Benchmarking optimizations/case 91: x: 1 - {x} - 2 - 3 - 4 - 5
+Benchmarking optimizations/case 91: x: 1 - {x} - 2 - 3 - 4 - 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 91: x: 1 - {x} - 2 - 3 - 4 - 5: Collecting 100 samples in estimated 1.0056 s (76k iterations)
+Benchmarking optimizations/case 91: x: 1 - {x} - 2 - 3 - 4 - 5: Analyzing
+optimizations/case 91: x: 1 - {x} - 2 - 3 - 4 - 5
+                        time:   [13.265 µs 13.279 µs 13.294 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 92: x: 1 - 2 - {x} - 3 - 4 - 5
+Benchmarking optimizations/case 92: x: 1 - 2 - {x} - 3 - 4 - 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 92: x: 1 - 2 - {x} - 3 - 4 - 5: Collecting 100 samples in estimated 1.0084 s (76k iterations)
+Benchmarking optimizations/case 92: x: 1 - 2 - {x} - 3 - 4 - 5: Analyzing
+optimizations/case 92: x: 1 - 2 - {x} - 3 - 4 - 5
+                        time:   [13.299 µs 13.315 µs 13.330 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 93: x: 1 - 2 - 3 - {x} - 4 - 5
+Benchmarking optimizations/case 93: x: 1 - 2 - 3 - {x} - 4 - 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 93: x: 1 - 2 - 3 - {x} - 4 - 5: Collecting 100 samples in estimated 1.0083 s (76k iterations)
+Benchmarking optimizations/case 93: x: 1 - 2 - 3 - {x} - 4 - 5: Analyzing
+optimizations/case 93: x: 1 - 2 - 3 - {x} - 4 - 5
+                        time:   [13.305 µs 13.320 µs 13.334 µs]
+Benchmarking optimizations/case 94: x: 1 - 2 - 3 - 4 - {x} - 5
+Benchmarking optimizations/case 94: x: 1 - 2 - 3 - 4 - {x} - 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 94: x: 1 - 2 - 3 - 4 - {x} - 5: Collecting 100 samples in estimated 1.0065 s (76k iterations)
+Benchmarking optimizations/case 94: x: 1 - 2 - 3 - 4 - {x} - 5: Analyzing
+optimizations/case 94: x: 1 - 2 - 3 - 4 - {x} - 5
+                        time:   [13.293 µs 13.304 µs 13.316 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 95: x: 1 - 2 - 3 - 4 - 5 - {x}
+Benchmarking optimizations/case 95: x: 1 - 2 - 3 - 4 - 5 - {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 95: x: 1 - 2 - 3 - 4 - 5 - {x}: Collecting 100 samples in estimated 1.0031 s (76k iterations)
+Benchmarking optimizations/case 95: x: 1 - 2 - 3 - 4 - 5 - {x}: Analyzing
+optimizations/case 95: x: 1 - 2 - 3 - 4 - 5 - {x}
+                        time:   [13.233 µs 13.240 µs 13.249 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 96: x: {x} / 1 / 2 / 3 / 4 / 5
+Benchmarking optimizations/case 96: x: {x} / 1 / 2 / 3 / 4 / 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 96: x: {x} / 1 / 2 / 3 / 4 / 5: Collecting 100 samples in estimated 1.0049 s (126k iterations)
+Benchmarking optimizations/case 96: x: {x} / 1 / 2 / 3 / 4 / 5: Analyzing
+optimizations/case 96: x: {x} / 1 / 2 / 3 / 4 / 5
+                        time:   [7.9621 µs 7.9689 µs 7.9759 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 97: x: 1 / {x} / 2 / 3 / 4 / 5
+Benchmarking optimizations/case 97: x: 1 / {x} / 2 / 3 / 4 / 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 97: x: 1 / {x} / 2 / 3 / 4 / 5: Collecting 100 samples in estimated 1.0549 s (81k iterations)
+Benchmarking optimizations/case 97: x: 1 / {x} / 2 / 3 / 4 / 5: Analyzing
+optimizations/case 97: x: 1 / {x} / 2 / 3 / 4 / 5
+                        time:   [13.031 µs 13.045 µs 13.059 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 98: x: 1 / 2 / {x} / 3 / 4 / 5
+Benchmarking optimizations/case 98: x: 1 / 2 / {x} / 3 / 4 / 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 98: x: 1 / 2 / {x} / 3 / 4 / 5: Collecting 100 samples in estimated 1.0542 s (81k iterations)
+Benchmarking optimizations/case 98: x: 1 / 2 / {x} / 3 / 4 / 5: Analyzing
+optimizations/case 98: x: 1 / 2 / {x} / 3 / 4 / 5
+                        time:   [13.058 µs 13.069 µs 13.081 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 99: x: 1 / 2 / 3 / {x} / 4 / 5
+Benchmarking optimizations/case 99: x: 1 / 2 / 3 / {x} / 4 / 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 99: x: 1 / 2 / 3 / {x} / 4 / 5: Collecting 100 samples in estimated 1.0559 s (81k iterations)
+Benchmarking optimizations/case 99: x: 1 / 2 / 3 / {x} / 4 / 5: Analyzing
+optimizations/case 99: x: 1 / 2 / 3 / {x} / 4 / 5
+                        time:   [13.070 µs 13.085 µs 13.100 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+Benchmarking optimizations/case 100: x: 1 / 2 / 3 / 4 / {x} / 5
+Benchmarking optimizations/case 100: x: 1 / 2 / 3 / 4 / {x} / 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 100: x: 1 / 2 / 3 / 4 / {x} / 5: Collecting 100 samples in estimated 1.0557 s (81k iterations)
+Benchmarking optimizations/case 100: x: 1 / 2 / 3 / 4 / {x} / 5: Analyzing
+optimizations/case 100: x: 1 / 2 / 3 / 4 / {x} / 5
+                        time:   [13.071 µs 13.083 µs 13.096 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 101: x: 1 / 2 / 3 / 4 / 5 / {x}
+Benchmarking optimizations/case 101: x: 1 / 2 / 3 / 4 / 5 / {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 101: x: 1 / 2 / 3 / 4 / 5 / {x}: Collecting 100 samples in estimated 1.0565 s (81k iterations)
+Benchmarking optimizations/case 101: x: 1 / 2 / 3 / 4 / 5 / {x}: Analyzing
+optimizations/case 101: x: 1 / 2 / 3 / 4 / 5 / {x}
+                        time:   [13.094 µs 13.129 µs 13.174 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  3 (3.00%) high mild
+  6 (6.00%) high severe
+Benchmarking optimizations/case 102: 0 + 1
+Benchmarking optimizations/case 102: 0 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 102: 0 + 1: Collecting 100 samples in estimated 1.0110 s (434k iterations)
+Benchmarking optimizations/case 102: 0 + 1: Analyzing
+optimizations/case 102: 0 + 1
+                        time:   [2.3053 µs 2.3088 µs 2.3123 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 103: 2147483647 + 1
+Benchmarking optimizations/case 103: 2147483647 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 103: 2147483647 + 1: Collecting 100 samples in estimated 1.0032 s (434k iterations)
+Benchmarking optimizations/case 103: 2147483647 + 1: Analyzing
+optimizations/case 103: 2147483647 + 1
+                        time:   [2.3000 µs 2.3025 µs 2.3051 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 104: -2147483648 + -1
+Benchmarking optimizations/case 104: -2147483648 + -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 104: -2147483648 + -1: Collecting 100 samples in estimated 1.0011 s (586k iterations)
+Benchmarking optimizations/case 104: -2147483648 + -1: Analyzing
+optimizations/case 104: -2147483648 + -1
+                        time:   [1.7040 µs 1.7064 µs 1.7088 µs]
+Benchmarking optimizations/case 105: 0 - 1
+Benchmarking optimizations/case 105: 0 - 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 105: 0 - 1: Collecting 100 samples in estimated 1.0110 s (465k iterations)
+Benchmarking optimizations/case 105: 0 - 1: Analyzing
+optimizations/case 105: 0 - 1
+                        time:   [2.1712 µs 2.1751 µs 2.1790 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low severe
+  3 (3.00%) high mild
+Benchmarking optimizations/case 106: 2147483647 - -1
+Benchmarking optimizations/case 106: 2147483647 - -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 106: 2147483647 - -1: Collecting 100 samples in estimated 1.0010 s (530k iterations)
+Benchmarking optimizations/case 106: 2147483647 - -1: Analyzing
+optimizations/case 106: 2147483647 - -1
+                        time:   [1.8853 µs 1.8886 µs 1.8919 µs]
+Benchmarking optimizations/case 107: -2147483648 - 1
+Benchmarking optimizations/case 107: -2147483648 - 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 107: -2147483648 - 1: Collecting 100 samples in estimated 1.0053 s (530k iterations)
+Benchmarking optimizations/case 107: -2147483648 - 1: Analyzing
+optimizations/case 107: -2147483648 - 1
+                        time:   [1.8898 µs 1.8926 µs 1.8954 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+Benchmarking optimizations/case 108: 100 * 100
+Benchmarking optimizations/case 108: 100 * 100: Warming up for 3.0000 s
+Benchmarking optimizations/case 108: 100 * 100: Collecting 100 samples in estimated 1.0054 s (449k iterations)
+Benchmarking optimizations/case 108: 100 * 100: Analyzing
+optimizations/case 108: 100 * 100
+                        time:   [2.2319 µs 2.2344 µs 2.2369 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 109: 32768 * 65536
+Benchmarking optimizations/case 109: 32768 * 65536: Warming up for 3.0000 s
+Benchmarking optimizations/case 109: 32768 * 65536: Collecting 100 samples in estimated 1.0088 s (444k iterations)
+Benchmarking optimizations/case 109: 32768 * 65536: Analyzing
+optimizations/case 109: 32768 * 65536
+                        time:   [2.2669 µs 2.2713 µs 2.2766 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 110: 32768 * 65537
+Benchmarking optimizations/case 110: 32768 * 65537: Warming up for 3.0000 s
+Benchmarking optimizations/case 110: 32768 * 65537: Collecting 100 samples in estimated 1.0094 s (444k iterations)
+Benchmarking optimizations/case 110: 32768 * 65537: Analyzing
+optimizations/case 110: 32768 * 65537
+                        time:   [2.2682 µs 2.2749 µs 2.2847 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking optimizations/case 111: 200 / 100
+Benchmarking optimizations/case 111: 200 / 100: Warming up for 3.0000 s
+Benchmarking optimizations/case 111: 200 / 100: Collecting 100 samples in estimated 1.0054 s (470k iterations)
+Benchmarking optimizations/case 111: 200 / 100: Analyzing
+optimizations/case 111: 200 / 100
+                        time:   [2.1414 µs 2.1442 µs 2.1471 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 112: 100 / 0
+Benchmarking optimizations/case 112: 100 / 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 112: 100 / 0: Collecting 100 samples in estimated 1.0074 s (470k iterations)
+Benchmarking optimizations/case 112: 100 / 0: Analyzing
+optimizations/case 112: 100 / 0
+                        time:   [2.1447 µs 2.1468 µs 2.1489 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 113: -2147483648 / -1
+Benchmarking optimizations/case 113: -2147483648 / -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 113: -2147483648 / -1: Collecting 100 samples in estimated 1.0012 s (646k iterations)
+Benchmarking optimizations/case 113: -2147483648 / -1: Analyzing
+optimizations/case 113: -2147483648 / -1
+                        time:   [1.5425 µs 1.5438 µs 1.5451 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 114: 200 % 100
+Benchmarking optimizations/case 114: 200 % 100: Warming up for 3.0000 s
+Benchmarking optimizations/case 114: 200 % 100: Collecting 100 samples in estimated 1.0019 s (500k iterations)
+Benchmarking optimizations/case 114: 200 % 100: Analyzing
+optimizations/case 114: 200 % 100
+                        time:   [2.0058 µs 2.0078 µs 2.0098 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 115: 100 % 0
+Benchmarking optimizations/case 115: 100 % 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 115: 100 % 0: Collecting 100 samples in estimated 1.0088 s (505k iterations)
+Benchmarking optimizations/case 115: 100 % 0: Analyzing
+optimizations/case 115: 100 % 0
+                        time:   [1.9941 µs 1.9971 µs 2.0002 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 116: 0 ^ 0
+Benchmarking optimizations/case 116: 0 ^ 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 116: 0 ^ 0: Collecting 100 samples in estimated 1.0004 s (510k iterations)
+Benchmarking optimizations/case 116: 0 ^ 0: Analyzing
+optimizations/case 116: 0 ^ 0
+                        time:   [1.9596 µs 1.9623 µs 1.9652 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 117: 0 ^ 1
+Benchmarking optimizations/case 117: 0 ^ 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 117: 0 ^ 1: Collecting 100 samples in estimated 1.0022 s (505k iterations)
+Benchmarking optimizations/case 117: 0 ^ 1: Analyzing
+optimizations/case 117: 0 ^ 1
+                        time:   [1.9860 µs 1.9879 µs 1.9899 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 118: 0 ^ -1
+Benchmarking optimizations/case 118: 0 ^ -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 118: 0 ^ -1: Collecting 100 samples in estimated 1.0022 s (591k iterations)
+Benchmarking optimizations/case 118: 0 ^ -1: Analyzing
+optimizations/case 118: 0 ^ -1
+                        time:   [1.7670 µs 1.7954 µs 1.8223 µs]
+Found 21 outliers among 100 measurements (21.00%)
+  4 (4.00%) high mild
+  17 (17.00%) high severe
+Benchmarking optimizations/case 119: 1 ^ 0
+Benchmarking optimizations/case 119: 1 ^ 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 119: 1 ^ 0: Collecting 100 samples in estimated 1.0039 s (500k iterations)
+Benchmarking optimizations/case 119: 1 ^ 0: Analyzing
+optimizations/case 119: 1 ^ 0
+                        time:   [1.9887 µs 1.9913 µs 1.9938 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 120: 1 ^ 1
+Benchmarking optimizations/case 120: 1 ^ 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 120: 1 ^ 1: Collecting 100 samples in estimated 1.0096 s (515k iterations)
+Benchmarking optimizations/case 120: 1 ^ 1: Analyzing
+optimizations/case 120: 1 ^ 1
+                        time:   [1.9639 µs 1.9670 µs 1.9702 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking optimizations/case 121: 1 ^ -1
+Benchmarking optimizations/case 121: 1 ^ -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 121: 1 ^ -1: Collecting 100 samples in estimated 1.0020 s (591k iterations)
+Benchmarking optimizations/case 121: 1 ^ -1: Analyzing
+optimizations/case 121: 1 ^ -1
+                        time:   [1.6932 µs 1.6951 µs 1.6970 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 122: 1 ^ -2
+Benchmarking optimizations/case 122: 1 ^ -2: Warming up for 3.0000 s
+Benchmarking optimizations/case 122: 1 ^ -2: Collecting 100 samples in estimated 1.0039 s (591k iterations)
+Benchmarking optimizations/case 122: 1 ^ -2: Analyzing
+optimizations/case 122: 1 ^ -2
+                        time:   [1.6902 µs 1.6923 µs 1.6943 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 123: (-1) ^ 0
+Benchmarking optimizations/case 123: (-1) ^ 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 123: (-1) ^ 0: Collecting 100 samples in estimated 1.0108 s (439k iterations)
+Benchmarking optimizations/case 123: (-1) ^ 0: Analyzing
+optimizations/case 123: (-1) ^ 0
+                        time:   [2.2959 µs 2.2977 µs 2.2997 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 124: (-1) ^ 1
+Benchmarking optimizations/case 124: (-1) ^ 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 124: (-1) ^ 1: Collecting 100 samples in estimated 1.0018 s (434k iterations)
+Benchmarking optimizations/case 124: (-1) ^ 1: Analyzing
+optimizations/case 124: (-1) ^ 1
+                        time:   [2.3025 µs 2.3039 µs 2.3053 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking optimizations/case 125: (-1) ^ 2
+Benchmarking optimizations/case 125: (-1) ^ 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 125: (-1) ^ 2: Collecting 100 samples in estimated 1.0006 s (434k iterations)
+Benchmarking optimizations/case 125: (-1) ^ 2: Analyzing
+optimizations/case 125: (-1) ^ 2
+                        time:   [2.3008 µs 2.3029 µs 2.3049 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 126: (-1) ^ -1
+Benchmarking optimizations/case 126: (-1) ^ -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 126: (-1) ^ -1: Collecting 100 samples in estimated 1.0042 s (510k iterations)
+Benchmarking optimizations/case 126: (-1) ^ -1: Analyzing
+optimizations/case 126: (-1) ^ -1
+                        time:   [1.9623 µs 1.9642 µs 1.9659 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 127: (-1) ^ -2
+Benchmarking optimizations/case 127: (-1) ^ -2: Warming up for 3.0000 s
+Benchmarking optimizations/case 127: (-1) ^ -2: Collecting 100 samples in estimated 1.0073 s (505k iterations)
+Benchmarking optimizations/case 127: (-1) ^ -2: Analyzing
+optimizations/case 127: (-1) ^ -2
+                        time:   [1.9863 µs 1.9879 µs 1.9897 µs]
+Found 12 outliers among 100 measurements (12.00%)
+  7 (7.00%) low mild
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 128: 10 ^ 0
+Benchmarking optimizations/case 128: 10 ^ 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 128: 10 ^ 0: Collecting 100 samples in estimated 1.0066 s (505k iterations)
+Benchmarking optimizations/case 128: 10 ^ 0: Analyzing
+optimizations/case 128: 10 ^ 0
+                        time:   [1.9921 µs 1.9939 µs 1.9959 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 129: 10 ^ 3
+Benchmarking optimizations/case 129: 10 ^ 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 129: 10 ^ 3: Collecting 100 samples in estimated 1.0048 s (505k iterations)
+Benchmarking optimizations/case 129: 10 ^ 3: Analyzing
+optimizations/case 129: 10 ^ 3
+                        time:   [1.9898 µs 1.9918 µs 1.9938 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 130: 10 ^ 10000
+Benchmarking optimizations/case 130: 10 ^ 10000: Warming up for 3.0000 s
+Benchmarking optimizations/case 130: 10 ^ 10000: Collecting 100 samples in estimated 1.0012 s (500k iterations)
+Benchmarking optimizations/case 130: 10 ^ 10000: Analyzing
+optimizations/case 130: 10 ^ 10000
+                        time:   [2.0000 µs 2.0022 µs 2.0045 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 131: 10 ^ -1
+Benchmarking optimizations/case 131: 10 ^ -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 131: 10 ^ -1: Collecting 100 samples in estimated 1.0016 s (591k iterations)
+Benchmarking optimizations/case 131: 10 ^ -1: Analyzing
+optimizations/case 131: 10 ^ -1
+                        time:   [1.6937 µs 1.6960 µs 1.6983 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 132: -0
+Benchmarking optimizations/case 132: -0: Warming up for 3.0000 s
+Benchmarking optimizations/case 132: -0: Collecting 100 samples in estimated 1.0024 s (1.4M iterations)
+Benchmarking optimizations/case 132: -0: Analyzing
+optimizations/case 132: -0
+                        time:   [702.69 ns 703.80 ns 704.93 ns]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 133: -(-2147483648)
+Benchmarking optimizations/case 133: -(-2147483648): Warming up for 3.0000 s
+Benchmarking optimizations/case 133: -(-2147483648): Collecting 100 samples in estimated 1.0058 s (520k iterations)
+Benchmarking optimizations/case 133: -(-2147483648): Analyzing
+optimizations/case 133: -(-2147483648)
+                        time:   [1.9261 µs 1.9290 µs 1.9320 µs]
+Benchmarking optimizations/case 134: 1 + 2 - 3 + 4 - 5 + 6 - 7 + 8 - 9 + 10
+Benchmarking optimizations/case 134: 1 + 2 - 3 + 4 - 5 + 6 - 7 + 8 - 9 + 10: Warming up for 3.0000 s
+Benchmarking optimizations/case 134: 1 + 2 - 3 + 4 - 5 + 6 - 7 + 8 - 9 + 10: Collecting 100 samples in estimated 1.0226 s (81k iterations)
+Benchmarking optimizations/case 134: 1 + 2 - 3 + 4 - 5 + 6 - 7 + 8 - 9 + 10: Analyzing
+optimizations/case 134: 1 + 2 - 3 + 4 - 5 + 6 - 7 + 8 - 9 + 10
+                        time:   [12.631 µs 12.642 µs 12.653 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 135: x: 1 + 4 + {x} + 4 + 9
+Benchmarking optimizations/case 135: x: 1 + 4 + {x} + 4 + 9: Warming up for 3.0000 s
+Benchmarking optimizations/case 135: x: 1 + 4 + {x} + 4 + 9: Collecting 100 samples in estimated 1.0041 s (101k iterations)
+Benchmarking optimizations/case 135: x: 1 + 4 + {x} + 4 + 9: Analyzing
+optimizations/case 135: x: 1 + 4 + {x} + 4 + 9
+                        time:   [9.9466 µs 9.9601 µs 9.9747 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 136: 1 + 4 + {x} + 4 + 9
+Benchmarking optimizations/case 136: 1 + 4 + {x} + 4 + 9: Warming up for 3.0000 s
+Benchmarking optimizations/case 136: 1 + 4 + {x} + 4 + 9: Collecting 100 samples in estimated 1.0397 s (106k iterations)
+Benchmarking optimizations/case 136: 1 + 4 + {x} + 4 + 9: Analyzing
+optimizations/case 136: 1 + 4 + {x} + 4 + 9
+                        time:   [9.7846 µs 9.7953 µs 9.8057 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 137: [5:10]
+Benchmarking optimizations/case 137: [5:10]: Warming up for 3.0000 s
+Benchmarking optimizations/case 137: [5:10]: Collecting 100 samples in estimated 1.0008 s (364k iterations)
+Benchmarking optimizations/case 137: [5:10]: Analyzing
+optimizations/case 137: [5:10]
+                        time:   [2.7565 µs 2.7603 µs 2.7642 µs]
+Benchmarking optimizations/case 138: [7:7]
+Benchmarking optimizations/case 138: [7:7]: Warming up for 3.0000 s
+Benchmarking optimizations/case 138: [7:7]: Collecting 100 samples in estimated 1.0029 s (439k iterations)
+Benchmarking optimizations/case 138: [7:7]: Analyzing
+optimizations/case 138: [7:7]
+                        time:   [2.2791 µs 2.2827 µs 2.2867 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  6 (6.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 139: [5:4]
+Benchmarking optimizations/case 139: [5:4]: Warming up for 3.0000 s
+Benchmarking optimizations/case 139: [5:4]: Collecting 100 samples in estimated 1.0059 s (424k iterations)
+Benchmarking optimizations/case 139: [5:4]: Analyzing
+optimizations/case 139: [5:4]
+                        time:   [2.3688 µs 2.3717 µs 2.3747 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 140: 3D6
+Benchmarking optimizations/case 140: 3D6: Warming up for 3.0000 s
+Benchmarking optimizations/case 140: 3D6: Collecting 100 samples in estimated 1.0046 s (495k iterations)
+Benchmarking optimizations/case 140: 3D6: Analyzing
+optimizations/case 140: 3D6
+                        time:   [2.0340 µs 2.0384 µs 2.0438 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 141: 0D100
+Benchmarking optimizations/case 141: 0D100: Warming up for 3.0000 s
+Benchmarking optimizations/case 141: 0D100: Collecting 100 samples in estimated 1.0021 s (601k iterations)
+Benchmarking optimizations/case 141: 0D100: Analyzing
+optimizations/case 141: 0D100
+                        time:   [1.6534 µs 1.6554 µs 1.6573 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+Benchmarking optimizations/case 142: 100D0
+Benchmarking optimizations/case 142: 100D0: Warming up for 3.0000 s
+Benchmarking optimizations/case 142: 100D0: Collecting 100 samples in estimated 1.0029 s (601k iterations)
+Benchmarking optimizations/case 142: 100D0: Analyzing
+optimizations/case 142: 100D0
+                        time:   [1.6606 µs 1.6622 µs 1.6637 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 143: 100D1
+Benchmarking optimizations/case 143: 100D1: Warming up for 3.0000 s
+Benchmarking optimizations/case 143: 100D1: Collecting 100 samples in estimated 1.0076 s (601k iterations)
+Benchmarking optimizations/case 143: 100D1: Analyzing
+optimizations/case 143: 100D1
+                        time:   [1.6646 µs 1.6666 µs 1.6687 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 144: 3D6 drop lowest 1
+Benchmarking optimizations/case 144: 3D6 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 144: 3D6 drop lowest 1: Collecting 100 samples in estimated 1.0090 s (404k iterations)
+Benchmarking optimizations/case 144: 3D6 drop lowest 1: Analyzing
+optimizations/case 144: 3D6 drop lowest 1
+                        time:   [2.5826 µs 2.6365 µs 2.7079 µs]
+Found 13 outliers among 100 measurements (13.00%)
+  13 (13.00%) high severe
+Benchmarking optimizations/case 145: 3D6 drop lowest 3
+Benchmarking optimizations/case 145: 3D6 drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 145: 3D6 drop lowest 3: Collecting 100 samples in estimated 1.0058 s (530k iterations)
+Benchmarking optimizations/case 145: 3D6 drop lowest 3: Analyzing
+optimizations/case 145: 3D6 drop lowest 3
+                        time:   [1.8939 µs 1.8960 µs 1.8982 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  6 (6.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 146: 3D6 drop lowest 5
+Benchmarking optimizations/case 146: 3D6 drop lowest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 146: 3D6 drop lowest 5: Collecting 100 samples in estimated 1.0073 s (525k iterations)
+Benchmarking optimizations/case 146: 3D6 drop lowest 5: Analyzing
+optimizations/case 146: 3D6 drop lowest 5
+                        time:   [1.9094 µs 1.9110 µs 1.9126 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 147: 0D6 drop lowest 3
+Benchmarking optimizations/case 147: 0D6 drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 147: 0D6 drop lowest 3: Collecting 100 samples in estimated 1.0039 s (530k iterations)
+Benchmarking optimizations/case 147: 0D6 drop lowest 3: Analyzing
+optimizations/case 147: 0D6 drop lowest 3
+                        time:   [1.8915 µs 1.8931 µs 1.8948 µs]
+Benchmarking optimizations/case 148: 6D0 drop lowest 3
+Benchmarking optimizations/case 148: 6D0 drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 148: 6D0 drop lowest 3: Collecting 100 samples in estimated 1.0004 s (525k iterations)
+Benchmarking optimizations/case 148: 6D0 drop lowest 3: Analyzing
+optimizations/case 148: 6D0 drop lowest 3
+                        time:   [1.9009 µs 1.9028 µs 1.9048 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  6 (6.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 149: 8D1 drop lowest 5
+Benchmarking optimizations/case 149: 8D1 drop lowest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 149: 8D1 drop lowest 5: Collecting 100 samples in estimated 1.0026 s (520k iterations)
+Benchmarking optimizations/case 149: 8D1 drop lowest 5: Analyzing
+optimizations/case 149: 8D1 drop lowest 5
+                        time:   [1.9128 µs 1.9153 µs 1.9177 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+Benchmarking optimizations/case 150: 3D6 drop highest 1
+Benchmarking optimizations/case 150: 3D6 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 150: 3D6 drop highest 1: Collecting 100 samples in estimated 1.0007 s (399k iterations)
+Benchmarking optimizations/case 150: 3D6 drop highest 1: Analyzing
+optimizations/case 150: 3D6 drop highest 1
+                        time:   [2.5035 µs 2.5067 µs 2.5098 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 151: 3D6 drop highest 3
+Benchmarking optimizations/case 151: 3D6 drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 151: 3D6 drop highest 3: Collecting 100 samples in estimated 1.0022 s (530k iterations)
+Benchmarking optimizations/case 151: 3D6 drop highest 3: Analyzing
+optimizations/case 151: 3D6 drop highest 3
+                        time:   [1.8841 µs 1.8861 µs 1.8882 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 152: 3D6 drop highest 5
+Benchmarking optimizations/case 152: 3D6 drop highest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 152: 3D6 drop highest 5: Collecting 100 samples in estimated 1.0031 s (520k iterations)
+Benchmarking optimizations/case 152: 3D6 drop highest 5: Analyzing
+optimizations/case 152: 3D6 drop highest 5
+                        time:   [1.9145 µs 1.9166 µs 1.9190 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  6 (6.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 153: 10D10 drop lowest (1 + 3)
+Benchmarking optimizations/case 153: 10D10 drop lowest (1 + 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 153: 10D10 drop lowest (1 + 3): Collecting 100 samples in estimated 1.0092 s (187k iterations)
+Benchmarking optimizations/case 153: 10D10 drop lowest (1 + 3): Analyzing
+optimizations/case 153: 10D10 drop lowest (1 + 3)
+                        time:   [5.3793 µs 5.3855 µs 5.3917 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 154: 0D6 drop highest 3
+Benchmarking optimizations/case 154: 0D6 drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 154: 0D6 drop highest 3: Collecting 100 samples in estimated 1.0060 s (530k iterations)
+Benchmarking optimizations/case 154: 0D6 drop highest 3: Analyzing
+optimizations/case 154: 0D6 drop highest 3
+                        time:   [1.8897 µs 1.8920 µs 1.8942 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+Benchmarking optimizations/case 155: 6D0 drop highest 3
+Benchmarking optimizations/case 155: 6D0 drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 155: 6D0 drop highest 3: Collecting 100 samples in estimated 1.0060 s (530k iterations)
+Benchmarking optimizations/case 155: 6D0 drop highest 3: Analyzing
+optimizations/case 155: 6D0 drop highest 3
+                        time:   [1.8943 µs 1.8959 µs 1.8974 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) low mild
+Benchmarking optimizations/case 156: 8D1 drop highest 5
+Benchmarking optimizations/case 156: 8D1 drop highest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 156: 8D1 drop highest 5: Collecting 100 samples in estimated 1.0061 s (525k iterations)
+Benchmarking optimizations/case 156: 8D1 drop highest 5: Analyzing
+optimizations/case 156: 8D1 drop highest 5
+                        time:   [1.9163 µs 1.9207 µs 1.9271 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 157: 10D10 drop highest (1 + 3)
+Benchmarking optimizations/case 157: 10D10 drop highest (1 + 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 157: 10D10 drop highest (1 + 3): Collecting 100 samples in estimated 1.0100 s (187k iterations)
+Benchmarking optimizations/case 157: 10D10 drop highest (1 + 3): Analyzing
+optimizations/case 157: 10D10 drop highest (1 + 3)
+                        time:   [5.3886 µs 5.3936 µs 5.3989 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 158: 8D1 drop lowest 3 drop highest 3
+Benchmarking optimizations/case 158: 8D1 drop lowest 3 drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 158: 8D1 drop lowest 3 drop highest 3: Collecting 100 samples in estimated 1.0038 s (460k iterations)
+Benchmarking optimizations/case 158: 8D1 drop lowest 3 drop highest 3: Analyzing
+optimizations/case 158: 8D1 drop lowest 3 drop highest 3
+                        time:   [2.1755 µs 2.1786 µs 2.1816 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 159: 8D1 drop highest 3 drop lowest 3
+Benchmarking optimizations/case 159: 8D1 drop highest 3 drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 159: 8D1 drop highest 3 drop lowest 3: Collecting 100 samples in estimated 1.0068 s (460k iterations)
+Benchmarking optimizations/case 159: 8D1 drop highest 3 drop lowest 3: Analyzing
+optimizations/case 159: 8D1 drop highest 3 drop lowest 3
+                        time:   [2.1781 µs 2.1796 µs 2.1812 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  3 (3.00%) low mild
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 160: {x}D(3 + 3)
+Benchmarking optimizations/case 160: {x}D(3 + 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 160: {x}D(3 + 3): Collecting 100 samples in estimated 1.0106 s (197k iterations)
+Benchmarking optimizations/case 160: {x}D(3 + 3): Analyzing
+optimizations/case 160: {x}D(3 + 3)
+                        time:   [5.0920 µs 5.0964 µs 5.1007 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 161: {x}D0
+Benchmarking optimizations/case 161: {x}D0: Warming up for 3.0000 s
+Benchmarking optimizations/case 161: {x}D0: Collecting 100 samples in estimated 1.0054 s (485k iterations)
+Benchmarking optimizations/case 161: {x}D0: Analyzing
+optimizations/case 161: {x}D0
+                        time:   [2.0779 µs 2.0807 µs 2.0835 µs]
+Benchmarking optimizations/case 162: {x}D(-1)
+Benchmarking optimizations/case 162: {x}D(-1): Warming up for 3.0000 s
+Benchmarking optimizations/case 162: {x}D(-1): Collecting 100 samples in estimated 1.0109 s (424k iterations)
+Benchmarking optimizations/case 162: {x}D(-1): Analyzing
+optimizations/case 162: {x}D(-1)
+                        time:   [2.3739 µs 2.3773 µs 2.3809 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 163: {x}D1
+Benchmarking optimizations/case 163: {x}D1: Warming up for 3.0000 s
+Benchmarking optimizations/case 163: {x}D1: Collecting 100 samples in estimated 1.0089 s (470k iterations)
+Benchmarking optimizations/case 163: {x}D1: Analyzing
+optimizations/case 163: {x}D1
+                        time:   [2.1427 µs 2.1460 µs 2.1493 µs]
+Benchmarking optimizations/case 164: 0D{x}
+Benchmarking optimizations/case 164: 0D{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 164: 0D{x}: Collecting 100 samples in estimated 1.0065 s (480k iterations)
+Benchmarking optimizations/case 164: 0D{x}: Analyzing
+optimizations/case 164: 0D{x}
+                        time:   [2.0882 µs 2.1036 µs 2.1222 µs]
+Found 10 outliers among 100 measurements (10.00%)
+  3 (3.00%) low mild
+  3 (3.00%) high mild
+  4 (4.00%) high severe
+Benchmarking optimizations/case 165: (-1)D{x}
+Benchmarking optimizations/case 165: (-1)D{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 165: (-1)D{x}: Collecting 100 samples in estimated 1.0114 s (419k iterations)
+Benchmarking optimizations/case 165: (-1)D{x}: Analyzing
+optimizations/case 165: (-1)D{x}
+                        time:   [2.4032 µs 2.4059 µs 2.4085 µs]
+Benchmarking optimizations/case 166: 1D[0, 0, 0, 1, 1, 2]
+Benchmarking optimizations/case 166: 1D[0, 0, 0, 1, 1, 2]: Warming up for 3.0000 s
+Benchmarking optimizations/case 166: 1D[0, 0, 0, 1, 1, 2]: Collecting 100 samples in estimated 1.0050 s (369k iterations)
+Benchmarking optimizations/case 166: 1D[0, 0, 0, 1, 1, 2]: Analyzing
+optimizations/case 166: 1D[0, 0, 0, 1, 1, 2]
+                        time:   [2.7190 µs 2.7226 µs 2.7264 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking optimizations/case 167: 0D[0, 0, 0, 1, 1, 2]
+Benchmarking optimizations/case 167: 0D[0, 0, 0, 1, 1, 2]: Warming up for 3.0000 s
+Benchmarking optimizations/case 167: 0D[0, 0, 0, 1, 1, 2]: Collecting 100 samples in estimated 1.0049 s (429k iterations)
+Benchmarking optimizations/case 167: 0D[0, 0, 0, 1, 1, 2]: Analyzing
+optimizations/case 167: 0D[0, 0, 0, 1, 1, 2]
+                        time:   [2.3266 µs 2.3295 µs 2.3326 µs]
+Benchmarking optimizations/case 168: 5D[1]
+Benchmarking optimizations/case 168: 5D[1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 168: 5D[1]: Collecting 100 samples in estimated 1.0082 s (510k iterations)
+Benchmarking optimizations/case 168: 5D[1]: Analyzing
+optimizations/case 168: 5D[1]
+                        time:   [1.9681 µs 1.9704 µs 1.9727 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 169: 8D[3, 3, 3]
+Benchmarking optimizations/case 169: 8D[3, 3, 3]: Warming up for 3.0000 s
+Benchmarking optimizations/case 169: 8D[3, 3, 3]: Collecting 100 samples in estimated 1.0055 s (470k iterations)
+Benchmarking optimizations/case 169: 8D[3, 3, 3]: Analyzing
+optimizations/case 169: 8D[3, 3, 3]
+                        time:   [2.1268 µs 2.1288 µs 2.1309 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 170: 5D[1, 2, 3] drop lowest 5
+Benchmarking optimizations/case 170: 5D[1, 2, 3] drop lowest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 170: 5D[1, 2, 3] drop lowest 5: Collecting 100 samples in estimated 1.0025 s (429k iterations)
+Benchmarking optimizations/case 170: 5D[1, 2, 3] drop lowest 5: Analyzing
+optimizations/case 170: 5D[1, 2, 3] drop lowest 5
+                        time:   [2.3165 µs 2.3180 µs 2.3196 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 171: 5D[1, 2, 3] drop lowest 6
+Benchmarking optimizations/case 171: 5D[1, 2, 3] drop lowest 6: Warming up for 3.0000 s
+Benchmarking optimizations/case 171: 5D[1, 2, 3] drop lowest 6: Collecting 100 samples in estimated 1.0020 s (414k iterations)
+Benchmarking optimizations/case 171: 5D[1, 2, 3] drop lowest 6: Analyzing
+optimizations/case 171: 5D[1, 2, 3] drop lowest 6
+                        time:   [2.3875 µs 2.3904 µs 2.3933 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 172: 5D[1, 1, 1] drop lowest 3
+Benchmarking optimizations/case 172: 5D[1, 1, 1] drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 172: 5D[1, 1, 1] drop lowest 3: Collecting 100 samples in estimated 1.0055 s (414k iterations)
+Benchmarking optimizations/case 172: 5D[1, 1, 1] drop lowest 3: Analyzing
+optimizations/case 172: 5D[1, 1, 1] drop lowest 3
+                        time:   [2.4158 µs 2.4186 µs 2.4217 µs]
+Found 11 outliers among 100 measurements (11.00%)
+  2 (2.00%) low mild
+  6 (6.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 173: 5D[1, 2, 3] drop highest 5
+Benchmarking optimizations/case 173: 5D[1, 2, 3] drop highest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 173: 5D[1, 2, 3] drop highest 5: Collecting 100 samples in estimated 1.0109 s (434k iterations)
+Benchmarking optimizations/case 173: 5D[1, 2, 3] drop highest 5: Analyzing
+optimizations/case 173: 5D[1, 2, 3] drop highest 5
+                        time:   [2.3017 µs 2.3041 µs 2.3066 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 174: 5D[1, 2, 3] drop highest 6
+Benchmarking optimizations/case 174: 5D[1, 2, 3] drop highest 6: Warming up for 3.0000 s
+Benchmarking optimizations/case 174: 5D[1, 2, 3] drop highest 6: Collecting 100 samples in estimated 1.0068 s (419k iterations)
+Benchmarking optimizations/case 174: 5D[1, 2, 3] drop highest 6: Analyzing
+optimizations/case 174: 5D[1, 2, 3] drop highest 6
+                        time:   [2.3839 µs 2.3868 µs 2.3898 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 175: 5D[1, 1, 1] drop highest 3
+Benchmarking optimizations/case 175: 5D[1, 1, 1] drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 175: 5D[1, 1, 1] drop highest 3: Collecting 100 samples in estimated 1.0006 s (409k iterations)
+Benchmarking optimizations/case 175: 5D[1, 1, 1] drop highest 3: Analyzing
+optimizations/case 175: 5D[1, 1, 1] drop highest 3
+                        time:   [2.4225 µs 2.4252 µs 2.4279 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 176: 5D[5, 5, 5, 5] drop highest 3 drop lowest 1
+Benchmarking optimizations/case 176: 5D[5, 5, 5, 5] drop highest 3 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 176: 5D[5, 5, 5, 5] drop highest 3 drop lowest 1: Collecting 100 samples in estimated 1.0100 s (364k iterations)
+Benchmarking optimizations/case 176: 5D[5, 5, 5, 5] drop highest 3 drop lowest 1: Analyzing
+optimizations/case 176: 5D[5, 5, 5, 5] drop highest 3 drop lowest 1
+                        time:   [2.7569 µs 2.7606 µs 2.7651 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 177: 5D[5, 5, 5, 5] drop lowest 3 drop highest 1
+Benchmarking optimizations/case 177: 5D[5, 5, 5, 5] drop lowest 3 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 177: 5D[5, 5, 5, 5] drop lowest 3 drop highest 1: Collecting 100 samples in estimated 1.0110 s (364k iterations)
+Benchmarking optimizations/case 177: 5D[5, 5, 5, 5] drop lowest 3 drop highest 1: Analyzing
+optimizations/case 177: 5D[5, 5, 5, 5] drop lowest 3 drop highest 1
+                        time:   [2.7567 µs 2.7593 µs 2.7620 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 178: 3D1 + 7
+Benchmarking optimizations/case 178: 3D1 + 7: Warming up for 3.0000 s
+Benchmarking optimizations/case 178: 3D1 + 7: Collecting 100 samples in estimated 1.0035 s (379k iterations)
+Benchmarking optimizations/case 178: 3D1 + 7: Analyzing
+optimizations/case 178: 3D1 + 7
+                        time:   [2.6340 µs 2.6355 µs 2.6369 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking optimizations/case 179: 7 + 3D1
+Benchmarking optimizations/case 179: 7 + 3D1: Warming up for 3.0000 s
+Benchmarking optimizations/case 179: 7 + 3D1: Collecting 100 samples in estimated 1.0089 s (379k iterations)
+Benchmarking optimizations/case 179: 7 + 3D1: Analyzing
+optimizations/case 179: 7 + 3D1
+                        time:   [2.6592 µs 2.6643 µs 2.6704 µs]
+Found 12 outliers among 100 measurements (12.00%)
+  4 (4.00%) high mild
+  8 (8.00%) high severe
+Benchmarking optimizations/case 180: x: 0 + {x}
+Benchmarking optimizations/case 180: x: 0 + {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 180: x: 0 + {x}: Collecting 100 samples in estimated 1.0132 s (348k iterations)
+Benchmarking optimizations/case 180: x: 0 + {x}: Analyzing
+optimizations/case 180: x: 0 + {x}
+                        time:   [2.8916 µs 2.8942 µs 2.8971 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) low mild
+  3 (3.00%) high mild
+Benchmarking optimizations/case 181: x: {x} + 0
+Benchmarking optimizations/case 181: x: {x} + 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 181: x: {x} + 0: Collecting 100 samples in estimated 1.0133 s (348k iterations)
+Benchmarking optimizations/case 181: x: {x} + 0: Analyzing
+optimizations/case 181: x: {x} + 0
+                        time:   [2.8858 µs 2.8887 µs 2.8917 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 182: x: {x} + 1
+Benchmarking optimizations/case 182: x: {x} + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 182: x: {x} + 1: Collecting 100 samples in estimated 1.0000 s (258k iterations)
+Benchmarking optimizations/case 182: x: {x} + 1: Analyzing
+optimizations/case 182: x: {x} + 1
+                        time:   [3.8666 µs 3.8700 µs 3.8735 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 183: x: 0 - {x}
+Benchmarking optimizations/case 183: x: 0 - {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 183: x: 0 - {x}: Collecting 100 samples in estimated 1.0010 s (293k iterations)
+Benchmarking optimizations/case 183: x: 0 - {x}: Analyzing
+optimizations/case 183: x: 0 - {x}
+                        time:   [3.4014 µs 3.4099 µs 3.4213 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 184: x: {x} - 0
+Benchmarking optimizations/case 184: x: {x} - 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 184: x: {x} - 0: Collecting 100 samples in estimated 1.0049 s (364k iterations)
+Benchmarking optimizations/case 184: x: {x} - 0: Analyzing
+optimizations/case 184: x: {x} - 0
+                        time:   [2.7472 µs 2.7534 µs 2.7597 µs]
+Benchmarking optimizations/case 185: x: {x} - {x}
+Benchmarking optimizations/case 185: x: {x} - {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 185: x: {x} - {x}: Collecting 100 samples in estimated 1.0149 s (333k iterations)
+Benchmarking optimizations/case 185: x: {x} - {x}: Analyzing
+optimizations/case 185: x: {x} - {x}
+                        time:   [3.0358 µs 3.0644 µs 3.0996 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 186: x: {x} - 1
+Benchmarking optimizations/case 186: x: {x} - 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 186: x: {x} - 1: Collecting 100 samples in estimated 1.0041 s (348k iterations)
+Benchmarking optimizations/case 186: x: {x} - 1: Analyzing
+optimizations/case 186: x: {x} - 1
+                        time:   [2.9878 µs 3.0101 µs 3.0334 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high mild
+Benchmarking optimizations/case 187: x: 0 * {x}
+Benchmarking optimizations/case 187: x: 0 * {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 187: x: 0 * {x}: Collecting 100 samples in estimated 1.0005 s (313k iterations)
+Benchmarking optimizations/case 187: x: 0 * {x}: Analyzing
+optimizations/case 187: x: 0 * {x}
+                        time:   [3.3297 µs 3.3623 µs 3.3958 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+Benchmarking optimizations/case 188: x: {x} * 0
+Benchmarking optimizations/case 188: x: {x} * 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 188: x: {x} * 0: Collecting 100 samples in estimated 1.0117 s (293k iterations)
+Benchmarking optimizations/case 188: x: {x} * 0: Analyzing
+optimizations/case 188: x: {x} * 0
+                        time:   [3.4870 µs 3.5302 µs 3.5744 µs]
+Benchmarking optimizations/case 189: x: -1 * {x}
+Benchmarking optimizations/case 189: x: -1 * {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 189: x: -1 * {x}: Collecting 100 samples in estimated 1.0024 s (252k iterations)
+Benchmarking optimizations/case 189: x: -1 * {x}: Analyzing
+optimizations/case 189: x: -1 * {x}
+                        time:   [3.9463 µs 4.0165 µs 4.0906 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking optimizations/case 190: x: {x} * -1
+Benchmarking optimizations/case 190: x: {x} * -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 190: x: {x} * -1: Collecting 100 samples in estimated 1.0030 s (252k iterations)
+Benchmarking optimizations/case 190: x: {x} * -1: Analyzing
+optimizations/case 190: x: {x} * -1
+                        time:   [3.9740 µs 4.0265 µs 4.0845 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 191: x: {x} * 2
+Benchmarking optimizations/case 191: x: {x} * 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 191: x: {x} * 2: Collecting 100 samples in estimated 1.0175 s (212k iterations)
+Benchmarking optimizations/case 191: x: {x} * 2: Analyzing
+optimizations/case 191: x: {x} * 2
+                        time:   [4.6599 µs 4.7145 µs 4.7750 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking optimizations/case 192: x: 2 * {x}
+Benchmarking optimizations/case 192: x: 2 * {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 192: x: 2 * {x}: Collecting 100 samples in estimated 1.0198 s (212k iterations)
+Benchmarking optimizations/case 192: x: 2 * {x}: Analyzing
+optimizations/case 192: x: 2 * {x}
+                        time:   [4.7078 µs 4.7690 µs 4.8353 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 193: x: {x} * 3
+Benchmarking optimizations/case 193: x: {x} * 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 193: x: {x} * 3: Collecting 100 samples in estimated 1.0070 s (212k iterations)
+Benchmarking optimizations/case 193: x: {x} * 3: Analyzing
+optimizations/case 193: x: {x} * 3
+                        time:   [4.6970 µs 4.7320 µs 4.7659 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 194: x: 0 / {x}
+Benchmarking optimizations/case 194: x: 0 / {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 194: x: 0 / {x}: Collecting 100 samples in estimated 1.0048 s (303k iterations)
+Benchmarking optimizations/case 194: x: 0 / {x}: Analyzing
+optimizations/case 194: x: 0 / {x}
+                        time:   [3.2317 µs 3.2638 µs 3.3010 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  4 (4.00%) high mild
+  4 (4.00%) high severe
+Benchmarking optimizations/case 195: x: {x} / 0
+Benchmarking optimizations/case 195: x: {x} / 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 195: x: {x} / 0: Collecting 100 samples in estimated 1.0144 s (308k iterations)
+Benchmarking optimizations/case 195: x: {x} / 0: Analyzing
+optimizations/case 195: x: {x} / 0
+                        time:   [3.1749 µs 3.2080 µs 3.2431 µs]
+Found 10 outliers among 100 measurements (10.00%)
+  1 (1.00%) low mild
+  8 (8.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 196: x: {x} / 1
+Benchmarking optimizations/case 196: x: {x} / 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 196: x: {x} / 1: Collecting 100 samples in estimated 1.0085 s (308k iterations)
+Benchmarking optimizations/case 196: x: {x} / 1: Analyzing
+optimizations/case 196: x: {x} / 1
+                        time:   [3.1489 µs 3.1779 µs 3.2106 µs]
+Found 23 outliers among 100 measurements (23.00%)
+  15 (15.00%) low mild
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking optimizations/case 197: x: {x} / -1
+Benchmarking optimizations/case 197: x: {x} / -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 197: x: {x} / -1: Collecting 100 samples in estimated 1.0122 s (288k iterations)
+Benchmarking optimizations/case 197: x: {x} / -1: Analyzing
+optimizations/case 197: x: {x} / -1
+                        time:   [3.3725 µs 3.3935 µs 3.4154 µs]
+Found 22 outliers among 100 measurements (22.00%)
+  12 (12.00%) low mild
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+Benchmarking optimizations/case 198: x: {x} / {x}
+Benchmarking optimizations/case 198: x: {x} / {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 198: x: {x} / {x}: Collecting 100 samples in estimated 1.0066 s (308k iterations)
+Benchmarking optimizations/case 198: x: {x} / {x}: Analyzing
+optimizations/case 198: x: {x} / {x}
+                        time:   [3.1625 µs 3.1843 µs 3.2081 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+Benchmarking optimizations/case 199: x: {x} / 2
+Benchmarking optimizations/case 199: x: {x} / 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 199: x: {x} / 2: Collecting 100 samples in estimated 1.0017 s (333k iterations)
+Benchmarking optimizations/case 199: x: {x} / 2: Analyzing
+optimizations/case 199: x: {x} / 2
+                        time:   [2.8872 µs 2.9036 µs 2.9212 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 200: x: 0 % {x}
+Benchmarking optimizations/case 200: x: 0 % {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 200: x: 0 % {x}: Collecting 100 samples in estimated 1.0096 s (369k iterations)
+Benchmarking optimizations/case 200: x: 0 % {x}: Analyzing
+optimizations/case 200: x: 0 % {x}
+                        time:   [2.7096 µs 2.7238 µs 2.7391 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 201: x: {x} % 0
+Benchmarking optimizations/case 201: x: {x} % 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 201: x: {x} % 0: Collecting 100 samples in estimated 1.0100 s (374k iterations)
+Benchmarking optimizations/case 201: x: {x} % 0: Analyzing
+optimizations/case 201: x: {x} % 0
+                        time:   [2.7221 µs 2.7353 µs 2.7480 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 202: x: {x} % 1
+Benchmarking optimizations/case 202: x: {x} % 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 202: x: {x} % 1: Collecting 100 samples in estimated 1.0115 s (369k iterations)
+Benchmarking optimizations/case 202: x: {x} % 1: Analyzing
+optimizations/case 202: x: {x} % 1
+                        time:   [2.6344 µs 2.6483 µs 2.6615 µs]
+Benchmarking optimizations/case 203: x: {x} % 2
+Benchmarking optimizations/case 203: x: {x} % 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 203: x: {x} % 2: Collecting 100 samples in estimated 1.0027 s (374k iterations)
+Benchmarking optimizations/case 203: x: {x} % 2: Analyzing
+optimizations/case 203: x: {x} % 2
+                        time:   [2.6056 µs 2.6225 µs 2.6412 µs]
+Benchmarking optimizations/case 204: x: 0 ^ {x}
+Benchmarking optimizations/case 204: x: 0 ^ {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 204: x: 0 ^ {x}: Collecting 100 samples in estimated 1.0076 s (379k iterations)
+Benchmarking optimizations/case 204: x: 0 ^ {x}: Analyzing
+optimizations/case 204: x: 0 ^ {x}
+                        time:   [2.5754 µs 2.5825 µs 2.5923 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 205: x: 1 ^ {x}
+Benchmarking optimizations/case 205: x: 1 ^ {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 205: x: 1 ^ {x}: Collecting 100 samples in estimated 1.0054 s (379k iterations)
+Benchmarking optimizations/case 205: x: 1 ^ {x}: Analyzing
+optimizations/case 205: x: 1 ^ {x}
+                        time:   [2.5661 µs 2.5703 µs 2.5746 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 206: x: {x} ^ 0
+Benchmarking optimizations/case 206: x: {x} ^ 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 206: x: {x} ^ 0: Collecting 100 samples in estimated 1.0125 s (384k iterations)
+Benchmarking optimizations/case 206: x: {x} ^ 0: Analyzing
+optimizations/case 206: x: {x} ^ 0
+                        time:   [2.5558 µs 2.5603 µs 2.5653 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 207: x: {x} ^ 1
+Benchmarking optimizations/case 207: x: {x} ^ 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 207: x: {x} ^ 1: Collecting 100 samples in estimated 1.0009 s (379k iterations)
+Benchmarking optimizations/case 207: x: {x} ^ 1: Analyzing
+optimizations/case 207: x: {x} ^ 1
+                        time:   [2.5540 µs 2.5583 µs 2.5627 µs]
+Benchmarking optimizations/case 208: x: {x} ^ 2
+Benchmarking optimizations/case 208: x: {x} ^ 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 208: x: {x} ^ 2: Collecting 100 samples in estimated 1.0122 s (273k iterations)
+Benchmarking optimizations/case 208: x: {x} ^ 2: Analyzing
+optimizations/case 208: x: {x} ^ 2
+                        time:   [3.5366 µs 3.5405 µs 3.5448 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+Benchmarking optimizations/case 209: x: {x} ^ 3
+Benchmarking optimizations/case 209: x: {x} ^ 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 209: x: {x} ^ 3: Collecting 100 samples in estimated 1.0077 s (384k iterations)
+Benchmarking optimizations/case 209: x: {x} ^ 3: Analyzing
+optimizations/case 209: x: {x} ^ 3
+                        time:   [2.5533 µs 2.5567 µs 2.5602 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 210: x: {x} ^ -1
+Benchmarking optimizations/case 210: x: {x} ^ -1: Warming up for 3.0000 s
+Benchmarking optimizations/case 210: x: {x} ^ -1: Collecting 100 samples in estimated 1.0044 s (434k iterations)
+Benchmarking optimizations/case 210: x: {x} ^ -1: Analyzing
+optimizations/case 210: x: {x} ^ -1
+                        time:   [2.2461 µs 2.2493 µs 2.2525 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 211: x: -{x}
+Benchmarking optimizations/case 211: x: -{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 211: x: -{x}: Collecting 100 samples in estimated 1.0043 s (475k iterations)
+Benchmarking optimizations/case 211: x: -{x}: Analyzing
+optimizations/case 211: x: -{x}
+                        time:   [2.0481 µs 2.0509 µs 2.0536 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 212: x: --{x}
+Benchmarking optimizations/case 212: x: --{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 212: x: --{x}: Collecting 100 samples in estimated 1.0061 s (419k iterations)
+Benchmarking optimizations/case 212: x: --{x}: Analyzing
+optimizations/case 212: x: --{x}
+                        time:   [2.3357 µs 2.3391 µs 2.3426 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 213: x: ---{x}
+Benchmarking optimizations/case 213: x: ---{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 213: x: ---{x}: Collecting 100 samples in estimated 1.0022 s (293k iterations)
+Benchmarking optimizations/case 213: x: ---{x}: Analyzing
+optimizations/case 213: x: ---{x}
+                        time:   [3.3078 µs 3.3120 µs 3.3163 µs]
+Benchmarking optimizations/case 214: x: ----{x}
+Benchmarking optimizations/case 214: x: ----{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 214: x: ----{x}: Collecting 100 samples in estimated 1.0069 s (298k iterations)
+Benchmarking optimizations/case 214: x: ----{x}: Analyzing
+optimizations/case 214: x: ----{x}
+                        time:   [3.2561 µs 3.2610 µs 3.2663 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 215: x: --{x} + 2
+Benchmarking optimizations/case 215: x: --{x} + 2: Warming up for 3.0000 s
+Benchmarking optimizations/case 215: x: --{x} + 2: Collecting 100 samples in estimated 1.0009 s (217k iterations)
+Benchmarking optimizations/case 215: x: --{x} + 2: Analyzing
+optimizations/case 215: x: --{x} + 2
+                        time:   [4.5030 µs 4.5085 µs 4.5141 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+Benchmarking optimizations/case 216: x: [{x}:{x}]
+Benchmarking optimizations/case 216: x: [{x}:{x}]: Warming up for 3.0000 s
+Benchmarking optimizations/case 216: x: [{x}:{x}]: Collecting 100 samples in estimated 1.0028 s (313k iterations)
+Benchmarking optimizations/case 216: x: [{x}:{x}]: Analyzing
+optimizations/case 216: x: [{x}:{x}]
+                        time:   [3.2352 µs 3.2507 µs 3.2637 µs]
+Benchmarking optimizations/case 217: x, y: [{x}:{y}]
+Benchmarking optimizations/case 217: x, y: [{x}:{y}]: Warming up for 3.0000 s
+Benchmarking optimizations/case 217: x, y: [{x}:{y}]: Collecting 100 samples in estimated 1.0186 s (242k iterations)
+Benchmarking optimizations/case 217: x, y: [{x}:{y}]: Analyzing
+optimizations/case 217: x, y: [{x}:{y}]
+                        time:   [3.9298 µs 3.9503 µs 3.9688 µs]
+Benchmarking optimizations/case 218: x: {x}D1
+Benchmarking optimizations/case 218: x: {x}D1: Warming up for 3.0000 s
+Benchmarking optimizations/case 218: x: {x}D1: Collecting 100 samples in estimated 1.0092 s (419k iterations)
+Benchmarking optimizations/case 218: x: {x}D1: Analyzing
+optimizations/case 218: x: {x}D1
+                        time:   [2.3322 µs 2.3444 µs 2.3567 µs]
+Found 10 outliers among 100 measurements (10.00%)
+  5 (5.00%) low mild
+  5 (5.00%) high mild
+Benchmarking optimizations/case 219: 1D6
+Benchmarking optimizations/case 219: 1D6: Warming up for 3.0000 s
+Benchmarking optimizations/case 219: 1D6: Collecting 100 samples in estimated 1.0068 s (293k iterations)
+Benchmarking optimizations/case 219: 1D6: Analyzing
+optimizations/case 219: 1D6
+                        time:   [3.2505 µs 3.2578 µs 3.2650 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 220: x: 1D{x}
+Benchmarking optimizations/case 220: x: 1D{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 220: x: 1D{x}: Collecting 100 samples in estimated 1.0200 s (258k iterations)
+Benchmarking optimizations/case 220: x: 1D{x}: Analyzing
+optimizations/case 220: x: 1D{x}
+                        time:   [3.7680 µs 3.7759 µs 3.7840 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 221: x, y: {x}D{y}
+Benchmarking optimizations/case 221: x, y: {x}D{y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 221: x, y: {x}D{y}: Collecting 100 samples in estimated 1.0062 s (308k iterations)
+Benchmarking optimizations/case 221: x, y: {x}D{y}: Analyzing
+optimizations/case 221: x, y: {x}D{y}
+                        time:   [3.1023 µs 3.1091 µs 3.1159 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 222: 10D1
+Benchmarking optimizations/case 222: 10D1: Warming up for 3.0000 s
+Benchmarking optimizations/case 222: 10D1: Collecting 100 samples in estimated 1.0055 s (550k iterations)
+Benchmarking optimizations/case 222: 10D1: Analyzing
+optimizations/case 222: 10D1
+                        time:   [1.6964 µs 1.7042 µs 1.7132 µs]
+Benchmarking optimizations/case 223: x: {x}D[1]
+Benchmarking optimizations/case 223: x: {x}D[1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 223: x: {x}D[1]: Collecting 100 samples in estimated 1.0049 s (364k iterations)
+Benchmarking optimizations/case 223: x: {x}D[1]: Analyzing
+optimizations/case 223: x: {x}D[1]
+                        time:   [2.6691 µs 2.6738 µs 2.6786 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 224: x: {x}D[1, 1, 1]
+Benchmarking optimizations/case 224: x: {x}D[1, 1, 1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 224: x: {x}D[1, 1, 1]: Collecting 100 samples in estimated 1.0066 s (333k iterations)
+Benchmarking optimizations/case 224: x: {x}D[1, 1, 1]: Analyzing
+optimizations/case 224: x: {x}D[1, 1, 1]
+                        time:   [2.8434 µs 2.8496 µs 2.8556 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 225: x: {x}D[5, 5, 5, 5, 5]
+Benchmarking optimizations/case 225: x: {x}D[5, 5, 5, 5, 5]: Warming up for 3.0000 s
+Benchmarking optimizations/case 225: x: {x}D[5, 5, 5, 5, 5]: Collecting 100 samples in estimated 1.0211 s (192k iterations)
+Benchmarking optimizations/case 225: x: {x}D[5, 5, 5, 5, 5]: Analyzing
+optimizations/case 225: x: {x}D[5, 5, 5, 5, 5]
+                        time:   [5.1637 µs 5.1757 µs 5.1877 µs]
+Benchmarking optimizations/case 226: x: 1D[3, 4, 5, 6]
+Benchmarking optimizations/case 226: x: 1D[3, 4, 5, 6]: Warming up for 3.0000 s
+Benchmarking optimizations/case 226: x: 1D[3, 4, 5, 6]: Collecting 100 samples in estimated 1.0048 s (232k iterations)
+Benchmarking optimizations/case 226: x: 1D[3, 4, 5, 6]: Analyzing
+optimizations/case 226: x: 1D[3, 4, 5, 6]
+                        time:   [4.1950 µs 4.2025 µs 4.2101 µs]
+Benchmarking optimizations/case 227: x: {x}D[1, 2, 3]
+Benchmarking optimizations/case 227: x: {x}D[1, 2, 3]: Warming up for 3.0000 s
+Benchmarking optimizations/case 227: x: {x}D[1, 2, 3]: Collecting 100 samples in estimated 1.0058 s (227k iterations)
+Benchmarking optimizations/case 227: x: {x}D[1, 2, 3]: Analyzing
+optimizations/case 227: x: {x}D[1, 2, 3]
+                        time:   [4.2749 µs 4.2912 µs 4.3065 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) low mild
+Benchmarking optimizations/case 228: x: {x}D[3, 4, 5, 6, 7, 8]
+Benchmarking optimizations/case 228: x: {x}D[3, 4, 5, 6, 7, 8]: Warming up for 3.0000 s
+Benchmarking optimizations/case 228: x: {x}D[3, 4, 5, 6, 7, 8]: Collecting 100 samples in estimated 1.0024 s (298k iterations)
+Benchmarking optimizations/case 228: x: {x}D[3, 4, 5, 6, 7, 8]: Analyzing
+optimizations/case 228: x: {x}D[3, 4, 5, 6, 7, 8]
+                        time:   [3.2003 µs 3.2144 µs 3.2271 µs]
+Benchmarking optimizations/case 229: x: {x}D[1, 1, 2, 3, 5, 8]
+Benchmarking optimizations/case 229: x: {x}D[1, 1, 2, 3, 5, 8]: Warming up for 3.0000 s
+Benchmarking optimizations/case 229: x: {x}D[1, 1, 2, 3, 5, 8]: Collecting 100 samples in estimated 1.0031 s (298k iterations)
+Benchmarking optimizations/case 229: x: {x}D[1, 1, 2, 3, 5, 8]: Analyzing
+optimizations/case 229: x: {x}D[1, 1, 2, 3, 5, 8]
+                        time:   [3.2440 µs 3.2505 µs 3.2570 µs]
+Benchmarking optimizations/case 230: x: 10D1 drop lowest {x}
+Benchmarking optimizations/case 230: x: 10D1 drop lowest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 230: x: 10D1 drop lowest {x}: Collecting 100 samples in estimated 1.0177 s (273k iterations)
+Benchmarking optimizations/case 230: x: 10D1 drop lowest {x}: Analyzing
+optimizations/case 230: x: 10D1 drop lowest {x}
+                        time:   [3.5735 µs 3.5810 µs 3.5892 µs]
+Benchmarking optimizations/case 231: x, y: {x}D1 drop lowest {y}
+Benchmarking optimizations/case 231: x, y: {x}D1 drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 231: x, y: {x}D1 drop lowest {y}: Collecting 100 samples in estimated 1.0036 s (237k iterations)
+Benchmarking optimizations/case 231: x, y: {x}D1 drop lowest {y}: Analyzing
+optimizations/case 231: x, y: {x}D1 drop lowest {y}
+                        time:   [4.1015 µs 4.1109 µs 4.1207 µs]
+Benchmarking optimizations/case 232: x: 1D{x} drop lowest 1
+Benchmarking optimizations/case 232: x: 1D{x} drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 232: x: 1D{x} drop lowest 1: Collecting 100 samples in estimated 1.0048 s (222k iterations)
+Benchmarking optimizations/case 232: x: 1D{x} drop lowest 1: Analyzing
+optimizations/case 232: x: 1D{x} drop lowest 1
+                        time:   [4.3771 µs 4.3890 µs 4.4010 µs]
+Benchmarking optimizations/case 233: x: {x}D1 drop lowest 1
+Benchmarking optimizations/case 233: x: {x}D1 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 233: x: {x}D1 drop lowest 1: Collecting 100 samples in estimated 1.0045 s (273k iterations)
+Benchmarking optimizations/case 233: x: {x}D1 drop lowest 1: Analyzing
+optimizations/case 233: x: {x}D1 drop lowest 1
+                        time:   [3.5235 µs 3.5294 µs 3.5355 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) low mild
+Benchmarking optimizations/case 234: x, y: 1D{x} drop lowest {y}
+Benchmarking optimizations/case 234: x, y: 1D{x} drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 234: x, y: 1D{x} drop lowest {y}: Collecting 100 samples in estimated 1.0075 s (192k iterations)
+Benchmarking optimizations/case 234: x, y: 1D{x} drop lowest {y}: Analyzing
+optimizations/case 234: x, y: 1D{x} drop lowest {y}
+                        time:   [5.0545 µs 5.0659 µs 5.0775 µs]
+Benchmarking optimizations/case 235: x, y: 3D{x} drop lowest {y}
+Benchmarking optimizations/case 235: x, y: 3D{x} drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 235: x, y: 3D{x} drop lowest {y}: Collecting 100 samples in estimated 1.0051 s (268k iterations)
+Benchmarking optimizations/case 235: x, y: 3D{x} drop lowest {y}: Analyzing
+optimizations/case 235: x, y: 3D{x} drop lowest {y}
+                        time:   [3.5758 µs 3.5838 µs 3.5920 µs]
+Benchmarking optimizations/case 236: 3D6 drop lowest 0
+Benchmarking optimizations/case 236: 3D6 drop lowest 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 236: 3D6 drop lowest 0: Collecting 100 samples in estimated 1.0173 s (268k iterations)
+Benchmarking optimizations/case 236: 3D6 drop lowest 0: Analyzing
+optimizations/case 236: 3D6 drop lowest 0
+                        time:   [3.5479 µs 3.5553 µs 3.5627 µs]
+Benchmarking optimizations/case 237: 3D6 drop lowest 1 drop lowest 1
+Benchmarking optimizations/case 237: 3D6 drop lowest 1 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 237: 3D6 drop lowest 1 drop lowest 1: Collecting 100 samples in estimated 1.0290 s (136k iterations)
+Benchmarking optimizations/case 237: 3D6 drop lowest 1 drop lowest 1: Analyzing
+optimizations/case 237: 3D6 drop lowest 1 drop lowest 1
+                        time:   [7.4005 µs 7.4299 µs 7.4538 µs]
+Found 12 outliers among 100 measurements (12.00%)
+  6 (6.00%) low severe
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+Benchmarking optimizations/case 238: 3D6 drop lowest 1 drop lowest (-1)
+Benchmarking optimizations/case 238: 3D6 drop lowest 1 drop lowest (-1): Warming up for 3.0000 s
+Benchmarking optimizations/case 238: 3D6 drop lowest 1 drop lowest (-1): Collecting 100 samples in estimated 1.0302 s (111k iterations)
+Benchmarking optimizations/case 238: 3D6 drop lowest 1 drop lowest (-1): Analyzing
+optimizations/case 238: 3D6 drop lowest 1 drop lowest (-1)
+                        time:   [9.3144 µs 9.3660 µs 9.4075 µs]
+Benchmarking optimizations/case 239: x: 10D1 drop highest {x}
+Benchmarking optimizations/case 239: x: 10D1 drop highest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 239: x: 10D1 drop highest {x}: Collecting 100 samples in estimated 1.0060 s (192k iterations)
+Benchmarking optimizations/case 239: x: 10D1 drop highest {x}: Analyzing
+optimizations/case 239: x: 10D1 drop highest {x}
+                        time:   [5.1264 µs 5.1320 µs 5.1377 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 240: x, y: {x}D1 drop highest {y}
+Benchmarking optimizations/case 240: x, y: {x}D1 drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 240: x, y: {x}D1 drop highest {y}: Collecting 100 samples in estimated 1.0238 s (162k iterations)
+Benchmarking optimizations/case 240: x, y: {x}D1 drop highest {y}: Analyzing
+optimizations/case 240: x, y: {x}D1 drop highest {y}
+                        time:   [5.9043 µs 5.9185 µs 5.9367 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 241: x: 1D{x} drop highest 1
+Benchmarking optimizations/case 241: x: 1D{x} drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 241: x: 1D{x} drop highest 1: Collecting 100 samples in estimated 1.0319 s (157k iterations)
+Benchmarking optimizations/case 241: x: 1D{x} drop highest 1: Analyzing
+optimizations/case 241: x: 1D{x} drop highest 1
+                        time:   [6.2755 µs 6.2831 µs 6.2914 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 242: x: {x}D1 drop highest 1
+Benchmarking optimizations/case 242: x: {x}D1 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 242: x: {x}D1 drop highest 1: Collecting 100 samples in estimated 1.0200 s (192k iterations)
+Benchmarking optimizations/case 242: x: {x}D1 drop highest 1: Analyzing
+optimizations/case 242: x: {x}D1 drop highest 1
+                        time:   [3.9643 µs 4.0374 µs 4.1284 µs]
+Benchmarking optimizations/case 243: x, y: 1D{x} drop highest {y}
+Benchmarking optimizations/case 243: x, y: 1D{x} drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 243: x, y: 1D{x} drop highest {y}: Collecting 100 samples in estimated 1.0168 s (197k iterations)
+Benchmarking optimizations/case 243: x, y: 1D{x} drop highest {y}: Analyzing
+optimizations/case 243: x, y: 1D{x} drop highest {y}
+                        time:   [5.0384 µs 5.0476 µs 5.0569 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 244: x, y: 3D{x} drop highest {y}
+Benchmarking optimizations/case 244: x, y: 3D{x} drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 244: x, y: 3D{x} drop highest {y}: Collecting 100 samples in estimated 1.0028 s (268k iterations)
+Benchmarking optimizations/case 244: x, y: 3D{x} drop highest {y}: Analyzing
+optimizations/case 244: x, y: 3D{x} drop highest {y}
+                        time:   [3.5859 µs 3.5926 µs 3.5993 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking optimizations/case 245: 3D6 drop highest 0
+Benchmarking optimizations/case 245: 3D6 drop highest 0: Warming up for 3.0000 s
+Benchmarking optimizations/case 245: 3D6 drop highest 0: Collecting 100 samples in estimated 1.0154 s (268k iterations)
+Benchmarking optimizations/case 245: 3D6 drop highest 0: Analyzing
+optimizations/case 245: 3D6 drop highest 0
+                        time:   [3.5280 µs 3.5362 µs 3.5447 µs]
+Benchmarking optimizations/case 246: 3D6 drop highest 1 drop highest 1
+Benchmarking optimizations/case 246: 3D6 drop highest 1 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 246: 3D6 drop highest 1 drop highest 1: Collecting 100 samples in estimated 1.0159 s (131k iterations)
+Benchmarking optimizations/case 246: 3D6 drop highest 1 drop highest 1: Analyzing
+optimizations/case 246: 3D6 drop highest 1 drop highest 1
+                        time:   [6.4595 µs 6.4731 µs 6.4853 µs]
+Benchmarking optimizations/case 247: 3D6 drop highest 1 drop highest (-1)
+Benchmarking optimizations/case 247: 3D6 drop highest 1 drop highest (-1): Warming up for 3.0000 s
+Benchmarking optimizations/case 247: 3D6 drop highest 1 drop highest (-1): Collecting 100 samples in estimated 1.0091 s (111k iterations)
+Benchmarking optimizations/case 247: 3D6 drop highest 1 drop highest (-1): Analyzing
+optimizations/case 247: 3D6 drop highest 1 drop highest (-1)
+                        time:   [8.5562 µs 8.7773 µs 9.0111 µs]
+Benchmarking optimizations/case 248: x: 10D1 drop lowest {x} drop highest 1
+Benchmarking optimizations/case 248: x: 10D1 drop lowest {x} drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 248: x: 10D1 drop lowest {x} drop highest 1: Collecting 100 samples in estimated 1.0006 s (141k iterations)
+Benchmarking optimizations/case 248: x: 10D1 drop lowest {x} drop highest 1: Analyzing
+optimizations/case 248: x: 10D1 drop lowest {x} drop highest 1
+                        time:   [6.5652 µs 6.5750 µs 6.5854 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 249: x: 10D1 drop lowest 1 drop highest {x}
+Benchmarking optimizations/case 249: x: 10D1 drop lowest 1 drop highest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 249: x: 10D1 drop lowest 1 drop highest {x}: Collecting 100 samples in estimated 1.0272 s (152k iterations)
+Benchmarking optimizations/case 249: x: 10D1 drop lowest 1 drop highest {x}: Analyzing
+optimizations/case 249: x: 10D1 drop lowest 1 drop highest {x}
+                        time:   [6.8857 µs 6.9003 µs 6.9155 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 250: x: {x}D[1] drop lowest 3
+Benchmarking optimizations/case 250: x: {x}D[1] drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 250: x: {x}D[1] drop lowest 3: Collecting 100 samples in estimated 1.0120 s (242k iterations)
+Benchmarking optimizations/case 250: x: {x}D[1] drop lowest 3: Analyzing
+optimizations/case 250: x: {x}D[1] drop lowest 3
+                        time:   [3.9896 µs 4.0023 µs 4.0175 µs]
+Found 10 outliers among 100 measurements (10.00%)
+  5 (5.00%) high mild
+  5 (5.00%) high severe
+Benchmarking optimizations/case 251: x: {x}D[1, 1, 1] drop lowest 3
+Benchmarking optimizations/case 251: x: {x}D[1, 1, 1] drop lowest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 251: x: {x}D[1, 1, 1] drop lowest 3: Collecting 100 samples in estimated 1.0192 s (232k iterations)
+Benchmarking optimizations/case 251: x: {x}D[1, 1, 1] drop lowest 3: Analyzing
+optimizations/case 251: x: {x}D[1, 1, 1] drop lowest 3
+                        time:   [4.1274 µs 4.1360 µs 4.1446 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 252: x: {x}D[5, 5, 5, 5, 5] drop lowest 5
+Benchmarking optimizations/case 252: x: {x}D[5, 5, 5, 5, 5] drop lowest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 252: x: {x}D[5, 5, 5, 5, 5] drop lowest 5: Collecting 100 samples in estimated 1.0024 s (136k iterations)
+Benchmarking optimizations/case 252: x: {x}D[5, 5, 5, 5, 5] drop lowest 5: Analyzing
+optimizations/case 252: x: {x}D[5, 5, 5, 5, 5] drop lowest 5
+                        time:   [7.0432 µs 7.0623 µs 7.0818 µs]
+Benchmarking optimizations/case 253: x: 1D[3, 4, 5, 6] drop lowest {x}
+Benchmarking optimizations/case 253: x: 1D[3, 4, 5, 6] drop lowest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 253: x: 1D[3, 4, 5, 6] drop lowest {x}: Collecting 100 samples in estimated 1.0306 s (162k iterations)
+Benchmarking optimizations/case 253: x: 1D[3, 4, 5, 6] drop lowest {x}: Analyzing
+optimizations/case 253: x: 1D[3, 4, 5, 6] drop lowest {x}
+                        time:   [5.1157 µs 5.1257 µs 5.1362 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 254: x, y: {x}D[1, 2, 3] drop lowest {y}
+Benchmarking optimizations/case 254: x, y: {x}D[1, 2, 3] drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 254: x, y: {x}D[1, 2, 3] drop lowest {y}: Collecting 100 samples in estimated 1.0281 s (126k iterations)
+Benchmarking optimizations/case 254: x, y: {x}D[1, 2, 3] drop lowest {y}: Analyzing
+optimizations/case 254: x, y: {x}D[1, 2, 3] drop lowest {y}
+                        time:   [8.1058 µs 8.1312 µs 8.1530 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 255: x, y: {x}D[3, 4, 5, 6, 7, 8] drop lowest {y}
+Benchmarking optimizations/case 255: x, y: {x}D[3, 4, 5, 6, 7, 8] drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 255: x, y: {x}D[3, 4, 5, 6, 7, 8] drop lowest {y}: Collecting 100 samples in estimated 1.0062 s (152k iterations)
+Benchmarking optimizations/case 255: x, y: {x}D[3, 4, 5, 6, 7, 8] drop lowest {y}: Analyzing
+optimizations/case 255: x, y: {x}D[3, 4, 5, 6, 7, 8] drop lowest {y}
+                        time:   [6.3267 µs 6.3343 µs 6.3411 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  5 (5.00%) low mild
+  3 (3.00%) high mild
+Benchmarking optimizations/case 256: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y}
+Benchmarking optimizations/case 256: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 256: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y}: Collecting 100 samples in estimated 1.0023 s (146k iterations)
+Benchmarking optimizations/case 256: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y}: Analyzing
+optimizations/case 256: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y}
+                        time:   [6.3221 µs 6.3288 µs 6.3357 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 257: x: {x}D[1] drop highest 3
+Benchmarking optimizations/case 257: x: {x}D[1] drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 257: x: {x}D[1] drop highest 3: Collecting 100 samples in estimated 1.0101 s (162k iterations)
+Benchmarking optimizations/case 257: x: {x}D[1] drop highest 3: Analyzing
+optimizations/case 257: x: {x}D[1] drop highest 3
+                        time:   [5.7683 µs 5.7749 µs 5.7817 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 258: x: {x}D[1, 1, 1] drop highest 3
+Benchmarking optimizations/case 258: x: {x}D[1, 1, 1] drop highest 3: Warming up for 3.0000 s
+Benchmarking optimizations/case 258: x: {x}D[1, 1, 1] drop highest 3: Collecting 100 samples in estimated 1.0048 s (157k iterations)
+Benchmarking optimizations/case 258: x: {x}D[1, 1, 1] drop highest 3: Analyzing
+optimizations/case 258: x: {x}D[1, 1, 1] drop highest 3
+                        time:   [6.0105 µs 6.0184 µs 6.0267 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking optimizations/case 259: x: {x}D[5, 5, 5, 5, 5] drop highest 5
+Benchmarking optimizations/case 259: x: {x}D[5, 5, 5, 5, 5] drop highest 5: Warming up for 3.0000 s
+Benchmarking optimizations/case 259: x: {x}D[5, 5, 5, 5, 5] drop highest 5: Collecting 100 samples in estimated 1.0306 s (121k iterations)
+Benchmarking optimizations/case 259: x: {x}D[5, 5, 5, 5, 5] drop highest 5: Analyzing
+optimizations/case 259: x: {x}D[5, 5, 5, 5, 5] drop highest 5
+                        time:   [9.4002 µs 9.5796 µs 9.7286 µs]
+Benchmarking optimizations/case 260: x: 1D[3, 4, 5, 6] drop highest {x}
+Benchmarking optimizations/case 260: x: 1D[3, 4, 5, 6] drop highest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 260: x: 1D[3, 4, 5, 6] drop highest {x}: Collecting 100 samples in estimated 1.0192 s (152k iterations)
+Benchmarking optimizations/case 260: x: 1D[3, 4, 5, 6] drop highest {x}: Analyzing
+optimizations/case 260: x: 1D[3, 4, 5, 6] drop highest {x}
+                        time:   [4.9902 µs 4.9969 µs 5.0039 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 261: x, y: {x}D[1, 2, 3] drop highest {y}
+Benchmarking optimizations/case 261: x, y: {x}D[1, 2, 3] drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 261: x, y: {x}D[1, 2, 3] drop highest {y}: Collecting 100 samples in estimated 1.0151 s (172k iterations)
+Benchmarking optimizations/case 261: x, y: {x}D[1, 2, 3] drop highest {y}: Analyzing
+optimizations/case 261: x, y: {x}D[1, 2, 3] drop highest {y}
+                        time:   [5.6264 µs 5.6371 µs 5.6485 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 262: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y}
+Benchmarking optimizations/case 262: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 262: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y}: Collecting 100 samples in estimated 1.0194 s (217k iterations)
+Benchmarking optimizations/case 262: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y}: Analyzing
+optimizations/case 262: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y}
+                        time:   [4.3735 µs 4.3826 µs 4.3920 µs]
+Benchmarking optimizations/case 263: x, y: {x}D[1, 1, 2, 3, 5, 8] drop highest {y}
+Benchmarking optimizations/case 263: x, y: {x}D[1, 1, 2, 3, 5, 8] drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 263: x, y: {x}D[1, 1, 2, 3, 5, 8] drop highest {y}: Collecting 100 samples in estimated 1.0071 s (222k iterations)
+Benchmarking optimizations/case 263: x, y: {x}D[1, 1, 2, 3, 5, 8] drop highest {y}: Analyzing
+optimizations/case 263: x, y: {x}D[1, 1, 2, 3, 5, 8] drop highest {y}
+                        time:   [4.3622 µs 4.3716 µs 4.3812 µs]
+Benchmarking optimizations/case 264: x: {x}D[1] drop highest 1 drop lowest 1
+Benchmarking optimizations/case 264: x: {x}D[1] drop highest 1 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 264: x: {x}D[1] drop highest 1 drop lowest 1: Collecting 100 samples in estimated 1.0237 s (116k iterations)
+Benchmarking optimizations/case 264: x: {x}D[1] drop highest 1 drop lowest 1: Analyzing
+optimizations/case 264: x: {x}D[1] drop highest 1 drop lowest 1
+                        time:   [8.7281 µs 8.7859 µs 8.8237 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) low severe
+  2 (2.00%) high mild
+Benchmarking optimizations/case 265: x: {x}D[1, 1, 1] drop highest 1 drop lowest 1
+Benchmarking optimizations/case 265: x: {x}D[1, 1, 1] drop highest 1 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 265: x: {x}D[1, 1, 1] drop highest 1 drop lowest 1: Collecting 100 samples in estimated 1.0444 s (106k iterations)
+Benchmarking optimizations/case 265: x: {x}D[1, 1, 1] drop highest 1 drop lowest 1: Analyzing
+optimizations/case 265: x: {x}D[1, 1, 1] drop highest 1 drop lowest 1
+                        time:   [9.1908 µs 9.2622 µs 9.3360 µs]
+Found 18 outliers among 100 measurements (18.00%)
+  9 (9.00%) high mild
+  9 (9.00%) high severe
+Benchmarking optimizations/case 266: x: {x}D[5, 5, 5, 5, 5] drop lowest 1 drop highest 1
+Benchmarking optimizations/case 266: x: {x}D[5, 5, 5, 5, 5] drop lowest 1 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 266: x: {x}D[5, 5, 5, 5, 5] drop lowest 1 drop highest 1: Collecting 100 samples in estimated 1.0098 s (76k iterations)
+Benchmarking optimizations/case 266: x: {x}D[5, 5, 5, 5, 5] drop lowest 1 drop highest 1: Analyzing
+optimizations/case 266: x: {x}D[5, 5, 5, 5, 5] drop lowest 1 drop highest 1
+                        time:   [10.879 µs 11.130 µs 11.409 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) low mild
+Benchmarking optimizations/case 267: x: 1D[3, 4, 5, 6] drop highest {x} drop lowest {x}
+Benchmarking optimizations/case 267: x: 1D[3, 4, 5, 6] drop highest {x} drop lowest {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 267: x: 1D[3, 4, 5, 6] drop highest {x} drop lowest {x}: Collecting 100 samples in estimated 1.0115 s (141k iterations)
+Benchmarking optimizations/case 267: x: 1D[3, 4, 5, 6] drop highest {x} drop lowest {x}: Analyzing
+optimizations/case 267: x: 1D[3, 4, 5, 6] drop highest {x} drop lowest {x}
+                        time:   [6.3232 µs 6.3362 µs 6.3490 µs]
+Benchmarking optimizations/case 268: x, y: {x}D[1, 2, 3] drop highest {y} drop lowest {y}
+Benchmarking optimizations/case 268: x, y: {x}D[1, 2, 3] drop highest {y} drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 268: x, y: {x}D[1, 2, 3] drop highest {y} drop lowest {y}: Collecting 100 samples in estimated 1.0407 s (121k iterations)
+Benchmarking optimizations/case 268: x, y: {x}D[1, 2, 3] drop highest {y} drop lowest {y}: Analyzing
+optimizations/case 268: x, y: {x}D[1, 2, 3] drop highest {y} drop lowest {y}
+                        time:   [6.7995 µs 6.8150 µs 6.8306 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 269: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y} drop lowest {y}
+Benchmarking optimizations/case 269: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y} drop lowest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 269: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y} drop lowest {y}: Collecting 100 samples in estimated 1.0107 s (146k iterations)
+Benchmarking optimizations/case 269: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y} drop lowest {y}: Analyzing
+optimizations/case 269: x, y: {x}D[3, 4, 5, 6, 7, 8] drop highest {y} drop lowest {y}
+                        time:   [5.1410 µs 5.1538 µs 5.1689 µs]
+Benchmarking optimizations/case 270: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y} drop highest {y}
+Benchmarking optimizations/case 270: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y} drop highest {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 270: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y} drop highest {y}: Collecting 100 samples in estimated 1.0064 s (136k iterations)
+Benchmarking optimizations/case 270: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y} drop highest {y}: Analyzing
+optimizations/case 270: x, y: {x}D[1, 1, 2, 3, 5, 8] drop lowest {y} drop highest {y}
+                        time:   [7.4168 µs 7.4252 µs 7.4349 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 271: x, y: 20D10 drop lowest {x} drop lowest {y} drop highest {x} drop highest {y...
+Benchmarking optimizations/case 271: x, y: 20D10 drop lowest {x} drop lowest {y} drop highest {x} drop highest {y...: Warming up for 3.0000 s
+Benchmarking optimizations/case 271: x, y: 20D10 drop lowest {x} drop lowest {y} drop highest {x} drop highest {y...: Collecting 100 samples in estimated 1.0637 s (61k iterations)
+Benchmarking optimizations/case 271: x, y: 20D10 drop lowest {x} drop lowest {y} drop highest {x} drop highest {y...: Analyzing
+optimizations/case 271: x, y: 20D10 drop lowest {x} drop lowest {y} drop highest {x} drop highest {y...
+                        time:   [16.139 µs 16.156 µs 16.174 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 272: x, y: 20D10 drop highest {x} drop highest {y} drop lowest {x} drop lowest {y...
+Benchmarking optimizations/case 272: x, y: 20D10 drop highest {x} drop highest {y} drop lowest {x} drop lowest {y...: Warming up for 3.0000 s
+Benchmarking optimizations/case 272: x, y: 20D10 drop highest {x} drop highest {y} drop lowest {x} drop lowest {y...: Collecting 100 samples in estimated 1.0381 s (61k iterations)
+Benchmarking optimizations/case 272: x, y: 20D10 drop highest {x} drop highest {y} drop lowest {x} drop lowest {y...: Analyzing
+optimizations/case 272: x, y: 20D10 drop highest {x} drop highest {y} drop lowest {x} drop lowest {y...
+                        time:   [16.136 µs 16.160 µs 16.184 µs]
+Benchmarking optimizations/case 273: x, y: 20D10 drop highest {x} drop lowest {y} drop highest {x} drop lowest {y...
+Benchmarking optimizations/case 273: x, y: 20D10 drop highest {x} drop lowest {y} drop highest {x} drop lowest {y...: Warming up for 3.0000 s
+Benchmarking optimizations/case 273: x, y: 20D10 drop highest {x} drop lowest {y} drop highest {x} drop lowest {y...: Collecting 100 samples in estimated 1.0527 s (71k iterations)
+Benchmarking optimizations/case 273: x, y: 20D10 drop highest {x} drop lowest {y} drop highest {x} drop lowest {y...: Analyzing
+optimizations/case 273: x, y: 20D10 drop highest {x} drop lowest {y} drop highest {x} drop lowest {y...
+                        time:   [13.649 µs 13.893 µs 14.109 µs]
+Found 20 outliers among 100 measurements (20.00%)
+  17 (17.00%) low severe
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 274: x, y: 20D10 drop lowest {x} drop highest {y} drop lowest {x} drop highest {y...
+Benchmarking optimizations/case 274: x, y: 20D10 drop lowest {x} drop highest {y} drop lowest {x} drop highest {y...: Warming up for 3.0000 s
+Benchmarking optimizations/case 274: x, y: 20D10 drop lowest {x} drop highest {y} drop lowest {x} drop highest {y...: Collecting 100 samples in estimated 1.0291 s (71k iterations)
+Benchmarking optimizations/case 274: x, y: 20D10 drop lowest {x} drop highest {y} drop lowest {x} drop highest {y...: Analyzing
+optimizations/case 274: x, y: 20D10 drop lowest {x} drop highest {y} drop lowest {x} drop highest {y...
+                        time:   [13.207 µs 13.476 µs 13.762 µs]
+Found 18 outliers among 100 measurements (18.00%)
+  16 (16.00%) low severe
+  2 (2.00%) high mild
+Benchmarking optimizations/case 275: [2:8] + [2:8]
+Benchmarking optimizations/case 275: [2:8] + [2:8]: Warming up for 3.0000 s
+Benchmarking optimizations/case 275: [2:8] + [2:8]: Collecting 100 samples in estimated 1.0038 s (136k iterations)
+Benchmarking optimizations/case 275: [2:8] + [2:8]: Analyzing
+optimizations/case 275: [2:8] + [2:8]
+                        time:   [6.0765 µs 6.0888 µs 6.1021 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 276: [2:8] - [2:8]
+Benchmarking optimizations/case 276: [2:8] - [2:8]: Warming up for 3.0000 s
+Benchmarking optimizations/case 276: [2:8] - [2:8]: Collecting 100 samples in estimated 1.0314 s (146k iterations)
+Benchmarking optimizations/case 276: [2:8] - [2:8]: Analyzing
+optimizations/case 276: [2:8] - [2:8]
+                        time:   [5.9935 µs 6.0056 µs 6.0169 µs]
+Benchmarking optimizations/case 277: 3D6 + 3D6
+Benchmarking optimizations/case 277: 3D6 + 3D6: Warming up for 3.0000 s
+Benchmarking optimizations/case 277: 3D6 + 3D6: Collecting 100 samples in estimated 1.0241 s (177k iterations)
+Benchmarking optimizations/case 277: 3D6 + 3D6: Analyzing
+optimizations/case 277: 3D6 + 3D6
+                        time:   [4.6389 µs 4.6452 µs 4.6514 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 278: 3D6 - 3D6
+Benchmarking optimizations/case 278: 3D6 - 3D6: Warming up for 3.0000 s
+Benchmarking optimizations/case 278: 3D6 - 3D6: Collecting 100 samples in estimated 1.0130 s (212k iterations)
+Benchmarking optimizations/case 278: 3D6 - 3D6: Analyzing
+optimizations/case 278: 3D6 - 3D6
+                        time:   [4.6210 µs 4.6300 µs 4.6394 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+Benchmarking optimizations/case 279: 2D[-1, 0, 1] + 2D[-1, 0, 1]
+Benchmarking optimizations/case 279: 2D[-1, 0, 1] + 2D[-1, 0, 1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 279: 2D[-1, 0, 1] + 2D[-1, 0, 1]: Collecting 100 samples in estimated 1.0148 s (116k iterations)
+Benchmarking optimizations/case 279: 2D[-1, 0, 1] + 2D[-1, 0, 1]: Analyzing
+optimizations/case 279: 2D[-1, 0, 1] + 2D[-1, 0, 1]
+                        time:   [8.7198 µs 8.7300 µs 8.7407 µs]
+Found 15 outliers among 100 measurements (15.00%)
+  3 (3.00%) high mild
+  12 (12.00%) high severe
+Benchmarking optimizations/case 280: 2D[-1, 0, 1] - 2D[-1, 0, 1]
+Benchmarking optimizations/case 280: 2D[-1, 0, 1] - 2D[-1, 0, 1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 280: 2D[-1, 0, 1] - 2D[-1, 0, 1]: Collecting 100 samples in estimated 1.0376 s (126k iterations)
+Benchmarking optimizations/case 280: 2D[-1, 0, 1] - 2D[-1, 0, 1]: Analyzing
+optimizations/case 280: 2D[-1, 0, 1] - 2D[-1, 0, 1]
+                        time:   [6.4984 µs 6.6024 µs 6.6929 µs]
+Benchmarking optimizations/case 281: 3D6 drop lowest 1 + 3D6 drop lowest 1
+Benchmarking optimizations/case 281: 3D6 drop lowest 1 + 3D6 drop lowest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 281: 3D6 drop lowest 1 + 3D6 drop lowest 1: Collecting 100 samples in estimated 1.0046 s (116k iterations)
+Benchmarking optimizations/case 281: 3D6 drop lowest 1 + 3D6 drop lowest 1: Analyzing
+optimizations/case 281: 3D6 drop lowest 1 + 3D6 drop lowest 1
+                        time:   [5.8885 µs 5.8975 µs 5.9094 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) high mild
+  4 (4.00%) high severe
+Benchmarking optimizations/case 282: 3D6 drop highest 1 + 3D6 drop highest 1
+Benchmarking optimizations/case 282: 3D6 drop highest 1 + 3D6 drop highest 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 282: 3D6 drop highest 1 + 3D6 drop highest 1: Collecting 100 samples in estimated 1.0126 s (172k iterations)
+Benchmarking optimizations/case 282: 3D6 drop highest 1 + 3D6 drop highest 1: Analyzing
+optimizations/case 282: 3D6 drop highest 1 + 3D6 drop highest 1
+                        time:   [5.8867 µs 5.8959 µs 5.9065 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  5 (5.00%) high mild
+  4 (4.00%) high severe
+Benchmarking optimizations/case 283: x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1)
+Benchmarking optimizations/case 283: x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 283: x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1): Collecting 100 samples in estimated 1.0402 s (71k iterations)
+Benchmarking optimizations/case 283: x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1): Analyzing
+optimizations/case 283: x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1)
+                        time:   [14.659 µs 14.711 µs 14.801 µs]
+Found 11 outliers among 100 measurements (11.00%)
+  4 (4.00%) high mild
+  7 (7.00%) high severe
+Benchmarking optimizations/case 284: (1 + 1) + (1 + 1)
+Benchmarking optimizations/case 284: (1 + 1) + (1 + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 284: (1 + 1) + (1 + 1): Collecting 100 samples in estimated 1.0007 s (157k iterations)
+Benchmarking optimizations/case 284: (1 + 1) + (1 + 1): Analyzing
+optimizations/case 284: (1 + 1) + (1 + 1)
+                        time:   [6.3485 µs 6.3535 µs 6.3586 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 285: (2 + 1) + (1 + 2)
+Benchmarking optimizations/case 285: (2 + 1) + (1 + 2): Warming up for 3.0000 s
+Benchmarking optimizations/case 285: (2 + 1) + (1 + 2): Collecting 100 samples in estimated 1.0163 s (152k iterations)
+Benchmarking optimizations/case 285: (2 + 1) + (1 + 2): Analyzing
+optimizations/case 285: (2 + 1) + (1 + 2)
+                        time:   [6.6745 µs 6.6807 µs 6.6878 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 286: x: (1 + {x}) - (1 + {x})
+Benchmarking optimizations/case 286: x: (1 + {x}) - (1 + {x}): Warming up for 3.0000 s
+Benchmarking optimizations/case 286: x: (1 + {x}) - (1 + {x}): Collecting 100 samples in estimated 1.0335 s (131k iterations)
+Benchmarking optimizations/case 286: x: (1 + {x}) - (1 + {x}): Analyzing
+optimizations/case 286: x: (1 + {x}) - (1 + {x})
+                        time:   [7.8477 µs 7.8546 µs 7.8624 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 287: x: ({x} - 1) + ({x} - 1)
+Benchmarking optimizations/case 287: x: ({x} - 1) + ({x} - 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 287: x: ({x} - 1) + ({x} - 1): Collecting 100 samples in estimated 1.0191 s (106k iterations)
+Benchmarking optimizations/case 287: x: ({x} - 1) + ({x} - 1): Analyzing
+optimizations/case 287: x: ({x} - 1) + ({x} - 1)
+                        time:   [9.5914 µs 9.6013 µs 9.6116 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking optimizations/case 288: x: (1 - {x}) + (1 - {x})
+Benchmarking optimizations/case 288: x: (1 - {x}) + (1 - {x}): Warming up for 3.0000 s
+Benchmarking optimizations/case 288: x: (1 - {x}) + (1 - {x}): Collecting 100 samples in estimated 1.0262 s (106k iterations)
+Benchmarking optimizations/case 288: x: (1 - {x}) + (1 - {x}): Analyzing
+optimizations/case 288: x: (1 - {x}) + (1 - {x})
+                        time:   [9.6682 µs 9.6772 µs 9.6860 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 289: x: ({x} / 3) + ({x} / 3)
+Benchmarking optimizations/case 289: x: ({x} / 3) + ({x} / 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 289: x: ({x} / 3) + ({x} / 3): Collecting 100 samples in estimated 1.0007 s (106k iterations)
+Benchmarking optimizations/case 289: x: ({x} / 3) + ({x} / 3): Analyzing
+optimizations/case 289: x: ({x} / 3) + ({x} / 3)
+                        time:   [9.4079 µs 9.4211 µs 9.4345 µs]
+Benchmarking optimizations/case 290: x: (3 / {x}) + (3 / {x})
+Benchmarking optimizations/case 290: x: (3 / {x}) + (3 / {x}): Warming up for 3.0000 s
+Benchmarking optimizations/case 290: x: (3 / {x}) + (3 / {x}): Collecting 100 samples in estimated 1.0040 s (106k iterations)
+Benchmarking optimizations/case 290: x: (3 / {x}) + (3 / {x}): Analyzing
+optimizations/case 290: x: (3 / {x}) + (3 / {x})
+                        time:   [9.4504 µs 9.4843 µs 9.5238 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+Benchmarking optimizations/case 291: x: ({x} % 3) + ({x} % 3)
+Benchmarking optimizations/case 291: x: ({x} % 3) + ({x} % 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 291: x: ({x} % 3) + ({x} % 3): Collecting 100 samples in estimated 1.0149 s (111k iterations)
+Benchmarking optimizations/case 291: x: ({x} % 3) + ({x} % 3): Analyzing
+optimizations/case 291: x: ({x} % 3) + ({x} % 3)
+                        time:   [9.1185 µs 9.1309 µs 9.1449 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 292: x: (3 % {x}) + (3 % {x})
+Benchmarking optimizations/case 292: x: (3 % {x}) + (3 % {x}): Warming up for 3.0000 s
+Benchmarking optimizations/case 292: x: (3 % {x}) + (3 % {x}): Collecting 100 samples in estimated 1.0176 s (111k iterations)
+Benchmarking optimizations/case 292: x: (3 % {x}) + (3 % {x}): Analyzing
+optimizations/case 292: x: (3 % {x}) + (3 % {x})
+                        time:   [9.1725 µs 9.1865 µs 9.2020 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 293: x: ({x} ^ 3) + ({x} ^ 3)
+Benchmarking optimizations/case 293: x: ({x} ^ 3) + ({x} ^ 3): Warming up for 3.0000 s
+Benchmarking optimizations/case 293: x: ({x} ^ 3) + ({x} ^ 3): Collecting 100 samples in estimated 1.0105 s (111k iterations)
+Benchmarking optimizations/case 293: x: ({x} ^ 3) + ({x} ^ 3): Analyzing
+optimizations/case 293: x: ({x} ^ 3) + ({x} ^ 3)
+                        time:   [9.0838 µs 9.0997 µs 9.1159 µs]
+Benchmarking optimizations/case 294: x: (3 ^ {x}) + (3 ^ {x})
+Benchmarking optimizations/case 294: x: (3 ^ {x}) + (3 ^ {x}): Warming up for 3.0000 s
+Benchmarking optimizations/case 294: x: (3 ^ {x}) + (3 ^ {x}): Collecting 100 samples in estimated 1.0135 s (111k iterations)
+Benchmarking optimizations/case 294: x: (3 ^ {x}) + (3 ^ {x}): Analyzing
+optimizations/case 294: x: (3 ^ {x}) + (3 ^ {x})
+                        time:   [9.0986 µs 9.1080 µs 9.1178 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 295: x: -{x} + -{x}
+Benchmarking optimizations/case 295: x: -{x} + -{x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 295: x: -{x} + -{x}: Collecting 100 samples in estimated 1.0171 s (207k iterations)
+Benchmarking optimizations/case 295: x: -{x} + -{x}: Analyzing
+optimizations/case 295: x: -{x} + -{x}
+                        time:   [4.9133 µs 4.9230 µs 4.9327 µs]
+Benchmarking optimizations/case 296: x: ({x} + 1) + -({x} + 1)
+Benchmarking optimizations/case 296: x: ({x} + 1) + -({x} + 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 296: x: ({x} + 1) + -({x} + 1): Collecting 100 samples in estimated 1.0278 s (96k iterations)
+Benchmarking optimizations/case 296: x: ({x} + 1) + -({x} + 1): Analyzing
+optimizations/case 296: x: ({x} + 1) + -({x} + 1)
+                        time:   [10.681 µs 10.694 µs 10.707 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 297: x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y})
+Benchmarking optimizations/case 297: x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y}): Warming up for 3.0000 s
+Benchmarking optimizations/case 297: x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y}): Collecting 100 samples in estimated 1.0394 s (40k iterations)
+Benchmarking optimizations/case 297: x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y}): Analyzing
+optimizations/case 297: x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y})
+                        time:   [25.668 µs 25.696 µs 25.725 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  4 (4.00%) low mild
+  4 (4.00%) high mild
+Benchmarking optimizations/case 298: x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y}))
+Benchmarking optimizations/case 298: x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y})): Warming up for 3.0000 s
+Benchmarking optimizations/case 298: x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y})): Collecting 100 samples in estimated 1.1360 s (35k iterations)
+Benchmarking optimizations/case 298: x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y})): Analyzing
+optimizations/case 298: x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y}))
+                        time:   [32.035 µs 32.078 µs 32.124 µs]
+Benchmarking optimizations/case 299: x: {x}
+Benchmarking optimizations/case 299: x: {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 299: x: {x}: Collecting 100 samples in estimated 1.0001 s (667k iterations)
+Benchmarking optimizations/case 299: x: {x}: Analyzing
+optimizations/case 299: x: {x}
+                        time:   [1.5009 µs 1.5026 µs 1.5043 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 300: x: {x} + 1 + 1 + 1 + 1
+Benchmarking optimizations/case 300: x: {x} + 1 + 1 + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 300: x: {x} + 1 + 1 + 1 + 1: Collecting 100 samples in estimated 1.0214 s (106k iterations)
+Benchmarking optimizations/case 300: x: {x} + 1 + 1 + 1 + 1: Analyzing
+optimizations/case 300: x: {x} + 1 + 1 + 1 + 1
+                        time:   [9.6230 µs 9.6356 µs 9.6483 µs]
+Benchmarking optimizations/case 301: x, y: {x} + {y}
+Benchmarking optimizations/case 301: x, y: {x} + {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 301: x, y: {x} + {y}: Collecting 100 samples in estimated 1.0152 s (303k iterations)
+Benchmarking optimizations/case 301: x, y: {x} + {y}: Analyzing
+optimizations/case 301: x, y: {x} + {y}
+                        time:   [3.3579 µs 3.3615 µs 3.3654 µs]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 302: u, v, w, x, y, z: {u} + {v} + {w} + {x} + {y} + {z}
+Benchmarking optimizations/case 302: u, v, w, x, y, z: {u} + {v} + {w} + {x} + {y} + {z}: Warming up for 3.0000 s
+Benchmarking optimizations/case 302: u, v, w, x, y, z: {u} + {v} + {w} + {x} + {y} + {z}: Collecting 100 samples in estimated 1.0808 s (61k iterations)
+Benchmarking optimizations/case 302: u, v, w, x, y, z: {u} + {v} + {w} + {x} + {y} + {z}: Analyzing
+optimizations/case 302: u, v, w, x, y, z: {u} + {v} + {w} + {x} + {y} + {z}
+                        time:   [17.834 µs 17.855 µs 17.877 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 303: {x}
+Benchmarking optimizations/case 303: {x}: Warming up for 3.0000 s
+Benchmarking optimizations/case 303: {x}: Collecting 100 samples in estimated 1.0065 s (702k iterations)
+Benchmarking optimizations/case 303: {x}: Analyzing
+optimizations/case 303: {x}
+                        time:   [1.4337 µs 1.4358 µs 1.4381 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) low mild
+  6 (6.00%) high mild
+Benchmarking optimizations/case 304: {x} + 1
+Benchmarking optimizations/case 304: {x} + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 304: {x} + 1: Collecting 100 samples in estimated 1.0100 s (268k iterations)
+Benchmarking optimizations/case 304: {x} + 1: Analyzing
+optimizations/case 304: {x} + 1
+                        time:   [3.7715 µs 3.7778 µs 3.7841 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 305: {x} + 1 + 1 + 1 + 1
+Benchmarking optimizations/case 305: {x} + 1 + 1 + 1 + 1: Warming up for 3.0000 s
+Benchmarking optimizations/case 305: {x} + 1 + 1 + 1 + 1: Collecting 100 samples in estimated 1.0236 s (106k iterations)
+Benchmarking optimizations/case 305: {x} + 1 + 1 + 1 + 1: Analyzing
+optimizations/case 305: {x} + 1 + 1 + 1 + 1
+                        time:   [9.6616 µs 9.6738 µs 9.6858 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking optimizations/case 306: {x} + {y}
+Benchmarking optimizations/case 306: {x} + {y}: Warming up for 3.0000 s
+Benchmarking optimizations/case 306: {x} + {y}: Collecting 100 samples in estimated 1.0045 s (313k iterations)
+Benchmarking optimizations/case 306: {x} + {y}: Analyzing
+optimizations/case 306: {x} + {y}
+                        time:   [3.2066 µs 3.2104 µs 3.2144 µs]
+Benchmarking optimizations/case 307: {u} + {v} + {w} + {x} + {y} + {z}
+Benchmarking optimizations/case 307: {u} + {v} + {w} + {x} + {y} + {z}: Warming up for 3.0000 s
+Benchmarking optimizations/case 307: {u} + {v} + {w} + {x} + {y} + {z}: Collecting 100 samples in estimated 1.0390 s (61k iterations)
+Benchmarking optimizations/case 307: {u} + {v} + {w} + {x} + {y} + {z}: Analyzing
+optimizations/case 307: {u} + {v} + {w} + {x} + {y} + {z}
+                        time:   [17.102 µs 17.124 µs 17.146 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 308: [1 + 2 : 3 + 4]
+Benchmarking optimizations/case 308: [1 + 2 : 3 + 4]: Warming up for 3.0000 s
+Benchmarking optimizations/case 308: [1 + 2 : 3 + 4]: Collecting 100 samples in estimated 1.0177 s (172k iterations)
+Benchmarking optimizations/case 308: [1 + 2 : 3 + 4]: Analyzing
+optimizations/case 308: [1 + 2 : 3 + 4]
+                        time:   [5.9383 µs 5.9439 µs 5.9493 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) low mild
+Benchmarking optimizations/case 309: (4 - 2)D(3 - 1)
+Benchmarking optimizations/case 309: (4 - 2)D(3 - 1): Warming up for 3.0000 s
+Benchmarking optimizations/case 309: (4 - 2)D(3 - 1): Collecting 100 samples in estimated 1.0060 s (167k iterations)
+Benchmarking optimizations/case 309: (4 - 2)D(3 - 1): Analyzing
+optimizations/case 309: (4 - 2)D(3 - 1)
+                        time:   [6.0278 µs 6.0342 µs 6.0409 µs]
+Benchmarking optimizations/case 310: (4 * 2)D[-1, 0, 1]
+Benchmarking optimizations/case 310: (4 * 2)D[-1, 0, 1]: Warming up for 3.0000 s
+Benchmarking optimizations/case 310: (4 * 2)D[-1, 0, 1]: Collecting 100 samples in estimated 1.0063 s (192k iterations)
+Benchmarking optimizations/case 310: (4 * 2)D[-1, 0, 1]: Analyzing
+optimizations/case 310: (4 * 2)D[-1, 0, 1]
+                        time:   [5.2334 µs 5.2382 µs 5.2432 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 311: (8 * 2)D(24 / 3) drop lowest (10 % 7)
+Benchmarking optimizations/case 311: (8 * 2)D(24 / 3) drop lowest (10 % 7): Warming up for 3.0000 s
+Benchmarking optimizations/case 311: (8 * 2)D(24 / 3) drop lowest (10 % 7): Collecting 100 samples in estimated 1.0300 s (121k iterations)
+Benchmarking optimizations/case 311: (8 * 2)D(24 / 3) drop lowest (10 % 7): Analyzing
+optimizations/case 311: (8 * 2)D(24 / 3) drop lowest (10 % 7)
+                        time:   [8.4785 µs 8.4881 µs 8.4975 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking optimizations/case 312: (3 ^ 3)D(24 / 3) drop highest (3 + -1)
+Benchmarking optimizations/case 312: (3 ^ 3)D(24 / 3) drop highest (3 + -1): Warming up for 3.0000 s
+Benchmarking optimizations/case 312: (3 ^ 3)D(24 / 3) drop highest (3 + -1): Collecting 100 samples in estimated 1.0324 s (126k iterations)
+Benchmarking optimizations/case 312: (3 ^ 3)D(24 / 3) drop highest (3 + -1): Analyzing
+optimizations/case 312: (3 ^ 3)D(24 / 3) drop highest (3 + -1)
+                        time:   [8.1558 µs 8.1631 µs 8.1704 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 313: (1D3)D3
+Benchmarking optimizations/case 313: (1D3)D3: Warming up for 3.0000 s
+Benchmarking optimizations/case 313: (1D3)D3: Collecting 100 samples in estimated 1.0284 s (172k iterations)
+Benchmarking optimizations/case 313: (1D3)D3: Analyzing
+optimizations/case 313: (1D3)D3
+                        time:   [6.0012 µs 6.0057 µs 6.0105 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+Benchmarking optimizations/case 314: 1D(1D3)
+Benchmarking optimizations/case 314: 1D(1D3): Warming up for 3.0000 s
+Benchmarking optimizations/case 314: 1D(1D3): Collecting 100 samples in estimated 1.0180 s (172k iterations)
+Benchmarking optimizations/case 314: 1D(1D3): Analyzing
+optimizations/case 314: 1D(1D3)
+                        time:   [5.9334 µs 5.9382 µs 5.9429 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking optimizations/case 315: (1D3)D(1D3)
+Benchmarking optimizations/case 315: (1D3)D(1D3): Warming up for 3.0000 s
+Benchmarking optimizations/case 315: (1D3)D(1D3): Collecting 100 samples in estimated 1.0377 s (121k iterations)
+Benchmarking optimizations/case 315: (1D3)D(1D3): Analyzing
+optimizations/case 315: (1D3)D(1D3)
+                        time:   [8.5485 µs 8.5561 µs 8.5637 µs]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  6 (6.00%) high severe
+Criterion.rs ERROR: Error in Gnuplot:          line 0: Bad format character
+
+
+

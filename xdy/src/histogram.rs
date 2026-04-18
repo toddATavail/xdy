@@ -302,7 +302,7 @@ pub struct EvaluationState<'inst>
 
 	/// Successor states to evaluate, sometime after the current state is
 	/// evaluated. Only `Some` for states that have resumed. Drained by the
-	/// [iterator](EvaluationStateIterator).
+	/// [iterator](serial::EvaluationStateIterator).
 	successors: Option<Vec<EvaluationState<'inst>>>,
 
 	/// The final result of the dice expression, if it has been computed.

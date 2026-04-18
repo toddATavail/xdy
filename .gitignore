@@ -4,6 +4,16 @@ Cargo.lock
 
 # cargo-mutants artifacts.
 /mutants.out
+/mutants.out.old
 
 # Scratch files.
 repl.rs
+
+# Beads / Dolt files (added by bd init)
+.beads/
+.dolt/
+*.db
+.beads-credential-key
+
+# AI support.
+CLAUDE.md

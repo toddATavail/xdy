@@ -22,8 +22,8 @@ use crate::{
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function,
 	InstructionVisitor, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return,
 	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
-	SumRollingRecord, add, div, exp, r#mod, mul, neg, roll_custom_dice,
-	roll_range, roll_standard_dice, sub
+	SumRollingRecord, add, div, exp, r#mod, mul, neg, parser::ParseError,
+	roll_custom_dice, roll_range, roll_standard_dice, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -195,6 +195,38 @@ where
 /// * Division by zero is treated as zero,
 /// * Zero to the power of zero is treated as one,
 /// * Bases raised to negative exponents are treated as zero.
+///
+/// # Virtual machine model
+///
+/// The evaluator is a simple register machine with two register files:
+///
+/// ```mermaid
+/// graph TD
+///     subgraph VM["Evaluator VM"]
+///         direction TB
+///         PC["Program Counter"]
+///         subgraph RF["Register Bank (i32)"]
+///             R0["@0: param/extern"]
+///             R1["@1: param/extern"]
+///             RN["@N: computed"]
+///         end
+///         subgraph RR["Rolling Record Bank"]
+///             RR0["⚅0: dice/range results"]
+///             RR1["⚅1: dice/range results"]
+///         end
+///         RES["Result Register"]
+///     end
+///     F["Function (IR)"] --> PC
+///     RNG["pRNG"] --> RR
+///     ARGS["Arguments"] --> RF
+///     ENV["Environment"] --> RF
+///     VM --> OUT["Evaluation"]
+///     style VM fill:#e8f4fd,stroke:#333,color:#000
+///     style RF fill:#d4edda,stroke:#333,color:#000
+///     style RR fill:#fff3cd,stroke:#333,color:#000
+///     style OUT fill:#9f9,stroke:#333,color:#000
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluator
@@ -642,12 +674,19 @@ impl RollingRecordKind<i32>
 
 /// An error that may occur during the evaluation of a dice expression. Note
 /// that evaluation itself never causes an error, but setup may fail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Lifetimes
+/// - `'error`: The lifetime of the source text or external variable name that
+///   caused the error. For [`CompilationFailed`](Self::CompilationFailed), this
+///   is the source code; for
+///   [`UnrecognizedExternal`](Self::UnrecognizedExternal), it is the variable
+///   name passed to [`Evaluator::bind()`](crate::Evaluator::bind).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvaluationError<'error>
 {
-	/// The function could not be compiled. Produced only by the simple
+	/// The source code could not be parsed. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
-	CompilationFailed,
+	CompilationFailed(ParseError<'error>),
 
 	/// The function could not be optimized. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
@@ -674,9 +713,9 @@ impl Display for EvaluationError<'_>
 	{
 		match self
 		{
-			EvaluationError::CompilationFailed =>
+			EvaluationError::CompilationFailed(e) =>
 			{
-				write!(f, "compilation failed")
+				write!(f, "{}", e)
 			},
 			EvaluationError::OptimizationFailed =>
 			{
@@ -700,14 +739,17 @@ impl Display for EvaluationError<'_>
 
 impl Error for EvaluationError<'_> {}
 
-impl From<CompilationError> for EvaluationError<'static>
+impl<'src> From<CompilationError<'src>> for EvaluationError<'src>
 {
-	fn from(e: CompilationError) -> Self
+	fn from(e: CompilationError<'src>) -> Self
 	{
 		match e
 		{
-			CompilationError::OptimizationFailed => Self::OptimizationFailed,
-			CompilationError::CompilationFailed => Self::CompilationFailed
+			CompilationError::CompilationFailed(e) =>
+			{
+				Self::CompilationFailed(e)
+			},
+			CompilationError::OptimizationFailed => Self::OptimizationFailed
 		}
 	}
 }

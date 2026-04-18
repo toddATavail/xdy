@@ -251,12 +251,16 @@
 //! * `serde`: Implements the `Serialize` and `Deserialize` traits for various
 //!   types. This feature requires the `serde` crate, and is enabled by default.
 
+pub mod ast;
 mod compiler;
+pub mod diagnostics;
 mod evaluator;
 mod histogram;
 mod ir;
 mod optimizer;
+pub mod parser;
 mod primitives;
+pub mod s_expr;
 #[cfg(any(test, feature = "bench"))]
 pub mod support;
 #[cfg(test)]
@@ -302,15 +306,15 @@ pub use primitives::*;
 ///   signature.
 /// * [`UnrecognizedExternal`](EvaluationError::UnrecognizedExternal) if an
 ///   external variable is not recognized.
-pub fn evaluate_unoptimized<'s, 'e, 'r, R>(
-	source: &'s str,
+pub fn evaluate_unoptimized<'src, 'env, 'rng, R>(
+	source: &'src str,
 	args: impl IntoIterator<Item = i32>,
-	environment: impl IntoIterator<Item = (&'e str, i32)>,
-	rng: &'r mut R
-) -> Result<Evaluation, EvaluationError<'s>>
+	environment: impl IntoIterator<Item = (&'env str, i32)>,
+	rng: &'rng mut R
+) -> Result<Evaluation, EvaluationError<'src>>
 where
 	R: rand::Rng + ?Sized,
-	'e: 's
+	'env: 'src
 {
 	let function = compile_unoptimized(source)?;
 	let mut evaluator = Evaluator::new(function);
@@ -416,15 +420,15 @@ where
 /// assert!(1 <= result.records[1].results[1] && result.records[1].results[1] <= 8);
 /// assert!(1 <= result.records[2].results[0] && result.records[2].results[0] <= 10);
 /// ```
-pub fn evaluate<'s, 'e, 'r, R>(
-	source: &'s str,
+pub fn evaluate<'src, 'env, 'rng, R>(
+	source: &'src str,
 	args: impl IntoIterator<Item = i32>,
-	environment: impl IntoIterator<Item = (&'e str, i32)>,
-	rng: &'r mut R
-) -> Result<Evaluation, EvaluationError<'s>>
+	environment: impl IntoIterator<Item = (&'env str, i32)>,
+	rng: &'rng mut R
+) -> Result<Evaluation, EvaluationError<'src>>
 where
 	R: rand::Rng + ?Sized,
-	'e: 's
+	'env: 'src
 {
 	let function = compile(source)?;
 	let mut evaluator = Evaluator::new(function);

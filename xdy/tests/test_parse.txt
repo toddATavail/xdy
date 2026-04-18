@@ -1,0 +1,371 @@
+0
+=
+(function [] 0)
+
+1
+=
+(function [] 1)
+
+-1
+=
+(function [] -1)
+
+10
+=
+(function [] 10)
+
+100
+=
+(function [] 100)
+
+123456789123456789123456789123456789
+=
+(function [] 2147483647)
+
+987654321987654321987654321987654321
+=
+(function [] 2147483647)
+
+09
+=
+(function [] 9)
+
+(0)
+=
+(function [] 0)
+
+{a}
+=
+(function [] a)
+
+{alloy}
+=
+(function [] alloy)
+
+{a0}
+=
+(function [] a0)
+
+{kebab-case}
+=
+(function [] kebab-case)
+
+{snake_case}
+=
+(function [] snake_case)
+
+{qualified.access}
+=
+(function [] qualified.access)
+
+{dés}
+=
+(function [] dés)
+
+{an external variable}
+=
+(function [] "an external variable")
+
+{выражение в кости}
+=
+(function [] "выражение в кости")
+
+{έκφραση ζαριών}
+=
+(function [] "έκφραση ζαριών")
+
+a: {a}
+=
+(function [a] a)
+
+a, an external variable: {an external variable}
+=
+(function [a "an external variable"] "an external variable")
+
+({a})
+=
+(function [] a)
+
+[0:5]
+=
+(function [] (range 0 5))
+
+[-10:10]
+=
+(function [] (range -10 10))
+
+[1d3 + 5 : 55 - 8D4]
+=
+(function [] (range (add (standard-dice 1 3) 5) (sub 55 (standard-dice 8 4))))
+
+1D6
+=
+(function [] (standard-dice 1 6))
+
+1d6
+=
+(function [] (standard-dice 1 6))
+
+2d8
+=
+(function [] (standard-dice 2 8))
+
+20d10
+=
+(function [] (standard-dice 20 10))
+
+{x}D{y}
+=
+(function [] (standard-dice x y))
+
+1D[-1, 0, 1]
+=
+(function [] (custom-dice 1 [-1 0 1]))
+
+(1d6)
+=
+(function [] (standard-dice 1 6))
+
+(1)d(6)
+=
+(function [] (standard-dice 1 6))
+
+(1d[1, 1, 2, 3, 5, 8])D(1D8)
+=
+(function [] (standard-dice (custom-dice 1 [1 1 2 3 5 8]) (standard-dice 1 8)))
+
+3D10 drop lowest
+=
+(function [] (drop-lowest (standard-dice 3 10) 1))
+
+3D10 drop lowest 2
+=
+(function [] (drop-lowest (standard-dice 3 10) 2))
+
+3D10 drop highest
+=
+(function [] (drop-highest (standard-dice 3 10) 1))
+
+3D10 drop highest 2
+=
+(function [] (drop-highest (standard-dice 3 10) 2))
+
+10D10 drop highest 2 drop lowest 5
+=
+(function [] (drop-lowest (drop-highest (standard-dice 10 10) 2) 5))
+
+10D10 drop lowest (1 + 3) drop highest {x}
+=
+(function [] (drop-highest (drop-lowest (standard-dice 10 10) (add 1 3)) x))
+
+0 + 0
+=
+(function [] (add 0 0))
+
+0 - 0
+=
+(function [] (sub 0 0))
+
+0 * 0
+=
+(function [] (mul 0 0))
+
+{a} × {b}
+=
+(function [] (mul a b))
+
+0 / 0
+=
+(function [] (div 0 0))
+
+{a} ÷ {b}
+=
+(function [] (div a b))
+
+{a} % {b}
+=
+(function [] (mod a b))
+
+-10
+=
+(function [] -10)
+
+0 + 1 + 2
+=
+(function [] (add (add 0 1) 2))
+
+(0 + 1) + 2
+=
+(function [] (add (add 0 1) 2))
+
+0 + (1 + 2)
+=
+(function [] (add 0 (add 1 2)))
+
+0 + 1 - 2
+=
+(function [] (sub (add 0 1) 2))
+
+0 + 1 * 2
+=
+(function [] (add 0 (mul 1 2)))
+
+0 + 1 / 2
+=
+(function [] (add 0 (div 1 2)))
+
+0 + 1 % 2
+=
+(function [] (add 0 (mod 1 2)))
+
+0 + 1 ^ 2 ^ {a}
+=
+(function [] (add 0 (exp 1 (exp 2 a))))
+
+0 ^ {a} - {a} ^ 2
+=
+(function [] (sub (exp 0 a) (exp a 2)))
+
+0 ^ -{a} - -{a} ^ 2
+=
+(function [] (sub (exp 0 (neg a)) (neg (exp a 2))))
+
+3D6 + 0
+=
+(function [] (add (standard-dice 3 6) 0))
+
+5 + 3D6
+=
+(function [] (add 5 (standard-dice 3 6)))
+
+3D6 + 2D12
+=
+(function [] (add (standard-dice 3 6) (standard-dice 2 12)))
+
+3 ^ 3D6 + -2D12
+=
+(function [] (add (exp 3 (standard-dice 3 6)) (neg (standard-dice 2 12))))
+
+(5 + {a})d({b})
+=
+(function [] (standard-dice (add 5 a) b))
+
+(5 + {a})d({b}) drop lowest 1
+=
+(function [] (drop-lowest (standard-dice (add 5 a) b) 1))
+
+(5 + {a})d({b}) drop highest 1 * 3
+=
+(function [] (mul (drop-highest (standard-dice (add 5 a) b) 1) 3))
+
+(5 + {a})d({b}) drop highest 1 % [2:3]
+=
+(function [] (mod (drop-highest (standard-dice (add 5 a) b) 1) (range 2 3)))
+
+x: ({x} + 1) - ({x} + 1)
+=
+(function [x] (sub (add x 1) (add x 1)))
+
+2 + 3 * 4
+=
+(function [] (add 2 (mul 3 4)))
+
+(2 + 3) * 4
+=
+(function [] (mul (add 2 3) 4))
+
+-2 ^ 3
+=
+(function [] (neg (exp 2 3)))
+
+2 ^ 3 ^ 2
+=
+(function [] (exp 2 (exp 3 2)))
+
+- - 5
+=
+(function [] (neg -5))
+
+-2^-3
+=
+(function [] (neg (exp 2 -3)))
+
+2147483647
+=
+(function [] 2147483647)
+
+2147483648
+=
+(function [] 2147483647)
+
+-2147483647
+=
+(function [] -2147483647)
+
+-2147483648
+=
+(function [] -2147483648)
+
+-2147483649
+=
+(function [] -2147483648)
+
+-9999999999999
+=
+(function [] -2147483648)
+
+-2147483648d6
+=
+(function [] (neg (standard-dice 2147483647 6)))
+
+-9999999999999d6
+=
+(function [] (neg (standard-dice 2147483647 6)))
+
+-2147483648D[1,2,3]
+=
+(function [] (neg (custom-dice 2147483647 [1 2 3])))
+
+-2147483648d6 drop lowest
+=
+(function [] (neg (drop-lowest (standard-dice 2147483647 6) 1)))
+
+-3d6
+=
+(function [] (neg (standard-dice 3 6)))
+
+2*3
+=
+(function [] (mul 2 3))
+
+6/3
+=
+(function [] (div 6 3))
+
+{こんにちは}
+=
+(function [] こんにちは)
+
+{Здравствуй_мир}
+=
+(function [] Здравствуй_мир)
+
+{hello world}
+=
+(function [] "hello world")
+
+{foo.bar}
+=
+(function [] foo.bar)
+
+( 1 + 2 )
+=
+(function [] (add 1 2))
+
+((1 + 2))
+=
+(function [] (add 1 2))
+
+{x} + {y} * {z}
+=
+(function [] (add x (mul y z)))

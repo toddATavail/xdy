@@ -13,11 +13,16 @@ categories = ["compilers", "parsing", "game-development", "mathematics"]
 repository = "https://github.com/toddATavail/xdy"
 
 [workspace.dependencies]
+aquamarine = "0.6"
 cc = "1.1.8"
-criterion = { version = "0.5.1", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
+ebnsf = "0.1"
+nom = "8.0.0"
+nom-language = "0.1.0"
+nom_locate = "5.0.0"
 pretty_assertions = "1.4.0"
 proc-macro2 = "1.0"
-rand = "0.9"
+rand = "0.10"
 rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 syn = "2.0.72"

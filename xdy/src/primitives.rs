@@ -7,7 +7,7 @@
 
 use std::ops::RangeInclusive;
 
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 
 #[cfg(doc)]
 use crate::Evaluator;

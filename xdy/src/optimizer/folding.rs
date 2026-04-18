@@ -21,7 +21,7 @@ use crate::{Optimizer, add, div, exp, r#mod, mul, neg, sub};
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A constant folder. The standard optimizer uses a constant folder to fold
-/// expressions with only constant operands into [immediates]Immediate).
+/// expressions with only constant operands into [immediates](Immediate).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConstantFolder
 {

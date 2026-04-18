@@ -1,227 +1,214 @@
-# xDy: Once-and-for-all dice expression compiler
+# xDy crate
 
-`xDy` is an extremely fast dice expression compiler that can be used to generate pseudorandom numbers. It is designed for use within a variety of applications, such as role-playing games (RPGs) and simulations, but also suits other applications that must introduce controlled randomness or generate specific probability distributions. It is written in Rust for maximum performance, safety, and portability.
+The `xdy` crate is the core library of the xDy project. It compiles dice expressions into reusable functions, optimizes them, and evaluates them against client-supplied pseudorandom number generators. For a high-level overview of the project, language features, and usage examples, see the [project README](../README.md).
 
-* [Examples](#examples)
-	* [One-shot evaluation](#one-shot-evaluation)
-	* [Repeated evaluation](#repeated-evaluation)
-* [Performance](#performance)
-* [Safety](#safety)
-* [Language features](#language-features)
+This document covers the internal architecture for contributors and curious power users.
+
+* [Architecture](#architecture)
+	* [Compilation pipeline](#compilation-pipeline)
+	* [Intermediate representation](#intermediate-representation)
+	* [Evaluator](#evaluator)
+	* [Optimizer](#optimizer)
+	* [Histogram engine](#histogram-engine)
+	* [Diagnostics](#diagnostics)
+* [Instruction set reference](#instruction-set-reference)
+	* [Addressing modes](#addressing-modes)
+	* [Roll instructions](#roll-instructions)
+	* [Drop instructions](#drop-instructions)
+	* [Reduce instructions](#reduce-instructions)
+	* [Arithmetic instructions](#arithmetic-instructions)
+	* [Control instructions](#control-instructions)
 * [Cargo features](#cargo-features)
-* [Planned work](#planned-work)
+* [Safety](#safety)
 
-## Overview
+## Architecture
 
-`xDy` compiles dice expressions into reusable functions that can be applied to user-supplied pseudorandom number generators (pRNGs) to simulate dice rolls. Functions may define formal parameters or bind values supplied through an environment. A six-pass optimizing compiler produces efficient code for each dice expression, so the resulting functions can be used to generate dice rolls with minimal overhead. The generated code targets a dedicated intermediate representation (IR) that is designed specifically for dice expressions. An efficient evaluator interprets the IR to produce the final result.
+### Compilation pipeline
 
-Beyond generating just a final tally, `xDy` also provides detailed information about the individual dice rolls that contributed to the total. So `3D6 + 1D8` might produce a total of `18`, but it also tells you that the six-sided dice produced [`3`, `5`, `4`] and the eight-sided die produced `6`.
+Source code flows through a six-stage pipeline. The `compile()` convenience function drives the full pipeline; `compile_unoptimized()` skips the optimizer.
 
-`xDy` also provides analytical capabilities. `xDy` can compute the bounds and probability distribution of a dice expression. For example, `xDy` can determine that `3D6 + 1D8` has a minimum value of `4`, has a maximum value of `26`, and puts the probability of rolling a `10` at `0.125` (`27/216`). Probability distributions can be computed serially or in parallel (with the `parallel-histogram` feature). For static dice expressions, `xDy` can calculate the total number of outcomes without iterating through the state space.
-
-## Examples
-
-### One-shot evaluation
-
-Rolling one standard six-sided die:
-
-```rust
-use xdy::evaluate;
-use rand::rng;
-
-let result = evaluate("1d6", vec![], vec![], &mut rng()).unwrap();
-
-assert!(1 <= result.result && result.result <= 6);
-assert!(result.records.len() == 1);
-assert!(result.records[0].results.len() == 1);
-assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
+```mermaid
+graph LR
+    A["Source Code<br/><code>&str</code>"] --> B["Parser<br/><code>parser::parse</code>"]
+    B --> C["AST<br/><code>ast::Function</code>"]
+    C --> D["Compiler<br/><code>Compiler::compile</code>"]
+    D --> E["Unoptimized IR<br/><code>Function</code>"]
+    E --> F["Optimizer<br/><code>StandardOptimizer</code>"]
+    F --> G["Optimized IR<br/><code>Function</code>"]
+    style A fill:#f9f,stroke:#333,color:#000
+    style G fill:#9f9,stroke:#333,color:#000
 ```
 
-Rolling a variable number of dice, using an argument named `x` to supply the
-number of dice to roll:
+**Parser.** A [nom](https://docs.rs/nom)-based combinator parser recognizes the xDy grammar and produces an abstract syntax tree (`ast::Function`). The grammar supports operator precedence via recursive descent: `add_sub` → `mul_div_mod` → `unary` → `exponent` → `primary`. See `parser::combinators` for the full set of production rules; the Rustdoc includes a railroad diagram generated from the EBNF grammar.
 
-```rust
-use xdy::evaluate;
-use rand::rng;
+**Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout.
 
-let result = evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
+**Optimizer.** The `StandardOptimizer` applies five transformation passes in a fixed-point loop, then a final register coalescing pass. See [Optimizer](#optimizer) below.
 
-assert!(3 <= result.result && result.result <= 18);
-assert!(result.records.len() == 1);
-assert!(result.records[0].results.len() == 3);
-assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+### Intermediate representation
+
+The IR is a simple register transfer language (RTL) with no control flow — all instructions reside in a single basic block. The machine model provides two register files:
+
+- **Register bank** (`@0`, `@1`, …): holds `i32` values for parameters, external variables, and computed intermediates.
+- **Rolling record bank** (`⚅0`, `⚅1`, …): holds the individual results of dice rolls and range selections, along with drop counters.
+
+Each operand uses one of three addressing modes:
+
+| Mode | Notation | Description |
+|------|----------|-------------|
+| Immediate | `#N` | Constant `i32` embedded in the instruction |
+| Register | `@N` | Index into the register bank |
+| RollingRecord | `⚅N` | Index into the rolling record bank |
+
+See [Instruction set reference](#instruction-set-reference) for the complete ISA.
+
+### Evaluator
+
+The evaluator is a linear instruction interpreter. For each evaluation it:
+
+1. Allocates a register bank (sized at compile time) and a rolling record bank.
+2. Loads arguments into parameter registers and environment bindings into external variable registers.
+3. Walks the instruction stream sequentially — there is no branching, so the program counter simply increments.
+4. Returns the final `Evaluation`, which includes both the `i32` result and the complete `Vec<RollingRecord>` for display.
+
+```mermaid
+graph TD
+    subgraph VM["Evaluator VM"]
+        direction TB
+        PC["Program Counter"]
+        subgraph RF["Register Bank (i32)"]
+            R0["@0: param"]
+            R1["@1: extern"]
+            RN["@N: computed"]
+        end
+        subgraph RR["Rolling Record Bank"]
+            RR0["⚅0: dice results"]
+            RR1["⚅1: range results"]
+        end
+    end
+    F["Function (IR)"] --> PC
+    RNG["pRNG"] --> RR
+    ARGS["Arguments"] --> RF
+    ENV["Environment"] --> RF
+    VM --> OUT["Evaluation<br/>result + records"]
+    style VM fill:#e8f4fd,stroke:#333,color:#000
+    style RF fill:#d4edda,stroke:#333,color:#000
+    style RR fill:#fff3cd,stroke:#333,color:#000
 ```
 
-Rolling a variable number of dice, using an external variable named `x` to
-supply the number of dice to roll:
+All arithmetic saturates to `i32::MIN`/`i32::MAX`. Division by zero yields zero. `0^0 = 1`. Negative exponents yield zero.
 
-```rust
-use xdy::evaluate;
-use rand::rng;
+The evaluator also provides `bounds()`, which computes static `min`/`max` bounds and (when possible) the total outcome count — without requiring an RNG.
 
-let result =
-    evaluate("{x}D6", vec![], vec![("x", 3)], &mut rng()).unwrap();
+### Optimizer
 
-assert!(3 <= result.result && result.result <= 18);
-assert!(result.records.len() == 1);
-assert!(result.records[0].results.len() == 3);
-assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+The `StandardOptimizer` applies six passes. The first five run in a fixed-point loop; the sixth runs once at the end:
+
+```mermaid
+graph TD
+    A["Input Function (SSA)"] --> B["Common Subexpression Elimination"]
+    B --> C["Constant Commuting"]
+    C --> D["Constant Folding"]
+    D --> E["Strength Reduction"]
+    E --> F["Dead Code Elimination"]
+    F --> G{"Changed?"}
+    G -- Yes --> B
+    G -- No --> H["Register Coalescing"]
+    H --> I["Optimized Function"]
+    style A fill:#f9f,stroke:#333,color:#000
+    style I fill:#9f9,stroke:#333,color:#000
+    style G fill:#ff9,stroke:#333,color:#000
 ```
 
-Evaluating an arithmetic expression involving different types of dice:
+| Pass | Effect |
+|------|--------|
+| **CSE** | Identifies identical instructions and replaces duplicates with references to the first occurrence |
+| **Constant commuting** | Moves immediate operands to the left side of commutative operators, creating folding opportunities |
+| **Constant folding** | Evaluates instructions whose operands are all immediates at compile time |
+| **Strength reduction** | Replaces expensive operations with cheaper equivalents (e.g., multiply by power of two → shift) |
+| **Dead code elimination** | Removes instructions whose results are never consumed |
+| **Register coalescing** | Merges equivalent registers to reduce the register bank size; breaks SSA form, so it runs last |
 
-```rust
-use xdy::evaluate;
-use rand::rng;
+### Histogram engine
 
-let result = evaluate("1d6 + 2d8 - 1d10", vec![], vec![], &mut rng()).unwrap();
+The histogram engine computes the complete probability distribution of a dice expression by exhaustive enumeration. It uses a state-machine approach:
 
-assert!(-7 <= result.result && result.result <= 21);
-assert!(result.records.len() == 3);
-assert!(result.records[0].results.len() == 1);
-assert!(result.records[1].results.len() == 2);
-assert!(result.records[2].results.len() == 1);
-assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-assert!(1 <= result.records[1].results[0] && result.records[1].results[0] <= 8);
-assert!(1 <= result.records[1].results[1] && result.records[1].results[1] <= 8);
-assert!(
-    1 <= result.records[2].results[0]
-        && result.records[2].results[0] <= 10
-);
-```
+1. Each `EvaluationState` suspends at roll/range instructions.
+2. For each possible outcome of the suspended instruction, a successor state is generated.
+3. States that reach `Return` contribute their result to the histogram.
+4. A configurable gas tank (`MAX_SUCCESSORS = 30`) bounds the branching factor per instruction.
 
-### Repeated evaluation
+Two builders are provided: `SerialHistogramBuilder` and `ParallelHistogramBuilder` (the latter requires the `parallel-histogram` feature and uses `rayon`).
 
-Compiling and optimizing a dice expression and evaluating it multiple times:
+### Diagnostics
 
-```rust
-use xdy::{compile, Evaluator};
-use rand::rng;
+The `diagnostics` module provides structured error reporting with a fix-and-retry strategy. When parsing fails, the diagnostics engine:
 
-let function = compile("3D6")?;
-let mut evaluator = Evaluator::new(function);
-let results = (0..10)
-    .flat_map(|_| evaluator.evaluate(vec![], &mut rng()))
-    .collect::<Vec<_>>();
+1. Analyzes the parse error to identify the failure kind (unclosed delimiter, missing operand, etc.).
+2. Applies a minimal fix to the source text.
+3. Re-parses the fixed source to discover additional errors.
+4. Maps error spans back to the original source using an offset map.
 
-assert!(results.len() == 10);
-assert!(results.iter().all(|result| 3 <= result.result && result.result <= 18));
-```
+This produces rich `Diagnostic` values with error kinds, source spans, messages, and suggested fixes — designed to power IDE-style error reporting on every keystroke.
 
-Compiling and optimizing a dice expression with formal parameters and evaluating
-it multiple times with different arguments:
+## Instruction set reference
 
-```rust
-use xdy::{compile, Evaluator};
-use rand::rng;
+### Addressing modes
 
-let function = compile("x: 1D6 + {x}")?;
-let mut evaluator = Evaluator::new(function);
-let results = (0..10)
-   .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
-   .collect::<Vec<_>>();
+| Mode | Syntax | Description |
+|------|--------|-------------|
+| `Immediate(N)` | `#N` | Constant `i32` value |
+| `Register(N)` | `@N` | General-purpose register |
+| `RollingRecord(N)` | `⚅N` | Rolling record (dice/range results) |
 
-assert!(results.len() == 10);
-(0..10).for_each(|i| {
-   let x = i as i32;
-   assert!(1 + x <= results[i].result && results[i].result <= 6 + x);
-});
-```
+### Roll instructions
 
-Compiling and optimizing a dice expression with environmental variables and
-evaluating it multiple times:
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `RollRange` | `⚅N ← roll range S:E` | Select a random value from the inclusive range `[S, E]` and store it in rolling record `N` |
+| `RollStandardDice` | `⚅N ← roll standard dice CDF` | Roll `C` standard dice with `F` faces each, storing all results in rolling record `N` |
+| `RollCustomDice` | `⚅N ← roll custom dice CD[f₁, f₂, …]` | Roll `C` custom dice with the specified face values, storing all results in rolling record `N` |
 
-```rust
-use xdy::{compile, Evaluator};
-use rand::rng;
+### Drop instructions
 
-let function = compile("1D6 + {x}")?;
-let mut evaluator = Evaluator::new(function);
-evaluator.bind("x", 3)?;
-let results = (0..10)
-   .flat_map(|x| evaluator.evaluate(vec![], &mut rng()))
-   .collect::<Vec<_>>();
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `DropLowest` | `⚅N ← drop lowest K from ⚅N` | Mark the `K` lowest results in rolling record `N` as dropped |
+| `DropHighest` | `⚅N ← drop highest K from ⚅N` | Mark the `K` highest results in rolling record `N` as dropped |
 
-assert!(results.len() == 10);
-assert!(
-    results.iter().all(|result| 4 <= result.result && result.result <= 9)
-);
-```
+### Reduce instructions
 
-## Performance
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `SumRollingRecord` | `@N ← sum rolling record ⚅M` | Sum the non-dropped results of rolling record `M` into register `N` (saturating) |
 
-`xDy` is _very fast_. Consider the following dice expression, where `x = 4`, `y = 2`, and `z = 2`:
+### Arithmetic instructions
 
-```text
-x, y, z: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
-```
+All arithmetic instructions saturate on overflow/underflow.
 
-This dice expression involves argument binding, custom dice, and dropping values. On a 2023 MacBook Pro, `xDy` compiled and optimized this expression with mean time `22.664 µs` and evaluated it with mean time `216.89 ns`. Furthermore, the serial probability distribution calculation took mean time `394.85 µs` and the parallel calculation took mean time `291.46 µs`.
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `Add` | `@N ← A + B` | Saturating addition |
+| `Sub` | `@N ← A - B` | Saturating subtraction |
+| `Mul` | `@N ← A * B` | Saturating multiplication |
+| `Div` | `@N ← A / B` | Saturating division; `x / 0 = 0` |
+| `Mod` | `@N ← A % B` | Saturating remainder; `x % 0 = 0` |
+| `Exp` | `@N ← A ^ B` | Saturating exponentiation; `0^0 = 1`, `x^(-n) = 0` |
+| `Neg` | `@N ← -A` | Saturating negation |
 
-`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer can also reorder commutative operations and operands to improve opportunities for constant folding and strength reduction. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
+### Control instructions
 
-## Safety
-
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. `unsafe` code is limited to the `tree-sitter` dependency, and pertains exclusively to foreign function interfaces (FFIs) that are not exposed to users of the main crate.
-
-## Language features
-
-`xDy` aims to achieve sufficient expressiveness to cover the gamut of use cases established by popular RPG systems. The following features are supported:
-
-* Constants: `-1`, `0`, `1`, `2`, `3`, …
-* Standard dice, e.g., `xDy` for all `x` and `y`:
-  `1D6`, `2D8`, `3D10`, `4D17`, …
-* Custom dice, e.g., Fudge dice:
-  `1D[-1, 0, 1]`, `2D[-1, 0, 1, 3, 5]`, `3D[1, 1, 2, 3, 5, 8]`, …
-* Arithmetic
-  * Negation: `-1`, `-1D4`, …
-  * Addition: `1 + 1`, `1 + 1D4`, `1D6 + 1D8`, …
-  * Subtraction: `3 - 2`, `1 - 1D4`, `1D6 - 1D8`, …
-  * Multiplication: `2 * 3`, `2 * 1D4`, `2D6 * 1D8`, …
-  * Division: `6 / 2`, `6 / 1D4`, `1D6 / 1D8`, …
-  * Modulus: `6 % 2`, `6 % 1D4`, `1D6 % 1D8`, …
-  * Exponentiation: `2 ^ 3`, `2 ^ 1D4`, `2D6 ^ 1D8`, …
-* Grouping: `(1 + 2) * 3`, `1 + (2 * 3D4)`, `(3 * 2)D5`, `4D(5 - 2)`, …
-* Drop lowest: `1D6 drop lowest 1`, `2D8 drop lowest 2`, …
-* Drop highest: `1D6 drop highest 1`, `2D8 drop highest 2`, …
-* Formal parameters: `x: 1D6 + {x}`, `y: 1D6 + {y}`, `x, y: {x}D{y}`, …
-* Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
-* Dynamic expressions: `3D(2D6)`, `x: ({x}D3)D8`, …
-
-Environmental variables permit background state to be associated with an evaluator, while formal parameters permit dynamic state to be passed into each evaluation. Both features can be used to parameterize dice expressions and make them more flexible. Environmental variables could easily cover, for example, the attributes and skills of a character in an RPG, while formal parameters could cover the situational modifiers applied to a particular roll.
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `Return` | `return A` | Set the function result to `A` and terminate |
 
 ## Cargo features
 
-`xDy` provides several optional features that can be enabled or disabled in your `Cargo.toml`:
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `parallel-histogram` | Yes | Parallel probability distribution computation via `rayon` |
+| `serde` | Yes | `Serialize`/`Deserialize` for IR, evaluation, and histogram types |
 
-* `parallel-histogram`: Enables parallel computation of probability distributions. This feature requires the `rayon` crate, and is enabled by default.
-* `serde`: Implements the `Serialize` and `Deserialize` traits for various types. This feature requires the `serde` crate, and is enabled by default.
+## Safety
 
-## Planned work
-
-### Error reporting
-
-Sadly, I discovered that `tree-sitter` does not support good syntax error reporting until _after_ all of the happy paths were working. I plan to introduce another parser that can provide better error messages if and only if `tree-sitter` fails to parse a dice expression.
-
-### Macros
-
-I plan to introduce an `xdy!` macro for compiling statically known dice expressions. This macro will generate a Rust function that leverages the low-level IR primitives directly, thereby completely eliminating the (already very low) runtime overhead of the compiler and evaluator.
-
-### More language features
-
-Other language features that I plan to add include:
-
-* Subexpression naming: `{x}@(1D6) + {x}`, `x, y: {z}@({x} + {y}) + {z}D6`, …
-* Keep lowest: `1D6 keep lowest 1`, `2D8 keep lowest 2`, …
-* Keep highest: `1D6 keep highest 1`, `2D8 keep highest 2`, …
-* Reroll: `1D6 reroll =1`, `2D8 reroll >=5`, `2D8 reroll >=5 1 time`,
-  `2D8 reroll <=2 3 times`, …
-* Explosion, e.g., rolling additional dice under certain conditions: `1D6 explode =6`, `2D8 explode >=7`, `1D6 explode =6 2 times`, …
-
-### Foreign function interface (FFI)
-
-I plan to expose an FFI that allows `xDy` to be used from other programming languages. This FFI will be designed to be safe and efficient, and will aim to minimize the amount of marshaling and manual resource management required by clients.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains no `unsafe` code.

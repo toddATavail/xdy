@@ -1,6 +1,7 @@
 dictionaries = []
 words = [
     "allocator",
+    "alphanumberic",
     "arity",
     "augend",
     "availlang",
@@ -8,9 +9,11 @@ words = [
     "bitor",
     "canonicalize",
     "coalescer",
+    "combinators",
     "cse",
     "dep",
     "deref",
+    "ebnf",
     "externs",
     "immediates",
     "initializer",
@@ -19,6 +22,7 @@ words = [
     "memoize",
     "memoized",
     "mul",
+    "naur",
     "optimizers",
     "pseudorandom",
     "reroll",
@@ -30,9 +34,11 @@ words = [
     "underflows",
     "unindexed",
     "unoptimized",
+    "whitespace",
     "worklist",
     "xdy",
     "µ",
 ]
 flag_words = []
 ignore_paths = []
+ignore_patterns = []
