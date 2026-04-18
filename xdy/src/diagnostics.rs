@@ -37,34 +37,14 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use crate::parser::{self, ParseError};
+use crate::{
+	parser::{self, ParseError},
+	span::SourceSpan
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                   Types.                                   //
 ////////////////////////////////////////////////////////////////////////////////
-
-/// A byte range in source text, suitable for highlighting a region.
-///
-/// # Notes
-/// Both `start` and `end` are byte offsets. `end` is exclusive, following the
-/// standard Rust range convention.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceSpan
-{
-	/// The start byte offset (inclusive).
-	pub start: usize,
-
-	/// The end byte offset (exclusive).
-	pub end: usize
-}
-
-impl Display for SourceSpan
-{
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
-	{
-		write!(f, "{}..{}", self.start, self.end)
-	}
-}
 
 /// The specific kind of diagnostic, indicating what went wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]

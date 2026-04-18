@@ -2,7 +2,7 @@
 //!
 //! Herein are the test cases for the various parser functions.
 
-use crate::{ast::*, parser::*};
+use crate::{ast::*, parser::*, span::SourceSpan};
 use pretty_assertions::assert_eq;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -19,8 +19,15 @@ fn test_function()
 			"x: 42",
 			"x: 42",
 			Function {
-				parameters: Some(vec!["x"]),
-				body: Expression::Constant(Constant(42))
+				parameters: Some(vec![Parameter {
+					name: "x",
+					span: SourceSpan::default()
+				}]),
+				body: Expression::Constant(Constant {
+					value: 42,
+					span: SourceSpan::default()
+				}),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -30,21 +37,46 @@ fn test_function()
 				parameters: None,
 				body: Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"x, y: {x} + {y}",
 			"x, y: {x} + {y}",
 			Function {
-				parameters: Some(vec!["x", "y"]),
+				parameters: Some(vec![
+					Parameter {
+						name: "x",
+						span: SourceSpan::default()
+					},
+					Parameter {
+						name: "y",
+						span: SourceSpan::default()
+					},
+				]),
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
-					left: Box::new(Expression::Variable(Variable("x"))),
-					right: Box::new(Expression::Variable(Variable("y")))
-				}))
+					left: Box::new(Expression::Variable(Variable {
+						name: "x",
+						span: SourceSpan::default()
+					})),
+					right: Box::new(Expression::Variable(Variable {
+						name: "y",
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -55,34 +87,72 @@ fn test_function()
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(Expression::Dice(DiceExpression::Standard(
 						StandardDice {
-							count: Box::new(Expression::Constant(Constant(2))),
-							faces: Box::new(Expression::Constant(Constant(20)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 20,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						}
 					))),
-					right: Box::new(Expression::Constant(Constant(5)))
-				}))
+					right: Box::new(Expression::Constant(Constant {
+						value: 5,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"a, b, c: ({a} + {b}) * {c}",
 			"a, b, c: ({a} + {b}) * {c}",
 			Function {
-				parameters: Some(vec!["a", "b", "c"]),
+				parameters: Some(vec![
+					Parameter {
+						name: "a",
+						span: SourceSpan::default()
+					},
+					Parameter {
+						name: "b",
+						span: SourceSpan::default()
+					},
+					Parameter {
+						name: "c",
+						span: SourceSpan::default()
+					},
+				]),
 				body: Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 					left: Box::new(Expression::Group(Group {
 						expression: Box::new(Expression::Arithmetic(
 							ArithmeticExpression::Add(Add {
-								left: Box::new(Expression::Variable(Variable(
-									"a"
-								))),
+								left: Box::new(Expression::Variable(
+									Variable {
+										name: "a",
+										span: SourceSpan::default()
+									}
+								)),
 								right: Box::new(Expression::Variable(
-									Variable("b")
-								))
+									Variable {
+										name: "b",
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							})
-						))
+						)),
+						span: SourceSpan::default()
 					})),
-					right: Box::new(Expression::Variable(Variable("c")))
-				}))
+					right: Box::new(Expression::Variable(Variable {
+						name: "c",
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -95,16 +165,25 @@ fn test_function()
 						dice: Box::new(DiceExpression::Standard(
 							StandardDice {
 								count: Box::new(Expression::Constant(
-									Constant(4)
+									Constant {
+										value: 4,
+										span: SourceSpan::default()
+									}
 								)),
 								faces: Box::new(Expression::Constant(
-									Constant(6)
-								))
+									Constant {
+										value: 6,
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							}
 						)),
-						drop: None
+						drop: None,
+						span: SourceSpan::default()
 					}
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -117,45 +196,87 @@ fn test_function()
 						dice: Box::new(DiceExpression::Standard(
 							StandardDice {
 								count: Box::new(Expression::Constant(
-									Constant(4)
+									Constant {
+										value: 4,
+										span: SourceSpan::default()
+									}
 								)),
 								faces: Box::new(Expression::Constant(
-									Constant(6)
-								))
+									Constant {
+										value: 6,
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							}
 						)),
-						drop: Some(Box::new(Expression::Variable(Variable(
-							"z"
-						))))
+						drop: Some(Box::new(Expression::Variable(Variable {
+							name: "z",
+							span: SourceSpan::default()
+						}))),
+						span: SourceSpan::default()
 					}
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"x: {x} * 2 + 1",
 			"x: {x} * 2 + 1",
 			Function {
-				parameters: Some(vec!["x"]),
+				parameters: Some(vec![Parameter {
+					name: "x",
+					span: SourceSpan::default()
+				}]),
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Mul(Mul {
-							left: Box::new(Expression::Variable(Variable("x"))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Variable(Variable {
+								name: "x",
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
 					)),
-					right: Box::new(Expression::Constant(Constant(1)))
-				}))
+					right: Box::new(Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"a, b: [{a}:{b}]",
 			"a, b: [{a}:{b}]",
 			Function {
-				parameters: Some(vec!["a", "b"]),
+				parameters: Some(vec![
+					Parameter {
+						name: "a",
+						span: SourceSpan::default()
+					},
+					Parameter {
+						name: "b",
+						span: SourceSpan::default()
+					},
+				]),
 				body: Expression::Range(Range {
-					start: Box::new(Expression::Variable(Variable("a"))),
-					end: Box::new(Expression::Variable(Variable("b")))
-				})
+					start: Box::new(Expression::Variable(Variable {
+						name: "a",
+						span: SourceSpan::default()
+					})),
+					end: Box::new(Expression::Variable(Variable {
+						name: "b",
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				}),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -166,12 +287,21 @@ fn test_function()
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(Expression::Dice(DiceExpression::Custom(
 						CustomDice {
-							count: Box::new(Expression::Constant(Constant(3))),
-							faces: vec![1, 2, 3]
+							count: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							faces: vec![1, 2, 3],
+							span: SourceSpan::default()
 						}
 					))),
-					right: Box::new(Expression::Constant(Constant(5)))
-				}))
+					right: Box::new(Expression::Constant(Constant {
+						value: 5,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		)
 	]
@@ -220,23 +350,46 @@ fn test_function()
 fn test_parameters()
 {
 	// Happy paths.
-	for (input, expected_str, expected_ast) in [
-		("x:", vec!["x"], vec!["x"]),
-		("x, y:", vec!["x", "y"], vec!["x", "y"]),
-		("x, y, z:", vec!["x", "y", "z"], vec!["x", "y", "z"]),
+	fn param(name: &str) -> Parameter<'_>
+	{
+		Parameter {
+			name,
+			span: SourceSpan::default()
+		}
+	}
+	for (input, expected_names, expected_ast) in [
+		("x:", vec!["x"], vec![param("x")]),
+		("x, y:", vec!["x", "y"], vec![param("x"), param("y")]),
+		(
+			"x, y, z:",
+			vec!["x", "y", "z"],
+			vec![param("x"), param("y"), param("z")]
+		),
 		(
 			"long_variable_name:",
 			vec!["long_variable_name"],
-			vec!["long_variable_name"]
+			vec![param("long_variable_name")]
 		),
 		(
 			"x1, x2, x3:",
 			vec!["x1", "x2", "x3"],
-			vec!["x1", "x2", "x3"]
+			vec![param("x1"), param("x2"), param("x3")]
 		),
-		("hello-world:", vec!["hello-world"], vec!["hello-world"]),
-		("x, y, z:", vec!["x", "y", "z"], vec!["x", "y", "z"]),
-		(" x , y , z :", vec!["x", "y", "z"], vec!["x", "y", "z"])
+		(
+			"hello-world:",
+			vec!["hello-world"],
+			vec![param("hello-world")]
+		),
+		(
+			"x, y, z:",
+			vec!["x", "y", "z"],
+			vec![param("x"), param("y"), param("z")]
+		),
+		(
+			" x , y , z :",
+			vec!["x", "y", "z"],
+			vec![param("x"), param("y"), param("z")]
+		)
 	]
 	{
 		let span = Span::new(input);
@@ -250,7 +403,12 @@ fn test_parameters()
 					input
 				);
 				let result = result.unwrap();
-				assert_eq!(result, expected_str, "Failed for input: {}", input);
+				let names: Vec<&str> = result.iter().map(|p| p.name).collect();
+				assert_eq!(
+					names, expected_names,
+					"Failed for input: {}",
+					input
+				);
 				assert_eq!(
 					result, expected_ast,
 					"AST mismatch for input: {}",
@@ -336,96 +494,192 @@ fn test_expression()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("42", "42", Expression::Constant(Constant(42))),
-		("-42", "-42", Expression::Constant(Constant(-42))),
-		("{x}", "{x}", Expression::Variable(Variable("x"))),
+		(
+			"42",
+			"42",
+			Expression::Constant(Constant {
+				value: 42,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-42",
+			"-42",
+			Expression::Constant(Constant {
+				value: -42,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"{x}",
+			"{x}",
+			Expression::Variable(Variable {
+				name: "x",
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"(1 + 2)",
 			"(1 + 2)",
 			Expression::Group(Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"[1:10]",
 			"[1:10]",
 			Expression::Range(Range {
-				start: Box::new(Expression::Constant(Constant(1))),
-				end: Box::new(Expression::Constant(Constant(10)))
+				start: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				end: Box::new(Expression::Constant(Constant {
+					value: 10,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"3d6",
 			"3D6",
 			Expression::Dice(DiceExpression::Standard(StandardDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: Box::new(Expression::Constant(Constant(6)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2 + 3",
 			"2 + 3",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"4 - 2",
 			"4 - 2",
 			Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
-				left: Box::new(Expression::Constant(Constant(4))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"3 * 5",
 			"3 * 5",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(3))),
-				right: Box::new(Expression::Constant(Constant(5)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"10 / 2",
 			"10 / 2",
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
-				left: Box::new(Expression::Constant(Constant(10))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 10,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"7 % 3",
 			"7 % 3",
 			Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
-				left: Box::new(Expression::Constant(Constant(7))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 7,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2 ^ 3",
 			"2 ^ 3",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2 + 3 * 4",
 			"2 + 3 * 4",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(3))),
-						right: Box::new(Expression::Constant(Constant(4)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 4,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -435,12 +689,24 @@ fn test_expression()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(2))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -449,11 +715,22 @@ fn test_expression()
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
 				left: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(1))),
-						faces: Box::new(Expression::Constant(Constant(20)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 20,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
 				))),
-				right: Box::new(Expression::Constant(Constant(5)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -461,10 +738,18 @@ fn test_expression()
 			"3D6 drop lowest",
 			Expression::Dice(DiceExpression::DropLowest(DropLowest {
 				dice: Box::new(DiceExpression::Standard(StandardDice {
-					count: Box::new(Expression::Constant(Constant(3))),
-					faces: Box::new(Expression::Constant(Constant(6)))
+					count: Box::new(Expression::Constant(Constant {
+						value: 3,
+						span: SourceSpan::default()
+					})),
+					faces: Box::new(Expression::Constant(Constant {
+						value: 6,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
 				})),
-				drop: None
+				drop: None,
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -472,10 +757,21 @@ fn test_expression()
 			"4D6 drop highest 1",
 			Expression::Dice(DiceExpression::DropHighest(DropHighest {
 				dice: Box::new(DiceExpression::Standard(StandardDice {
-					count: Box::new(Expression::Constant(Constant(4))),
-					faces: Box::new(Expression::Constant(Constant(6)))
+					count: Box::new(Expression::Constant(Constant {
+						value: 4,
+						span: SourceSpan::default()
+					})),
+					faces: Box::new(Expression::Constant(Constant {
+						value: 6,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
 				})),
-				drop: Some(Box::new(Expression::Constant(Constant(1))))
+				drop: Some(Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				}))),
+				span: SourceSpan::default()
 			}))
 		)
 	]
@@ -525,19 +821,34 @@ fn test_add_sub()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("-5", "-5", Expression::Constant(Constant(-5))),
+		(
+			"-5",
+			"-5",
+			Expression::Constant(Constant {
+				value: -5,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"- - 5",
 			"--5",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Constant(Constant(-5)))
+				operand: Box::new(Expression::Constant(Constant {
+					value: -5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"-{x}",
 			"-{x}",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Variable(Variable("x")))
+				operand: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -547,11 +858,20 @@ fn test_add_sub()
 				operand: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -560,41 +880,88 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
-		("2", "2", Expression::Constant(Constant(2))),
-		("-2", "-2", Expression::Constant(Constant(-2))),
+		(
+			"2",
+			"2",
+			Expression::Constant(Constant {
+				value: 2,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-2",
+			"-2",
+			Expression::Constant(Constant {
+				value: -2,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"2^3",
 			"2 ^ 3",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^3^2",
 			"2 ^ 3 ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Exp(Exp {
-						left: Box::new(Expression::Constant(Constant(3))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x}^2",
 			"{x} ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -604,34 +971,63 @@ fn test_add_sub()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^(3+4)",
 			"2 ^ (3 + 4)",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -641,52 +1037,99 @@ fn test_add_sub()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Exp(Exp {
-							left: Box::new(Expression::Constant(Constant(2))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2*3",
 			"2 * 3",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"6/3",
 			"6 / 3",
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
-				left: Box::new(Expression::Constant(Constant(6))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"7%3",
 			"7 % 3",
 			Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
-				left: Box::new(Expression::Constant(Constant(7))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 7,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2×3",
 			"2 * 3",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"6÷3",
 			"6 / 3",
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
-				left: Box::new(Expression::Constant(Constant(6))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -695,11 +1138,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -708,11 +1162,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Div(Div {
-						left: Box::new(Expression::Constant(Constant(12))),
-						right: Box::new(Expression::Constant(Constant(4)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 12,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 4,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -721,11 +1186,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mod(Mod {
-						left: Box::new(Expression::Constant(Constant(10))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 10,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -734,11 +1210,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -747,11 +1234,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Div(Div {
-						left: Box::new(Expression::Constant(Constant(6))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -760,34 +1258,64 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mod(Mod {
-						left: Box::new(Expression::Constant(Constant(8))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 8,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x}*2",
 			"{x} * 2",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2*(3+4)",
 			"2 * (3 + 4)",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -797,35 +1325,66 @@ fn test_add_sub()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"5 + 3",
 			"5 + 3",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(5))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"5 - 3",
 			"5 - 3",
 			Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
-				left: Box::new(Expression::Constant(Constant(5))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -834,11 +1393,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(5))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 5,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -847,11 +1417,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Sub(Sub {
-						left: Box::new(Expression::Constant(Constant(5))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 5,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -860,11 +1441,22 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -873,27 +1465,52 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Sub(Sub {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x} + 5",
 			"{x} + 5",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(5)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"5 + {x}",
 			"5 + {x}",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(5))),
-				right: Box::new(Expression::Variable(Variable("x")))
+				left: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -903,27 +1520,51 @@ fn test_add_sub()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"1 + (2 + 3)",
 			"1 + (2 + 3)",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(1))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(2))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -932,24 +1573,46 @@ fn test_add_sub()
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
 				left: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
 				))),
-				right: Box::new(Expression::Constant(Constant(5)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"5 + 3d6",
 			"5 + 3D6",
 			Expression::Arithmetic(ArithmeticExpression::Add(Add {
-				left: Box::new(Expression::Constant(Constant(5))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -961,17 +1624,32 @@ fn test_add_sub()
 						left: Box::new(Expression::Dice(
 							DiceExpression::Standard(StandardDice {
 								count: Box::new(Expression::Constant(
-									Constant(1)
+									Constant {
+										value: 1,
+										span: SourceSpan::default()
+									}
 								)),
 								faces: Box::new(Expression::Constant(
-									Constant(20)
-								))
+									Constant {
+										value: 20,
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							})
 						)),
-						right: Box::new(Expression::Constant(Constant(5)))
+						right: Box::new(Expression::Constant(Constant {
+							value: 5,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		)
 	]
@@ -1021,19 +1699,34 @@ fn test_mul_div_mod()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("-5", "-5", Expression::Constant(Constant(-5))),
+		(
+			"-5",
+			"-5",
+			Expression::Constant(Constant {
+				value: -5,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"- - 5",
 			"--5",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Constant(Constant(-5)))
+				operand: Box::new(Expression::Constant(Constant {
+					value: -5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"-{x}",
 			"-{x}",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Variable(Variable("x")))
+				operand: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1043,11 +1736,20 @@ fn test_mul_div_mod()
 				operand: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1056,41 +1758,88 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
-		("2", "2", Expression::Constant(Constant(2))),
-		("-2", "-2", Expression::Constant(Constant(-2))),
+		(
+			"2",
+			"2",
+			Expression::Constant(Constant {
+				value: 2,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-2",
+			"-2",
+			Expression::Constant(Constant {
+				value: -2,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"2^3",
 			"2 ^ 3",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^3^2",
 			"2 ^ 3 ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Exp(Exp {
-						left: Box::new(Expression::Constant(Constant(3))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x}^2",
 			"{x} ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1100,34 +1849,63 @@ fn test_mul_div_mod()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^(3+4)",
 			"2 ^ (3 + 4)",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1137,52 +1915,99 @@ fn test_mul_div_mod()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Exp(Exp {
-							left: Box::new(Expression::Constant(Constant(2))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2*3",
 			"2 * 3",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"6/3",
 			"6 / 3",
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
-				left: Box::new(Expression::Constant(Constant(6))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"7%3",
 			"7 % 3",
 			Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
-				left: Box::new(Expression::Constant(Constant(7))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 7,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2×3",
 			"2 * 3",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"6÷3",
 			"6 / 3",
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
-				left: Box::new(Expression::Constant(Constant(6))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1191,11 +2016,22 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1204,11 +2040,22 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Div(Div {
-						left: Box::new(Expression::Constant(Constant(12))),
-						right: Box::new(Expression::Constant(Constant(4)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 12,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 4,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1217,11 +2064,22 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mod(Mod {
-						left: Box::new(Expression::Constant(Constant(10))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 10,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1230,11 +2088,22 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Div(Div {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1243,11 +2112,22 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Div(Div {
-						left: Box::new(Expression::Constant(Constant(6))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(3)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1256,34 +2136,64 @@ fn test_mul_div_mod()
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mod(Mod {
-						left: Box::new(Expression::Constant(Constant(8))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 8,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
-				right: Box::new(Expression::Constant(Constant(2)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x}*2",
 			"{x} * 2",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2*(3+4)",
 			"2 * (3 + 4)",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1293,19 +2203,36 @@ fn test_mul_div_mod()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		)
 	]
@@ -1357,34 +2284,66 @@ fn test_exponent()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("2", "2", Expression::Constant(Constant(2))),
+		(
+			"2",
+			"2",
+			Expression::Constant(Constant {
+				value: 2,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"2^3",
 			"2 ^ 3",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
-				right: Box::new(Expression::Constant(Constant(3)))
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^3^2",
 			"2 ^ 3 ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Exp(Exp {
-						left: Box::new(Expression::Constant(Constant(3))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"{x}^2",
 			"{x} ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Variable(Variable("x"))),
-				right: Box::new(Expression::Constant(Constant(2)))
+				left: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				right: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1394,34 +2353,63 @@ fn test_exponent()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"2^(3+4)",
 			"2 ^ (3 + 4)",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-				left: Box::new(Expression::Constant(Constant(2))),
+				left: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
 				right: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1431,12 +2419,24 @@ fn test_exponent()
 				left: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Exp(Exp {
-							left: Box::new(Expression::Constant(Constant(2))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				right: Box::new(Expression::Constant(Constant(4)))
+				right: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		)
 	]
@@ -1486,19 +2486,34 @@ fn test_unary()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("-5", "-5", Expression::Constant(Constant(-5))),
+		(
+			"-5",
+			"-5",
+			Expression::Constant(Constant {
+				value: -5,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"- - 5",
 			"--5",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Constant(Constant(-5)))
+				operand: Box::new(Expression::Constant(Constant {
+					value: -5,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
 			"-{x}",
 			"-{x}",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(Expression::Variable(Variable("x")))
+				operand: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1508,11 +2523,20 @@ fn test_unary()
 				operand: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
 		(
@@ -1521,23 +2545,37 @@ fn test_unary()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
 		// i32::MIN boundary via negative_overflowed_constant.
 		(
 			"-2147483648",
 			"-2147483648",
-			Expression::Constant(Constant(-2147483648))
+			Expression::Constant(Constant {
+				value: -2147483648,
+				span: SourceSpan::default()
+			})
 		),
 		// Massive negative overflow saturates to i32::MIN.
 		(
 			"-9999999999999",
 			"-2147483648",
-			Expression::Constant(Constant(-2147483648))
+			Expression::Constant(Constant {
+				value: -2147483648,
+				span: SourceSpan::default()
+			})
 		),
 		// Overflow negative constant followed by dice operator: the count
 		// saturates to i32::MAX because negative_constant bails on `d`.
@@ -1547,12 +2585,18 @@ fn test_unary()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(
-							2147483647
-						))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 2147483647,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
 		// Massive overflow followed by dice operator: saturates to i32::MAX.
@@ -1562,12 +2606,18 @@ fn test_unary()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(
-							2147483647
-						))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 2147483647,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
 		// Overflow negative constant with custom faces.
@@ -1577,12 +2627,15 @@ fn test_unary()
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Dice(DiceExpression::Custom(
 					CustomDice {
-						count: Box::new(Expression::Constant(Constant(
-							2147483647
-						))),
-						faces: vec![1, 2, 3]
+						count: Box::new(Expression::Constant(Constant {
+							value: 2147483647,
+							span: SourceSpan::default()
+						})),
+						faces: vec![1, 2, 3],
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}))
 		),
 		// Overflow negative constant with drop clause.
@@ -1595,16 +2648,25 @@ fn test_unary()
 						dice: Box::new(DiceExpression::Standard(
 							StandardDice {
 								count: Box::new(Expression::Constant(
-									Constant(2147483647)
+									Constant {
+										value: 2147483647,
+										span: SourceSpan::default()
+									}
 								)),
 								faces: Box::new(Expression::Constant(
-									Constant(6)
-								))
+									Constant {
+										value: 6,
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							}
 						)),
-						drop: None
+						drop: None,
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}))
 		)
 	]
@@ -1660,31 +2722,74 @@ fn test_primary()
 			Expression::Group(Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			})
 		),
-		("{x}", "{x}", Expression::Variable(Variable("x"))),
+		(
+			"{x}",
+			"{x}",
+			Expression::Variable(Variable {
+				name: "x",
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"[1:10]",
 			"[1:10]",
 			Expression::Range(Range {
-				start: Box::new(Expression::Constant(Constant(1))),
-				end: Box::new(Expression::Constant(Constant(10)))
+				start: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				end: Box::new(Expression::Constant(Constant {
+					value: 10,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"3d6",
 			"3D6",
 			Expression::Dice(DiceExpression::Standard(StandardDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: Box::new(Expression::Constant(Constant(6)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}))
 		),
-		("42", "42", Expression::Constant(Constant(42))),
-		("-42", "-42", Expression::Constant(Constant(-42)))
+		(
+			"42",
+			"42",
+			Expression::Constant(Constant {
+				value: 42,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-42",
+			"-42",
+			Expression::Constant(Constant {
+				value: -42,
+				span: SourceSpan::default()
+			})
+		)
 	]
 	{
 		let span = Span::new(input);
@@ -1736,7 +2841,11 @@ fn test_group()
 			"(1)",
 			"(1)",
 			Group {
-				expression: Box::new(Expression::Constant(Constant(1)))
+				expression: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1745,10 +2854,18 @@ fn test_group()
 			Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1761,24 +2878,41 @@ fn test_group()
 							expression: Box::new(Expression::Arithmetic(
 								ArithmeticExpression::Add(Add {
 									left: Box::new(Expression::Constant(
-										Constant(1)
+										Constant {
+											value: 1,
+											span: SourceSpan::default()
+										}
 									)),
 									right: Box::new(Expression::Constant(
-										Constant(2)
-									))
+										Constant {
+											value: 2,
+											span: SourceSpan::default()
+										}
+									)),
+									span: SourceSpan::default()
 								})
-							))
+							)),
+							span: SourceSpan::default()
 						})),
-						right: Box::new(Expression::Constant(Constant(3)))
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"({x})",
 			"({x})",
 			Group {
-				expression: Box::new(Expression::Variable(Variable("x")))
+				expression: Box::new(Expression::Variable(Variable {
+					name: "x",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1787,10 +2921,18 @@ fn test_group()
 			Group {
 				expression: Box::new(Expression::Dice(
 					DiceExpression::Standard(StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1802,23 +2944,39 @@ fn test_group()
 						left: Box::new(Expression::Dice(
 							DiceExpression::Standard(StandardDice {
 								count: Box::new(Expression::Constant(
-									Constant(1)
+									Constant {
+										value: 1,
+										span: SourceSpan::default()
+									}
 								)),
 								faces: Box::new(Expression::Constant(
-									Constant(20)
-								))
+									Constant {
+										value: 20,
+										span: SourceSpan::default()
+									}
+								)),
+								span: SourceSpan::default()
 							})
 						)),
-						right: Box::new(Expression::Constant(Constant(5)))
+						right: Box::new(Expression::Constant(Constant {
+							value: 5,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"( 1 )",
 			"(1)",
 			Group {
-				expression: Box::new(Expression::Constant(Constant(1)))
+				expression: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1827,10 +2985,18 @@ fn test_group()
 			Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		)
 	]
@@ -1951,24 +3117,45 @@ fn test_range()
 			"[1:10]",
 			"[1:10]",
 			Range {
-				start: Box::new(Expression::Constant(Constant(1))),
-				end: Box::new(Expression::Constant(Constant(10)))
+				start: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				end: Box::new(Expression::Constant(Constant {
+					value: 10,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"[-10:10]",
 			"[-10:10]",
 			Range {
-				start: Box::new(Expression::Constant(Constant(-10))),
-				end: Box::new(Expression::Constant(Constant(10)))
+				start: Box::new(Expression::Constant(Constant {
+					value: -10,
+					span: SourceSpan::default()
+				})),
+				end: Box::new(Expression::Constant(Constant {
+					value: 10,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"[{min}:{max}]",
 			"[{min}:{max}]",
 			Range {
-				start: Box::new(Expression::Variable(Variable("min"))),
-				end: Box::new(Expression::Variable(Variable("max")))
+				start: Box::new(Expression::Variable(Variable {
+					name: "min",
+					span: SourceSpan::default()
+				})),
+				end: Box::new(Expression::Variable(Variable {
+					name: "max",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1977,16 +3164,31 @@ fn test_range()
 			Range {
 				start: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
 				)),
 				end: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Mul(Mul {
-						left: Box::new(Expression::Constant(Constant(3))),
-						right: Box::new(Expression::Constant(Constant(4)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 4,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -1996,19 +3198,36 @@ fn test_range()
 				start: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				end: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Mul(Mul {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(4)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -2017,16 +3236,31 @@ fn test_range()
 			Range {
 				start: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(1))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
 				))),
 				end: Box::new(Expression::Dice(DiceExpression::Standard(
 					StandardDice {
-						count: Box::new(Expression::Constant(Constant(2))),
-						faces: Box::new(Expression::Constant(Constant(8)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 8,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					}
-				)))
+				))),
+				span: SourceSpan::default()
 			}
 		)
 	]
@@ -2080,24 +3314,42 @@ fn test_dice()
 			"3d6",
 			"3D6",
 			DiceExpression::Standard(StandardDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: Box::new(Expression::Constant(Constant(6)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"2D20",
 			"2D20",
 			DiceExpression::Standard(StandardDice {
-				count: Box::new(Expression::Constant(Constant(2))),
-				faces: Box::new(Expression::Constant(Constant(20)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 20,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"3D[1,2,3]",
 			"3D[1, 2, 3]",
 			DiceExpression::Custom(CustomDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: vec![1, 2, 3]
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: vec![1, 2, 3],
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2105,10 +3357,18 @@ fn test_dice()
 			"4D6 drop lowest",
 			DiceExpression::DropLowest(DropLowest {
 				dice: Box::new(DiceExpression::Standard(StandardDice {
-					count: Box::new(Expression::Constant(Constant(4))),
-					faces: Box::new(Expression::Constant(Constant(6)))
+					count: Box::new(Expression::Constant(Constant {
+						value: 4,
+						span: SourceSpan::default()
+					})),
+					faces: Box::new(Expression::Constant(Constant {
+						value: 6,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
 				})),
-				drop: None
+				drop: None,
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2116,10 +3376,21 @@ fn test_dice()
 			"5D20 drop highest 2",
 			DiceExpression::DropHighest(DropHighest {
 				dice: Box::new(DiceExpression::Standard(StandardDice {
-					count: Box::new(Expression::Constant(Constant(5))),
-					faces: Box::new(Expression::Constant(Constant(20)))
+					count: Box::new(Expression::Constant(Constant {
+						value: 5,
+						span: SourceSpan::default()
+					})),
+					faces: Box::new(Expression::Constant(Constant {
+						value: 20,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
 				})),
-				drop: Some(Box::new(Expression::Constant(Constant(2))))
+				drop: Some(Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				}))),
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2128,12 +3399,27 @@ fn test_dice()
 			DiceExpression::DropHighest(DropHighest {
 				dice: Box::new(DiceExpression::DropLowest(DropLowest {
 					dice: Box::new(DiceExpression::Standard(StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})),
-					drop: Some(Box::new(Expression::Constant(Constant(1))))
+					drop: Some(Box::new(Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::default()
+					}))),
+					span: SourceSpan::default()
 				})),
-				drop: Some(Box::new(Expression::Constant(Constant(1))))
+				drop: Some(Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				}))),
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2142,20 +3428,36 @@ fn test_dice()
 			DiceExpression::DropLowest(DropLowest {
 				dice: Box::new(DiceExpression::DropHighest(DropHighest {
 					dice: Box::new(DiceExpression::Standard(StandardDice {
-						count: Box::new(Expression::Constant(Constant(3))),
-						faces: Box::new(Expression::Constant(Constant(6)))
+						count: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						faces: Box::new(Expression::Constant(Constant {
+							value: 6,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})),
-					drop: None
+					drop: None,
+					span: SourceSpan::default()
 				})),
-				drop: None
+				drop: None,
+				span: SourceSpan::default()
 			})
 		),
 		(
 			"{count}d{faces}",
 			"{count}D{faces}",
 			DiceExpression::Standard(StandardDice {
-				count: Box::new(Expression::Variable(Variable("count"))),
-				faces: Box::new(Expression::Variable(Variable("faces")))
+				count: Box::new(Expression::Variable(Variable {
+					name: "count",
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Variable(Variable {
+					name: "faces",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2165,19 +3467,36 @@ fn test_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		),
 		(
@@ -2187,19 +3506,36 @@ fn test_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Dice(
 						DiceExpression::Standard(StandardDice {
-							count: Box::new(Expression::Constant(Constant(3))),
-							faces: Box::new(Expression::Constant(Constant(6)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 6,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Dice(
 						DiceExpression::Standard(StandardDice {
-							count: Box::new(Expression::Constant(Constant(1))),
-							faces: Box::new(Expression::Constant(Constant(4)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			})
 		)
 	]
@@ -2265,24 +3601,45 @@ fn test_standard_dice()
 			"3d6",
 			"3D6",
 			StandardDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: Box::new(Expression::Constant(Constant(6)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 6,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"2D20",
 			"2D20",
 			StandardDice {
-				count: Box::new(Expression::Constant(Constant(2))),
-				faces: Box::new(Expression::Constant(Constant(20)))
+				count: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: 20,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"{count}d{faces}",
 			"{count}D{faces}",
 			StandardDice {
-				count: Box::new(Expression::Variable(Variable("count"))),
-				faces: Box::new(Expression::Variable(Variable("faces")))
+				count: Box::new(Expression::Variable(Variable {
+					name: "count",
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Variable(Variable {
+					name: "faces",
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -2292,19 +3649,36 @@ fn test_standard_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(3))),
-							right: Box::new(Expression::Constant(Constant(3)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -2314,19 +3688,36 @@ fn test_standard_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Dice(
 						DiceExpression::Standard(StandardDice {
-							count: Box::new(Expression::Constant(Constant(3))),
-							faces: Box::new(Expression::Constant(Constant(6)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 6,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Dice(
 						DiceExpression::Standard(StandardDice {
-							count: Box::new(Expression::Constant(Constant(1))),
-							faces: Box::new(Expression::Constant(Constant(4)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 4,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
-				}))
+					)),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
 			}
 		)
 	]
@@ -2380,16 +3771,24 @@ fn test_custom_dice()
 			"3D[1,2,3]",
 			"3D[1, 2, 3]",
 			CustomDice {
-				count: Box::new(Expression::Constant(Constant(3))),
-				faces: vec![1, 2, 3]
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: vec![1, 2, 3],
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"{count}D[1, 2, 3]",
 			"{count}D[1, 2, 3]",
 			CustomDice {
-				count: Box::new(Expression::Variable(Variable("count"))),
-				faces: vec![1, 2, 3]
+				count: Box::new(Expression::Variable(Variable {
+					name: "count",
+					span: SourceSpan::default()
+				})),
+				faces: vec![1, 2, 3],
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -2399,44 +3798,69 @@ fn test_custom_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Add(Add {
-							left: Box::new(Expression::Constant(Constant(1))),
-							right: Box::new(Expression::Constant(Constant(2)))
+							left: Box::new(Expression::Constant(Constant {
+								value: 1,
+								span: SourceSpan::default()
+							})),
+							right: Box::new(Expression::Constant(Constant {
+								value: 2,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				faces: vec![1, 2, 3]
+				faces: vec![1, 2, 3],
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"2D[10]",
 			"2D[10]",
 			CustomDice {
-				count: Box::new(Expression::Constant(Constant(2))),
-				faces: vec![10]
+				count: Box::new(Expression::Constant(Constant {
+					value: 2,
+					span: SourceSpan::default()
+				})),
+				faces: vec![10],
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"1D[-1,0,1]",
 			"1D[-1, 0, 1]",
 			CustomDice {
-				count: Box::new(Expression::Constant(Constant(1))),
-				faces: vec![-1, 0, 1]
+				count: Box::new(Expression::Constant(Constant {
+					value: 1,
+					span: SourceSpan::default()
+				})),
+				faces: vec![-1, 0, 1],
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"4D[-3, -2, -1]",
 			"4D[-3, -2, -1]",
 			CustomDice {
-				count: Box::new(Expression::Constant(Constant(4))),
-				faces: vec![-3, -2, -1]
+				count: Box::new(Expression::Constant(Constant {
+					value: 4,
+					span: SourceSpan::default()
+				})),
+				faces: vec![-3, -2, -1],
+				span: SourceSpan::default()
 			}
 		),
 		(
 			"5D[100, 200, 300]",
 			"5D[100, 200, 300]",
 			CustomDice {
-				count: Box::new(Expression::Constant(Constant(5))),
-				faces: vec![100, 200, 300]
+				count: Box::new(Expression::Constant(Constant {
+					value: 5,
+					span: SourceSpan::default()
+				})),
+				faces: vec![100, 200, 300],
+				span: SourceSpan::default()
 			}
 		),
 		(
@@ -2446,12 +3870,21 @@ fn test_custom_dice()
 				count: Box::new(Expression::Group(Group {
 					expression: Box::new(Expression::Dice(
 						DiceExpression::Standard(StandardDice {
-							count: Box::new(Expression::Constant(Constant(3))),
-							faces: Box::new(Expression::Constant(Constant(6)))
+							count: Box::new(Expression::Constant(Constant {
+								value: 3,
+								span: SourceSpan::default()
+							})),
+							faces: Box::new(Expression::Constant(Constant {
+								value: 6,
+								span: SourceSpan::default()
+							})),
+							span: SourceSpan::default()
 						})
-					))
+					)),
+					span: SourceSpan::default()
 				})),
-				faces: vec![-1, 0, 1]
+				faces: vec![-1, 0, 1],
+				span: SourceSpan::default()
 			}
 		)
 	]
@@ -2515,11 +3948,21 @@ fn test_dice_count()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("3", "3", Expression::Constant(Constant(3))),
+		(
+			"3",
+			"3",
+			Expression::Constant(Constant {
+				value: 3,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"{count}",
 			"{count}",
-			Expression::Variable(Variable("count"))
+			Expression::Variable(Variable {
+				name: "count",
+				span: SourceSpan::default()
+			})
 		),
 		(
 			"(1+2)",
@@ -2527,10 +3970,18 @@ fn test_dice_count()
 			Expression::Group(Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(1))),
-						right: Box::new(Expression::Constant(Constant(2)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 1,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			})
 		)
 	]
@@ -2580,12 +4031,29 @@ fn test_standard_faces()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("6", "6", Expression::Constant(Constant(6))),
-		("20", "20", Expression::Constant(Constant(20))),
+		(
+			"6",
+			"6",
+			Expression::Constant(Constant {
+				value: 6,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"20",
+			"20",
+			Expression::Constant(Constant {
+				value: 20,
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"{faces}",
 			"{faces}",
-			Expression::Variable(Variable("faces"))
+			Expression::Variable(Variable {
+				name: "faces",
+				span: SourceSpan::default()
+			})
 		),
 		(
 			"(2+3)",
@@ -2593,10 +4061,18 @@ fn test_standard_faces()
 			Expression::Group(Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			})
 		)
 	]
@@ -2797,19 +4273,48 @@ fn test_drop_expression()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("42", "42", Expression::Constant(Constant(42))),
-		("-42", "-42", Expression::Constant(Constant(-42))),
-		("{var}", "{var}", Expression::Variable(Variable("var"))),
+		(
+			"42",
+			"42",
+			Expression::Constant(Constant {
+				value: 42,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-42",
+			"-42",
+			Expression::Constant(Constant {
+				value: -42,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"{var}",
+			"{var}",
+			Expression::Variable(Variable {
+				name: "var",
+				span: SourceSpan::default()
+			})
+		),
 		(
 			"(2+3)",
 			"(2 + 3)",
 			Expression::Group(Group {
 				expression: Box::new(Expression::Arithmetic(
 					ArithmeticExpression::Add(Add {
-						left: Box::new(Expression::Constant(Constant(2))),
-						right: Box::new(Expression::Constant(Constant(3)))
+						left: Box::new(Expression::Constant(Constant {
+							value: 2,
+							span: SourceSpan::default()
+						})),
+						right: Box::new(Expression::Constant(Constant {
+							value: 3,
+							span: SourceSpan::default()
+						})),
+						span: SourceSpan::default()
 					})
-				))
+				)),
+				span: SourceSpan::default()
 			})
 		)
 	]
@@ -2859,20 +4364,86 @@ fn test_constant()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
-		("0", "0", Constant(0)),
-		("42", "42", Constant(42)),
-		("-42", "-42", Constant(-42)),
-		("9999", "9999", Constant(9999)),
-		("-9999", "-9999", Constant(-9999)),
-		("2147483647", "2147483647", Constant(2147483647)), // i32::MAX
-		("-2147483648", "-2147483648", Constant(-2147483648)), // i32::MIN
-		("2147483648", "2147483647", Constant(2147483647)), // Saturates
-		("-2147483649", "-2147483648", Constant(-2147483648)), // Saturates
+		(
+			"0",
+			"0",
+			Constant {
+				value: 0,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"42",
+			"42",
+			Constant {
+				value: 42,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"-42",
+			"-42",
+			Constant {
+				value: -42,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"9999",
+			"9999",
+			Constant {
+				value: 9999,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"-9999",
+			"-9999",
+			Constant {
+				value: -9999,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"2147483647",
+			"2147483647",
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		), // i32::MAX
+		(
+			"-2147483648",
+			"-2147483648",
+			Constant {
+				value: -2147483648,
+				span: SourceSpan::default()
+			}
+		), // i32::MIN
+		(
+			"2147483648",
+			"2147483647",
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		), // Saturates
+		(
+			"-2147483649",
+			"-2147483648",
+			Constant {
+				value: -2147483648,
+				span: SourceSpan::default()
+			}
+		), // Saturates
 		(
 			"123456789123456789123456789123456789",
 			"2147483647",
-			Constant(2147483647)
-		)  /* massive overflow saturates */
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		) // massive overflow saturates
 	]
 	{
 		let span = Span::new(input);

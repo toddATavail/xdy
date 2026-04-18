@@ -261,6 +261,7 @@ mod optimizer;
 pub mod parser;
 mod primitives;
 pub mod s_expr;
+mod span;
 #[cfg(any(test, feature = "bench"))]
 pub mod support;
 #[cfg(test)]
@@ -272,6 +273,7 @@ pub use histogram::*;
 pub use ir::*;
 pub use optimizer::*;
 pub use primitives::*;
+pub use span::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 //                           Convenient evaluation.                           //

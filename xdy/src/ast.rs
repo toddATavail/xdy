@@ -8,9 +8,17 @@
 //! may then be [optimized](crate::Optimizer::optimize) and
 //! [evaluated](crate::evaluate).
 //!
+//! Every AST node carries a [source span](SourceSpan) referencing the byte
+//! range of the original input from which it was parsed. The [`Spanned`] trait
+//! provides uniform access to this metadata and offers an
+//! [`untethered`](Spanned::untethered) operation for position-independent
+//! structural comparison.
+//!
 //! The root of the AST is a [`Function`].
 
 use std::fmt::{self, Display, Formatter};
+
+use crate::span::{SourceSpan, Spanned};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                        Abstract syntax tree (AST).                         //
@@ -22,14 +30,17 @@ use std::fmt::{self, Display, Formatter};
 /// - `'src`: The lifetime of the source text from which this AST was parsed.
 ///   Parameter names and variable identifiers are borrowed directly from the
 ///   source.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function<'src>
 {
 	/// The formal parameters of the function, if any.
-	pub parameters: Option<Vec<&'src str>>,
+	pub parameters: Option<Vec<Parameter<'src>>>,
 
 	/// The body of the function.
-	pub body: Expression<'src>
+	pub body: Expression<'src>,
+
+	/// The span of the entire function definition in the original source.
+	pub span: SourceSpan
 }
 
 impl Display for Function<'_>
@@ -52,12 +63,38 @@ impl Display for Function<'_>
 	}
 }
 
+/// A formal parameter of a [function](Function).
+///
+/// # Lifetimes
+/// - `'src`: The lifetime of the source text. The parameter name is borrowed
+///   directly from the source.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Parameter<'src>
+{
+	/// The name of the parameter.
+	pub name: &'src str,
+
+	/// The span of this parameter in the original source.
+	pub span: SourceSpan
+}
+
+impl Display for Parameter<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		write!(f, "{}", self.name)
+	}
+}
+
 /// A parenthesized expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Group<'src>
 {
 	/// The expression inside the parentheses.
-	pub expression: Box<Expression<'src>>
+	pub expression: Box<Expression<'src>>,
+
+	/// The span of the group, including both parentheses.
+	pub span: SourceSpan
 }
 
 impl Display for Group<'_>
@@ -69,38 +106,55 @@ impl Display for Group<'_>
 }
 
 /// A constant value.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Constant(pub i32);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Constant
+{
+	/// The integer value of the constant.
+	pub value: i32,
+
+	/// The span of the constant in the original source.
+	pub span: SourceSpan
+}
 
 impl Display for Constant
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}", self.0)
+		write!(f, "{}", self.value)
 	}
 }
 
 /// A variable reference.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Variable<'src>(pub &'src str);
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Variable<'src>
+{
+	/// The name of the variable, without the surrounding braces.
+	pub name: &'src str,
+
+	/// The span of the variable reference, including the surrounding braces.
+	pub span: SourceSpan
+}
 
 impl Display for Variable<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{{{}}}", self.0)
+		write!(f, "{{{}}}", self.name)
 	}
 }
 
 /// A range expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Range<'src>
 {
 	/// The start of the range.
 	pub start: Box<Expression<'src>>,
 
 	/// The end of the range.
-	pub end: Box<Expression<'src>>
+	pub end: Box<Expression<'src>>,
+
+	/// The span of the range expression, including the surrounding brackets.
+	pub span: SourceSpan
 }
 
 impl Display for Range<'_>
@@ -117,7 +171,7 @@ impl Display for Range<'_>
 /// - `'src`: The lifetime of the source text. Inherited from the enclosing
 ///   [`Function`]; individual expression nodes borrow variable names from the
 ///   source.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expression<'src>
 {
 	/// A parenthesized expression.
@@ -188,14 +242,17 @@ impl Display for Expression<'_>
 }
 
 /// A standard dice expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StandardDice<'src>
 {
 	/// The number of dice to roll.
 	pub count: Box<Expression<'src>>,
 
 	/// The number of faces on each die, starting at 1.
-	pub faces: Box<Expression<'src>>
+	pub faces: Box<Expression<'src>>,
+
+	/// The span of the dice expression, from `count` through `faces`.
+	pub span: SourceSpan
 }
 
 impl Display for StandardDice<'_>
@@ -207,14 +264,18 @@ impl Display for StandardDice<'_>
 }
 
 /// A custom dice expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CustomDice<'src>
 {
 	/// The number of dice to roll.
 	pub count: Box<Expression<'src>>,
 
 	/// The faces themselves.
-	pub faces: Vec<i32>
+	pub faces: Vec<i32>,
+
+	/// The span of the dice expression, from `count` through the closing
+	/// bracket of the face list.
+	pub span: SourceSpan
 }
 
 impl Display for CustomDice<'_>
@@ -235,14 +296,18 @@ impl Display for CustomDice<'_>
 }
 
 /// A drop-lowest expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DropLowest<'src>
 {
 	/// The dice expression.
 	pub dice: Box<DiceExpression<'src>>,
 
 	/// The number of dice to drop. Defaults to 1.
-	pub drop: Option<Box<Expression<'src>>>
+	pub drop: Option<Box<Expression<'src>>>,
+
+	/// The span of the drop-lowest expression, from the dice expression
+	/// through the drop count (or the `lowest` keyword if no count is given).
+	pub span: SourceSpan
 }
 
 impl Display for DropLowest<'_>
@@ -259,14 +324,18 @@ impl Display for DropLowest<'_>
 }
 
 /// A drop-highest expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DropHighest<'src>
 {
 	/// The dice expression.
 	pub dice: Box<DiceExpression<'src>>,
 
 	/// The number of dice to drop. Defaults to 1.
-	pub drop: Option<Box<Expression<'src>>>
+	pub drop: Option<Box<Expression<'src>>>,
+
+	/// The span of the drop-highest expression, from the dice expression
+	/// through the drop count (or the `highest` keyword if no count is given).
+	pub span: SourceSpan
 }
 
 impl Display for DropHighest<'_>
@@ -283,7 +352,7 @@ impl Display for DropHighest<'_>
 }
 
 /// A dice expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DiceExpression<'src>
 {
 	/// A standard dice expression.
@@ -342,14 +411,17 @@ impl Display for DiceExpression<'_>
 }
 
 /// An addition expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Add<'src>
 {
 	/// The augend.
 	pub left: Box<Expression<'src>>,
 
 	/// The addend.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the addition expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Add<'_>
@@ -361,14 +433,17 @@ impl Display for Add<'_>
 }
 
 /// A subtraction expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sub<'src>
 {
 	/// The minuend.
 	pub left: Box<Expression<'src>>,
 
 	/// The subtrahend.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the subtraction expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Sub<'_>
@@ -380,14 +455,17 @@ impl Display for Sub<'_>
 }
 
 /// A multiplication expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Mul<'src>
 {
 	/// The multiplicand.
 	pub left: Box<Expression<'src>>,
 
 	/// The multiplier.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the multiplication expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Mul<'_>
@@ -399,14 +477,17 @@ impl Display for Mul<'_>
 }
 
 /// A division expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Div<'src>
 {
 	/// The dividend.
 	pub left: Box<Expression<'src>>,
 
 	/// The divisor.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the division expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Div<'_>
@@ -418,14 +499,17 @@ impl Display for Div<'_>
 }
 
 /// A modulo expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Mod<'src>
 {
 	/// The dividend.
 	pub left: Box<Expression<'src>>,
 
 	/// The divisor.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the modulo expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Mod<'_>
@@ -437,14 +521,17 @@ impl Display for Mod<'_>
 }
 
 /// An exponentiation expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Exp<'src>
 {
 	/// The base.
 	pub left: Box<Expression<'src>>,
 
 	/// The exponent.
-	pub right: Box<Expression<'src>>
+	pub right: Box<Expression<'src>>,
+
+	/// The span of the exponentiation expression, from `left` through `right`.
+	pub span: SourceSpan
 }
 
 impl Display for Exp<'_>
@@ -456,11 +543,15 @@ impl Display for Exp<'_>
 }
 
 /// A negation expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Neg<'src>
 {
 	/// The operand.
-	pub operand: Box<Expression<'src>>
+	pub operand: Box<Expression<'src>>,
+
+	/// The span of the negation expression, from the leading `-` through
+	/// `operand`.
+	pub span: SourceSpan
 }
 
 impl Display for Neg<'_>
@@ -602,7 +693,7 @@ pub trait ASTVisitor<'src>
 ////////////////////////////////////////////////////////////////////////////////
 
 /// An arithmetic expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArithmeticExpression<'src>
 {
 	/// An addition expression.
@@ -671,6 +762,361 @@ impl Display for ArithmeticExpression<'_>
 			ArithmeticExpression::Mod(r#mod) => write!(f, "{}", r#mod),
 			ArithmeticExpression::Exp(exp) => write!(f, "{}", exp),
 			ArithmeticExpression::Neg(neg) => write!(f, "{}", neg)
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                          Spanned implementations.                          //
+////////////////////////////////////////////////////////////////////////////////
+
+impl Spanned for Function<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Function {
+			parameters: self
+				.parameters
+				.as_ref()
+				.map(|ps| ps.iter().map(Spanned::untethered).collect()),
+			body: self.body.untethered(),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Parameter<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Parameter {
+			name: self.name,
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Group<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Group {
+			expression: Box::new(self.expression.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Constant
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Constant {
+			value: self.value,
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Variable<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Variable {
+			name: self.name,
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Range<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Range {
+			start: Box::new(self.start.untethered()),
+			end: Box::new(self.end.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Expression<'_>
+{
+	fn span(&self) -> SourceSpan
+	{
+		match self
+		{
+			Expression::Group(g) => g.span(),
+			Expression::Constant(c) => c.span(),
+			Expression::Variable(v) => v.span(),
+			Expression::Range(r) => r.span(),
+			Expression::Dice(d) => d.span(),
+			Expression::Arithmetic(a) => a.span()
+		}
+	}
+
+	fn untethered(&self) -> Self
+	{
+		match self
+		{
+			Expression::Group(g) => Expression::Group(g.untethered()),
+			Expression::Constant(c) => Expression::Constant(c.untethered()),
+			Expression::Variable(v) => Expression::Variable(v.untethered()),
+			Expression::Range(r) => Expression::Range(r.untethered()),
+			Expression::Dice(d) => Expression::Dice(d.untethered()),
+			Expression::Arithmetic(a) => Expression::Arithmetic(a.untethered())
+		}
+	}
+}
+
+impl Spanned for StandardDice<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		StandardDice {
+			count: Box::new(self.count.untethered()),
+			faces: Box::new(self.faces.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for CustomDice<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		CustomDice {
+			count: Box::new(self.count.untethered()),
+			faces: self.faces.clone(),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for DropLowest<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		DropLowest {
+			dice: Box::new(self.dice.untethered()),
+			drop: self.drop.as_ref().map(|d| Box::new(d.untethered())),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for DropHighest<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		DropHighest {
+			dice: Box::new(self.dice.untethered()),
+			drop: self.drop.as_ref().map(|d| Box::new(d.untethered())),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for DiceExpression<'_>
+{
+	fn span(&self) -> SourceSpan
+	{
+		match self
+		{
+			DiceExpression::Standard(d) => d.span(),
+			DiceExpression::Custom(d) => d.span(),
+			DiceExpression::DropLowest(d) => d.span(),
+			DiceExpression::DropHighest(d) => d.span()
+		}
+	}
+
+	fn untethered(&self) -> Self
+	{
+		match self
+		{
+			DiceExpression::Standard(d) =>
+			{
+				DiceExpression::Standard(d.untethered())
+			},
+			DiceExpression::Custom(d) => DiceExpression::Custom(d.untethered()),
+			DiceExpression::DropLowest(d) =>
+			{
+				DiceExpression::DropLowest(d.untethered())
+			},
+			DiceExpression::DropHighest(d) =>
+			{
+				DiceExpression::DropHighest(d.untethered())
+			},
+		}
+	}
+}
+
+impl Spanned for Add<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Add {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Sub<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Sub {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Mul<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Mul {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Div<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Div {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Mod<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Mod {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Exp<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Exp {
+			left: Box::new(self.left.untethered()),
+			right: Box::new(self.right.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for Neg<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Neg {
+			operand: Box::new(self.operand.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for ArithmeticExpression<'_>
+{
+	fn span(&self) -> SourceSpan
+	{
+		match self
+		{
+			ArithmeticExpression::Add(a) => a.span(),
+			ArithmeticExpression::Sub(s) => s.span(),
+			ArithmeticExpression::Mul(m) => m.span(),
+			ArithmeticExpression::Div(d) => d.span(),
+			ArithmeticExpression::Mod(m) => m.span(),
+			ArithmeticExpression::Exp(e) => e.span(),
+			ArithmeticExpression::Neg(n) => n.span()
+		}
+	}
+
+	fn untethered(&self) -> Self
+	{
+		match self
+		{
+			ArithmeticExpression::Add(a) =>
+			{
+				ArithmeticExpression::Add(a.untethered())
+			},
+			ArithmeticExpression::Sub(s) =>
+			{
+				ArithmeticExpression::Sub(s.untethered())
+			},
+			ArithmeticExpression::Mul(m) =>
+			{
+				ArithmeticExpression::Mul(m.untethered())
+			},
+			ArithmeticExpression::Div(d) =>
+			{
+				ArithmeticExpression::Div(d.untethered())
+			},
+			ArithmeticExpression::Mod(m) =>
+			{
+				ArithmeticExpression::Mod(m.untethered())
+			},
+			ArithmeticExpression::Exp(e) =>
+			{
+				ArithmeticExpression::Exp(e.untethered())
+			},
+			ArithmeticExpression::Neg(n) =>
+			{
+				ArithmeticExpression::Neg(n.untethered())
+			},
 		}
 	}
 }

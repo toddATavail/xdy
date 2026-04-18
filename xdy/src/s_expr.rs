@@ -11,10 +11,13 @@ use std::{
 	ops::Deref
 };
 
-use crate::ast::{
-	Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
-	DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul, Neg,
-	Range, StandardDice, Sub, Variable
+use crate::{
+	ast::{
+		Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
+		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
+		Neg, Parameter, Range, StandardDice, Sub, Variable
+	},
+	span::SourceSpan
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -174,7 +177,7 @@ where
 	fn size_s_expr(&self) -> usize { (*self).size_s_expr() }
 }
 
-impl SExpressible for Option<Vec<&str>>
+impl SExpressible for Option<Vec<Parameter<'_>>>
 {
 	fn write_s_expr(
 		&self,
@@ -200,7 +203,7 @@ impl SExpressible for Option<Vec<&str>>
 	}
 }
 
-impl SExpressible for &[&str]
+impl SExpressible for &[Parameter<'_>]
 {
 	fn write_s_expr(
 		&self,
@@ -225,7 +228,7 @@ impl SExpressible for &[&str]
 				{
 					write!(f, " ")?;
 				}
-				write_ident(f, item)?;
+				write_ident(f, item.name)?;
 			}
 			write!(f, "]")
 		}
@@ -238,7 +241,7 @@ impl SExpressible for &[&str]
 				// Note that we don't care how long the item is, because we
 				// can't split it across multiple lines anyway.
 				write!(f, "\n{}", "\t".repeat(options.indent + 1))?;
-				write_ident(f, item)?;
+				write_ident(f, item.name)?;
 			}
 			write!(f, "\n{}]", "\t".repeat(options.indent))
 		}
@@ -249,7 +252,7 @@ impl SExpressible for &[&str]
 		// The delimiters and interposed spaces consume one character each. Note
 		// that there are one fewer interposed spaces than items, so the
 		// constant term is 1 after accounting for brackets (not 2).
-		self.iter().copied().map(ident_size).sum::<usize>() + self.len() + 1
+		self.iter().map(|p| ident_size(p.name)).sum::<usize>() + self.len() + 1
 	}
 }
 
@@ -537,7 +540,7 @@ impl SExpressible for Constant
 	) -> fmt::Result
 	{
 		// Constants cannot be split, so we just write the constant value.
-		write!(f, "{}", self.0)
+		write!(f, "{}", self.value)
 	}
 
 	fn size_s_expr(&self) -> usize
@@ -545,13 +548,13 @@ impl SExpressible for Constant
 		// The exact character count of the decimal representation. Using
 		// `ilog10` on the absolute value would panic on `i32::MIN`, so we
 		// format directly.
-		if self.0 == 0
+		if self.value == 0
 		{
 			1
 		}
 		else
 		{
-			format!("{}", self.0).len()
+			format!("{}", self.value).len()
 		}
 	}
 }
@@ -567,10 +570,10 @@ impl SExpressible for Variable<'_>
 	{
 		// Variables cannot be split, so we just write the variable, quoting
 		// it if it contains whitespace or delimiter characters.
-		write_ident(f, self.0)
+		write_ident(f, self.name)
 	}
 
-	fn size_s_expr(&self) -> usize { ident_size(self.0) }
+	fn size_s_expr(&self) -> usize { ident_size(self.name) }
 }
 
 impl SExpressible for Range<'_>
@@ -706,7 +709,12 @@ impl SExpressible for DropLowest<'_>
 			"drop-lowest",
 			self.dice.deref(),
 			self.drop.as_ref().map_or_else(
-				|| &Expression::Constant(Constant(1)),
+				|| {
+					&Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::SYNTHETIC
+					})
+				},
 				|drop| drop.deref()
 			)
 		)
@@ -719,7 +727,12 @@ impl SExpressible for DropLowest<'_>
 			"drop-lowest",
 			self.dice.deref(),
 			self.drop.as_ref().map_or_else(
-				|| &Expression::Constant(Constant(1)),
+				|| {
+					&Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::SYNTHETIC
+					})
+				},
 				|drop| drop.deref()
 			)
 		)
@@ -740,7 +753,12 @@ impl SExpressible for DropHighest<'_>
 			"drop-highest",
 			self.dice.deref(),
 			self.drop.as_ref().map_or_else(
-				|| &Expression::Constant(Constant(1)),
+				|| {
+					&Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::SYNTHETIC
+					})
+				},
 				|drop| drop.deref()
 			)
 		)
@@ -753,7 +771,12 @@ impl SExpressible for DropHighest<'_>
 			"drop-highest",
 			self.dice.deref(),
 			self.drop.as_ref().map_or_else(
-				|| &Expression::Constant(Constant(1)),
+				|| {
+					&Expression::Constant(Constant {
+						value: 1,
+						span: SourceSpan::SYNTHETIC
+					})
+				},
 				|drop| drop.deref()
 			)
 		)
@@ -1176,7 +1199,9 @@ impl<'src> SExprReader<'src>
 	}
 
 	/// Read a parameter list: `[` ident* `]`.
-	fn read_params(&mut self) -> Result<Option<Vec<&'src str>>, SExprError>
+	fn read_params(
+		&mut self
+	) -> Result<Option<Vec<Parameter<'src>>>, SExprError>
 	{
 		self.skip_whitespace();
 		self.expect_char('[')?;
@@ -1189,7 +1214,11 @@ impl<'src> SExprReader<'src>
 				self.next_char();
 				break;
 			}
-			params.push(self.read_ident()?);
+			let name = self.read_ident()?;
+			params.push(Parameter {
+				name,
+				span: SourceSpan::default()
+			});
 		}
 		if params.is_empty()
 		{
@@ -1246,44 +1275,51 @@ impl<'src> SExprReader<'src>
 					"add" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Add(Add {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"sub" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"mul" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"div" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Div(Div {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"mod" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"exp" => self.read_binary(|l, r| {
 						Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
 							left: Box::new(l),
-							right: Box::new(r)
+							right: Box::new(r),
+							span: SourceSpan::default()
 						}))
 					})?,
 					"neg" =>
 					{
 						let operand = self.read_expr()?;
 						Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-							operand: Box::new(operand)
+							operand: Box::new(operand),
+							span: SourceSpan::default()
 						}))
 					},
 					"standard-dice" =>
@@ -1293,7 +1329,8 @@ impl<'src> SExprReader<'src>
 						Expression::Dice(DiceExpression::Standard(
 							StandardDice {
 								count: Box::new(count),
-								faces: Box::new(faces)
+								faces: Box::new(faces),
+								span: SourceSpan::default()
 							}
 						))
 					},
@@ -1303,7 +1340,8 @@ impl<'src> SExprReader<'src>
 						let faces = self.read_faces()?;
 						Expression::Dice(DiceExpression::Custom(CustomDice {
 							count: Box::new(count),
-							faces
+							faces,
+							span: SourceSpan::default()
 						}))
 					},
 					"drop-lowest" =>
@@ -1313,7 +1351,8 @@ impl<'src> SExprReader<'src>
 						Expression::Dice(DiceExpression::DropLowest(
 							DropLowest {
 								dice: Box::new(dice),
-								drop: Some(Box::new(drop))
+								drop: Some(Box::new(drop)),
+								span: SourceSpan::default()
 							}
 						))
 					},
@@ -1324,7 +1363,8 @@ impl<'src> SExprReader<'src>
 						Expression::Dice(DiceExpression::DropHighest(
 							DropHighest {
 								dice: Box::new(dice),
-								drop: Some(Box::new(drop))
+								drop: Some(Box::new(drop)),
+								span: SourceSpan::default()
 							}
 						))
 					},
@@ -1334,7 +1374,8 @@ impl<'src> SExprReader<'src>
 						let end = self.read_expr()?;
 						Expression::Range(Range {
 							start: Box::new(start),
-							end: Box::new(end)
+							end: Box::new(end),
+							span: SourceSpan::default()
 						})
 					},
 					"function" =>
@@ -1359,12 +1400,18 @@ impl<'src> SExprReader<'src>
 			Some(c) if c == '-' || c.is_ascii_digit() =>
 			{
 				let value = self.read_integer()?;
-				Ok(Expression::Constant(Constant(value)))
+				Ok(Expression::Constant(Constant {
+					value,
+					span: SourceSpan::default()
+				}))
 			},
 			Some(_) =>
 			{
 				let name = self.read_ident()?;
-				Ok(Expression::Variable(Variable(name)))
+				Ok(Expression::Variable(Variable {
+					name,
+					span: SourceSpan::default()
+				}))
 			},
 			None => Err(SExprError {
 				message: "expected expression, found end of input".to_string(),
@@ -1427,7 +1474,11 @@ impl<'src> SExprReader<'src>
 				offset: self.pos
 			});
 		}
-		Ok(Function { parameters, body })
+		Ok(Function {
+			parameters,
+			body,
+			span: SourceSpan::default()
+		})
 	}
 }
 

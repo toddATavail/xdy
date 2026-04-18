@@ -453,9 +453,9 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 		// Register formal parameters first, in declaration order.
 		if let Some(ref parameters) = node.parameters
 		{
-			for &param in parameters
+			for param in parameters
 			{
-				self.variable(param);
+				self.variable(param.name);
 			}
 			self.arity = self.variables.len();
 		}
@@ -486,7 +486,7 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 		node: &Constant
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(Immediate(node.0).into())
+		Ok(Immediate(node.value).into())
 	}
 
 	fn visit_variable(
@@ -494,7 +494,7 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 		node: &'src ast::Variable<'src>
 	) -> Result<AddressingMode, Infallible>
 	{
-		let register = self.variable(node.0);
+		let register = self.variable(node.name);
 		Ok(register.into())
 	}
 
@@ -633,9 +633,10 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 	) -> Result<AddressingMode, Infallible>
 	{
 		// Fold negation of constants into a single immediate.
-		if let Expression::Constant(Constant(n)) = node.operand.as_ref()
+		if let Expression::Constant(Constant { value, .. }) =
+			node.operand.as_ref()
 		{
-			return Ok(Immediate(n.saturating_neg()).into());
+			return Ok(Immediate(value.saturating_neg()).into());
 		}
 		let op = self.accept_expression(&node.operand);
 		let dest = self.allocate_register();
@@ -679,7 +680,7 @@ fn collect_variables<'src>(
 	{
 		Expression::Variable(v) =>
 		{
-			out.push(v.0);
+			out.push(v.name);
 		},
 		Expression::Group(g) =>
 		{

@@ -29,9 +29,10 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
 		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
-		Neg, Range, StandardDice, Sub, Variable
+		Neg, Parameter, Range, StandardDice, Sub, Variable
 	},
-	parser::NomErrorKind
+	parser::NomErrorKind,
+	span::SourceSpan
 };
 
 use super::{
@@ -70,7 +71,14 @@ pub fn function(input: Span) -> IResult<Span, Function, ParseError>
 	let (input, body) =
 		preceded(multispace0, context(FUNCTION_BODY_CONTEXT, expression))
 			.parse_complete(input)?;
-	Ok((input, Function { parameters, body }))
+	Ok((
+		input,
+		Function {
+			parameters,
+			body,
+			span: SourceSpan::default()
+		}
+	))
 }
 
 /// Parse a list of formal parameters, without leading whitespace.
@@ -85,7 +93,7 @@ pub fn function(input: Span) -> IResult<Span, Function, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn parameters(
 	input: Span<'_>
-) -> IResult<Span<'_>, Option<Vec<&str>>, ParseError<'_>>
+) -> IResult<Span<'_>, Option<Vec<Parameter<'_>>>, ParseError<'_>>
 {
 	let (input, parameters) = separated_list0(
 		preceded(multispace0, char(',')),
@@ -128,7 +136,15 @@ pub fn parameters(
 			.parse_complete(input)?;
 			Ok((
 				input,
-				Some(parameters.iter().map(|p| *p.fragment()).collect())
+				Some(
+					parameters
+						.iter()
+						.map(|p| Parameter {
+							name: p.fragment(),
+							span: SourceSpan::default()
+						})
+						.collect()
+				)
 			))
 		}
 	}
@@ -194,11 +210,13 @@ pub fn add_sub(input: Span) -> IResult<Span, Expression, ParseError>
 			{
 				'+' => Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(acc),
-					right: Box::new(expr)
+					right: Box::new(expr),
+					span: SourceSpan::default()
 				})),
 				'-' => Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
 					left: Box::new(acc),
-					right: Box::new(expr)
+					right: Box::new(expr),
+					span: SourceSpan::default()
 				})),
 				_ => unreachable!()
 			})
@@ -235,19 +253,22 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 				{
 					Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 						left: Box::new(acc),
-						right: Box::new(expr)
+						right: Box::new(expr),
+						span: SourceSpan::default()
 					}))
 				},
 				'/' | '÷' =>
 				{
 					Expression::Arithmetic(ArithmeticExpression::Div(Div {
 						left: Box::new(acc),
-						right: Box::new(expr)
+						right: Box::new(expr),
+						span: SourceSpan::default()
 					}))
 				},
 				'%' => Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
 					left: Box::new(acc),
-					right: Box::new(expr)
+					right: Box::new(expr),
+					span: SourceSpan::default()
 				})),
 				_ => unreachable!()
 			})
@@ -270,7 +291,8 @@ pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 		negative_constant,
 		map(preceded(char('-'), preceded(multispace0, unary)), |expr| {
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
-				operand: Box::new(expr)
+				operand: Box::new(expr),
+				span: SourceSpan::default()
 			}))
 		}),
 		preceded(multispace0, exponent)
@@ -325,7 +347,13 @@ fn negative_constant(input: Span) -> IResult<Span, Expression, ParseError>
 		Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
 		Err(_) => unreachable!()
 	};
-	Ok((remaining, Expression::Constant(Constant(value))))
+	Ok((
+		remaining,
+		Expression::Constant(Constant {
+			value,
+			span: SourceSpan::default()
+		})
+	))
 }
 
 /// Parse an exponentiation expression, without leading whitespace.
@@ -357,7 +385,8 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 			input,
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
 				left: Box::new(initial),
-				right: Box::new(expr)
+				right: Box::new(expr),
+				span: SourceSpan::default()
 			}))
 		)),
 		None => Ok((input, initial))
@@ -412,7 +441,8 @@ pub fn group(input: Span) -> IResult<Span, Group, ParseError>
 	Ok((
 		input,
 		Group {
-			expression: Box::new(expression)
+			expression: Box::new(expression),
+			span: SourceSpan::default()
 		}
 	))
 }
@@ -440,7 +470,13 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 		context(CLOSING_BRACE_CONTEXT, char('}'))
 	))
 	.parse_complete(input)?;
-	Ok((input, Variable(span.fragment())))
+	Ok((
+		input,
+		Variable {
+			name: span.fragment(),
+			span: SourceSpan::default()
+		}
+	))
 }
 
 /// Parse a range expression, without leading whitespace.
@@ -477,7 +513,8 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 		input,
 		Range {
 			start: Box::new(start),
-			end: Box::new(end)
+			end: Box::new(end),
+			span: SourceSpan::default()
 		}
 	))
 }
@@ -509,7 +546,8 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 					move |faces| {
 						DiceExpression::Standard(StandardDice {
 							count: Box::new(count.clone()),
-							faces: Box::new(faces)
+							faces: Box::new(faces),
+							span: SourceSpan::default()
 						})
 					}
 				})
@@ -519,7 +557,8 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 				map(custom_faces, move |faces| {
 					DiceExpression::Custom(CustomDice {
 						count: Box::new(count.clone()),
-						faces
+						faces,
+						span: SourceSpan::default()
 					})
 				})
 			)
@@ -534,11 +573,13 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 		{
 			DropDirection::Lowest => DiceExpression::DropLowest(DropLowest {
 				dice: Box::new(acc),
-				drop
+				drop,
+				span: SourceSpan::default()
 			}),
 			DropDirection::Highest => DiceExpression::DropHighest(DropHighest {
 				dice: Box::new(acc),
-				drop
+				drop,
+				span: SourceSpan::default()
 			})
 		}
 	)
@@ -570,7 +611,8 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 			input,
 			StandardDice {
 				count: Box::new(count),
-				faces: Box::new(faces)
+				faces: Box::new(faces),
+				span: SourceSpan::default()
 			}
 		)
 	})
@@ -599,7 +641,8 @@ pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, ParseError>
 			input,
 			CustomDice {
 				count: Box::new(count),
-				faces
+				faces,
+				span: SourceSpan::default()
 			}
 		)
 	})
@@ -662,7 +705,7 @@ pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 		preceded(multispace0, char(',')),
 		preceded(
 			multispace0,
-			context(CONSTANT_CONTEXT, map(constant, |c| c.0))
+			context(CONSTANT_CONTEXT, map(constant, |c| c.value))
 		)
 	))
 	.parse_complete(input)?;
@@ -818,7 +861,13 @@ pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 		// produce `Ok`, `PosOverflow`, or `NegOverflow`.
 		Err(_) => unreachable!()
 	};
-	Ok((input, Constant(constant)))
+	Ok((
+		input,
+		Constant {
+			value: constant,
+			span: SourceSpan::default()
+		}
+	))
 }
 
 /// Parse a `d` or `D` operator, without leading whitespace.
