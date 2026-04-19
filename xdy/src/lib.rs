@@ -204,6 +204,25 @@
 //! # Ok::<(), xdy::EvaluationError>(())
 //! ```
 //!
+//! ## Diagnostics and validation
+//!
+//! The [`compile`] and [`evaluate`] happy path returns typed
+//! [`CompilationError`] and [`EvaluationError`] values; for editor-style
+//! feedback — rich error reports, suggested fixes, caret-precise source spans —
+//! use the [`diagnostics::diagnose`] entry point instead. It runs the full sad
+//! path: a fix-and-retry loop over parser errors, followed by a semantic
+//! [`Validator`] pass over the parsed AST. The validator currently catches
+//! duplicate formal parameter names; further checks will land as language
+//! features are added.
+//!
+//! Every AST node carries a [`SourceSpan`] referencing its byte range in the
+//! original input. Semantic errors and diagnostics propagate these spans
+//! end-to-end, enabling precise highlighting and the forthcoming `xdy!`
+//! procedural macro's `compile_error!` translation. The [`Spanned`] trait
+//! offers uniform `span()` access plus an `untethered()` operation for
+//! position-independent structural comparison (useful for tests and for the
+//! S-expression round-trip in the [`s_expr`] module).
+//!
 //! ## Performance
 //!
 //! `xDy` is _very fast_. Consider the following dice expression, where `x = 5`,

@@ -2,7 +2,7 @@
 //!
 //! Herein is the diagnostic layer for the `xDy` parser and
 //! [validator](Validator). The [`diagnose`] function analyzes a source string
-//! by repeatedly parsing, detecting errors,//! applying fixes, and re-parsing
+//! by repeatedly parsing, detecting errors, applying fixes, and re-parsing
 //! until all syntactic errors are collected; it then runs the semantic
 //! validator on the final AST whenever the original source parsed cleanly. This
 //! produces structured [`Diagnostic`]s with specific error kinds, source spans
@@ -24,13 +24,16 @@
 //! # Error Recovery Strategy
 //!
 //! The doctor runs two sequential passes. Syntactic errors go through a
-//! **fix-and-retry loop**:
+//! **fix-and-retry loop**; once the source parses cleanly, a **semantic pass**
+//! runs the [`Validator`] against the final AST. The [rustdoc for
+//! `diagnose`](diagnose) carries a Mermaid rendering of the complete pipeline;
+//! the ASCII sketch below summarizes the flow for casual skimming.
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
 //! │ Parser::parse(current_source)                        │
-//! │   ├─ success → proceed to semantic pass              │
-//! │   └─ error → analyze → apply fix → loop              │
+//! │   ├─ success → Validator::validate(ast) → diagnostics│
+//! │   └─ error   → analyze → apply fix → loop            │
 //! └──────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -40,9 +43,8 @@
 //! original source. The loop terminates when parsing succeeds or when an
 //! unfixable error is encountered.
 //!
-//! After the loop, the doctor runs the [semantic validator](Validator) on the
-//! parsed AST, but **only when the original source parsed cleanly** — that is,
-//! when no fixes were applied. Semantic diagnostics (e.g., duplicate
+//! The semantic pass runs **only when the original source parsed cleanly** —
+//! that is, when no fixes were applied. Semantic diagnostics (e.g., duplicate
 //! parameters) point at spans the user actually typed; running the validator on
 //! a fix-synthesized source would attach diagnostics to characters the user
 //! never wrote, so semantic checks wait for a syntactically valid source.
@@ -511,6 +513,21 @@ fn analyze_error(
 		&& let Some(diag) = detect_incomplete_parameter(source, pos, offset_map)
 	{
 		return diag;
+	}
+
+	// Pattern: bare closing delimiter where an expression was expected → the
+	// user has a spurious `)`, `]`, or `}` with no matching opener. This is
+	// more specific than the catch-all `UnexpectedToken` and produces a
+	// `remove the unopened` suggestion. Only fires when an expression was
+	// expected at `pos`; if the parser had already consumed a complete
+	// expression, the trailing-input branch below handles it instead.
+	if expects_expression && !at_eof
+	{
+		let ch = source[pos..].chars().next().unwrap_or('\0');
+		if ch == ')' || ch == ']' || ch == '}'
+		{
+			return make_unopened_delimiter(source, ch, pos, offset_map);
+		}
 	}
 
 	// Pattern: end of input from all_consuming → trailing input.
@@ -1013,29 +1030,18 @@ fn make_unclosed_delimiter(
 	offset_map: &OffsetMap
 ) -> Diagnostic
 {
+	// The parser only raises a closer expectation after it has already
+	// consumed an expression inside the delimited construct, so by the time
+	// this function is called the content between `opener` and `error_pos` is
+	// always non-empty. The zero-content path (which would need a placeholder
+	// expression as well as a closer) is handled by
+	// [`make_incomplete_delimited`] from the `expects_expression` branch of
+	// [`analyze_error`] — a separate helper because the diagnostic kind and
+	// placeholder set differ. See the doc-comment on [`analyze_error`] for
+	// the full pattern-matching order.
 	let actual_opener = opener_pos.unwrap_or(0);
 	let orig_opener = offset_map.to_original(actual_opener);
-	// Check if there's meaningful content between opener and error position.
-	let content_between = source[actual_opener + opener.len_utf8()..error_pos]
-		.trim()
-		.is_empty();
 	let mut corrected = source[..error_pos].to_string();
-	let mut placeholders = Vec::new();
-	if content_between
-	{
-		// No expression between opener and closer — insert placeholder.
-		let placeholder_start = corrected.len();
-		corrected.push('0');
-		let placeholder_end = corrected.len();
-		placeholders.push(Placeholder {
-			span: SourceSpan {
-				start: placeholder_start,
-				end: placeholder_end
-			},
-			description: "expression",
-			valid_kinds: OPERAND_KINDS
-		});
-	}
 	corrected.push(closer);
 	corrected.push_str(&source[error_pos..]);
 	Diagnostic {
@@ -1052,7 +1058,7 @@ fn make_unclosed_delimiter(
 		suggestions: vec![Suggestion {
 			description: format!("insert `{}`", closer),
 			corrected_source: corrected,
-			placeholders
+			placeholders: vec![]
 		}]
 	}
 }
@@ -1437,6 +1443,47 @@ fn make_incomplete_drop(
 	}
 }
 
+/// Create a diagnostic for a bare closing delimiter with no matching opener.
+/// The fix removes the spurious closer. Emitted from
+/// [`analyze_error`](analyze_error) when an expression was expected at the
+/// error position but the source has `)`, `]`, or `}` there instead.
+///
+/// # Parameters
+/// - `source`: The current source text.
+/// - `closer`: The unmatched closing delimiter character.
+/// - `pos`: The byte offset of the closer in the current source.
+/// - `offset_map`: For mapping positions back to the original source.
+///
+/// # Returns
+/// A diagnostic with an
+/// [`UnopenedDelimiter`](DiagnosticKind::UnopenedDelimiter) kind and a single
+/// suggestion that removes the offending character.
+fn make_unopened_delimiter(
+	source: &str,
+	closer: char,
+	pos: usize,
+	offset_map: &OffsetMap
+) -> Diagnostic
+{
+	let orig_pos = offset_map.to_original(pos);
+	let mut corrected = source[..pos].to_string();
+	corrected.push_str(&source[pos + closer.len_utf8()..]);
+	Diagnostic {
+		kind: DiagnosticKind::UnopenedDelimiter { closer },
+		span: SourceSpan {
+			start: orig_pos,
+			end: orig_pos + closer.len_utf8()
+		},
+		message: format!("unexpected `{}` with no matching opener", closer),
+		related: vec![],
+		suggestions: vec![Suggestion {
+			description: format!("remove the unopened `{}`", closer),
+			corrected_source: corrected,
+			placeholders: vec![]
+		}]
+	}
+}
+
 /// Create a diagnostic for an empty or whitespace-only expression. The fix
 /// inserts `0` as a placeholder.
 ///
@@ -1756,23 +1803,52 @@ impl OffsetMap
 //                                The doctor.                                 //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Diagnose a source string, collecting all parse errors and suggested fixes.
+/// Diagnose a source string, collecting all parse errors, semantic errors, and
+/// suggested fixes.
 ///
-/// The doctor uses a fix-and-retry loop: parse, detect the error, generate a
-/// fix, apply the fix, and re-parse. This continues until parsing succeeds (all
-/// errors collected) or an unfixable error is encountered.
+/// The doctor runs two sequential passes. Syntactic errors go through a
+/// fix-and-retry loop: parse, detect the error, generate a fix, apply the fix,
+/// and re-parse. This continues until parsing succeeds (all errors collected)
+/// or an unfixable error is encountered. When — and only when — the original
+/// source parsed cleanly, the doctor then runs the semantic [`Validator`]
+/// against the AST and translates any error into a corresponding
+/// [`Diagnostic`]. The semantic pass is skipped after any fix, because
+/// attaching semantic diagnostics to fix-synthesized characters the user never
+/// typed would mislead them about what their source actually says.
+///
+/// ```mermaid
+/// graph TD
+///     S["Source Code"] --> P["Parser::parse"]
+///     P -->|OK| V["Validator::validate"]
+///     P -->|Err| A["analyze_error"]
+///     A --> F["Apply fix"]
+///     F --> OM["OffsetMap records edit"]
+///     OM --> P
+///     V -->|OK| DONE["DiagnoseResult"]
+///     V -->|Err| SEM["analyze_semantic_error"]
+///     SEM --> DONE
+///     A -.unfixable.-> DONE
+///     style S fill:#f9f,stroke:#333,color:#000
+///     style DONE fill:#9f9,stroke:#333,color:#000
+///     style P fill:#ffd,stroke:#333,color:#000
+///     style V fill:#ffd,stroke:#333,color:#000
+/// ```
 ///
 /// # Parameters
 /// - `source`: The source string to diagnose.
 ///
 /// # Returns
-/// A [`DiagnoseResult`] containing all diagnostics and, if all errors were
-/// fixable, the corrected source string.
+/// A [`DiagnoseResult`] containing all diagnostics and, if all parse errors
+/// were fixable, the corrected source string. Semantic diagnostics never
+/// prevent the corrected-source return: a duplicate-parameter program
+/// produces a diagnostic *and* a `corrected_source` equal to the original
+/// input, because the source already parses.
 ///
 /// # Performance
 /// Designed for keystroke-speed execution. Each iteration involves a single
 /// `nom` parse (microseconds for typical dice expressions) and a string fixup.
-/// The loop runs at most `O(n)` times where `n` is the number of errors.
+/// The loop runs at most `O(n)` times where `n` is the number of errors, and
+/// the semantic pass runs at most once per call.
 ///
 /// # Examples
 /// Single error with an unambiguous fix:
@@ -1812,6 +1888,23 @@ impl OffsetMap
 ///     ).is_ok()
 /// );
 /// ```
+///
+/// A semantic diagnostic on a program that otherwise parses cleanly:
+///
+/// ```rust
+/// use xdy::diagnostics::{DiagnosticKind, diagnose};
+///
+/// let result = diagnose("x, x: {x}");
+/// assert_eq!(result.diagnostics.len(), 1);
+/// assert!(matches!(
+///     result.diagnostics[0].kind,
+///     DiagnosticKind::DuplicateParameter { .. }
+/// ));
+/// // Semantic diagnostics don't prevent `corrected_source`; the original
+/// // source already parses, so it is returned verbatim.
+/// assert_eq!(result.corrected_source.as_deref(), Some("x, x: {x}"));
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub fn diagnose(source: &str) -> DiagnoseResult
 {
 	// Fast path: if the source parses cleanly, skip the fix-and-retry loop and

@@ -353,6 +353,16 @@ pub struct ExpectedDiagnostic
 	/// The expected message.
 	pub message: &'static str,
 
+	/// The expected full [`Display`](std::fmt::Display) rendering of the
+	/// diagnostic, as produced by `format!("{}", diagnostic)`. This is an
+	/// end-to-end check on the `Display` assembly of `DiagnosticKind`,
+	/// `SourceSpan`, and the message, distinct from the component-wise
+	/// assertions on `kind`/`span`/`message`. Keeping it alongside the
+	/// decomposed fields means a regression in any of the three `Display`
+	/// impls — or in the assembly itself — is caught with a human-readable
+	/// diff.
+	pub rendered: &'static str,
+
 	/// The expected related labels, in the order they should appear.
 	pub related: Vec<ExpectedRelated>,
 
@@ -382,10 +392,11 @@ pub struct ErrorTestCase
 /// case ::= source "\n=\n" diagnostics ;
 /// source ::= [^\n]* ;
 /// diagnostics ::= diagnostic ("---\n" diagnostic)* ;
-/// diagnostic ::= kind span message related* suggestion* ;
+/// diagnostic ::= kind span message rendered related* suggestion* ;
 /// kind ::= "kind:" IDENTIFIER "\n" ;
 /// span ::= "span:" USIZE ".." USIZE "\n" ;
 /// message ::= "message:" [^\n]* "\n" ;
+/// rendered ::= "rendered:" [^\n]* "\n" ;
 /// related ::= "related:" USIZE ".." USIZE '"' [^"]* '"' "\n" ;
 /// suggestion ::= "suggestion:" [^\n]* "\n" placeholder* ;
 /// placeholder ::= "placeholder:" USIZE ".." USIZE
@@ -393,7 +404,11 @@ pub struct ErrorTestCase
 /// kinds ::= IDENTIFIER ("," IDENTIFIER)* ;
 /// ```
 ///
-/// All `related:` lines must appear before the first `suggestion:` line.
+/// The `rendered:` field captures the full
+/// [`Display`](std::fmt::Display) output of the diagnostic, as produced by
+/// `format!("{}", diag)`; the harness asserts this directly against the
+/// `diagnose()` output. All `related:` lines must appear before the first
+/// `suggestion:` line.
 ///
 /// # Parameters
 /// - `source`: The contents of a test case file.
@@ -453,6 +468,7 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 	let mut kind = None;
 	let mut span = None;
 	let mut message = None;
+	let mut rendered = None;
 	let mut related: Vec<ExpectedRelated> = Vec::new();
 	let mut suggestions: Vec<ExpectedSuggestion> = Vec::new();
 	let mut current_suggestion: Option<&'static str> = None;
@@ -476,6 +492,10 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 		else if let Some(rest) = line.strip_prefix("message:")
 		{
 			message = Some(rest.trim());
+		}
+		else if let Some(rest) = line.strip_prefix("rendered:")
+		{
+			rendered = Some(rest.trim());
 		}
 		else if let Some(rest) = line.strip_prefix("related:")
 		{
@@ -516,6 +536,7 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 		kind: kind.expect("missing kind"),
 		span: span.expect("missing span"),
 		message: message.expect("missing message"),
+		rendered: rendered.expect("missing rendered"),
 		related,
 		suggestions
 	}

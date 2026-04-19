@@ -3,6 +3,7 @@
 kind: MissingRightOperand
 span: 4..5
 message: expected operand after `+`
+rendered: missing right operand of `+` (4..5): expected operand after `+`
 suggestion: 3D6 + 0
 placeholder: 6..7 "operand" [integer, {variable}, (expression), dice expression]
 suggestion: 3D6
@@ -12,6 +13,7 @@ suggestion: 3D6
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `)` to close `(`
+rendered: unclosed `(` (0..1): expected `)` to close `(`
 suggestion: (3D6)
 
 {x
@@ -19,6 +21,7 @@ suggestion: (3D6)
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
 suggestion: {x}
 
 [1:6
@@ -26,6 +29,7 @@ suggestion: {x}
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `]` to close `[`
+rendered: unclosed `[` (0..1): expected `]` to close `[`
 suggestion: [1:6]
 
 3D
@@ -33,6 +37,7 @@ suggestion: [1:6]
 kind: MissingDiceFaces
 span: 1..2
 message: expected face count after `D`
+rendered: missing dice faces (1..2): expected face count after `D`
 suggestion: 3D6
 placeholder: 2..3 "face count" [integer, {variable}, (expression)]
 
@@ -41,6 +46,7 @@ placeholder: 2..3 "face count" [integer, {variable}, (expression)]
 kind: MissingDiceFaces
 span: 1..2
 message: expected face count after `d`
+rendered: missing dice faces (1..2): expected face count after `d`
 suggestion: 3d6
 placeholder: 2..3 "face count" [integer, {variable}, (expression)]
 
@@ -49,6 +55,7 @@ placeholder: 2..3 "face count" [integer, {variable}, (expression)]
 kind: IncompleteDropClause
 span: 4..8
 message: expected `lowest` or `highest` after `drop`
+rendered: incomplete drop clause (4..8): expected `lowest` or `highest` after `drop`
 suggestion: 4D6 drop lowest
 placeholder: 9..15 "direction" [lowest, highest]
 
@@ -57,6 +64,7 @@ xD6
 kind: BareIdentifier
 span: 0..1
 message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
 suggestion: {x}D6
 suggestion: {xD6}
 
@@ -65,6 +73,7 @@ abcD12
 kind: BareIdentifier
 span: 0..3
 message: bare identifier `abc` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..3): bare identifier `abc` is not valid here; variables must be wrapped in `{}`
 suggestion: {abc}D12
 suggestion: {abcD12}
 
@@ -73,6 +82,7 @@ suggestion: {abcD12}
 kind: MissingLeftOperand
 span: 0..1
 message: expected operand before `+`
+rendered: missing left operand of `+` (0..1): expected operand before `+`
 suggestion: 0 + 3D6
 placeholder: 0..1 "operand" [integer, {variable}, (expression), dice expression]
 suggestion: 3D6
@@ -82,6 +92,7 @@ suggestion: 3D6
 kind: TrailingInput
 span: 3..4
 message: unexpected `)` after expression
+rendered: trailing input (3..4): unexpected `)` after expression
 suggestion: 3D6
 
 3D6 hello
@@ -89,6 +100,7 @@ suggestion: 3D6
 kind: TrailingInput
 span: 4..9
 message: unexpected `hello` after expression
+rendered: trailing input (4..9): unexpected `hello` after expression
 suggestion: 3D6
 
 3d6 + (2d4
@@ -96,6 +108,7 @@ suggestion: 3D6
 kind: UnclosedDelimiter
 span: 6..7
 message: expected `)` to close `(`
+rendered: unclosed `(` (6..7): expected `)` to close `(`
 suggestion: 3d6 + (2d4)
 
 1 + * 2
@@ -103,6 +116,7 @@ suggestion: 3d6 + (2d4)
 kind: MissingRightOperand
 span: 2..4
 message: expected operand after `+`
+rendered: missing right operand of `+` (2..4): expected operand after `+`
 suggestion: 1 + 0 * 2
 placeholder: 4..5 "operand" [integer, {variable}, (expression), dice expression]
 suggestion: 1 * 2
@@ -112,6 +126,7 @@ suggestion: 1 * 2
 kind: MissingRightOperand
 span: 4..6
 message: expected operand after `+`
+rendered: missing right operand of `+` (4..6): expected operand after `+`
 suggestion: 3D6 + 0 + 1D3 -
 placeholder: 6..7 "operand" [integer, {variable}, (expression), dice expression]
 suggestion: 3D6 + 1D3 -
@@ -119,6 +134,7 @@ suggestion: 3D6 + 1D3 -
 kind: MissingRightOperand
 span: 12..13
 message: expected operand after `-`
+rendered: missing right operand of `-` (12..13): expected operand after `-`
 suggestion: 3D6 + 0 + 1D3 - 0
 placeholder: 16..17 "operand" [integer, {variable}, (expression), dice expression]
 suggestion: 3D6 + 0 + 1D3
@@ -128,6 +144,7 @@ suggestion: 3D6 + 0 + 1D3
 kind: EmptyExpression
 span: 0..0
 message: expected expression
+rendered: empty expression (0..0): expected expression
 suggestion: 0
 placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expression]
 
@@ -136,6 +153,7 @@ placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expressi
 kind: BareIdentifier
 span: 4..9
 message: bare identifier `hello` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..9): bare identifier `hello` is not valid here; variables must be wrapped in `{}`
 suggestion: 4 + {hello}
 
 hello
@@ -143,6 +161,7 @@ hello
 kind: IncompleteParameterDefinition
 span: 0..5
 message: expected `:` and expression body after parameter
+rendered: incomplete parameter definition (0..5): expected `:` and expression body after parameter
 suggestion: hello: 0
 placeholder: 7..8 "expression" [integer, {variable}, (expression), dice expression]
 suggestion: {hello}
@@ -152,6 +171,7 @@ x, y
 kind: IncompleteParameterDefinition
 span: 0..4
 message: expected `:` and expression body after parameters
+rendered: incomplete parameter definition (0..4): expected `:` and expression body after parameters
 suggestion: x, y: 0
 placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expression]
 
@@ -160,6 +180,7 @@ placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expressi
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `)` to close `(`
+rendered: unclosed `(` (0..1): expected `)` to close `(`
 suggestion: (0)
 placeholder: 1..2 "expression" [integer, {variable}, (expression), dice expression]
 
@@ -168,6 +189,7 @@ placeholder: 1..2 "expression" [integer, {variable}, (expression), dice expressi
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `]` to close `[`
+rendered: unclosed `[` (0..1): expected `]` to close `[`
 suggestion: [0:0]
 placeholder: 1..2 "range start" [integer, {variable}, (expression), dice expression]
 placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
@@ -177,6 +199,7 @@ placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expressio
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
 suggestion: {x}
 placeholder: 1..2 "identifier" [identifier]
 
@@ -185,6 +208,7 @@ placeholder: 1..2 "identifier" [identifier]
 kind: UnclosedDelimiter
 span: 0..1
 message: expected `]` to close `[`
+rendered: unclosed `[` (0..1): expected `]` to close `[`
 suggestion: [1:0]
 placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
 
@@ -193,6 +217,7 @@ placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expressio
 kind: UnclosedDelimiter
 span: 2..3
 message: expected `]` to close `[`
+rendered: unclosed `[` (2..3): expected `]` to close `[`
 suggestion: 3D[0]
 placeholder: 3..4 "face value" [integer]
 
@@ -201,6 +226,7 @@ placeholder: 3..4 "face value" [integer]
 kind: UnclosedDelimiter
 span: 2..3
 message: expected `]` to close `[`
+rendered: unclosed `[` (2..3): expected `]` to close `[`
 suggestion: 3D[1,2]
 
 3D6 + 2D
@@ -208,6 +234,7 @@ suggestion: 3D[1,2]
 kind: MissingDiceFaces
 span: 7..8
 message: expected face count after `D`
+rendered: missing dice faces (7..8): expected face count after `D`
 suggestion: 3D6 + 2D6
 placeholder: 8..9 "face count" [integer, {variable}, (expression)]
 
@@ -216,6 +243,7 @@ hello * 3
 kind: IncompleteParameterDefinition
 span: 0..6
 message: expected `:` and expression body after parameter
+rendered: incomplete parameter definition (0..6): expected `:` and expression body after parameter
 suggestion: {hello} * 3
 suggestion: hello : 0
 placeholder: 8..9 "expression" [integer, {variable}, (expression), dice expression]
@@ -225,6 +253,7 @@ dD6
 kind: BareIdentifier
 span: 0..1
 message: bare identifier `d` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `d` is not valid here; variables must be wrapped in `{}`
 suggestion: {d}D6
 suggestion: {dD6}
 
@@ -233,6 +262,7 @@ _xD6
 kind: BareIdentifier
 span: 0..2
 message: bare identifier `_x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..2): bare identifier `_x` is not valid here; variables must be wrapped in `{}`
 suggestion: {_x}D6
 suggestion: {_xD6}
 
@@ -241,6 +271,7 @@ dropD6
 kind: BareIdentifier
 span: 0..4
 message: bare identifier `drop` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..4): bare identifier `drop` is not valid here; variables must be wrapped in `{}`
 suggestion: {drop}D6
 suggestion: {dropD6}
 
@@ -249,12 +280,14 @@ xd
 kind: BareIdentifier
 span: 0..1
 message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
 suggestion: {x}d
 suggestion: {xd}
 ---
 kind: MissingDiceFaces
 span: 1..2
 message: expected face count after `d`
+rendered: missing dice faces (1..2): expected face count after `d`
 suggestion: {x}d6
 placeholder: 4..5 "face count" [integer, {variable}, (expression)]
 
@@ -263,12 +296,14 @@ aD
 kind: BareIdentifier
 span: 0..1
 message: bare identifier `a` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `a` is not valid here; variables must be wrapped in `{}`
 suggestion: {a}D
 suggestion: {aD}
 ---
 kind: MissingDiceFaces
 span: 1..2
 message: expected face count after `D`
+rendered: missing dice faces (1..2): expected face count after `D`
 suggestion: {a}D6
 placeholder: 4..5 "face count" [integer, {variable}, (expression)]
 
@@ -277,6 +312,7 @@ x, x: {x}
 kind: DuplicateParameter
 span: 3..4
 message: parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `x` (3..4): parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
 related: 0..1 "first declared here"
 suggestion: x, y: {x}
 
@@ -285,6 +321,7 @@ a, b, b: {a}
 kind: DuplicateParameter
 span: 6..7
 message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
 related: 3..4 "first declared here"
 suggestion: a, b, c: {a}
 
@@ -293,6 +330,7 @@ a, b, b, c: {a}
 kind: DuplicateParameter
 span: 6..7
 message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
 related: 3..4 "first declared here"
 suggestion: a, b, d, c: {a}
 
@@ -301,6 +339,7 @@ abc, abc: {abc}
 kind: DuplicateParameter
 span: 5..8
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `abc` (5..8): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
 related: 0..3 "first declared here"
 suggestion: abc, new0: {abc}
 
@@ -309,6 +348,7 @@ A, A: 1
 kind: DuplicateParameter
 span: 3..4
 message: parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `A` (3..4): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
 related: 0..1 "first declared here"
 suggestion: A, B: 1
 
@@ -317,6 +357,7 @@ a, z, z: {a}
 kind: DuplicateParameter
 span: 6..7
 message: parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `z` (6..7): parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
 related: 3..4 "first declared here"
 suggestion: a, z, b: {a}
 
@@ -325,6 +366,7 @@ abc, new0, abc: {abc}
 kind: DuplicateParameter
 span: 11..14
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `abc` (11..14): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
 related: 0..3 "first declared here"
 suggestion: abc, new0, new1: {abc}
 
@@ -333,5 +375,205 @@ abc, new0, new1, abc: {abc}
 kind: DuplicateParameter
 span: 17..20
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `abc` (17..20): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
 related: 0..3 "first declared here"
 suggestion: abc, new0, new1, new2: {abc}
+
+4 + xD6
+=
+kind: BareIdentifier
+span: 4..7
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..7): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {x}D6
+suggestion: 4 + {xD6}
+
+@
+=
+kind: UnexpectedToken
+span: 0..1
+message: unexpected `@`
+rendered: unexpected token (0..1): unexpected `@`
+
+~
+=
+kind: UnexpectedToken
+span: 0..1
+message: unexpected `~`
+rendered: unexpected token (0..1): unexpected `~`
+
+x (3)
+=
+kind: IncompleteParameterDefinition
+span: 0..2
+message: expected `:` and expression body after parameter
+rendered: incomplete parameter definition (0..2): expected `:` and expression body after parameter
+suggestion: {x} (3)
+suggestion: x : (3)
+---
+kind: TrailingInput
+span: 2..5
+message: unexpected `(3)` after expression
+rendered: trailing input (2..5): unexpected `(3)` after expression
+suggestion: {x}
+
+4 + _xD6
+=
+kind: BareIdentifier
+span: 4..8
+message: bare identifier `_x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..8): bare identifier `_x` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {_x}D6
+suggestion: 4 + {_xD6}
+
+4 + foo-barD6
+=
+kind: BareIdentifier
+span: 4..13
+message: bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..13): bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {foo-bar}D6
+suggestion: 4 + {foo-barD6}
+
+4 + foo.barD6
+=
+kind: BareIdentifier
+span: 4..13
+message: bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..13): bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {foo.bar}D6
+suggestion: 4 + {foo.barD6}
+
+foo-barD6
+=
+kind: BareIdentifier
+span: 0..7
+message: bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..7): bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
+suggestion: {foo-bar}D6
+suggestion: {foo-barD6}
+
+foo.barD6
+=
+kind: BareIdentifier
+span: 0..7
+message: bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..7): bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
+suggestion: {foo.bar}D6
+suggestion: {foo.barD6}
+
+_barD6
+=
+kind: BareIdentifier
+span: 0..4
+message: bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..4): bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
+suggestion: {_bar}D6
+suggestion: {_barD6}
+
+_bar
+=
+kind: IncompleteParameterDefinition
+span: 0..4
+message: expected `:` and expression body after parameter
+rendered: incomplete parameter definition (0..4): expected `:` and expression body after parameter
+suggestion: _bar: 0
+placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expression]
+suggestion: {_bar}
+
+3d[
+=
+kind: UnclosedDelimiter
+span: 2..3
+message: expected `]` to close `[`
+rendered: unclosed `[` (2..3): expected `]` to close `[`
+suggestion: 3d[0]
+placeholder: 3..4 "face value" [integer]
+
+((3)
+=
+kind: UnclosedDelimiter
+span: 1..2
+message: expected `)` to close `(`
+rendered: unclosed `(` (1..2): expected `)` to close `(`
+suggestion: ((3))
+
+a, c, a: 1
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `a` (6..7): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+related: 0..1 "first declared here"
+suggestion: a, c, d: 1
+
+z, A, A: 1
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `A` (6..7): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+related: 3..4 "first declared here"
+suggestion: z, A, B: 1
+
+A, b, b: 1
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 3..4 "first declared here"
+suggestion: A, b, c: 1
+
+)
+=
+kind: UnopenedDelimiter
+span: 0..1
+message: unexpected `)` with no matching opener
+rendered: unexpected `)` (0..1): unexpected `)` with no matching opener
+suggestion:
+---
+kind: EmptyExpression
+span: 0..0
+message: expected expression
+rendered: empty expression (0..0): expected expression
+suggestion: 0
+placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expression]
+
+}
+=
+kind: UnopenedDelimiter
+span: 0..1
+message: unexpected `}` with no matching opener
+rendered: unexpected `}` (0..1): unexpected `}` with no matching opener
+suggestion:
+---
+kind: EmptyExpression
+span: 0..0
+message: expected expression
+rendered: empty expression (0..0): expected expression
+suggestion: 0
+placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expression]
+
+]
+=
+kind: UnopenedDelimiter
+span: 0..1
+message: unexpected `]` with no matching opener
+rendered: unexpected `]` (0..1): unexpected `]` with no matching opener
+suggestion:
+---
+kind: EmptyExpression
+span: 0..0
+message: expected expression
+rendered: empty expression (0..0): expected expression
+suggestion: 0
+placeholder: 0..1 "expression" [integer, {variable}, (expression), dice expression]
+
+)3D6
+=
+kind: UnopenedDelimiter
+span: 0..1
+message: unexpected `)` with no matching opener
+rendered: unexpected `)` (0..1): unexpected `)` with no matching opener
+suggestion: 3D6

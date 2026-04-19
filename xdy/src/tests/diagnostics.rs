@@ -120,6 +120,20 @@ fn test_error_diagnostics()
 				di + 1
 			);
 
+			// Check the full Display rendering. This is a redundant but
+			// load-bearing assertion: any divergence between the component-wise
+			// fields above and the `Display` impl — for any of
+			// `DiagnosticKind`, `SourceSpan`, `Diagnostic` — surfaces here with
+			// a readable diff.
+			assert_eq!(
+				format!("{}", actual),
+				expected.rendered,
+				"case {}: {:?} — diagnostic {} rendered output mismatch",
+				index + 1,
+				case.source,
+				di + 1
+			);
+
 			// Check related labels.
 			assert_eq!(
 				actual.related.len(),
@@ -338,6 +352,32 @@ fn test_valid_programs_produce_no_diagnostics()
 	}
 }
 
+/// A duplicate-parameter program produces exactly one semantic diagnostic,
+/// whose [`Display`](std::fmt::Display) rendering surfaces the caret-level
+/// position of the duplicate and names the offending identifier.
+#[test]
+fn test_diagnose_duplicate_parameter_rendered_output()
+{
+	let result = diagnostics::diagnose("x, x: {x}");
+	assert_eq!(result.diagnostics.len(), 1);
+	let diag = &result.diagnostics[0];
+	assert!(matches!(
+		diag.kind,
+		DiagnosticKind::DuplicateParameter { ref name } if name == "x"
+	));
+	assert_eq!(
+		format!("{}", diag),
+		"duplicate parameter `x` (3..4): parameter `x` is declared more than \
+		 once; review references to `x` in the body — one may have meant a \
+		 different parameter or an external variable"
+	);
+	// Related label points at the first occurrence.
+	assert_eq!(diag.related.len(), 1);
+	assert_eq!(diag.related[0].span.start, 0);
+	assert_eq!(diag.related[0].span.end, 1);
+	assert_eq!(diag.related[0].message, "first declared here");
+}
+
 /// Test that the semantic validator is intentionally bypassed when the
 /// fix-and-retry loop had to rewrite the source to obtain a clean parse.
 /// Attaching semantic diagnostics (`DuplicateParameter`, etc.) to spans in a
@@ -370,6 +410,58 @@ fn test_validator_skipped_after_parse_fix()
 		"validator should not run after the fix-and-retry loop; got {:?}",
 		result.diagnostics[0].kind
 	);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                       DiagnosticKind Display tests.                        //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The [`DiagnosticKind::UnopenedDelimiter`] variant's
+/// [`Display`](std::fmt::Display) rendering shows the unmatched closer in
+/// backticks. This variant is part of the public API but is not currently
+/// emitted by the analyzer (closing brackets without openers surface as
+/// [`UnexpectedToken`](DiagnosticKind::UnexpectedToken) today); the direct test
+/// guards the `Display` impl regardless.
+#[test]
+fn test_diagnostic_kind_unopened_delimiter_display()
+{
+	let kind = DiagnosticKind::UnopenedDelimiter { closer: ')' };
+	assert_eq!(format!("{}", kind), "unexpected `)`");
+	let kind = DiagnosticKind::UnopenedDelimiter { closer: ']' };
+	assert_eq!(format!("{}", kind), "unexpected `]`");
+	let kind = DiagnosticKind::UnopenedDelimiter { closer: '}' };
+	assert_eq!(format!("{}", kind), "unexpected `}`");
+}
+
+/// The [`DiagnosticKind::UnexpectedEof`] variant's
+/// [`Display`](std::fmt::Display) renders a fixed human-readable phrase. This
+/// variant is reachable only from the catch-all in `analyze_error`, a branch
+/// the current pattern set almost never routes to; the direct test guards the
+/// `Display` impl regardless.
+#[test]
+fn test_diagnostic_kind_unexpected_eof_display()
+{
+	let kind = DiagnosticKind::UnexpectedEof;
+	assert_eq!(format!("{}", kind), "unexpected end of input");
+}
+
+/// When the catch-all emits an
+/// [`UnexpectedToken`](DiagnosticKind::UnexpectedToken) diagnostic, the token
+/// span ends at the first whitespace byte after the error position — exercising
+/// the `pos + i` arithmetic on the `.find(is_whitespace)` success path that
+/// other test cases (whose trailing text contains no interior whitespace) don't
+/// reach.
+#[test]
+fn test_diagnose_unexpected_token_stops_at_whitespace()
+{
+	let result = diagnostics::diagnose("@\t");
+	assert_eq!(result.diagnostics.len(), 1);
+	let diag = &result.diagnostics[0];
+	assert!(matches!(diag.kind, DiagnosticKind::UnexpectedToken));
+	// Span ends at byte offset 1, where the tab begins — not at source.len().
+	assert_eq!((diag.span.start, diag.span.end), (0, 1));
+	assert_eq!(diag.message, "unexpected `@`");
+	assert!(diag.suggestions.is_empty());
 }
 
 /// Test that the diagnostics pipeline is fast enough for keystroke-speed

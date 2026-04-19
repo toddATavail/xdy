@@ -85,13 +85,17 @@ pub fn compile_unoptimized(
 ///
 /// # Pipeline
 ///
-/// This function drives the full compilation pipeline:
+/// This function drives the full compilation pipeline — the happy path.
+/// Syntactic and semantic errors produce typed [`CompilationError`] values;
+/// for the rich-diagnostic sad path used by editor integrations, see
+/// [`diagnose`](crate::diagnostics::diagnose).
 ///
 /// ```mermaid
 /// graph LR
 ///     A["Source Code<br/><code>&amp;str</code>"] --> B["Parser<br/><code>Parser::parse</code>"]
 ///     B --> C["AST<br/><code>ast::Function</code>"]
-///     C --> D["Compiler<br/><code>Compiler::compile</code>"]
+///     C --> V["Validator<br/><code>Validator::validate</code>"]
+///     V --> D["Compiler<br/><code>Compiler::compile</code>"]
 ///     D --> E["IR<br/><code>Function</code>"]
 ///     E --> F["Optimizer<br/><code>StandardOptimizer</code>"]
 ///     F --> G["Optimized IR<br/><code>Function</code>"]

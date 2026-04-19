@@ -6,6 +6,8 @@ This document covers the internal architecture for contributors and curious powe
 
 * [Architecture](#architecture)
 	* [Compilation pipeline](#compilation-pipeline)
+	* [Source spans](#source-spans)
+	* [Semantic validation](#semantic-validation)
 	* [Intermediate representation](#intermediate-representation)
 	* [Evaluator](#evaluator)
 	* [Optimizer](#optimizer)
@@ -25,13 +27,14 @@ This document covers the internal architecture for contributors and curious powe
 
 ### Compilation pipeline
 
-Source code flows through a six-stage pipeline. The `compile()` convenience function drives the full pipeline; `compile_unoptimized()` skips the optimizer.
+Source code flows through a four-stage happy path: parse, validate, compile, optimize. The `compile()` convenience function drives the full pipeline; `compile_unoptimized()` skips the optimizer; the sad path (syntactic and semantic errors, rich diagnostics) is described in [Diagnostics](#diagnostics).
 
 ```mermaid
 graph LR
     A["Source Code<br/><code>&str</code>"] --> B["Parser<br/><code>Parser::parse</code>"]
     B --> C["AST<br/><code>ast::Function</code>"]
-    C --> D["Compiler<br/><code>Compiler::compile</code>"]
+    C --> V["Validator<br/><code>Validator::validate</code>"]
+    V --> D["Compiler<br/><code>Compiler::compile</code>"]
     D --> E["Unoptimized IR<br/><code>Function</code>"]
     E --> F["Optimizer<br/><code>StandardOptimizer</code>"]
     F --> G["Optimized IR<br/><code>Function</code>"]
@@ -39,11 +42,31 @@ graph LR
     style G fill:#9f9,stroke:#333,color:#000
 ```
 
-**Parser.** A [nom](https://docs.rs/nom)-based combinator parser recognizes the xDy grammar and produces an abstract syntax tree (`ast::Function`). The grammar supports operator precedence via recursive descent: `add_sub` → `mul_div_mod` → `unary` → `exponent` → `primary`. See `parser::combinators` for the full set of production rules; the Rustdoc includes a railroad diagram generated from the EBNF grammar.
+**Parser.** A [nom](https://docs.rs/nom)-based combinator parser recognizes the xDy grammar and produces an abstract syntax tree (`ast::Function`). The grammar supports operator precedence via recursive descent: `add_sub` → `mul_div_mod` → `unary` → `exponent` → `primary`. See `parser::combinators` for the full set of production rules; the Rustdoc includes a railroad diagram generated from the EBNF grammar. Every AST node carries a `SourceSpan` referencing its byte range in the original input — see [Source spans](#source-spans) below.
 
-**Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout.
+**Validator.** The `Validator` performs semantic checks on the parsed AST before code generation. Currently it catches duplicate formal parameter names; the design admits further checks (use-before-bind, rebinding, etc.) as downstream language features demand them. See [Semantic validation](#semantic-validation).
+
+**Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout. Keeping validation as a separate pass lets the compiler's `ASTVisitor::Error` be `Infallible`.
 
 **Optimizer.** The `StandardOptimizer` applies five transformation passes in a fixed-point loop, then a final register coalescing pass. See [Optimizer](#optimizer) below.
+
+### Source spans
+
+Every AST node carries a `SourceSpan { start, end }` byte range referencing the original source text. The `Spanned` trait provides uniform access to these spans (`span()`) and an `untethered()` operation that zeroes every span in a value recursively, enabling position-independent structural comparison for tests and round-trip fidelity checks.
+
+Spans flow end-to-end: parser combinators compute them from `nom_locate::LocatedSpan` positions; semantic errors (`CompilationError::DuplicateParameter`) carry the spans of both the first and duplicate occurrences; diagnostics (`Diagnostic`, `RelatedLabel`) surface them as byte ranges in the original source. This layer is a prerequisite for the planned `xdy!` procedural macro (which translates compiler errors to `compile_error!` at token-precise spans) and for editor integrations that want to underline or gutter-highlight errors.
+
+### Semantic validation
+
+The `Validator` pass sits between parsing and code generation and rejects ASTs that are syntactically well-formed but semantically invalid. It implements `ASTVisitor` so callers can drive it directly (e.g., to interleave it with other analyses), but `Validator::validate()` is the ordinary entry point.
+
+The current check:
+
+| Error | Example | Payload |
+|-------|---------|---------|
+| `DuplicateParameter` | `x, x: {x} + 1` | both occurrence spans, duplicated name |
+
+Additional checks will be added here as language features land.
 
 ### Intermediate representation
 
@@ -142,14 +165,29 @@ Two builders are provided: `SerialHistogramBuilder` and `ParallelHistogramBuilde
 
 ### Diagnostics
 
-The `diagnostics` module provides structured error reporting with a fix-and-retry strategy. When parsing fails, the diagnostics engine:
+The `diagnostics` module is the sad-path counterpart to the [compilation pipeline](#compilation-pipeline): it produces rich `Diagnostic` values — each carrying an error kind, a source span, a human-readable message, optional secondary `RelatedLabel`s, and one or more `Suggestion`s (complete corrected source strings, with placeholder regions for ambiguous fixes) — designed to power IDE-style error reporting on every keystroke. It runs as two sequential passes: a **syntactic fix-and-retry loop** over parse errors, followed by a **semantic validator pass** that runs only on clean parses.
 
-1. Analyzes the parse error to identify the failure kind (unclosed delimiter, missing operand, etc.).
-2. Applies a minimal fix to the source text.
-3. Re-parses the fixed source to discover additional errors.
-4. Maps error spans back to the original source using an offset map.
+```mermaid
+graph TD
+    S["Source Code<br/><code>&str</code>"] --> P["Parser::parse"]
+    P -->|OK| V["Validator::validate"]
+    P -->|Err| A["Analyze parse error"]
+    A --> F["Apply fix to source"]
+    F --> OM["OffsetMap records edit"]
+    OM --> P
+    V -->|OK| DONE["DiagnoseResult<br/>diagnostics + corrected_source"]
+    V -->|Err| SEM["Build semantic Diagnostic"]
+    SEM --> DONE
+    A -.unfixable.-> DONE
+    style S fill:#f9f,stroke:#333,color:#000
+    style DONE fill:#9f9,stroke:#333,color:#000
+    style P fill:#ffd,stroke:#333,color:#000
+    style V fill:#ffd,stroke:#333,color:#000
+```
 
-This produces rich `Diagnostic` values with error kinds, source spans, messages, and suggested fixes — designed to power IDE-style error reporting on every keystroke.
+**Syntactic pass.** Each fix inserts, removes, or wraps characters in the source string, making progress toward a clean parse. An `OffsetMap` tracks cumulative adjustments so that diagnostic spans are mapped back to positions in the original source. The loop terminates when parsing succeeds or when an unfixable error is encountered.
+
+**Semantic pass.** After the loop, the doctor runs the `Validator` on the parsed AST — but **only when the original source parsed cleanly**, that is, when no fixes were applied. Semantic diagnostics point at spans the user actually typed; running the validator on a fix-synthesized source would attach diagnostics to characters the user never wrote, which is confusing, so semantic checks wait for a syntactically valid source.
 
 ## Instruction set reference
 

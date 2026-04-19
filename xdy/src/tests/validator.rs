@@ -240,3 +240,155 @@ fn validator_can_be_driven_through_the_trait()
 		Err(CompilationError::DuplicateParameter { name: "x", .. })
 	));
 }
+
+/// Every non-[`visit_function`](crate::ast::ASTVisitor::visit_function) arm of
+/// the [`Validator`]'s [`ASTVisitor`] implementation is a no-op that returns
+/// `Ok(())`. This test walks an AST that touches every node type the visitor
+/// can encounter, driving each arm at least once, so that any future rewrite
+/// that silently turns a `Ok(())` arm into something else is caught.
+#[test]
+fn validator_visitor_arms_are_no_ops()
+{
+	use crate::ast::{
+		ASTVisitor, ArithmeticExpression, DiceExpression, Expression
+	};
+
+	// Build an AST that exercises every node type the visitor can encounter:
+	// Group, Constant, Variable, Range, StandardDice, CustomDice, DropLowest,
+	// DropHighest, Add, Sub, Mul, Div, Mod, Exp, and Neg. The enclosing
+	// function is semantically clean, so `visit_function` returns `Ok(())`.
+	let ast = Parser::parse(
+		"x: [1:{x}] + (1D6 - 1D[1,2,3]) * 2D6 drop lowest / \
+		 3D8 drop highest + -1 ^ 2 % 1"
+	)
+	.unwrap();
+	let mut validator = Validator::new();
+
+	assert_eq!(validator.visit_function(&ast), Ok(()));
+
+	// Additionally drive every non-function arm directly by walking the AST.
+	// The walkers recurse into every child so that every reachable node is
+	// handed to its corresponding visitor method at least once.
+	fn drive_expression<'src>(
+		validator: &mut Validator,
+		expr: &'src Expression<'src>
+	)
+	{
+		match expr
+		{
+			Expression::Group(g) =>
+			{
+				assert_eq!(validator.visit_group(g), Ok(()));
+				drive_expression(validator, &g.expression);
+			},
+			Expression::Constant(c) =>
+			{
+				assert_eq!(validator.visit_constant(c), Ok(()));
+			},
+			Expression::Variable(v) =>
+			{
+				assert_eq!(validator.visit_variable(v), Ok(()));
+			},
+			Expression::Range(r) =>
+			{
+				assert_eq!(validator.visit_range(r), Ok(()));
+				drive_expression(validator, &r.start);
+				drive_expression(validator, &r.end);
+			},
+			Expression::Dice(d) => drive_dice(validator, d),
+			Expression::Arithmetic(a) => drive_arithmetic(validator, a)
+		}
+	}
+
+	fn drive_dice<'src>(
+		validator: &mut Validator,
+		dice: &'src DiceExpression<'src>
+	)
+	{
+		match dice
+		{
+			DiceExpression::Standard(d) =>
+			{
+				assert_eq!(validator.visit_standard_dice(d), Ok(()));
+				drive_expression(validator, &d.count);
+				drive_expression(validator, &d.faces);
+			},
+			DiceExpression::Custom(d) =>
+			{
+				assert_eq!(validator.visit_custom_dice(d), Ok(()));
+				drive_expression(validator, &d.count);
+			},
+			DiceExpression::DropLowest(d) =>
+			{
+				assert_eq!(validator.visit_drop_lowest(d), Ok(()));
+				drive_dice(validator, &d.dice);
+				if let Some(drop) = &d.drop
+				{
+					drive_expression(validator, drop);
+				}
+			},
+			DiceExpression::DropHighest(d) =>
+			{
+				assert_eq!(validator.visit_drop_highest(d), Ok(()));
+				drive_dice(validator, &d.dice);
+				if let Some(drop) = &d.drop
+				{
+					drive_expression(validator, drop);
+				}
+			}
+		}
+	}
+
+	fn drive_arithmetic<'src>(
+		validator: &mut Validator,
+		arith: &'src ArithmeticExpression<'src>
+	)
+	{
+		match arith
+		{
+			ArithmeticExpression::Add(a) =>
+			{
+				assert_eq!(validator.visit_add(a), Ok(()));
+				drive_expression(validator, &a.left);
+				drive_expression(validator, &a.right);
+			},
+			ArithmeticExpression::Sub(s) =>
+			{
+				assert_eq!(validator.visit_sub(s), Ok(()));
+				drive_expression(validator, &s.left);
+				drive_expression(validator, &s.right);
+			},
+			ArithmeticExpression::Mul(m) =>
+			{
+				assert_eq!(validator.visit_mul(m), Ok(()));
+				drive_expression(validator, &m.left);
+				drive_expression(validator, &m.right);
+			},
+			ArithmeticExpression::Div(d) =>
+			{
+				assert_eq!(validator.visit_div(d), Ok(()));
+				drive_expression(validator, &d.left);
+				drive_expression(validator, &d.right);
+			},
+			ArithmeticExpression::Mod(m) =>
+			{
+				assert_eq!(validator.visit_mod(m), Ok(()));
+				drive_expression(validator, &m.left);
+				drive_expression(validator, &m.right);
+			},
+			ArithmeticExpression::Exp(e) =>
+			{
+				assert_eq!(validator.visit_exp(e), Ok(()));
+				drive_expression(validator, &e.left);
+				drive_expression(validator, &e.right);
+			},
+			ArithmeticExpression::Neg(n) =>
+			{
+				assert_eq!(validator.visit_neg(n), Ok(()));
+				drive_expression(validator, &n.operand);
+			}
+		}
+	}
+
+	drive_expression(&mut validator, &ast.body);
+}
