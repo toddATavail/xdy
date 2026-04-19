@@ -271,3 +271,67 @@ span: 1..2
 message: expected face count after `D`
 suggestion: {a}D6
 placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+
+x, x: {x}
+=
+kind: DuplicateParameter
+span: 3..4
+message: parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
+related: 0..1 "first declared here"
+suggestion: x, y: {x}
+
+a, b, b: {a}
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 3..4 "first declared here"
+suggestion: a, b, c: {a}
+
+a, b, b, c: {a}
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 3..4 "first declared here"
+suggestion: a, b, d, c: {a}
+
+abc, abc: {abc}
+=
+kind: DuplicateParameter
+span: 5..8
+message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 0..3 "first declared here"
+suggestion: abc, new0: {abc}
+
+A, A: 1
+=
+kind: DuplicateParameter
+span: 3..4
+message: parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+related: 0..1 "first declared here"
+suggestion: A, B: 1
+
+a, z, z: {a}
+=
+kind: DuplicateParameter
+span: 6..7
+message: parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
+related: 3..4 "first declared here"
+suggestion: a, z, b: {a}
+
+abc, new0, abc: {abc}
+=
+kind: DuplicateParameter
+span: 11..14
+message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 0..3 "first declared here"
+suggestion: abc, new0, new1: {abc}
+
+abc, new0, new1, abc: {abc}
+=
+kind: DuplicateParameter
+span: 17..20
+message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 0..3 "first declared here"
+suggestion: abc, new0, new1, new2: {abc}

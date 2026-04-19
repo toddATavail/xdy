@@ -38,7 +38,8 @@ fn kind_name(kind: &DiagnosticKind) -> &'static str
 		DiagnosticKind::TrailingInput => "TrailingInput",
 		DiagnosticKind::EmptyExpression => "EmptyExpression",
 		DiagnosticKind::UnexpectedToken => "UnexpectedToken",
-		DiagnosticKind::UnexpectedEof => "UnexpectedEof"
+		DiagnosticKind::UnexpectedEof => "UnexpectedEof",
+		DiagnosticKind::DuplicateParameter { .. } => "DuplicateParameter"
 	}
 }
 
@@ -118,6 +119,44 @@ fn test_error_diagnostics()
 				case.source,
 				di + 1
 			);
+
+			// Check related labels.
+			assert_eq!(
+				actual.related.len(),
+				expected.related.len(),
+				"case {}: {:?} — diagnostic {} related count mismatch: \
+				 expected {}, got {}",
+				index + 1,
+				case.source,
+				di + 1,
+				expected.related.len(),
+				actual.related.len()
+			);
+			for (ri, (actual_rel, expected_rel)) in actual
+				.related
+				.iter()
+				.zip(expected.related.iter())
+				.enumerate()
+			{
+				assert_eq!(
+					(actual_rel.span.start, actual_rel.span.end),
+					expected_rel.span,
+					"case {}: {:?} — diagnostic {} related {} span mismatch",
+					index + 1,
+					case.source,
+					di + 1,
+					ri + 1
+				);
+				assert_eq!(
+					actual_rel.message,
+					expected_rel.message,
+					"case {}: {:?} — diagnostic {} related {} message mismatch",
+					index + 1,
+					case.source,
+					di + 1,
+					ri + 1
+				);
+			}
 
 			// Check suggestions.
 			assert_eq!(
@@ -297,6 +336,40 @@ fn test_valid_programs_produce_no_diagnostics()
 			source
 		);
 	}
+}
+
+/// Test that the semantic validator is intentionally bypassed when the
+/// fix-and-retry loop had to rewrite the source to obtain a clean parse.
+/// Attaching semantic diagnostics (`DuplicateParameter`, etc.) to spans in a
+/// fix-synthesized source would point at characters the user never typed, so
+/// `diagnose()` runs the validator only when the original parses cleanly.
+#[test]
+fn test_validator_skipped_after_parse_fix()
+{
+	// Source has a parser error (`{x` is missing `}`) and a would-be semantic
+	// error (`x, x` duplicates a parameter). The fix-and-retry loop synthesizes
+	// `x, x: {x}`; we must not then run the validator on that synthesized
+	// source and report a duplicate parameter, because the second `x` the user
+	// typed is a statement the validator has not been asked to corroborate yet.
+	let result = diagnostics::diagnose("x, x: {x");
+	assert_eq!(
+		result.diagnostics.len(),
+		1,
+		"expected only the parser diagnostic, got {:?}",
+		result
+			.diagnostics
+			.iter()
+			.map(|d| format!("{}", d))
+			.collect::<Vec<_>>()
+	);
+	assert!(
+		!matches!(
+			result.diagnostics[0].kind,
+			DiagnosticKind::DuplicateParameter { .. }
+		),
+		"validator should not run after the fix-and-retry loop; got {:?}",
+		result.diagnostics[0].kind
+	);
 }
 
 /// Test that the diagnostics pipeline is fast enough for keystroke-speed

@@ -1,30 +1,35 @@
 //! # Diagnostics
 //!
-//! Herein is the diagnostic layer for the `xDy` parser. The [`diagnose`]
-//! function analyzes a source string by repeatedly parsing, detecting errors,
-//! applying fixes, and re-parsing until all errors are collected. This produces
-//! structured [`Diagnostic`]s with specific error kinds, source spans for
-//! highlighting, human-readable messages, and suggested fixes — including
-//! complete corrected source strings for unambiguous errors and templates with
-//! highlighted placeholder regions for ambiguous ones.
+//! Herein is the diagnostic layer for the `xDy` parser and
+//! [validator](Validator). The [`diagnose`] function analyzes a source string
+//! by repeatedly parsing, detecting errors,//! applying fixes, and re-parsing
+//! until all syntactic errors are collected; it then runs the semantic
+//! validator on the final AST whenever the original source parsed cleanly. This
+//! produces structured [`Diagnostic`]s with specific error kinds, source spans
+//! highlighting, human-readable messages, secondary [related labels](
+//! RelatedLabel) for cross-referenced positions, and suggested fixes —
+//! including complete corrected source strings for unambiguous errors and
+//! templates with highlighted placeholder regions for ambiguous ones.
 //!
 //! # Architecture
 //!
-//! The diagnostic layer is a consumer of the parser's [`ParseError`], not part
-//! of the parser itself. The [`compile`](crate::compile) and
+//! The diagnostic layer is a consumer of the parser's [`ParseError`] and the
+//! validator's [`CompilationError`], not part of either. The
+//! [`compile`](crate::compile) and
 //! [`compile_unoptimized`](crate::compile_unoptimized) functions continue to
-//! deal in [`ParseError`]; diagnostics are a separate concern for clients that
-//! want richer error information (e.g., for IDE integration, syntax
-//! highlighting on every keystroke, or autocompletion).
+//! deal in the typed errors directly; diagnostics are a separate concern for
+//! clients that want richer error information (e.g., for IDE integration,
+//! syntax highlighting on every keystroke, or autocompletion).
 //!
 //! # Error Recovery Strategy
 //!
-//! The doctor uses a **fix-and-retry loop**:
+//! The doctor runs two sequential passes. Syntactic errors go through a
+//! **fix-and-retry loop**:
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
 //! │ Parser::parse(current_source)                        │
-//! │   ├─ success → return diagnostics + corrected_source │
+//! │   ├─ success → proceed to semantic pass              │
 //! │   └─ error → analyze → apply fix → loop              │
 //! └──────────────────────────────────────────────────────┘
 //! ```
@@ -34,10 +39,25 @@
 //! adjustments so that diagnostic spans are mapped back to positions in the
 //! original source. The loop terminates when parsing succeeds or when an
 //! unfixable error is encountered.
+//!
+//! After the loop, the doctor runs the [semantic validator](Validator) on the
+//! parsed AST, but **only when the original source parsed cleanly** — that is,
+//! when no fixes were applied. Semantic diagnostics (e.g., duplicate
+//! parameters) point at spans the user actually typed; running the validator on
+//! a fix-synthesized source would attach diagnostics to characters the user
+//! never wrote, so semantic checks wait for a syntactically valid source.
 
-use std::fmt::{self, Display, Formatter};
+use std::{
+	collections::HashSet,
+	fmt::{self, Display, Formatter}
+};
 
-use crate::{Parser, parser::ParseError, span::SourceSpan};
+use crate::{
+	CompilationError, Parser, Validator,
+	ast::{Function, Parameter},
+	parser::ParseError,
+	span::SourceSpan
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                   Types.                                   //
@@ -126,7 +146,22 @@ pub enum DiagnosticKind
 	UnexpectedToken,
 
 	/// The input ended unexpectedly.
-	UnexpectedEof
+	UnexpectedEof,
+
+	/// A formal parameter name was declared more than once. Unlike the kinds
+	/// above — which are produced from [`ParseError`] during the fix-and-retry
+	/// loop — this kind is produced by the [`Validator`] semantic pass after a
+	/// clean parse. The diagnostic's primary [`span`](Diagnostic::span) points
+	/// at the duplicate occurrence; the [`related`](Diagnostic::related) list
+	/// carries the span of the first occurrence.
+	///
+	/// # Examples
+	/// `x, x: {x}`, `a, b, b: {a}`
+	DuplicateParameter
+	{
+		/// The duplicated parameter name.
+		name: String
+	}
 }
 
 impl Display for DiagnosticKind
@@ -164,7 +199,11 @@ impl Display for DiagnosticKind
 			Self::TrailingInput => write!(f, "trailing input"),
 			Self::EmptyExpression => write!(f, "empty expression"),
 			Self::UnexpectedToken => write!(f, "unexpected token"),
-			Self::UnexpectedEof => write!(f, "unexpected end of input")
+			Self::UnexpectedEof => write!(f, "unexpected end of input"),
+			Self::DuplicateParameter { name } =>
+			{
+				write!(f, "duplicate parameter `{}`", name)
+			}
 		}
 	}
 }
@@ -187,8 +226,33 @@ pub struct Diagnostic
 	/// A human-readable error message.
 	pub message: String,
 
+	/// Secondary spans that enrich the diagnostic with related context, such
+	/// as the prior occurrence of a duplicate name. Each entry is a
+	/// [`RelatedLabel`] whose span is in the **original** source coordinates.
+	/// Empty for most parse-error diagnostics; populated by semantic
+	/// diagnostics that naturally reference multiple source positions.
+	pub related: Vec<RelatedLabel>,
+
 	/// Suggested fixes, from most to least specific.
 	pub suggestions: Vec<Suggestion>
+}
+
+/// A secondary source label attached to a [`Diagnostic`]. Used to point at
+/// related positions in the source — for example, the prior declaration of a
+/// duplicated parameter — without expanding the primary span of the
+/// diagnostic.
+///
+/// # Notes
+/// The `span` refers to byte offsets in the **original** source string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedLabel
+{
+	/// The byte range of the related region in the original source.
+	pub span: SourceSpan,
+
+	/// A short human-readable explanation of the relationship, such as
+	/// `"first declared here"`.
+	pub message: String
 }
 
 impl Display for Diagnostic
@@ -383,6 +447,7 @@ fn analyze_error(
 					end: orig_bracket + 1
 				},
 				message: "expected `]` to close `[`".into(),
+				related: vec![],
 				suggestions: vec![Suggestion {
 					description: "insert range end \
 								and `]`"
@@ -463,6 +528,7 @@ fn analyze_error(
 				"unexpected `{}` after expression",
 				&source[pos..].split_whitespace().next().unwrap_or("")
 			),
+			related: vec![],
 			suggestions: vec![Suggestion {
 				description: "remove trailing input".into(),
 				corrected_source: source[..pos].trim_end().to_string(),
@@ -482,6 +548,7 @@ fn analyze_error(
 				end: orig_pos
 			},
 			message: "unexpected end of input".into(),
+			related: vec![],
 			suggestions: vec![]
 		}
 	}
@@ -498,6 +565,7 @@ fn analyze_error(
 				end: orig_end
 			},
 			message: format!("unexpected `{}`", &source[pos..token_end]),
+			related: vec![],
 			suggestions: vec![]
 		}
 	}
@@ -651,6 +719,7 @@ fn detect_bare_identifier_at_pos(
 			 variables must be wrapped in `{{}}`",
 			bare_name
 		),
+		related: vec![],
 		suggestions
 	})
 }
@@ -799,6 +868,7 @@ fn detect_incomplete_parameter(
 			"expected `:` and expression body after parameter{}",
 			if params.len() > 1 { "s" } else { "" }
 		),
+		related: vec![],
 		suggestions
 	})
 }
@@ -886,6 +956,7 @@ fn detect_bare_identifier(
 							 variables must be wrapped in `{{}}`",
 							name
 						),
+						related: vec![],
 						suggestions: vec![
 							Suggestion {
 								description: format!(
@@ -977,6 +1048,7 @@ fn make_unclosed_delimiter(
 			end: orig_opener + opener.len_utf8()
 		},
 		message: format!("expected `{}` to close `{}`", closer, opener),
+		related: vec![],
 		suggestions: vec![Suggestion {
 			description: format!("insert `{}`", closer),
 			corrected_source: corrected,
@@ -1041,6 +1113,7 @@ fn make_missing_right_operand(
 			end: orig_error_pos
 		},
 		message: format!("expected operand after `{}`", operator),
+		related: vec![],
 		suggestions: vec![
 			Suggestion {
 				description: format!("insert operand after `{}`", operator),
@@ -1095,6 +1168,7 @@ fn make_missing_left_operand(
 			end: orig_pos + operator.len_utf8()
 		},
 		message: format!("expected operand before `{}`", operator),
+		related: vec![],
 		suggestions: vec![
 			Suggestion {
 				description: format!("insert operand before `{}`", operator),
@@ -1241,6 +1315,7 @@ fn make_incomplete_delimited(
 			end: orig_opener + opener.len_utf8()
 		},
 		message: format!("expected `{}` to close `{}`", closer, opener),
+		related: vec![],
 		suggestions: vec![Suggestion {
 			description: format!("insert expression and `{}`", closer),
 			corrected_source: corrected,
@@ -1290,6 +1365,7 @@ fn make_missing_dice_faces(
 			"expected face count after `{}`",
 			&source[d_pos..d_pos + 1]
 		),
+		related: vec![],
 		suggestions: vec![Suggestion {
 			description: "insert face count".into(),
 			corrected_source: corrected,
@@ -1345,6 +1421,7 @@ fn make_incomplete_drop(
 			end: orig_drop_end
 		},
 		message: "expected `lowest` or `highest` after `drop`".into(),
+		related: vec![],
 		suggestions: vec![Suggestion {
 			description: "insert drop direction".into(),
 			corrected_source: corrected,
@@ -1376,6 +1453,7 @@ fn make_empty_expression(source: &str) -> Diagnostic
 		kind: DiagnosticKind::EmptyExpression,
 		span: SourceSpan { start: 0, end: 0 },
 		message: "expected expression".into(),
+		related: vec![],
 		suggestions: vec![Suggestion {
 			description: "insert expression".into(),
 			corrected_source: "0".into(),
@@ -1386,6 +1464,228 @@ fn make_empty_expression(source: &str) -> Diagnostic
 			}]
 		}]
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                          Semantic error analysis.                          //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Run the [validator](Validator) over a parsed [function](Function) and
+/// translate any [semantic error](CompilationError) into a [`Diagnostic`].
+///
+/// Invoked from [`diagnose`] only after the original source parses cleanly —
+/// that is, when no fix-and-retry edits have been applied — so that semantic
+/// diagnostics reference the user's actual source text rather than a
+/// fix-synthesized variant. Returns an empty vector when the validator
+/// accepts the function, or a single-element vector when it rejects it.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text (same lifetime as the AST).
+/// - `ast`: The parsed function to validate.
+///
+/// # Returns
+/// The semantic diagnostics produced by the validator, in source order.
+fn run_validator<'src>(
+	source: &'src str,
+	ast: &Function<'src>
+) -> Vec<Diagnostic>
+{
+	match Validator::validate(ast)
+	{
+		Ok(()) => Vec::new(),
+		Err(error) => vec![analyze_semantic_error(source, ast, error)]
+	}
+}
+
+/// Translate a [semantic error](CompilationError) into a [`Diagnostic`].
+///
+/// Exhaustively matches the variants [`Validator::validate`] is permitted to
+/// produce today. The `ParseError` and `OptimizationFailed` arms are statically
+/// unreachable — the parser has already succeeded by the time this helper runs,
+/// and the optimizer is not invoked from the diagnostic pipeline — but listing
+/// them explicitly (rather than using a wildcard) forces a compile-time
+/// consideration whenever a new [`CompilationError`] variant is introduced.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `ast`: The parsed function that produced the error.
+/// - `error`: The semantic error returned by [`Validator::validate`].
+///
+/// # Returns
+/// A [`Diagnostic`] describing the semantic error, with a rename suggestion
+/// whose corrected source parses and validates cleanly.
+fn analyze_semantic_error<'src>(
+	source: &'src str,
+	ast: &Function<'src>,
+	error: CompilationError<'src>
+) -> Diagnostic
+{
+	match error
+	{
+		CompilationError::DuplicateParameter {
+			name,
+			first,
+			duplicate
+		} => make_duplicate_parameter(source, ast, name, first, duplicate),
+		CompilationError::ParseError(_)
+		| CompilationError::OptimizationFailed =>
+		{
+			unreachable!(
+				"Validator::validate produces only DuplicateParameter; \
+				 ParseError is produced by the parser and OptimizationFailed \
+				 by the optimizer, neither of which is reached from \
+				 diagnose() at this point"
+			)
+		}
+	}
+}
+
+/// Build a [`DuplicateParameter`](DiagnosticKind::DuplicateParameter)
+/// diagnostic with a rename suggestion whose corrected source is guaranteed to
+/// parse and validate cleanly.
+///
+/// The primary [`span`](Diagnostic::span) points at the duplicate
+/// occurrence; a single [`RelatedLabel`] on [`related`](Diagnostic::related)
+/// points at the first occurrence. The suggestion splices a fresh name
+/// produced by [`suggest_rename`] into the duplicate span — references in the
+/// body are deliberately left alone because there is no safe way to pick
+/// which one of them (if any) was intended to refer to a different binding.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `ast`: The parsed function (used to enumerate in-use parameter names).
+/// - `name`: The duplicated parameter name, borrowed from `source`.
+/// - `first`: The span of the first occurrence of `name`.
+/// - `duplicate`: The span of the duplicate occurrence that triggered the
+///   error.
+///
+/// # Returns
+/// A fully-formed [`Diagnostic`] with one rename [`Suggestion`].
+fn make_duplicate_parameter<'src>(
+	source: &'src str,
+	ast: &Function<'src>,
+	name: &'src str,
+	first: SourceSpan,
+	duplicate: SourceSpan
+) -> Diagnostic
+{
+	let parameters = ast.parameters.as_deref().unwrap_or(&[]);
+	let fresh = suggest_rename(name, parameters);
+	let mut corrected =
+		String::with_capacity(source.len() + fresh.len() - name.len());
+	corrected.push_str(&source[..duplicate.start]);
+	corrected.push_str(&fresh);
+	corrected.push_str(&source[duplicate.end..]);
+	Diagnostic {
+		kind: DiagnosticKind::DuplicateParameter {
+			name: name.to_string()
+		},
+		span: duplicate,
+		message: format!(
+			"parameter `{}` is declared more than once; review references \
+			 to `{}` in the body — one may have meant a different parameter \
+			 or an external variable",
+			name, name
+		),
+		related: vec![RelatedLabel {
+			span: first,
+			message: "first declared here".into()
+		}],
+		suggestions: vec![Suggestion {
+			description: format!("rename duplicate parameter to `{}`", fresh),
+			corrected_source: corrected,
+			placeholders: vec![]
+		}]
+	}
+}
+
+/// Suggest a fresh parameter name that does not collide with any existing name
+/// in `parameters`.
+///
+/// When the duplicate is a single ASCII letter — the common case, given dice
+/// expressions tend to use terse names like `x`, `y`, `a`, `b` — the
+/// replacement is the first unused letter encountered by **bumping from the
+/// highest attested same-case single-letter parameter** and wrapping through
+/// the alphabet. So `x, x` becomes `x, y` (bump `x` → `y`), `a, b, b, c`
+/// becomes `a, b, d, c` (bump highest `c` → `d`), `a, x, x` becomes `a, x, y`
+/// (bump highest `x` → `y`), and `a, z, z` becomes `a, z, b` (bump `z` wraps
+/// past unused `a` which is taken, lands on `b`). Continuing from the user's
+/// apparent "trajectory" is usually more natural than filling the earliest
+/// alphabetic gap, which would produce `a, x, b` in the third example.
+///
+/// When the duplicate is a multi-character name, or all 26 letters in the
+/// matching case are already in use, the replacement falls through to a `newN`
+/// form (`new0`, `new1`, …), where `N` is the first non-negative integer for
+/// which the resulting name is unused. The `newN` loop likewise skips over
+/// names the user has already adopted, so `abc, new0, abc` becomes `abc, new0,
+/// new1` and `abc, new0, new1, abc` becomes `abc, new0, new1, new2`.
+///
+/// # Parameters
+/// - `duplicate`: The duplicated parameter name.
+/// - `parameters`: The function's parameter list, used to determine which names
+///   are already in use.
+///
+/// # Returns
+/// A fresh parameter name that does not appear in `parameters`.
+fn suggest_rename(duplicate: &str, parameters: &[Parameter<'_>]) -> String
+{
+	let used: HashSet<&str> = parameters.iter().map(|p| p.name).collect();
+	let mut chars = duplicate.chars();
+	if let (Some(c), None) = (chars.next(), chars.next())
+		&& c.is_ascii_alphabetic()
+	{
+		let start = if c.is_ascii_uppercase() { b'A' } else { b'a' };
+		// The highest attested same-case single-letter parameter. The duplicate
+		// itself is always attested, so `highest` is at least `c`.
+		let highest = parameters
+			.iter()
+			.filter_map(|p| {
+				let mut cs = p.name.chars();
+				match (cs.next(), cs.next())
+				{
+					(Some(ch), None)
+						if ch.is_ascii_alphabetic()
+							&& ch.is_ascii_uppercase()
+								== c.is_ascii_uppercase() =>
+					{
+						Some(ch as u8)
+					},
+					_ => None
+				}
+			})
+			.max()
+			.unwrap_or(c as u8);
+		// Iterate the 25 other letters by bumping forward from `highest` and
+		// wrapping through the alphabet. `offset == 26` would loop back to
+		// `highest`, which is attested, so 1..26 is sufficient.
+		for offset in 1u8..26
+		{
+			let code = start + ((highest - start + offset) % 26);
+			let candidate = (code as char).to_string();
+			if !used.contains(candidate.as_str())
+			{
+				return candidate;
+			}
+		}
+	}
+	for i in 0usize..
+	{
+		let candidate = format!("new{}", i);
+		if !used.contains(candidate.as_str())
+		{
+			return candidate;
+		}
+	}
+	unreachable!("cannot exhaust usize worth of `newN` candidates")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1514,11 +1814,16 @@ impl OffsetMap
 /// ```
 pub fn diagnose(source: &str) -> DiagnoseResult
 {
-	// Fast path: if the source parses cleanly, no diagnostics needed.
-	if Parser::parse(source).is_ok()
+	// Fast path: if the source parses cleanly, skip the fix-and-retry loop and
+	// run the semantic pass directly on the AST. Fixing up a syntactically
+	// invalid source first and then reporting a semantic error against the
+	// fix-synthesized text would attach diagnostics to characters the user
+	// never typed, which is confusing — so semantic checks run only on the
+	// unmodified original.
+	if let Ok(ast) = Parser::parse(source)
 	{
 		return DiagnoseResult {
-			diagnostics: vec![],
+			diagnostics: run_validator(source, &ast),
 			corrected_source: Some(source.to_string())
 		};
 	}

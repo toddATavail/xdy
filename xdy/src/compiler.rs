@@ -192,7 +192,7 @@ pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 
 /// An error that may occur during compilation of a dice expression.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source code that was being compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompilationError<'src>
@@ -263,7 +263,7 @@ impl Error for CompilationError<'_> {}
 /// keeps the generation phase zero-copy while producing a self-contained
 /// output.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text from which the AST was parsed.
 ///   Variable names are borrowed from the AST (and transitively from the source
 ///   text) during compilation, then copied into owned strings when assembling

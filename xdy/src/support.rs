@@ -328,6 +328,18 @@ pub struct ExpectedSuggestion
 }
 
 #[cfg(test)]
+/// An expected related label attached to a diagnostic.
+#[derive(Debug)]
+pub struct ExpectedRelated
+{
+	/// The byte range in the original source.
+	pub span: (usize, usize),
+
+	/// The expected message.
+	pub message: &'static str
+}
+
+#[cfg(test)]
 /// An expected diagnostic in an error test case.
 #[derive(Debug)]
 pub struct ExpectedDiagnostic
@@ -340,6 +352,9 @@ pub struct ExpectedDiagnostic
 
 	/// The expected message.
 	pub message: &'static str,
+
+	/// The expected related labels, in the order they should appear.
+	pub related: Vec<ExpectedRelated>,
 
 	/// The expected suggestions.
 	pub suggestions: Vec<ExpectedSuggestion>
@@ -367,15 +382,18 @@ pub struct ErrorTestCase
 /// case ::= source "\n=\n" diagnostics ;
 /// source ::= [^\n]* ;
 /// diagnostics ::= diagnostic ("---\n" diagnostic)* ;
-/// diagnostic ::= kind span message suggestion? ;
+/// diagnostic ::= kind span message related* suggestion* ;
 /// kind ::= "kind:" IDENTIFIER "\n" ;
 /// span ::= "span:" USIZE ".." USIZE "\n" ;
 /// message ::= "message:" [^\n]* "\n" ;
+/// related ::= "related:" USIZE ".." USIZE '"' [^"]* '"' "\n" ;
 /// suggestion ::= "suggestion:" [^\n]* "\n" placeholder* ;
 /// placeholder ::= "placeholder:" USIZE ".." USIZE
 ///     '"' [^"]* '"' "[" kinds "]" "\n" ;
 /// kinds ::= IDENTIFIER ("," IDENTIFIER)* ;
 /// ```
+///
+/// All `related:` lines must appear before the first `suggestion:` line.
 ///
 /// # Parameters
 /// - `source`: The contents of a test case file.
@@ -435,6 +453,7 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 	let mut kind = None;
 	let mut span = None;
 	let mut message = None;
+	let mut related: Vec<ExpectedRelated> = Vec::new();
 	let mut suggestions: Vec<ExpectedSuggestion> = Vec::new();
 	let mut current_suggestion: Option<&'static str> = None;
 	let mut current_placeholders: Vec<ExpectedPlaceholder> = Vec::new();
@@ -457,6 +476,15 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 		else if let Some(rest) = line.strip_prefix("message:")
 		{
 			message = Some(rest.trim());
+		}
+		else if let Some(rest) = line.strip_prefix("related:")
+		{
+			assert!(
+				current_suggestion.is_none(),
+				"`related:` line must appear before any `suggestion:` line: {:?}",
+				line
+			);
+			related.push(parse_expected_related(rest.trim()));
 		}
 		else if let Some(rest) = line.strip_prefix("suggestion:")
 		{
@@ -488,8 +516,41 @@ fn parse_expected_diagnostic(text: &'static str) -> ExpectedDiagnostic
 		kind: kind.expect("missing kind"),
 		span: span.expect("missing span"),
 		message: message.expect("missing message"),
+		related,
 		suggestions
 	}
+}
+
+#[cfg(test)]
+/// Parse a related-label specification from its text representation.
+///
+/// Expected format: `start..end "message"`
+///
+/// # Parameters
+/// - `text`: The related-label text.
+///
+/// # Returns
+/// The parsed expected related label.
+///
+/// # Panics
+/// If the text is malformed.
+fn parse_expected_related(text: &'static str) -> ExpectedRelated
+{
+	// Parse span: "start..end"
+	let span_end = text.find(' ').unwrap();
+	let span_parts: Vec<&str> = text[..span_end].split("..").collect();
+	let span = (
+		span_parts[0].parse::<usize>().unwrap(),
+		span_parts[1].parse::<usize>().unwrap()
+	);
+
+	// Parse message: "..."
+	let rest = text[span_end..].trim();
+	let msg_start = rest.find('"').unwrap() + 1;
+	let msg_end = rest[msg_start..].rfind('"').unwrap() + msg_start;
+	let message = &rest[msg_start..msg_end];
+
+	ExpectedRelated { span, message }
 }
 
 #[cfg(test)]

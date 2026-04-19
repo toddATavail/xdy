@@ -26,7 +26,7 @@ use crate::span::{SourceSpan, Spanned};
 
 /// A function definition.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text from which this AST was parsed.
 ///   Parameter names and variable identifiers are borrowed directly from the
 ///   source.
@@ -65,7 +65,7 @@ impl Display for Function<'_>
 
 /// A formal parameter of a [function](Function).
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text. The parameter name is borrowed
 ///   directly from the source.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -167,7 +167,7 @@ impl Display for Range<'_>
 
 /// An arbitrary expression.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text. Inherited from the enclosing
 ///   [`Function`]; individual expression nodes borrow variable names from the
 ///   source.

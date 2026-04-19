@@ -675,7 +675,7 @@ impl RollingRecordKind<i32>
 /// An error that may occur during the evaluation of a dice expression. Note
 /// that evaluation itself never causes an error, but setup may fail.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'error`: The lifetime of the source text or external variable name that
 ///   caused the error. For [`ParseError`](Self::ParseError), this is the source
 ///   code; for [`UnrecognizedExternal`](Self::UnrecognizedExternal), it is the

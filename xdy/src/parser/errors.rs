@@ -25,7 +25,7 @@ use super::Span;
 /// preserves the rightmost _parse error_ of an [`alt`](nom::branch::alt)
 /// combinator rather than the one produced by the rightmost _alternative_.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed. Error spans
 ///   reference slices of the original input.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

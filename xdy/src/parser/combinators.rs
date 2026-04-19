@@ -51,7 +51,7 @@ use super::{
 
 /// The type of a span of text.
 ///
-/// # Lifetimes
+/// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
 pub type Span<'src> = LocatedSpan<&'src str>;
 
