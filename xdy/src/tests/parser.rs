@@ -15,4 +15,7 @@ mod combinators_primary;
 mod data_driven;
 mod internals;
 mod s_expr_format;
+mod s_expr_multiline;
+mod s_expr_reader_errors;
+mod s_expr_sizing;
 mod spans;

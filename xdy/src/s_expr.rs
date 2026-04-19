@@ -256,13 +256,17 @@ impl SExpressibleOptions
 		self
 	}
 
-	/// Compute the available space for a fresh line.
+	/// Compute the available space for a fresh line. When the indentation
+	/// consumes more than the [`soft_limit`](Self::soft_limit) allows, zero is
+	/// returned — the soft limit is advisory rather than strictly enforced, and
+	/// deep nesting beneath a tight limit is tolerated by emitting slightly
+	/// wider output rather than panicking on underflow.
 	///
 	/// # Returns
-	/// The available space for a fresh line.
+	/// The available space for a fresh line, saturating at zero.
 	pub fn available_space(&self) -> usize
 	{
-		self.soft_limit - self.indent * self.tab_width
+		self.soft_limit.saturating_sub(self.indent * self.tab_width)
 	}
 }
 
@@ -376,6 +380,12 @@ impl SExpressible for &[Parameter<'_>]
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
+		if self.is_empty()
+		{
+			// The empty vector renders as `[]`, mirroring the writer's
+			// fast-path branch.
+			return 2
+		}
 		// The delimiters and interposed spaces consume one character each. Note
 		// that there are one fewer interposed spaces than items, so the
 		// constant term is 1 after accounting for brackets (not 2).
@@ -433,6 +443,12 @@ impl SExpressible for &[i32]
 
 	fn size_s_expr(&self, _options: SExpressibleOptions) -> usize
 	{
+		if self.is_empty()
+		{
+			// The empty vector renders as `[]`, mirroring the writer's
+			// fast-path branch.
+			return 2
+		}
 		// The delimiters and interposed spaces consume one character each. Note
 		// that there are one fewer interposed spaces than items, so the
 		// constant term is 1 after accounting for brackets (not 2).
@@ -538,9 +554,9 @@ where
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		// Account for two parentheses, the keyword, two spaces, and the size of
-		// the subexpressions.
-		5 + self.0.as_ref().len()
+		// Account for two parentheses, the keyword, two interposing spaces,
+		// and the size of the subexpressions.
+		4 + self.0.as_ref().len()
 			+ self.1.size_s_expr(options)
 			+ self.2.size_s_expr(options)
 	}
@@ -628,7 +644,10 @@ impl SExpressible for Function<'_>
 		let keyword = "function";
 		write!(f, "({}", keyword)?;
 		// The remaining space discounts the open parenthesis and the keyword.
-		let remaining_space = remaining_space - 9;
+		// Saturate at zero to tolerate ambitious soft limits without panicking
+		// — the remaining space drives a fits-or-wraps heuristic, not a hard
+		// budget.
+		let remaining_space = remaining_space.saturating_sub(9);
 		// We want to write the parameters on the same line as the keyword if
 		// at all possible.
 		let params = &self.parameters;

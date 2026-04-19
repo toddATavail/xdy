@@ -17,3 +17,4 @@ repl.rs
 
 # AI support.
 CLAUDE.md
+.claude/

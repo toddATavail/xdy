@@ -379,14 +379,12 @@ fn negative_constant(input: Span) -> IResult<Span, Expression, ParseError>
 		)));
 	}
 	let end = remaining.location_offset();
-	// Parse the complete signed constant, including the leading `-`.
+	// Parse the complete signed constant, including the leading `-`. The
+	// `recognize` above only yields `-<digits>`, so the sole parse failure
+	// is `NegOverflow`; no guard is needed to disambiguate error kinds and
+	// saturating at `i32::MIN` captures the intent directly.
 	let text = format!("-{}", digits.fragment());
-	let value = match text.parse::<i32>()
-	{
-		Ok(v) => v,
-		Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
-		Err(_) => unreachable!()
-	};
+	let value = text.parse::<i32>().unwrap_or(i32::MIN);
 	Ok((
 		remaining,
 		Expression::Constant(Constant {
@@ -955,15 +953,16 @@ pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 {
 	let (input, recognized) =
 		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
+	// `recognize(pair(opt(char('-')), digit1))` only produces strings of
+	// optional `-` followed by digits, so parsing as `i32` can only fail
+	// with `PosOverflow` or `NegOverflow`. The first arm handles positive
+	// overflow explicitly; any remaining `Err` must therefore be
+	// negative overflow and saturates at `i32::MIN`.
 	let value = match recognized.fragment().parse::<i32>()
 	{
 		Ok(value) => value,
 		Err(e) if e.kind() == &IntErrorKind::PosOverflow => i32::MAX,
-		Err(e) if e.kind() == &IntErrorKind::NegOverflow => i32::MIN,
-		// `recognize(pair(opt(char('-')), digit1))` only produces strings of
-		// optional `-` followed by digits, so parsing as `i32` can only
-		// produce `Ok`, `PosOverflow`, or `NegOverflow`.
-		Err(_) => unreachable!()
+		Err(_) => i32::MIN
 	};
 	let start = recognized.location_offset();
 	let end = start + recognized.fragment().len();
@@ -1020,34 +1019,31 @@ pub fn identifier(input: Span) -> IResult<Span, Span, ParseError>
 		)))
 	))
 	.parse_complete(input)?;
+	// Rewind the input to just after the trimmed identifier, giving back
+	// any trailing whitespace to the remaining input. When no trailing
+	// whitespace is present the `trail` computes to zero and the rewind
+	// is a no-op, so the branchless construction preserves the original
+	// spans exactly; the unconditional form also precludes a spurious
+	// equivalent mutant on the boundary comparison.
 	let trimmed = span.fragment().trim_end();
-	if trimmed.len() < span.fragment().len()
-	{
-		// Rewind the input to just after the trimmed identifier, giving back
-		// the trailing whitespace to the remaining input.
-		let trail = span.fragment().len() - trimmed.len();
-		let new_remaining = unsafe {
-			Span::new_from_raw_offset(
-				remaining.location_offset() - trail,
-				remaining.location_line(),
-				&input.fragment()[trimmed.len()..],
-				()
-			)
-		};
-		let trimmed_span = unsafe {
-			Span::new_from_raw_offset(
-				span.location_offset(),
-				span.location_line(),
-				trimmed,
-				()
-			)
-		};
-		Ok((new_remaining, trimmed_span))
-	}
-	else
-	{
-		Ok((remaining, span))
-	}
+	let trail = span.fragment().len() - trimmed.len();
+	let new_remaining = unsafe {
+		Span::new_from_raw_offset(
+			remaining.location_offset() - trail,
+			remaining.location_line(),
+			&input.fragment()[trimmed.len()..],
+			()
+		)
+	};
+	let trimmed_span = unsafe {
+		Span::new_from_raw_offset(
+			span.location_offset(),
+			span.location_line(),
+			trimmed,
+			()
+		)
+	};
+	Ok((new_remaining, trimmed_span))
 }
 
 ////////////////////////////////////////////////////////////////////////////////

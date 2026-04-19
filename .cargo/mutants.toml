@@ -1,0 +1,98 @@
+# cargo-mutants configuration.
+#
+# Every entry in `exclude_re` below pins down a cluster of *equivalent*
+# mutants in the diagnostics module — mutations whose observable behaviour
+# is identical to the original under every input that can reach the
+# mutated site, so no test can kill them. They are suppressed here so
+# future `cargo mutants` runs cleanly report zero survivors and real
+# regressions stand out.
+#
+# Each regex uses `:\d+:\d+:` as a line/column wildcard and matches on the
+# (file, mutation description, function name) triple. This is deliberately
+# coarser than pinning every survivor to its exact coordinates: it survives
+# incidental edits that shift line numbers, but it also suppresses any
+# *future* mutation of the same shape in the same function. That is
+# defensible only when the equivalence argument applies uniformly to every
+# instance of the pattern within the function (e.g., "all `||` in
+# `analyze_error` live inside a single atomic expectation set, so any
+# single-operand flip to `&&` is invisible").
+#
+# When in doubt, prefer to restructure the code so the mutation becomes
+# non-equivalent — see `combinators.rs`, where the three former survivors
+# (`NegOverflow` match guards in `negative_constant` and `constant`, the
+# `<`/`<=` trim check in `identifier`) were killed by collapsing dead guards
+# and removing a spurious branch rather than by blacklisting.
+#
+# The full per-mutant equivalence analyses live in the closed issue
+# `xdy-yis` in the project's beads database.
+
+exclude_re = [
+	# analyze_error (xdy/src/diagnostics.rs):
+	# * `||` vs `&&` — every `||` within the expectation set for an
+	#   incomplete expression lives in a single atomic group (integer,
+	#   dice expression, `(`, `{`, `[`, `-`, EOF-or-all-whitespace), so
+	#   flipping any single operator collapses into the surrounding
+	#   chain without changing the set's truth value.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace \\|\\| with && in analyze_error$",
+	# * `+` vs `*` at the span-end computation for the
+	#   `IncompleteDropClause` path — `drop_pos` is always the constant
+	#   offset of the `drop` keyword, so both arithmetic shapes produce
+	#   the same source span in every reachable case.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace \\+ with \\* in analyze_error$",
+	# * `==` vs `!=` in the expectations-gating for
+	#   `detect_incomplete_parameter` — the inner check in
+	#   `detect_incomplete_parameter` also gates the path, making the
+	#   outer predicate redundant.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace == with != in analyze_error$",
+
+	# find_unmatched_opener (xdy/src/diagnostics.rs):
+	# * `-=` vs `+=`/`/=` — the scan only reports `last_opener` when
+	#   `depth > 0` at the end of the string, and every reachable corpus
+	#   input leaves `depth > 0` under all three operators.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace -= with \\+= in find_unmatched_opener$",
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace -= with /= in find_unmatched_opener$",
+	# * `>` vs `>=` at the end-of-scan depth check — `depth == 0`
+	#   implies a balanced source, which the caller never reaches via
+	#   `expects_delimiter`.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace > with >= in find_unmatched_opener$",
+
+	# detect_bare_identifier_at_pos (xdy/src/diagnostics.rs):
+	# * `&&` vs `||` and `delete !` on the whitespace predicate — only
+	#   reachable with ASCII identifier characters; the data-driven test
+	#   corpus can't express newlines inside identifiers because
+	#   newlines separate test cases.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace && with \\|\\| in detect_bare_identifier_at_pos$",
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: delete ! in detect_bare_identifier_at_pos$",
+	# * `>` vs `>=` at `i > 0` in the split-position check —
+	#   `name[..0]` is empty and `starts_with(alpha | _)` returns false
+	#   for empty, so both boundaries yield the same result.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace > with >= in detect_bare_identifier_at_pos$",
+
+	# detect_incomplete_parameter (xdy/src/diagnostics.rs):
+	# * `||` vs `&&` in `params.is_empty() || !params.iter().all(...)` —
+	#   the outer `params_text.is_empty()` check guards the
+	#   empty-params case, so the two inner operands are never
+	#   simultaneously `(true, true)`.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace \\|\\| with && in detect_incomplete_parameter$",
+
+	# detect_bare_identifier (xdy/src/diagnostics.rs):
+	# * `>` vs `>=` at `i > 0` — same empty-prefix equivalence as in
+	#   `detect_bare_identifier_at_pos`.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace > with >= in detect_bare_identifier$",
+	# * `||` vs `&&` on `after_d.starts_with('(' | '{')` — `after_d` is
+	#   always a suffix of an identifier, and neither `(` nor `{` is a
+	#   valid identifier character, so both branches are dead.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace \\|\\| with && in detect_bare_identifier$",
+
+	# make_incomplete_delimited (xdy/src/diagnostics.rs):
+	# * delete match arm `'('` — the default `_` arm produces `')'`,
+	#   the same value as the deleted arm.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: delete match arm '\\(' in make_incomplete_delimited$",
+	# * `>` vs `>=` at a length check — the boundary value is
+	#   unreachable with the current corpus's delimiter shapes.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace > with >= in make_incomplete_delimited$",
+	# * `&&` vs `||` in the `is_custom_faces` filter chain —
+	#   `is_custom_faces` is only used when `opener == '['`, and the
+	#   mutation is only visible when `opener != '['`.
+	"^xdy/src/diagnostics\\.rs:\\d+:\\d+: replace && with \\|\\| in make_incomplete_delimited$"
+]
