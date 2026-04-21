@@ -41,3 +41,15 @@
 <drop_clause> ::= "drop" "lowest" <drop_expression>? | "drop" "highest" <drop_expression>?
 
 <drop_expression> ::= <CONSTANT> | <variable> | <group>
+
+<IDENTIFIER> ::= <IDENTIFIER_START> <IDENTIFIER_CONTINUE>*
+
+<IDENTIFIER_START> ::= <ALPHA> | "_"
+
+<IDENTIFIER_CONTINUE> ::= <ALPHANUMERIC> | "_" | "-"
+
+<CONSTANT> ::= "-"? <DIGIT>+
+
+<DIGIT> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+
+<D_OPERATOR> ::= "d" | "D"

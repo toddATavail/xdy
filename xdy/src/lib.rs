@@ -270,6 +270,7 @@
 //! * `serde`: Implements the `Serialize` and `Deserialize` traits for various
 //!   types. This feature requires the `serde` crate, and is enabled by default.
 
+mod assembler;
 pub mod ast;
 mod compiler;
 pub mod diagnostics;
@@ -287,6 +288,7 @@ pub mod support;
 mod tests;
 mod validator;
 
+pub use assembler::*;
 pub use compiler::*;
 pub use evaluator::*;
 pub use histogram::*;

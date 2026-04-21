@@ -1,0 +1,57 @@
+<function> ::= <header> <extern_line> <body_header> <instruction_line>*
+
+<header> ::= "Function(" <parameters>? ")" "r#" <INDEX> "⚅#" <INDEX> <EOL>
+
+<parameters> ::= <named_reg> ("," <named_reg>)*
+
+<extern_line> ::= "extern[" <externals>? "]" <EOL>
+
+<externals> ::= <named_reg> ("," <named_reg>)*
+
+<named_reg> ::= <NAME> "@" <INDEX>
+
+<body_header> ::= "body:" <EOL>
+
+<instruction_line> ::= <instruction> <EOL>
+
+<instruction> ::= <roll_range>
+              |  <roll_standard_dice>
+              |  <roll_custom_dice>
+              |  <drop_lowest>
+              |  <drop_highest>
+              |  <sum_rolling_record>
+              |  <binary_op>
+              |  <unary_neg>
+              |  <return>
+
+<roll_range> ::= "⚅" <INDEX> "<-" "roll range" <value_operand> ":" <value_operand>
+
+<roll_standard_dice> ::= "⚅" <INDEX> "<-" "roll standard dice" <value_operand> "D" <value_operand>
+
+<roll_custom_dice> ::= "⚅" <INDEX> "<-" "roll custom dice" <value_operand> "D[" <INTEGER> ("," <INTEGER>)* "]"
+
+<drop_lowest> ::= "⚅" <INDEX> "<-" "drop lowest" <value_operand> "from" "⚅" <INDEX>
+
+<drop_highest> ::= "⚅" <INDEX> "<-" "drop highest" <value_operand> "from" "⚅" <INDEX>
+
+<sum_rolling_record> ::= "@" <INDEX> "<-" "sum rolling record" "⚅" <INDEX>
+
+<binary_op> ::= "@" <INDEX> "<-" <value_operand> <BINARY_OP> <value_operand>
+
+<unary_neg> ::= "@" <INDEX> "<-" "-" <value_operand>
+
+<return> ::= "return" <value_operand>
+
+<value_operand> ::= <INTEGER> | "@" <INDEX>
+
+<NAME> ::= <NAME_CHAR>+
+
+<INDEX> ::= <DIGIT>+
+
+<INTEGER> ::= "-"? <DIGIT>+
+
+<DIGIT> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+
+<BINARY_OP> ::= "+" | "-" | "*" | "/" | "%" | "^"
+
+<EOL> ::= "\n" | "\r\n"

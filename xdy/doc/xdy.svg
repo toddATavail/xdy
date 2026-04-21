@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="railroad" style="background-color:hsl(30,20%,95%);background-size:15px 15px;background-image:linear-gradient(to right,rgba(30,30,30,.05) 1px,transparent 1px),linear-gradient(to bottom,rgba(30,30,30,.05) 1px,transparent 1px)" viewBox="0 0 553 1465">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="railroad" style="background-color:hsl(30,20%,95%);background-size:15px 15px;background-image:linear-gradient(to right,rgba(30,30,30,.05) 1px,transparent 1px),linear-gradient(to bottom,rgba(30,30,30,.05) 1px,transparent 1px)" viewBox="0 0 562 2150">
 <rect width="100%" height="100%" class="railroad_canvas" style="stroke-width:0;fill:none"/>
 <g class="verticalgrid">
 <g class="sequence">
@@ -833,6 +833,271 @@ group</text>
 <path style="stroke-width:3px;stroke:black;fill:none" d=" M 302 1378 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
 <path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1378 h 10"/>
 <path style="stroke-width:3px;stroke:black;fill:none" d=" M 292 1378 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1491 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="75" y="1496">
+IDENTIFIER</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="125" y="1480" height="22" width="148"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="199" y="1496">
+IDENTIFIER_START</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 283 1491 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 196 m -95 0 l -5 -5 m 0 10 l 5 -5 m 95 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 307 1491 h 12 m 172 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -172 m 89 0 l 5 -5 m 0 10 l -5 -5 m -89 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="319" y="1480" height="22" width="172"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="405" y="1496">
+IDENTIFIER_CONTINUE</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 273 1491 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 115 1491 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 537 1491 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1491 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 527 1491 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1538 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="96" y="1543">
+IDENTIFIER_START</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 167 1538 h 24 m 60 0 h 24"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="191" y="1527" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="221" y="1543">
+ALPHA</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 167 1538 a 12 12 0 0 1 12 12 v 9 m 84 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 179 1559 v 0 a 12 12 0 0 0 12 12 m 28 0 h 32 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="191" y="1560" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="205" y="1576">
+_</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 157 1538 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 285 1538 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1538 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 275 1538 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1605 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="106" y="1610">
+IDENTIFIER_CONTINUE</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 188 1605 h 24 m 116 0 h 24"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="212" y="1594" height="22" width="116"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="270" y="1610">
+ALPHANUMERIC</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 188 1605 a 12 12 0 0 1 12 12 v 9 m 140 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 200 1626 v 33 m 140 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 200 1626 v 0 a 12 12 0 0 0 12 12 m 28 0 h 88 m -41 0 l -5 -5 m 0 10 l 5 -5 m 41 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="212" y="1627" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="226" y="1643">
+_</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 200 1659 v 0 a 12 12 0 0 0 12 12 m 28 0 h 88 m -41 0 l -5 -5 m 0 10 l 5 -5 m 41 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="212" y="1660" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="226" y="1676">
+-</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 178 1605 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 362 1605 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1605 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 352 1605 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1718 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="68" y="1723">
+CONSTANT</text>
+<g class="sequence">
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 111 1718 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 28 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="135" y="1707" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="149" y="1723">
+-</text>
+</g>
+</g>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 197 1718 h 12 m 60 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -60 m 33 0 l 5 -5 m 0 10 l -5 -5 m -33 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="209" y="1707" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="239" y="1723">
+DIGIT</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 187 1718 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 101 1718 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 291 1718 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1718 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 281 1718 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1765 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="57" y="1770">
+DIGIT</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 90 1765 h 24 m 28 0 h 24"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1754" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1770">
+0</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 90 1765 a 12 12 0 0 1 12 12 v 9 m 52 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1786 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1819 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1852 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1885 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1918 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1951 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1984 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 2017 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1786 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1787" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1803">
+1</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1819 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1820" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1836">
+2</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1852 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1853" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1869">
+3</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1885 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1886" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1902">
+4</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1918 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1919" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1935">
+5</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1951 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1952" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1968">
+6</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1984 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1985" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="2001">
+7</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 2017 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="2018" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="2034">
+8</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 2050 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="2051" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="2067">
+9</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 80 1765 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 176 1765 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1765 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 166 1765 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 2096 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="75" y="2101">
+D_OPERATOR</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 125 2096 h 24 m 28 0 h 24"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="149" y="2085" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="163" y="2101">
+d</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 125 2096 a 12 12 0 0 1 12 12 v 9 m 52 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 137 2117 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="149" y="2118" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="163" y="2134">
+D</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 115 2096 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 211 2096 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 2096 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 201 2096 h 10"/>
 </g>
 </g>
 </svg>

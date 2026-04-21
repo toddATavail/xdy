@@ -1,0 +1,1186 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="railroad" style="background-color:hsl(30,20%,95%);background-size:15px 15px;background-image:linear-gradient(to right,rgba(30,30,30,.05) 1px,transparent 1px),linear-gradient(to bottom,rgba(30,30,30,.05) 1px,transparent 1px)" viewBox="0 0 1004 1832">
+<rect width="100%" height="100%" class="railroad_canvas" style="stroke-width:0;fill:none"/>
+<g class="verticalgrid">
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 34 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="68" y="39">
+function</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="111" y="23" height="22" width="68"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="145" y="39">
+header</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="189" y="23" height="22" width="108"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="243" y="39">
+extern_line</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="307" y="23" height="22" width="108"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="361" y="39">
+body_header</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 425 34 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 172 m -83 0 l -5 -5 m 0 10 l 5 -5 m 83 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 449 34 h 12 m 148 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -148 m 77 0 l 5 -5 m 0 10 l -5 -5 m -77 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="461" y="23" height="22" width="148"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="535" y="39">
+instruction_line</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 179 34 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 297 34 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 415 34 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 101 34 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 655 34 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 34 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 645 34 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 94 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="61" y="99">
+header</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="97" y="83" height="22" width="92" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="143" y="99">
+Function(</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 199 94 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 100 m -47 0 l -5 -5 m 0 10 l 5 -5 m 47 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="223" y="83" height="22" width="100"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="273" y="99">
+parameters</text>
+</g>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="357" y="83" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="371" y="99">
+)</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="395" y="83" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="413" y="99">
+r#</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="441" y="83" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="471" y="99">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="511" y="83" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="529" y="99">
+⚅#</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="557" y="83" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="587" y="99">
+INDEX</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="627" y="83" height="22" width="44"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="649" y="99">
+EOL</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 189 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 347 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 385 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 431 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 501 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 547 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 617 94 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 87 94 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 681 94 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 94 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 671 94 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 141 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="75" y="146">
+parameters</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="125" y="130" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="171" y="146">
+named_reg</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 227 141 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 154 m -74 0 l -5 -5 m 0 10 l 5 -5 m 74 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 251 141 h 12 m 130 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -130 m 68 0 l 5 -5 m 0 10 l -5 -5 m -68 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="263" y="130" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="277" y="146">
+,</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="301" y="130" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="347" y="146">
+named_reg</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 291 141 h 10"/>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 217 141 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 115 141 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 439 141 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 141 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 429 141 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 201 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="78" y="206">
+extern_line</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="132" y="190" height="22" width="76" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="170" y="206">
+extern&#x5B;</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 218 201 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 92 m -43 0 l -5 -5 m 0 10 l 5 -5 m 43 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="242" y="190" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="288" y="206">
+externals</text>
+</g>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="368" y="190" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="382" y="206">
+&#x5D;</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="406" y="190" height="22" width="44"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="428" y="206">
+EOL</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 208 201 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 358 201 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 396 201 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 122 201 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 460 201 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 201 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 450 201 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 248 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="71" y="253">
+externals</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="118" y="237" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="164" y="253">
+named_reg</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 220 248 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 154 m -74 0 l -5 -5 m 0 10 l 5 -5 m 74 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 244 248 h 12 m 130 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -130 m 68 0 l 5 -5 m 0 10 l -5 -5 m -68 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="256" y="237" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="270" y="253">
+,</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="294" y="237" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="340" y="253">
+named_reg</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 284 248 h 10"/>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 210 248 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 108 248 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 432 248 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 248 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 422 248 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 295 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="71" y="300">
+named_reg</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="118" y="284" height="22" width="52"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="144" y="300">
+NAME</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="180" y="284" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="194" y="300">
+@</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="218" y="284" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="248" y="300">
+INDEX</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 170 295 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 208 295 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 108 295 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 288 295 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 295 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 278 295 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 329 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="78" y="334">
+body_header</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="132" y="318" height="22" width="60" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="162" y="334">
+body:</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="202" y="318" height="22" width="44"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="224" y="334">
+EOL</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 192 329 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 122 329 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 256 329 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 329 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 246 329 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 363 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="96" y="368">
+instruction_line</text>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="167" y="352" height="22" width="108"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="221" y="368">
+instruction</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="285" y="352" height="22" width="44"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="307" y="368">
+EOL</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 275 363 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 157 363 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 339 363 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 363 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 329 363 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 397 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="78" y="402">
+instruction</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 132 397 h 24 m 100 0 h 88 m -41 0 l -5 -5 m 0 10 l 5 -5 m 41 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="386" height="22" width="100"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="206" y="402">
+roll_range</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 132 397 a 12 12 0 0 1 12 12 v 9 m 188 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 418 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 451 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 484 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 517 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 550 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 583 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 616 v 33 m 188 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 418 v 0 a 12 12 0 0 0 12 12 m 164 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="419" height="22" width="164"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="238" y="435">
+roll_standard_dice</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 451 v 0 a 12 12 0 0 0 12 12 m 148 0 h 16 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="452" height="22" width="148"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="230" y="468">
+roll_custom_dice</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 484 v 0 a 12 12 0 0 0 12 12 m 108 0 h 56 m -25 0 l -5 -5 m 0 10 l 5 -5 m 25 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="485" height="22" width="108"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="210" y="501">
+drop_lowest</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 517 v 0 a 12 12 0 0 0 12 12 m 116 0 h 48 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="518" height="22" width="116"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="214" y="534">
+drop_highest</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 550 v 0 a 12 12 0 0 0 12 12 m 164 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="551" height="22" width="164"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="238" y="567">
+sum_rolling_record</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 583 v 0 a 12 12 0 0 0 12 12 m 92 0 h 72 m -33 0 l -5 -5 m 0 10 l 5 -5 m 33 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="584" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="202" y="600">
+binary_op</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 616 v 0 a 12 12 0 0 0 12 12 m 92 0 h 72 m -33 0 l -5 -5 m 0 10 l 5 -5 m 33 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="617" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="202" y="633">
+unary_neg</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 144 649 v 0 a 12 12 0 0 0 12 12 m 68 0 h 96 m -45 0 l -5 -5 m 0 10 l 5 -5 m 45 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="650" height="22" width="68"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="190" y="666">
+return</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 122 397 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 354 397 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 397 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 344 397 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 695 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="75" y="700">
+roll_range</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="125" y="684" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="139" y="700">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="163" y="684" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="193" y="700">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="233" y="684" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="251" y="700">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="279" y="684" height="22" width="100" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="329" y="700">
+roll range</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="389" y="684" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="451" y="700">
+value_operand</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="523" y="684" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="537" y="700">
+:</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="561" y="684" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="623" y="700">
+value_operand</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 153 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 223 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 269 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 379 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 513 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 551 695 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 115 695 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 695 695 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 695 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 685 695 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 729 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="103" y="734">
+roll_standard_dice</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="181" y="718" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="195" y="734">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="219" y="718" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="249" y="734">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="289" y="718" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="307" y="734">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="335" y="718" height="22" width="164" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="417" y="734">
+roll standard dice</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="509" y="718" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="571" y="734">
+value_operand</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="643" y="718" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="657" y="734">
+D</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="681" y="718" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="743" y="734">
+value_operand</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 209 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 279 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 325 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 499 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 633 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 671 729 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 171 729 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 815 729 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 729 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 805 729 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 776 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="96" y="781">
+roll_custom_dice</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="167" y="765" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="181" y="781">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="205" y="765" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="235" y="781">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="275" y="765" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="293" y="781">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="321" y="765" height="22" width="148" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="395" y="781">
+roll custom dice</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="479" y="765" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="541" y="781">
+value_operand</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="613" y="765" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="631" y="781">
+D&#x5B;</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="659" y="765" height="22" width="76"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="697" y="781">
+INTEGER</text>
+</g>
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 745 776 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 138 m -66 0 l -5 -5 m 0 10 l 5 -5 m 66 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 769 776 h 12 m 114 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -114 m 60 0 l 5 -5 m 0 10 l -5 -5 m -60 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="781" y="765" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="795" y="781">
+,</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="819" y="765" height="22" width="76"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="857" y="781">
+INTEGER</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 809 776 h 10"/>
+</g>
+</g>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="941" y="765" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="955" y="781">
+&#x5D;</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 195 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 265 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 311 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 469 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 603 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 649 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 735 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 931 776 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 157 776 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 979 776 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 776 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 969 776 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 823 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="78" y="828">
+drop_lowest</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="132" y="812" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="146" y="828">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="170" y="812" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="200" y="828">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="240" y="812" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="258" y="828">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="286" y="812" height="22" width="108" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="340" y="828">
+drop lowest</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="404" y="812" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="466" y="828">
+value_operand</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="538" y="812" height="22" width="52" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="564" y="828">
+from</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="600" y="812" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="614" y="828">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="638" y="812" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="668" y="828">
+INDEX</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 160 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 230 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 276 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 394 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 528 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 590 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 628 823 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 122 823 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 708 823 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 823 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 698 823 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 857 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="82" y="862">
+drop_highest</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="139" y="846" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="153" y="862">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="177" y="846" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="207" y="862">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="247" y="846" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="265" y="862">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="293" y="846" height="22" width="116" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="351" y="862">
+drop highest</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="419" y="846" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="481" y="862">
+value_operand</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="553" y="846" height="22" width="52" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="579" y="862">
+from</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="615" y="846" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="629" y="862">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="653" y="846" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="683" y="862">
+INDEX</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 167 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 237 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 283 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 409 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 543 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 605 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 643 857 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 129 857 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 723 857 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 857 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 713 857 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 891 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="103" y="896">
+sum_rolling_record</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="181" y="880" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="195" y="896">
+@</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="219" y="880" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="249" y="896">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="289" y="880" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="307" y="896">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="335" y="880" height="22" width="164" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="417" y="896">
+sum rolling record</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="509" y="880" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="523" y="896">
+⚅</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="547" y="880" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="577" y="896">
+INDEX</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 209 891 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 279 891 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 325 891 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 499 891 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 537 891 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 171 891 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 617 891 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 891 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 607 891 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 925 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="71" y="930">
+binary_op</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="118" y="914" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="132" y="930">
+@</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="914" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="186" y="930">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="226" y="914" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="244" y="930">
+&lt;-</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="272" y="914" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="334" y="930">
+value_operand</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="406" y="914" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="452" y="930">
+BINARY_OP</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="508" y="914" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="570" y="930">
+value_operand</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 146 925 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 216 925 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 262 925 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 396 925 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 498 925 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 108 925 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 642 925 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 925 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 632 925 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 959 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="71" y="964">
+unary_neg</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="118" y="948" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="132" y="964">
+@</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="156" y="948" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="186" y="964">
+INDEX</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="226" y="948" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="244" y="964">
+&lt;-</text>
+</g>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="272" y="948" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="286" y="964">
+-</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="310" y="948" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="372" y="964">
+value_operand</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 146 959 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 216 959 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 262 959 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 300 959 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 108 959 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 444 959 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 959 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 434 959 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 993 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="61" y="998">
+return</text>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="97" y="982" height="22" width="68" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="131" y="998">
+return</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="175" y="982" height="22" width="124"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="237" y="998">
+value_operand</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 165 993 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 87 993 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 309 993 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 993 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 299 993 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1027 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="85" y="1032">
+value_operand</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 146 1027 h 24 m 76 0 h 46"/>
+<g class="sequence">
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="170" y="1016" height="22" width="76"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="208" y="1032">
+INTEGER</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 146 1027 a 12 12 0 0 1 12 12 v 9 m 122 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 158 1048 v 0 a 12 12 0 0 0 12 12 m 98 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="170" y="1049" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="184" y="1065">
+@</text>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="208" y="1049" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="238" y="1065">
+INDEX</text>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 198 1060 h 10"/>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 136 1027 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 302 1027 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1027 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 292 1027 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1094 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="54" y="1099">
+NAME</text>
+<g class="sequence">
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 83 1094 h 12 m 92 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -92 m 49 0 l 5 -5 m 0 10 l -5 -5 m -49 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="95" y="1083" height="22" width="92"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="141" y="1099">
+NAME_CHAR</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 73 1094 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 209 1094 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1094 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 199 1094 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1141 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="57" y="1146">
+INDEX</text>
+<g class="sequence">
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 90 1141 h 12 m 60 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -60 m 33 0 l 5 -5 m 0 10 l -5 -5 m -33 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="102" y="1130" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="132" y="1146">
+DIGIT</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 80 1141 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 184 1141 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1141 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 174 1141 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1201 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="64" y="1206">
+INTEGER</text>
+<g class="sequence">
+<g class="optional">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 104 1201 h 24 m -24 0 a 12 12 0 0 0 12 -12 v 0 a 12 12 0 0 1 12 -12 h 28 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 0 12 12 h -24"/>
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="128" y="1190" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="142" y="1206">
+-</text>
+</g>
+</g>
+<g class="repeat">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 190 1201 h 12 m 60 0 h 12 m -12 0 a 12 12 0 0 1 12 12 v 0 a 12 12 0 0 1 -12 12 m 0 0 h -60 m 33 0 l 5 -5 m 0 10 l -5 -5 m -33 0 a 12 12 0 0 1 -12 -12 v 0 a 12 12 0 0 1 12 -12"/>
+<g>
+</g>
+<g class="nonterminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="202" y="1190" height="22" width="60"/>
+<text style="font:bold 14px monospace;text-anchor:middle" x="232" y="1206">
+DIGIT</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 180 1201 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 94 1201 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 284 1201 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1201 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 274 1201 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1248 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="57" y="1253">
+DIGIT</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 90 1248 h 24 m 28 0 h 24"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1237" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1253">
+0</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 90 1248 a 12 12 0 0 1 12 12 v 9 m 52 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1269 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1302 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1335 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1368 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1401 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1434 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1467 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1500 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1269 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1270" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1286">
+1</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1302 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1303" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1319">
+2</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1335 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1336" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1352">
+3</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1368 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1369" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1385">
+4</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1401 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1402" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1418">
+5</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1434 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1435" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1451">
+6</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1467 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1468" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1484">
+7</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1500 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1501" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1517">
+8</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 102 1533 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="114" y="1534" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="128" y="1550">
+9</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 80 1248 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 176 1248 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1248 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 166 1248 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1579 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="71" y="1584">
+BINARY_OP</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 118 1579 h 24 m 28 0 h 24"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1568" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1584">
++</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 118 1579 a 12 12 0 0 1 12 12 v 9 m 52 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1600 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1633 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1666 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1699 v 33 m 52 0 v -33"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1600 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1601" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1617">
+-</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1633 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1634" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1650">
+*</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1666 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1667" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1683">
+/</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1699 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1700" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1716">
+%</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 130 1732 v 0 a 12 12 0 0 0 12 12 m 28 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="142" y="1733" height="22" width="28" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="156" y="1749">
+^</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 108 1579 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 204 1579 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1579 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 194 1579 h 10"/>
+</g>
+<g class="sequence">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 10 1778 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<g class="sequence">
+<text style="font:italic 12px monospace;text-anchor:middle" class="comment" x="50" y="1783">
+EOL</text>
+<g class="choice">
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 76 1778 h 24 m 36 0 h 40"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="100" y="1767" height="22" width="36" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="118" y="1783">
+\n</text>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 76 1778 a 12 12 0 0 1 12 12 v 9 m 76 0 v -9 a 12 12 0 0 1 12 -12"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 88 1799 v 0 a 12 12 0 0 0 12 12 m 52 0 h 0 a 12 12 0 0 0 12 -12 v 0"/>
+<g class="sequence">
+<g class="terminal">
+<rect style="stroke-width:3px;stroke:black;fill:hsl(-290,70%,90%)" x="100" y="1800" height="22" width="52" rx="10" ry="10"/>
+<text style="font:14px monospace;text-anchor:middle" x="126" y="1816">
+\r\n</text>
+</g>
+</g>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 66 1778 h 10"/>
+</g>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 186 1778 a 5 5 0 0 1 5 -5 a 5 5 0 0 1 5 5 a 5 5 0 0 1 -5 5 a 5 5 0 0 1 -5 -5 m 10 0 h 5"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 25 1778 h 10"/>
+<path style="stroke-width:3px;stroke:black;fill:none" d=" M 176 1778 h 10"/>
+</g>
+</g>
+</svg>

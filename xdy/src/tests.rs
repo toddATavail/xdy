@@ -5,6 +5,7 @@
 //! cases, each of which consists of a source dice expression and an expected
 //! print rendition.
 
+mod assembler;
 mod compiler;
 mod diagnostics;
 mod evaluator;
