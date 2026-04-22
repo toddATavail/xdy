@@ -1,13 +1,12 @@
 //! # S-expression reader error tests
 //!
 //! Herein are the tests that exercise every error branch of
-//! [`read_s_expr`](crate::s_expr::read_s_expr) and its underlying
-//! [`SExprReader`] cursor. Each negative case pins down a distinct construction
-//! of [`SExprError`] — the exact message substring and the byte offset — so
-//! that a mutation to the reader's arithmetic, match arms, or guard expressions
-//! surfaces as a diff.
+//! [`read_s_expr`](crate::s_expr::read_s_expr) and its supporting [`nom`]-based
+//! combinators. Each negative case pins down a distinct [`SExprError`] variant
+//! — the rendered-message substring and the byte offset — so that a mutation to
+//! the reader's match arms, guard expressions, or span arithmetic surfaces as a
+//! diff.
 //!
-//! [`SExprReader`]: crate::s_expr
 //! [`SExprError`]: crate::s_expr::SExprError
 
 use crate::s_expr::*;
@@ -16,25 +15,31 @@ use crate::s_expr::*;
 //                      S-expression reader error tests.                      //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Assert that reading `input` produces an error whose message contains the
-/// given substring and whose offset matches the expected byte position.
+/// Assert that reading `input` produces an error whose rendered Display
+/// contains the given substring and whose location offset matches the expected
+/// byte position.
 fn assert_reader_error(input: &str, message_contains: &str, offset: usize)
 {
 	let err = read_s_expr(input).expect_err(&format!(
 		"expected reader error for {:?} (matching {:?}), got success",
 		input, message_contains
 	));
+	let rendered = err.to_string();
 	assert!(
-		err.message.contains(message_contains),
+		rendered.contains(message_contains),
 		"input {:?}: expected message to contain {:?}, got {:?}",
 		input,
 		message_contains,
-		err.message
+		rendered
 	);
 	assert_eq!(
-		err.offset, offset,
-		"input {:?}: expected offset {} but got {} (message was {:?})",
-		input, offset, err.offset, err.message
+		err.location().offset,
+		offset,
+		"input {:?}: expected offset {} but got {} (rendered was {:?})",
+		input,
+		offset,
+		err.location().offset,
+		rendered
 	);
 }
 
@@ -47,11 +52,11 @@ fn test_reader_rejects_empty_input()
 }
 
 /// The top-level form must begin with `(function …)`. Any other keyword
-/// produces a dedicated error whose offset points at the start of the rogue
-/// keyword — pinning down the `- keyword.len()` arithmetic in `read_function`.
-/// Leading whitespace pushes the cursor far enough past the keyword that `pos -
-/// len` differs from `pos / len`, so a mutant that replaces subtraction with
-/// integer division produces a distinct offset.
+/// produces a dedicated [`SExprError::ExpectedTopLevelFunction`] whose offset
+/// points at the start of the rogue keyword — pinning down the keyword-mark
+/// capture in `read_function`. Leading whitespace pushes the cursor well past
+/// byte 0, so a mutation that collapses the mark to some constant origin would
+/// land a distinct offset.
 #[test]
 fn test_reader_rejects_non_function_top_level_keyword()
 {
@@ -77,9 +82,10 @@ fn test_reader_rejects_nested_function_keyword()
 	);
 }
 
-/// An unknown keyword in operator position produces a generic error whose
-/// offset points at the keyword's start position. This pins down the
-/// `-keyword.len()` arithmetic in `read_expr` alongside the default match arm.
+/// An unknown keyword in operator position produces
+/// [`SExprError::UnknownKeyword`] whose offset points at the keyword's start.
+/// This pins down the keyword-mark capture in `read_expr` alongside the
+/// default match arm.
 #[test]
 fn test_reader_rejects_unknown_keyword()
 {
@@ -115,7 +121,7 @@ fn test_reader_rejects_missing_top_level_close_paren()
 
 /// A `)` replaced by any other delimiter character errors with the exact
 /// "expected ')', found ']'" phrasing and the offset points at the `]`. This
-/// anchors the `- c.len_utf8()` subtraction in `expect_char`. A non-delimiter
+/// anchors the pre-consume span capture in `expect_char`. A non-delimiter
 /// character would be folded into the body's identifier or integer, so a
 /// delimiter is required to surface the wrong-character error.
 #[test]
@@ -168,7 +174,7 @@ fn test_reader_rejects_unterminated_parameter_list()
 
 /// A quoted identifier missing its closing `"` errors with
 /// "unterminated quoted identifier" and the offset points at the opening
-/// quote. Anchors the `- 1` arithmetic in `read_ident` (`start - 1`).
+/// quote. Anchors the pre-advance span capture in `read_ident`.
 #[test]
 fn test_reader_rejects_unterminated_quoted_identifier()
 {
@@ -181,8 +187,8 @@ fn test_reader_rejects_unterminated_quoted_identifier()
 }
 
 /// A non-integer where an integer constant is expected fails with
-/// "invalid integer" and the offset points at the start of the offending word.
-/// Anchors the `- word.len()` arithmetic in `read_integer`.
+/// "invalid integer" and the offset points at the start of the offending
+/// word. Anchors the word-span capture in `read_integer`.
 #[test]
 fn test_reader_rejects_invalid_integer_literal()
 {
@@ -383,10 +389,16 @@ fn test_reader_rejects_parameter_span_escaping_parent()
 {
 	let err = read_s_expr("^[0 5] (function [^[10 11] x] 0)")
 		.expect_err("expected containment failure");
+	let rendered = err.to_string();
 	assert!(
-		err.message.contains("escapes parent span"),
+		rendered.contains("escapes parent span"),
 		"message was {:?}",
-		err.message
+		rendered
+	);
+	assert!(
+		matches!(err, SExprError::ChildSpanEscapesParent { .. }),
+		"expected ChildSpanEscapesParent, got {:?}",
+		err
 	);
 }
 
@@ -397,10 +409,16 @@ fn test_reader_rejects_out_of_order_parameters()
 {
 	let err = read_s_expr("^[0 9] (function [^[5 6] a ^[2 3] b] 0)")
 		.expect_err("expected sibling-order failure");
+	let rendered = err.to_string();
 	assert!(
-		err.message.contains("overlaps or precedes prior sibling"),
+		rendered.contains("overlaps or precedes prior sibling"),
 		"message was {:?}",
-		err.message
+		rendered
+	);
+	assert!(
+		matches!(err, SExprError::SiblingSpanOutOfOrder { .. }),
+		"expected SiblingSpanOutOfOrder, got {:?}",
+		err
 	);
 }
 
@@ -426,27 +444,159 @@ fn test_reader_rejects_add_missing_right_operand()
 //                     SExprError::Display pinning test.                      //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// [`SExprError`] renders as `S-expression error at byte N: <message>`. A
-/// mutation that drops the Display implementation entirely would replace the
-/// output with an empty default; this test anchors the exact format.
+/// [`SExprError`] renders as `S-expression error at line L, column C (byte N):
+/// <message>`. A mutation that drops the Display implementation entirely would
+/// replace the output with an empty default; this test anchors the exact
+/// format.
 #[test]
 fn test_sexpr_error_display_format()
 {
 	let err = read_s_expr("(function [] )").unwrap_err();
 	let rendered = err.to_string();
+	let location = err.location();
 	assert!(
-		rendered.starts_with("S-expression error at byte "),
+		rendered.starts_with("S-expression error at line "),
 		"unexpected Display prefix: {:?}",
 		rendered
 	);
 	assert!(
-		rendered.contains(&err.message),
-		"Display output must contain the error message: {:?}",
+		rendered.contains(&format!(
+			"line {}, column {} (byte {})",
+			location.line, location.column, location.offset
+		)),
+		"Display output must include location suffix: {:?}",
 		rendered
 	);
 	assert!(
-		rendered.contains(&err.offset.to_string()),
+		rendered.contains(&location.offset.to_string()),
 		"Display output must contain the offset: {:?}",
 		rendered
 	);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                    SExprLocation line/column accuracy.                     //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Single-line inputs report line 1 and a column equal to `offset + 1`. A
+/// mutation that swapped `location_line` for a constant or dropped the line
+/// increment entirely would fail this pin.
+#[test]
+fn test_location_single_line_byte_and_column_agree()
+{
+	let err = read_s_expr("     (body 42)").expect_err("expected error");
+	let loc = err.location();
+	assert_eq!(loc.line, 1, "expected line 1 on single-line input");
+	assert_eq!(loc.offset, 6, "expected byte offset 6");
+	assert_eq!(loc.column, 7, "expected 1-based column 7 (= offset + 1)");
+}
+
+/// A multi-line input should report the 1-based line number of the offending
+/// token plus a column measured from the start of its line, *not* from the
+/// start of input. The input straddles two newlines — the `(` opens on line
+/// 1, the keyword `body` sits on line 3 — which pins the `\n` accounting in
+/// `nom_locate`.
+#[test]
+fn test_location_multiline_reports_line_and_column()
+{
+	let input = "\n\n     (body 42)";
+	let err = read_s_expr(input).expect_err("expected error");
+	let loc = err.location();
+	assert_eq!(loc.line, 3, "expected line 3");
+	assert_eq!(loc.column, 7, "expected column 7 (after 6 spaces)");
+	assert_eq!(
+		loc.offset, 8,
+		"byte offset counts the newlines plus the leading spaces"
+	);
+}
+
+/// CRLF line endings must be counted as line terminators. The `\r\n` sequence
+/// bumps the line number once, not twice — a regression that treated `\r` as
+/// its own line would report line 3 here.
+#[test]
+fn test_location_crlf_line_endings()
+{
+	let input = "\r\n     (body 42)";
+	let err = read_s_expr(input).expect_err("expected error");
+	let loc = err.location();
+	assert_eq!(loc.line, 2, "CRLF counts as a single line terminator");
+	assert_eq!(loc.column, 7);
+}
+
+/// Containment-violation errors surface a typed
+/// [`SExprError::ChildSpanEscapesParent`] carrying both the child and parent
+/// spans for mechanical inspection. This pins the variant shape alongside the
+/// substring-match coverage above.
+#[test]
+fn test_child_span_escapes_parent_variant_shape()
+{
+	let err = read_s_expr("^[0 5] (function [^[10 11] x] 0)")
+		.expect_err("expected containment failure");
+	let SExprError::ChildSpanEscapesParent { child, parent, .. } = err
+	else
+	{
+		panic!("expected ChildSpanEscapesParent")
+	};
+	assert_eq!(child, crate::span::SourceSpan { start: 10, end: 11 });
+	assert_eq!(parent, crate::span::SourceSpan { start: 0, end: 5 });
+}
+
+/// Inverted-span errors surface a typed [`SExprError::InvertedSpan`] carrying
+/// the start and end as written, for mechanical inspection.
+#[test]
+fn test_inverted_span_variant_shape()
+{
+	let err = read_s_expr("^[5 2] (function [] 0)")
+		.expect_err("expected inverted-span error");
+	let SExprError::InvertedSpan { start, end, .. } = err
+	else
+	{
+		panic!("expected InvertedSpan")
+	};
+	assert_eq!(start, 5);
+	assert_eq!(end, 2);
+}
+
+/// Unknown-keyword errors carry the rejected keyword for mechanical inspection.
+#[test]
+fn test_unknown_keyword_variant_shape()
+{
+	let err = read_s_expr("(function [] (bogus 1 2))")
+		.expect_err("expected unknown-keyword error");
+	let SExprError::UnknownKeyword { keyword, .. } = err
+	else
+	{
+		panic!("expected UnknownKeyword")
+	};
+	assert_eq!(keyword, "bogus");
+}
+
+/// `ExpectedChar` distinguishes "found a different character" from "found end
+/// of input" by setting `found` to `None` for the latter.
+#[test]
+fn test_expected_char_distinguishes_eoi_from_mismatch()
+{
+	let eoi = read_s_expr("(function [] 42")
+		.expect_err("expected missing-close-paren error");
+	let SExprError::ExpectedChar {
+		expected, found, ..
+	} = eoi
+	else
+	{
+		panic!("expected ExpectedChar")
+	};
+	assert_eq!(expected, ')');
+	assert_eq!(found, None);
+
+	let mismatch = read_s_expr("(function [] 42]")
+		.expect_err("expected wrong-close-paren error");
+	let SExprError::ExpectedChar {
+		expected, found, ..
+	} = mismatch
+	else
+	{
+		panic!("expected ExpectedChar")
+	};
+	assert_eq!(expected, ')');
+	assert_eq!(found, Some(']'));
 }

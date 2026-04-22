@@ -230,7 +230,7 @@ fn test_s_expr_reader_rejects_unrecognized_metadata()
 		let input = format!("(function [] {})", bad);
 		let err = read_s_expr(&input).unwrap_err();
 		assert!(
-			err.message.contains("expected '[' after '^'"),
+			err.to_string().contains("expected '[' after '^'"),
 			"input {:?} — unexpected error: {}",
 			bad,
 			err
@@ -246,7 +246,7 @@ fn test_s_expr_reader_rejects_inverted_span()
 
 	let err = read_s_expr("^[5 2] (function [] 0)").unwrap_err();
 	assert!(
-		err.message.contains("span start 5 exceeds end 2"),
+		err.to_string().contains("span start 5 exceeds end 2"),
 		"unexpected error: {}",
 		err
 	);
@@ -264,7 +264,7 @@ fn test_s_expr_reader_rejects_containment_violation()
 	let input = "(function [] ^[0 5] (add ^[0 1] 1 ^[4 9] 2))";
 	let err = read_s_expr(input).unwrap_err();
 	assert!(
-		err.message.contains("escapes parent span"),
+		err.to_string().contains("escapes parent span"),
 		"unexpected error: {}",
 		err
 	);
@@ -280,7 +280,8 @@ fn test_s_expr_reader_rejects_sibling_overlap()
 	let input = "(function [] ^[0 5] (add ^[0 3] 1 ^[2 5] 2))";
 	let err = read_s_expr(input).unwrap_err();
 	assert!(
-		err.message.contains("overlaps or precedes prior sibling"),
+		err.to_string()
+			.contains("overlaps or precedes prior sibling"),
 		"unexpected error: {}",
 		err
 	);
