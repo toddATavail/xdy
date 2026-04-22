@@ -143,6 +143,60 @@ impl Display for Variable<'_>
 	}
 }
 
+/// A local binding that names a subexpression so its integer result can be
+/// referred to by [variable reference](Variable) later in the same enclosing
+/// function body. The syntax is `name@(expr)`: the bound name appears to the
+/// left of the `@` operator without delimiters (unlike a
+/// [variable reference](Variable), which uses `{name}`), followed by the bound
+/// expression enclosed in parentheses.
+///
+/// # Semantics
+/// - The binding introduces `name` into a single flat namespace shared by
+///   formal parameters, environment variables, and all other local bindings in
+///   the same function body — no shadowing or nested scopes.
+/// - References to `name` are forward-only: a binding must lexically precede
+///   every reference to it, and must not appear inside its own bound expression
+///   (i.e., self-reference is a compile error).
+/// - The bound value is the integer main effect of `expr` — the same `i32` that
+///   the expression would contribute to its parent. Rolling records produced by
+///   dice inside `expr` still flow anonymously into `Evaluation.records` in
+///   lexical order.
+/// - A binding expression evaluates to the bound value, so it can appear
+///   anywhere a [variable reference](Variable) is legal — as a primary, a dice
+///   count, standard faces, or a drop count.
+///
+/// Collision, rebinding, and use-before-bind errors are reported by the
+/// [`Validator`](crate::Validator).
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text. The bound name is borrowed
+///   directly from the source.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Binding<'src>
+{
+	/// The bound name.
+	pub name: &'src str,
+
+	/// The span of the bound name alone in the original source, excluding the
+	/// `@` operator and the parenthesized bound expression.
+	pub name_span: SourceSpan,
+
+	/// The bound expression.
+	pub expression: Box<Expression<'src>>,
+
+	/// The span of the entire binding, from the first character of `name`
+	/// through the closing `)` of the bound expression.
+	pub span: SourceSpan
+}
+
+impl Display for Binding<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		write!(f, "{}@({})", self.name, self.expression)
+	}
+}
+
 /// A range expression.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Range<'src>
@@ -183,6 +237,9 @@ pub enum Expression<'src>
 	/// A variable reference.
 	Variable(Variable<'src>),
 
+	/// A local binding.
+	Binding(Binding<'src>),
+
 	/// A range expression.
 	Range(Range<'src>),
 
@@ -218,6 +275,7 @@ impl<'src> Expression<'src>
 			Expression::Group(g) => visitor.visit_group(g),
 			Expression::Constant(c) => visitor.visit_constant(c),
 			Expression::Variable(v) => visitor.visit_variable(v),
+			Expression::Binding(b) => visitor.visit_binding(b),
 			Expression::Range(r) => visitor.visit_range(r),
 			Expression::Dice(d) => d.accept(visitor),
 			Expression::Arithmetic(a) => a.accept(visitor)
@@ -234,6 +292,7 @@ impl Display for Expression<'_>
 			Expression::Group(group) => write!(f, "{}", group),
 			Expression::Constant(constant) => write!(f, "{}", constant),
 			Expression::Variable(variable) => write!(f, "{}", variable),
+			Expression::Binding(binding) => write!(f, "{}", binding),
 			Expression::Range(range) => write!(f, "{}", range),
 			Expression::Dice(dice) => write!(f, "{}", dice),
 			Expression::Arithmetic(arithmetic) => write!(f, "{}", arithmetic)
@@ -615,6 +674,12 @@ pub trait ASTVisitor<'src>
 		node: &'src Variable<'src>
 	) -> Result<Self::Output, Self::Error>;
 
+	/// Visit a local [binding](Binding).
+	fn visit_binding(
+		&mut self,
+		node: &'src Binding<'src>
+	) -> Result<Self::Output, Self::Error>;
+
 	/// Visit a [range](Range) expression.
 	fn visit_range(
 		&mut self,
@@ -839,6 +904,21 @@ impl Spanned for Variable<'_>
 	}
 }
 
+impl Spanned for Binding<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Binding {
+			name: self.name,
+			name_span: SourceSpan::default(),
+			expression: Box::new(self.expression.untethered()),
+			span: SourceSpan::default()
+		}
+	}
+}
+
 impl Spanned for Range<'_>
 {
 	fn span(&self) -> SourceSpan { self.span }
@@ -862,6 +942,7 @@ impl Spanned for Expression<'_>
 			Expression::Group(g) => g.span(),
 			Expression::Constant(c) => c.span(),
 			Expression::Variable(v) => v.span(),
+			Expression::Binding(b) => b.span(),
 			Expression::Range(r) => r.span(),
 			Expression::Dice(d) => d.span(),
 			Expression::Arithmetic(a) => a.span()
@@ -875,6 +956,7 @@ impl Spanned for Expression<'_>
 			Expression::Group(g) => Expression::Group(g.untethered()),
 			Expression::Constant(c) => Expression::Constant(c.untethered()),
 			Expression::Variable(v) => Expression::Variable(v.untethered()),
+			Expression::Binding(b) => Expression::Binding(b.untethered()),
 			Expression::Range(r) => Expression::Range(r.untethered()),
 			Expression::Dice(d) => Expression::Dice(d.untethered()),
 			Expression::Arithmetic(a) => Expression::Arithmetic(a.untethered())

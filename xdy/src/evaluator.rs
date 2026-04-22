@@ -702,6 +702,53 @@ pub enum EvaluationError<'error>
 		duplicate: SourceSpan
 	},
 
+	/// A [local binding](crate::ast::Binding) uses a name that is already
+	/// declared as a formal parameter. Produced only by the simple
+	/// [one-shot evaluator](crate::evaluate).
+	BindingCollidesWithParameter
+	{
+		/// The colliding name, borrowed from the source text.
+		name: &'error str,
+
+		/// The span of the parameter declaration in the function signature.
+		parameter: SourceSpan,
+
+		/// The span of the binding-site name that triggered the error.
+		binding: SourceSpan
+	},
+
+	/// The same name is bound more than once by
+	/// [local bindings](crate::ast::Binding) within a single function body.
+	/// Produced only by the simple [one-shot evaluator](crate::evaluate).
+	DuplicateBinding
+	{
+		/// The rebound name, borrowed from the source text.
+		name: &'error str,
+
+		/// The span of the first binding-site name.
+		first: SourceSpan,
+
+		/// The span of the duplicate binding-site name that triggered the
+		/// error.
+		duplicate: SourceSpan
+	},
+
+	/// A [variable reference](crate::ast::Variable) appears lexically before
+	/// the [binding](crate::ast::Binding) that introduces its name. Produced
+	/// only by the simple [one-shot evaluator](crate::evaluate).
+	UseBeforeBind
+	{
+		/// The name that was referenced before being bound, borrowed from the
+		/// source text.
+		name: &'error str,
+
+		/// The span of the offending reference.
+		reference: SourceSpan,
+
+		/// The span of the binding-site name that appears later in the source.
+		binding: SourceSpan
+	},
+
 	/// The function could not be optimized. Produced only by the simple
 	/// [one-shot evaluator](crate::evaluate).
 	OptimizationFailed,
@@ -755,6 +802,43 @@ impl Display for EvaluationError<'_>
 					expected, given
 				)
 			},
+			EvaluationError::BindingCollidesWithParameter {
+				name,
+				parameter,
+				binding
+			} =>
+			{
+				write!(
+					f,
+					"local binding '{}' at {} collides with formal \
+					 parameter declared at {}",
+					name, binding, parameter
+				)
+			},
+			EvaluationError::DuplicateBinding {
+				name,
+				first,
+				duplicate
+			} =>
+			{
+				write!(
+					f,
+					"duplicate local binding '{}' at {} (first bound at {})",
+					name, duplicate, first
+				)
+			},
+			EvaluationError::UseBeforeBind {
+				name,
+				reference,
+				binding
+			} =>
+			{
+				write!(
+					f,
+					"reference to '{}' at {} precedes its binding at {}",
+					name, reference, binding
+				)
+			},
 			EvaluationError::UnrecognizedExternal(name) =>
 			{
 				write!(f, "unrecognized external variable: {}", name)
@@ -780,6 +864,33 @@ impl<'src> From<CompilationError<'src>> for EvaluationError<'src>
 				name,
 				first,
 				duplicate
+			},
+			CompilationError::BindingCollidesWithParameter {
+				name,
+				parameter,
+				binding
+			} => Self::BindingCollidesWithParameter {
+				name,
+				parameter,
+				binding
+			},
+			CompilationError::DuplicateBinding {
+				name,
+				first,
+				duplicate
+			} => Self::DuplicateBinding {
+				name,
+				first,
+				duplicate
+			},
+			CompilationError::UseBeforeBind {
+				name,
+				reference,
+				binding
+			} => Self::UseBeforeBind {
+				name,
+				reference,
+				binding
 			},
 			CompilationError::OptimizationFailed => Self::OptimizationFailed
 		}

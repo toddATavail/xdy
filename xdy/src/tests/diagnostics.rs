@@ -39,7 +39,13 @@ fn kind_name(kind: &DiagnosticKind) -> &'static str
 		DiagnosticKind::EmptyExpression => "EmptyExpression",
 		DiagnosticKind::UnexpectedToken => "UnexpectedToken",
 		DiagnosticKind::UnexpectedEof => "UnexpectedEof",
-		DiagnosticKind::DuplicateParameter { .. } => "DuplicateParameter"
+		DiagnosticKind::DuplicateParameter { .. } => "DuplicateParameter",
+		DiagnosticKind::BindingCollidesWithParameter { .. } =>
+		{
+			"BindingCollidesWithParameter"
+		},
+		DiagnosticKind::DuplicateBinding { .. } => "DuplicateBinding",
+		DiagnosticKind::UseBeforeBind { .. } => "UseBeforeBind"
 	}
 }
 

@@ -27,17 +27,19 @@ use nom_locate::LocatedSpan;
 
 use crate::{
 	ast::{
-		Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
-		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
-		Neg, Parameter, Range, StandardDice, Sub, Variable
+		Add, ArithmeticExpression, Binding, Constant, CustomDice,
+		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
+		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
+		Variable
 	},
 	parser::NomErrorKind,
 	span::{SourceSpan, Spanned}
 };
 
 use super::{
-	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT,
-	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
+	BINDING_CONTEXT, BINDING_EXPRESSION_CONTEXT, CLOSING_BRACE_CONTEXT,
+	CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT, CONSTANT_CONTEXT,
+	CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
 	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT,
 	FUNCTION_BODY_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
 	NEXT_PARAMETER_CONTEXT, PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT,
@@ -157,6 +159,15 @@ pub fn parameters(
 
 /// Parse a formal parameter, without leading whitespace.
 ///
+/// A parameter is an [identifier](identifier), with one caveat: if the
+/// identifier is immediately followed by an `@` (after optional inline
+/// whitespace), it is the head of a [local binding](binding) rather than a
+/// parameter declaration, so the combinator fails without consuming input. The
+/// rewind is necessary because `x@(expr)` at the start of a function body would
+/// otherwise be misinterpreted as a parameter `x` missing its `:` separator,
+/// and the enclosing [`parameters`] combinator cannot backtrack after
+/// `separated_list0` has committed to the identifier.
+///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
@@ -167,7 +178,20 @@ pub fn parameters(
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn parameter(input: Span) -> IResult<Span, Span, ParseError>
 {
-	identifier(input)
+	let original = input;
+	let (after_name, name) = identifier(input)?;
+	let peek: IResult<Span, char, ParseError> =
+		preceded(multispace0, char('@')).parse_complete(after_name);
+	if peek.is_ok()
+	{
+		return Err(nom::Err::Error(
+			<ParseError as NomParseError<Span>>::from_error_kind(
+				original,
+				ErrorKind::Tag
+			)
+		));
+	}
+	Ok((after_name, name))
 }
 
 /// Parse an expression, without leading whitespace.
@@ -455,6 +479,7 @@ pub fn primary(input: Span) -> IResult<Span, Expression, ParseError>
 		context(DICE_CONTEXT, map(dice, Expression::Dice)),
 		context(GROUP_CONTEXT, map(group, Expression::Group)),
 		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(BINDING_CONTEXT, map(binding, Expression::Binding)),
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant))
 	))
 	.parse_complete(input)
@@ -523,6 +548,79 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 		input,
 		Variable {
 			name: name.fragment(),
+			span: SourceSpan { start, end }
+		}
+	))
+}
+
+/// Parse a local binding, without leading whitespace. The syntax is
+/// `name@(expr)`, where `name` is an [identifier](identifier) and `expr` is any
+/// [expression](expression). The bound name must appear to the left of the `@`
+/// without delimiters — note that this is distinct from a [variable
+/// reference](variable), which uses `{name}`.
+///
+/// The combinator commits (via [`cut`]) once it has consumed the `@` operator,
+/// so a bare identifier followed by anything other than `@` backtracks cleanly
+/// and lets the enclosing [`alt`] try another alternative.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed local binding.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+pub fn binding(input: Span) -> IResult<Span, Binding, ParseError>
+{
+	// Commit to the binding form only after seeing `identifier @`, and on
+	// failure return an error at the original input position rather than at the
+	// post-identifier position. This preserves the diagnostic shape of
+	// bare-identifier-in-expression errors: without the rewind, an `alt`
+	// combinator would see a rightmost error whose span lies past the
+	// identifier, masking the true "bare identifier is not legal here"
+	// position.
+	let original_input = input;
+	let start = input.location_offset();
+	let (after_name, name) = identifier(input)?;
+	let name_span = SourceSpan {
+		start: name.location_offset(),
+		end: name.location_offset() + name.fragment().len()
+	};
+	let check: IResult<Span, char, ParseError> =
+		preceded(multispace0, char('@')).parse_complete(after_name);
+	let input = match check
+	{
+		Ok((rest, _)) => rest,
+		Err(_) =>
+		{
+			return Err(nom::Err::Error(
+				<ParseError as NomParseError<Span>>::from_error_kind(
+					original_input,
+					ErrorKind::Tag
+				)
+			));
+		}
+	};
+	let (input, _) =
+		cut(preceded(multispace0, char('('))).parse_complete(input)?;
+	let (input, expression) = cut(preceded(
+		multispace0,
+		context(BINDING_EXPRESSION_CONTEXT, expression)
+	))
+	.parse_complete(input)?;
+	let (input, _) = cut(preceded(
+		multispace0,
+		context(CLOSING_PAREN_CONTEXT, char(')'))
+	))
+	.parse_complete(input)?;
+	let end = input.location_offset();
+	Ok((
+		input,
+		Binding {
+			name: name.fragment(),
+			name_span,
+			expression: Box::new(expression),
 			span: SourceSpan { start, end }
 		}
 	))
@@ -754,6 +852,7 @@ pub fn dice_count(input: Span) -> IResult<Span, Expression, ParseError>
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
 		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(BINDING_CONTEXT, map(binding, Expression::Binding)),
 		context(GROUP_CONTEXT, map(group, Expression::Group))
 	))
 	.parse_complete(input)
@@ -774,6 +873,7 @@ pub fn standard_faces(input: Span) -> IResult<Span, Expression, ParseError>
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
 		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(BINDING_CONTEXT, map(binding, Expression::Binding)),
 		context(GROUP_CONTEXT, map(group, Expression::Group))
 	))
 	.parse_complete(input)
@@ -934,6 +1034,7 @@ pub fn drop_expression(input: Span) -> IResult<Span, Expression, ParseError>
 	alt((
 		context(CONSTANT_CONTEXT, map(constant, Expression::Constant)),
 		context(VARIABLE_CONTEXT, map(variable, Expression::Variable)),
+		context(BINDING_CONTEXT, map(binding, Expression::Binding)),
 		context(GROUP_CONTEXT, map(group, Expression::Group))
 	))
 	.parse_complete(input)

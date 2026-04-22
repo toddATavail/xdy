@@ -577,3 +577,57 @@ span: 0..1
 message: unexpected `)` with no matching opener
 rendered: unexpected `)` (0..1): unexpected `)` with no matching opener
 suggestion: 3D6
+
+x: x@(3D6) + {x}
+=
+kind: BindingCollidesWithParameter
+span: 3..4
+message: local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+rendered: local binding `x` collides with formal parameter (3..4): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 0..1 "declared as a parameter here"
+suggestion: x: y@(3D6) + {x}
+
+x@(3D6) + x@(1D4)
+=
+kind: DuplicateBinding
+span: 10..11
+message: local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+rendered: duplicate local binding `x` (10..11): local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 0..1 "first bound here"
+suggestion: x@(3D6) + y@(1D4)
+
+{x} + x@(3D6)
+=
+kind: UseBeforeBind
+span: 0..3
+message: reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
+rendered: reference to `x` precedes its binding (0..3): reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
+related: 6..7 "bound here"
+suggestion: {x} + y@(3D6)
+
+x@(1 + {x})
+=
+kind: UseBeforeBind
+span: 7..10
+message: reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
+rendered: reference to `x` precedes its binding (7..10): reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
+related: 0..1 "bound here"
+suggestion: y@(1 + {x})
+
+abc@(3D6) + abc@(1D4)
+=
+kind: DuplicateBinding
+span: 12..15
+message: local binding `abc` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+rendered: duplicate local binding `abc` (12..15): local binding `abc` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 0..3 "first bound here"
+suggestion: abc@(3D6) + new0@(1D4)
+
+a, b: a@(3D6) + {a}
+=
+kind: BindingCollidesWithParameter
+span: 6..7
+message: local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+rendered: local binding `a` collides with formal parameter (6..7): local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 0..1 "declared as a parameter here"
+suggestion: a, b: c@(3D6) + {a}

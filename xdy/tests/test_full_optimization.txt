@@ -2669,3 +2669,220 @@ Function() r#2 ⚅#3
 		⚅2 <- roll standard dice @0D@1
 		@0 <- sum rolling record ⚅2
 		return @0
+
+x@(3D6)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+x@(3D6) + {x}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 + @0
+		return @0
+
+x@(3D6) + {x} + {x}
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + @0
+		@0 <- @0 + @1
+		return @0
+
+a@(b@(3D6) + {b}) + {a} + {b}
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + @0
+		@0 <- @0 + @1
+		@0 <- @1 + @0
+		return @0
+
+y: x@(3D6) + {x} + {y}
+=
+Function(y@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@1 <- sum rolling record ⚅0
+		@0 <- @0 + @1
+		@0 <- @1 + @0
+		return @0
+
+x@(2+3)D6
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 5D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+x@(7)
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 7
+
+x@(7) + {x}
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 14
+
+x@(1D6) + {x}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 + @0
+		return @0
+
+x@([1:6]) + {x}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 + @0
+		return @0
+
+x@(2D4) * {x}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D4
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 * @0
+		return @0
+
+hp@(3D6) + {hp}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 + @0
+		return @0
+
+score@(1D20) + {score} + {score}
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:20
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + @0
+		@0 <- @0 + @1
+		return @0
+
+x@(1D6) + y@(1D4) + {x} * {y}
+=
+Function() r#3 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll range 1:4
+		@1 <- sum rolling record ⚅1
+		@2 <- @0 + @1
+		@0 <- @0 * @1
+		@0 <- @2 + @0
+		return @0
+
+a@(b@(1D4) + {b}) + {a}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:4
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 + @0
+		@0 <- @0 + @0
+		return @0
+
+x@(2) ^ {x}
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 4
+
+n@(1D3)D6 + {n}
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll range 1:3
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice @0D6
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 + @1
+		return @0
+
+3Df@(6) + {f}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		@0 <- 6 + @0
+		return @0
+
+4D6 drop lowest k@(1) + {k}
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		@0 <- 1 + @0
+		return @0
+
+y: x@(1D6) + {x} + {y}
+=
+Function(y@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		@1 <- sum rolling record ⚅0
+		@0 <- @0 + @1
+		@0 <- @1 + @0
+		return @0
+
+x@(2+3)
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 5
+
+x@(3) + y@(4) + {x} + {y}
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 14

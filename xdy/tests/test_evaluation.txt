@@ -3312,3 +3312,64 @@ value ∈ [0, 729], count = None
 -(1D3)D(1D3)
 =
 value ∈ [-9, -1], count = None
+
+x@(2+3)
+=
+value ∈ [5, 5], count = 1
+
+x@(7) + {x}
+=
+value ∈ [14, 14], count = 1
+
+x@(3) + y@(4) + {x} + {y}
+=
+value ∈ [14, 14], count = 1
+
+x@(1D6) + {x}
+=
+value ∈ [2, 12], count = 6
+
+x@([1:6]) + {x}
+=
+value ∈ [2, 12], count = 6
+
+x@(2D4) * {x}
+=
+value ∈ [4, 64], count = 16
+
+hp@(3D6) + {hp}
+=
+value ∈ [6, 36], count = 216
+
+score@(1D20) + {score} + {score}
+=
+value ∈ [3, 60], count = 20
+
+x@(1D6) + y@(1D4) + {x} * {y}
+=
+value ∈ [3, 34], count = 24
+
+a@(b@(1D4) + {b}) + {a}
+=
+value ∈ [4, 16], count = 4
+
+x@(2) ^ {x}
+=
+value ∈ [4, 4], count = 1
+
+n@(1D3)D6 + {n}
+=
+value ∈ [2, 21], count = None
+
+3Df@(6) + {f}
+=
+value ∈ [9, 24], count = 216
+
+4D6 drop lowest k@(1) + {k}
+=
+value ∈ [4, 19], count = 1296
+
+y: x@(1D6) + {x} + {y}
+=
+args: 3
+value ∈ [5, 15], count = 6

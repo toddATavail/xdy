@@ -30,7 +30,7 @@
 //! ```
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	convert::Infallible,
 	error::Error,
 	fmt::{Display, Formatter}
@@ -43,8 +43,8 @@ use crate::{
 	CanAllocate as _, Optimizer as _, Parser, SourceSpan, StandardOptimizer,
 	Validator,
 	ast::{
-		self, ASTVisitor, ArithmeticExpression, Constant, DiceExpression,
-		Expression
+		self, ASTVisitor, ArithmeticExpression, Binding, Constant,
+		DiceExpression, Expression
 	},
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
@@ -71,6 +71,14 @@ use crate::{
 ///   be parsed.
 /// * [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
 ///   function declares the same formal parameter name more than once.
+/// * [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter)
+///   if a [local binding](crate::ast::Binding) uses a name that is already
+///   declared as a formal parameter.
+/// * [`DuplicateBinding`](CompilationError::DuplicateBinding) if the same name
+///   is bound more than once within the same function body.
+/// * [`UseBeforeBind`](CompilationError::UseBeforeBind) if a [variable
+///   reference](crate::ast::Variable) appears lexically before the
+///   [binding](crate::ast::Binding) that introduces its name.
 pub fn compile_unoptimized(
 	source: &str
 ) -> Result<Function, CompilationError<'_>>
@@ -114,6 +122,14 @@ pub fn compile_unoptimized(
 ///   be parsed.
 /// * [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
 ///   function declares the same formal parameter name more than once.
+/// * [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter)
+///   if a [local binding](crate::ast::Binding) uses a name that is already
+///   declared as a formal parameter.
+/// * [`DuplicateBinding`](CompilationError::DuplicateBinding) if the same name
+///   is bound more than once within the same function body.
+/// * [`UseBeforeBind`](CompilationError::UseBeforeBind) if a [variable
+///   reference](crate::ast::Variable) appears lexically before the
+///   [binding](crate::ast::Binding) that introduces its name.
 /// * [`OptimizationFailed`](CompilationError::OptimizationFailed) if the
 ///   function could not be optimized.
 ///
@@ -218,6 +234,57 @@ pub enum CompilationError<'src>
 		duplicate: SourceSpan
 	},
 
+	/// A [local binding](crate::ast::Binding) uses a name that is already
+	/// declared as a formal parameter. Local bindings, formal parameters, and
+	/// environment variables all share one namespace per function;
+	/// cross-category collisions are not permitted.
+	BindingCollidesWithParameter
+	{
+		/// The colliding name, borrowed from the source text.
+		name: &'src str,
+
+		/// The span of the parameter declaration in the function signature.
+		parameter: SourceSpan,
+
+		/// The span of the binding-site name that triggered the error.
+		binding: SourceSpan
+	},
+
+	/// The same name is bound more than once by
+	/// [local bindings](crate::ast::Binding) within a single function body. The
+	/// language provides a single flat namespace per function, so rebinding is
+	/// not permitted.
+	DuplicateBinding
+	{
+		/// The rebound name, borrowed from the source text.
+		name: &'src str,
+
+		/// The span of the first binding-site name.
+		first: SourceSpan,
+
+		/// The span of the duplicate binding-site name that triggered the
+		/// error.
+		duplicate: SourceSpan
+	},
+
+	/// A [variable reference](crate::ast::Variable) appears lexically before
+	/// the [binding](crate::ast::Binding) that introduces its name. References
+	/// to a local binding are forward-only, so the binding must precede every
+	/// use — including any use inside its own bound expression (i.e.,
+	/// self-reference is rejected as use-before-bind).
+	UseBeforeBind
+	{
+		/// The name that was referenced before being bound, borrowed from the
+		/// source text.
+		name: &'src str,
+
+		/// The span of the offending reference.
+		reference: SourceSpan,
+
+		/// The span of the binding-site name that appears later in the source.
+		binding: SourceSpan
+	},
+
 	/// The function could not be optimized.
 	OptimizationFailed
 }
@@ -242,6 +309,43 @@ impl Display for CompilationError<'_>
 					f,
 					"duplicate parameter '{}' at {} (first declared at {})",
 					name, duplicate, first
+				)
+			},
+			CompilationError::BindingCollidesWithParameter {
+				name,
+				parameter,
+				binding
+			} =>
+			{
+				write!(
+					f,
+					"local binding '{}' at {} collides with formal \
+					 parameter declared at {}",
+					name, binding, parameter
+				)
+			},
+			CompilationError::DuplicateBinding {
+				name,
+				first,
+				duplicate
+			} =>
+			{
+				write!(
+					f,
+					"duplicate local binding '{}' at {} (first bound at {})",
+					name, duplicate, first
+				)
+			},
+			CompilationError::UseBeforeBind {
+				name,
+				reference,
+				binding
+			} =>
+			{
+				write!(
+					f,
+					"reference to '{}' at {} precedes its binding at {}",
+					name, reference, binding
 				)
 			},
 			CompilationError::OptimizationFailed =>
@@ -287,8 +391,21 @@ pub struct Compiler<'src>
 	arity: usize,
 
 	/// The parameters and external variables, mapped to their register
-	/// indices.
-	variables: HashMap<&'src str, RegisterIndex>
+	/// indices. Local bindings are tracked separately in
+	/// [`bindings`](Self::bindings).
+	variables: HashMap<&'src str, RegisterIndex>,
+
+	/// [Local bindings](crate::ast::Binding) introduced by `name@(expr)`
+	/// forms, mapped to the [addressing mode](AddressingMode) of the bound
+	/// expression. A binding is stored as whatever
+	/// [`accept_expression`](Self::accept_expression) produced for its
+	/// right-hand side — an [`Immediate`] for a constant RHS, a register for
+	/// everything else — so subsequent [references](ast::Variable) resolve to
+	/// the same value without reallocating or re-emitting the bound
+	/// expression. The [`Validator`] guarantees that binding names are
+	/// disjoint from parameter and external names, so the two tables never
+	/// need to be consulted together during name resolution.
+	bindings: HashMap<&'src str, AddressingMode>
 }
 
 impl<'src> Compiler<'src>
@@ -321,7 +438,8 @@ impl<'src> Compiler<'src>
 			next_register: RegisterIndex(0),
 			next_rolling_record: RollingRecordIndex(0),
 			arity: 0,
-			variables: HashMap::new()
+			variables: HashMap::new(),
+			bindings: HashMap::new()
 		};
 		let _ = compiler.visit_function(ast);
 		compiler.finish()
@@ -494,13 +612,23 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 			}
 			self.arity = self.variables.len();
 		}
+		// Discover local binding names before external discovery so that
+		// `{x}` inside `x@(...) + {x}` is not misclassified as an external.
+		// The [`Validator`] has already guaranteed that binding names are
+		// disjoint from parameter names and that every reference lexically
+		// follows its binding, so a name present in this set belongs to a
+		// local binding and not to the external environment.
+		let binding_names = collect_binding_names(&node.body);
 		// Discover and register external variables before generating the body,
 		// so that their register allocation order is deterministic
 		// (depth-first, left-to-right through the AST).
 		let externals = discover_externals(&node.body);
 		for external in externals
 		{
-			self.variable(external);
+			if !binding_names.contains(external)
+			{
+				self.variable(external);
+			}
 		}
 		// Generate the body.
 		let return_value = self.accept_expression(&node.body);
@@ -529,8 +657,33 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 		node: &'src ast::Variable<'src>
 	) -> Result<AddressingMode, Infallible>
 	{
+		// Local bindings take precedence over the parameter/external table:
+		// the [`Validator`] guarantees disjoint namespaces, so at most one
+		// match is possible, and consulting bindings first avoids allocating
+		// a spurious register for a name that has already been bound.
+		if let Some(&addr) = self.bindings.get(node.name)
+		{
+			return Ok(addr);
+		}
 		let register = self.variable(node.name);
 		Ok(register.into())
+	}
+
+	fn visit_binding(
+		&mut self,
+		node: &'src Binding<'src>
+	) -> Result<AddressingMode, Infallible>
+	{
+		// Compile the bound expression, coercing a rolling record to its sum
+		// register so the binding always captures the integer main effect.
+		// The resulting [addressing mode](AddressingMode) — a register for
+		// derived values, an immediate for a constant RHS — becomes the
+		// single shared source for every subsequent [reference](ast::Variable),
+		// which is how "single-evaluation" semantics fall out of linear IR
+		// without an explicit marker.
+		let value = self.accept_expression(&node.expression);
+		self.bindings.insert(node.name, value);
+		Ok(value)
 	}
 
 	fn visit_range(
@@ -717,6 +870,14 @@ fn collect_variables<'src>(
 		{
 			out.push(v.name);
 		},
+		Expression::Binding(b) =>
+		{
+			// The binding name itself is not a free variable — it is
+			// introduced by the binding, not referenced from outside — but
+			// any [references](ast::Variable) inside the bound expression
+			// may still be externals, so the RHS is walked recursively.
+			collect_variables(&b.expression, out);
+		},
 		Expression::Group(g) =>
 		{
 			collect_variables(&g.expression, out);
@@ -736,6 +897,151 @@ fn collect_variables<'src>(
 		},
 		Expression::Constant(_) =>
 		{}
+	}
+}
+
+/// Collect the names introduced by every [local binding](crate::ast::Binding)
+/// anywhere in `expr`. Used by the [compiler](Compiler) to exclude binding
+/// names from external-variable discovery — the [`Validator`] has already
+/// rejected duplicate bindings, so duplicates here would indicate an
+/// inconsistency in the pipeline and are merely deduplicated by the set.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `expr`: The expression to walk.
+///
+/// # Returns
+/// The set of binding names discovered in `expr`.
+fn collect_binding_names<'src>(
+	expr: &'src Expression<'src>
+) -> HashSet<&'src str>
+{
+	let mut names = HashSet::new();
+	gather_binding_names(expr, &mut names);
+	names
+}
+
+/// Recursively collect binding names from the given expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `expr`: The expression to walk.
+/// - `out`: The accumulator for binding names.
+fn gather_binding_names<'src>(
+	expr: &'src Expression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match expr
+	{
+		Expression::Binding(b) =>
+		{
+			out.insert(b.name);
+			gather_binding_names(&b.expression, out);
+		},
+		Expression::Group(g) => gather_binding_names(&g.expression, out),
+		Expression::Range(r) =>
+		{
+			gather_binding_names(&r.start, out);
+			gather_binding_names(&r.end, out);
+		},
+		Expression::Dice(d) => gather_dice_binding_names(d, out),
+		Expression::Arithmetic(a) => gather_arithmetic_binding_names(a, out),
+		Expression::Variable(_) | Expression::Constant(_) =>
+		{}
+	}
+}
+
+/// Recursively collect binding names from a dice expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `dice`: The dice expression to walk.
+/// - `out`: The accumulator for binding names.
+fn gather_dice_binding_names<'src>(
+	dice: &'src DiceExpression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match dice
+	{
+		DiceExpression::Standard(d) =>
+		{
+			gather_binding_names(&d.count, out);
+			gather_binding_names(&d.faces, out);
+		},
+		DiceExpression::Custom(d) => gather_binding_names(&d.count, out),
+		DiceExpression::DropLowest(d) =>
+		{
+			gather_dice_binding_names(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				gather_binding_names(drop, out);
+			}
+		},
+		DiceExpression::DropHighest(d) =>
+		{
+			gather_dice_binding_names(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				gather_binding_names(drop, out);
+			}
+		}
+	}
+}
+
+/// Recursively collect binding names from an arithmetic expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `arith`: The arithmetic expression to walk.
+/// - `out`: The accumulator for binding names.
+fn gather_arithmetic_binding_names<'src>(
+	arith: &'src ArithmeticExpression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match arith
+	{
+		ArithmeticExpression::Add(a) =>
+		{
+			gather_binding_names(&a.left, out);
+			gather_binding_names(&a.right, out);
+		},
+		ArithmeticExpression::Sub(s) =>
+		{
+			gather_binding_names(&s.left, out);
+			gather_binding_names(&s.right, out);
+		},
+		ArithmeticExpression::Mul(m) =>
+		{
+			gather_binding_names(&m.left, out);
+			gather_binding_names(&m.right, out);
+		},
+		ArithmeticExpression::Div(d) =>
+		{
+			gather_binding_names(&d.left, out);
+			gather_binding_names(&d.right, out);
+		},
+		ArithmeticExpression::Mod(m) =>
+		{
+			gather_binding_names(&m.left, out);
+			gather_binding_names(&m.right, out);
+		},
+		ArithmeticExpression::Exp(e) =>
+		{
+			gather_binding_names(&e.left, out);
+			gather_binding_names(&e.right, out);
+		},
+		ArithmeticExpression::Neg(n) => gather_binding_names(&n.operand, out)
 	}
 }
 

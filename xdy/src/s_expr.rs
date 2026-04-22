@@ -20,9 +20,10 @@ use nom_locate::LocatedSpan;
 
 use crate::{
 	ast::{
-		Add, ArithmeticExpression, Constant, CustomDice, DiceExpression, Div,
-		DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
-		Neg, Parameter, Range, StandardDice, Sub, Variable
+		Add, ArithmeticExpression, Binding, Constant, CustomDice,
+		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
+		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
+		Variable
 	},
 	span::{SourceSpan, Spanned}
 };
@@ -823,6 +824,68 @@ impl SExpressible for Range<'_>
 	}
 }
 
+impl SExpressible for Binding<'_>
+{
+	fn write_s_expr(
+		&self,
+		f: &mut dyn Write,
+		remaining_space: usize,
+		options: SExpressibleOptions
+	) -> fmt::Result
+	{
+		write_span_prefix(f, self.span, options)?;
+		let remaining_space = remaining_space
+			.saturating_sub(span_prefix_size(self.span, options));
+		let keyword = "binding";
+		write!(f, "({}", keyword)?;
+		// Account for the open paren and the keyword already emitted.
+		let remaining_space = remaining_space.saturating_sub(1 + keyword.len());
+		// Compute the in-line widths of the bound name and the bound
+		// expression. If everything fits on the current line, emit the
+		// single-line form; otherwise indent and emit the name and the
+		// expression on their own lines, mirroring the tuple(A, B, C) behavior
+		// used elsewhere in this module.
+		let name_size =
+			span_prefix_size(self.name_span, options) + ident_size(self.name);
+		let body = self.expression.deref();
+		let body_size = body.size_s_expr(options);
+		// Two interposing spaces (after keyword, between name and body) and the
+		// closing parenthesis, plus the indentation required by enclosing
+		// expressions.
+		let space_needed = name_size + 1 + body_size + 1 + options.indent;
+		if remaining_space >= space_needed
+		{
+			write!(f, " ")?;
+			write_span_prefix(f, self.name_span, options)?;
+			write_ident(f, self.name)?;
+			write!(f, " ")?;
+			body.write_s_expr(f, usize::MAX, options)?;
+		}
+		else
+		{
+			let options = options.increase_indent();
+			write!(f, "\n{}", "\t".repeat(options.indent))?;
+			write_span_prefix(f, self.name_span, options)?;
+			write_ident(f, self.name)?;
+			write!(f, "\n{}", "\t".repeat(options.indent))?;
+			body.write_s_expr(f, options.available_space(), options)?;
+		}
+		write!(f, ")")
+	}
+
+	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
+	{
+		// Two parentheses, the keyword `binding`, two interposing spaces, the
+		// optional span prefix before the name, the bound name (quoted if
+		// necessary), and the bound expression.
+		span_prefix_size(self.span, options)
+			+ 2 + "binding".len()
+			+ 2 + span_prefix_size(self.name_span, options)
+			+ ident_size(self.name)
+			+ self.expression.size_s_expr(options)
+	}
+}
+
 impl SExpressible for Expression<'_>
 {
 	fn write_s_expr(
@@ -849,6 +912,10 @@ impl SExpressible for Expression<'_>
 			{
 				variable.write_s_expr(f, remaining_space, options)
 			},
+			Expression::Binding(binding) =>
+			{
+				binding.write_s_expr(f, remaining_space, options)
+			},
 			Expression::Range(range) =>
 			{
 				range.write_s_expr(f, remaining_space, options)
@@ -871,6 +938,7 @@ impl SExpressible for Expression<'_>
 			Expression::Group(group) => group.size_s_expr(options),
 			Expression::Constant(constant) => constant.size_s_expr(options),
 			Expression::Variable(variable) => variable.size_s_expr(options),
+			Expression::Binding(binding) => binding.size_s_expr(options),
 			Expression::Range(range) => range.size_s_expr(options),
 			Expression::Dice(dice) => dice.size_s_expr(options),
 			Expression::Arithmetic(arithmetic) =>
@@ -2564,6 +2632,27 @@ fn read_expr(input: Span<'_>) -> SExprResult<'_, Expression<'_>>
 						Expression::Range(Range {
 							start: Box::new(start),
 							end: Box::new(end),
+							span
+						})
+					))
+				},
+				"binding" =>
+				{
+					// The bound name is emitted as an ident with an optional
+					// span prefix (only when spans are serialized). Read the
+					// prefix explicitly so the [`Binding::name_span`] survives
+					// the lossless round-trip; fall back to the default span
+					// when no prefix is present.
+					let (input, name_span) = read_span_prefix(input)?;
+					let (input, name) = read_ident(input)?;
+					let (input, expression) =
+						read_child(input, span, name_span)?;
+					Ok((
+						input,
+						Expression::Binding(Binding {
+							name,
+							name_span,
+							expression: Box::new(expression),
 							span
 						})
 					))

@@ -56,7 +56,9 @@ use std::{
 
 use crate::{
 	CompilationError, Parser, Validator,
-	ast::{Function, Parameter},
+	ast::{
+		ArithmeticExpression, DiceExpression, Expression, Function, Parameter
+	},
 	parser::ParseError,
 	span::SourceSpan
 };
@@ -163,6 +165,53 @@ pub enum DiagnosticKind
 	{
 		/// The duplicated parameter name.
 		name: String
+	},
+
+	/// A [local binding](crate::ast::Binding) uses a name that is already
+	/// declared as a formal parameter. Not produced by the fix-and-retry loop —
+	/// this kind is produced by the [`Validator`] semantic pass after a clean
+	/// parse. The diagnostic's primary [`span`](Diagnostic::span) points at the
+	/// binding-site name; the [`related`](Diagnostic::related) list carries the
+	/// span of the colliding parameter declaration.
+	///
+	/// # Examples
+	/// `x: x@(3D6) + {x}`
+	BindingCollidesWithParameter
+	{
+		/// The colliding name.
+		name: String
+	},
+
+	/// The same name is bound more than once by
+	/// [local bindings](crate::ast::Binding) within a single function body.
+	/// Not produced by the fix-and-retry loop — this kind is produced by the
+	/// [`Validator`] semantic pass after a clean parse. The diagnostic's
+	/// primary [`span`](Diagnostic::span) points at the duplicate binding-site
+	/// name; the [`related`](Diagnostic::related) list carries the span of the
+	/// first binding.
+	///
+	/// # Examples
+	/// `x@(3D6) + x@(1D4)`
+	DuplicateBinding
+	{
+		/// The rebound name.
+		name: String
+	},
+
+	/// A [variable reference](crate::ast::Variable) appears lexically before
+	/// the [binding](crate::ast::Binding) that introduces its name. Not
+	/// produced by the fix-and-retry loop — this kind is produced by the
+	/// [`Validator`] semantic pass after a clean parse. The diagnostic's
+	/// primary [`span`](Diagnostic::span) points at the offending reference;
+	/// the [`related`](Diagnostic::related) list carries the span of the later
+	/// binding site.
+	///
+	/// # Examples
+	/// `{x} + x@(3D6)`, `x@({x})` (self-reference inside the bound expression)
+	UseBeforeBind
+	{
+		/// The name that was referenced before being bound.
+		name: String
 	}
 }
 
@@ -205,6 +254,22 @@ impl Display for DiagnosticKind
 			Self::DuplicateParameter { name } =>
 			{
 				write!(f, "duplicate parameter `{}`", name)
+			},
+			Self::BindingCollidesWithParameter { name } =>
+			{
+				write!(
+					f,
+					"local binding `{}` collides with formal parameter",
+					name
+				)
+			},
+			Self::DuplicateBinding { name } =>
+			{
+				write!(f, "duplicate local binding `{}`", name)
+			},
+			Self::UseBeforeBind { name } =>
+			{
+				write!(f, "reference to `{}` precedes its binding", name)
 			}
 		}
 	}
@@ -1580,16 +1645,382 @@ fn analyze_semantic_error<'src>(
 			first,
 			duplicate
 		} => make_duplicate_parameter(source, ast, name, first, duplicate),
+		CompilationError::BindingCollidesWithParameter {
+			name,
+			parameter,
+			binding
+		} => make_binding_collides_with_parameter(
+			source, ast, name, parameter, binding
+		),
+		CompilationError::DuplicateBinding {
+			name,
+			first,
+			duplicate
+		} => make_duplicate_binding(source, ast, name, first, duplicate),
+		CompilationError::UseBeforeBind {
+			name,
+			reference,
+			binding
+		} => make_use_before_bind(source, ast, name, reference, binding),
 		CompilationError::ParseError(_)
 		| CompilationError::OptimizationFailed =>
 		{
 			unreachable!(
-				"Validator::validate produces only DuplicateParameter; \
+				"Validator::validate produces only semantic errors; \
 				 ParseError is produced by the parser and OptimizationFailed \
 				 by the optimizer, neither of which is reached from \
 				 diagnose() at this point"
 			)
 		}
+	}
+}
+
+/// Build a
+/// [`BindingCollidesWithParameter`](DiagnosticKind::BindingCollidesWithParameter)
+/// diagnostic with a rename [`Suggestion`] whose corrected source is guaranteed
+/// to parse and validate cleanly.
+///
+/// The primary [`span`](Diagnostic::span) points at the binding-site name; a
+/// single [`RelatedLabel`] points at the colliding parameter declaration. The
+/// suggestion splices a fresh name into the binding span — references in the
+/// body are deliberately left alone because there is no safe way to pick which
+/// of them (if any) was intended to refer to the parameter rather than the
+/// binding.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `ast`: The parsed function (used to enumerate in-use names).
+/// - `name`: The colliding name.
+/// - `parameter`: The span of the colliding parameter declaration.
+/// - `binding`: The span of the binding-site name.
+///
+/// # Returns
+/// A fully-formed [`Diagnostic`] with one rename [`Suggestion`].
+fn make_binding_collides_with_parameter<'src>(
+	source: &'src str,
+	ast: &Function<'src>,
+	name: &'src str,
+	parameter: SourceSpan,
+	binding: SourceSpan
+) -> Diagnostic
+{
+	let used = collect_in_use_names(ast);
+	let fresh = suggest_rename_with_pool(name, &used);
+	let corrected = splice(source, binding, &fresh);
+	Diagnostic {
+		kind: DiagnosticKind::BindingCollidesWithParameter {
+			name: name.to_string()
+		},
+		span: binding,
+		message: format!(
+			"local binding `{}` collides with a formal parameter of the same \
+			 name; bindings, parameters, and environment variables share one \
+			 flat namespace per function",
+			name
+		),
+		related: vec![RelatedLabel {
+			span: parameter,
+			message: "declared as a parameter here".into()
+		}],
+		suggestions: vec![Suggestion {
+			description: format!("rename local binding to `{}`", fresh),
+			corrected_source: corrected,
+			placeholders: vec![]
+		}]
+	}
+}
+
+/// Build a [`DuplicateBinding`](DiagnosticKind::DuplicateBinding) diagnostic
+/// with a rename [`Suggestion`] whose corrected source is guaranteed to parse
+/// and validate cleanly.
+///
+/// The primary [`span`](Diagnostic::span) points at the duplicate binding-site
+/// name; a single [`RelatedLabel`] points at the first binding. The suggestion
+/// splices a fresh name into the duplicate binding span — references in the
+/// body are deliberately left alone because there is no safe way to pick which
+/// one (if any) was intended to refer to the rebinding rather than the
+/// original.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `ast`: The parsed function (used to enumerate in-use names).
+/// - `name`: The rebound name.
+/// - `first`: The span of the first binding-site name.
+/// - `duplicate`: The span of the duplicate binding-site name.
+///
+/// # Returns
+/// A fully-formed [`Diagnostic`] with one rename [`Suggestion`].
+fn make_duplicate_binding<'src>(
+	source: &'src str,
+	ast: &Function<'src>,
+	name: &'src str,
+	first: SourceSpan,
+	duplicate: SourceSpan
+) -> Diagnostic
+{
+	let used = collect_in_use_names(ast);
+	let fresh = suggest_rename_with_pool(name, &used);
+	let corrected = splice(source, duplicate, &fresh);
+	Diagnostic {
+		kind: DiagnosticKind::DuplicateBinding {
+			name: name.to_string()
+		},
+		span: duplicate,
+		message: format!(
+			"local binding `{}` is bound more than once; a function body \
+			 provides a single flat namespace, so rebinding is not permitted",
+			name
+		),
+		related: vec![RelatedLabel {
+			span: first,
+			message: "first bound here".into()
+		}],
+		suggestions: vec![Suggestion {
+			description: format!("rename duplicate binding to `{}`", fresh),
+			corrected_source: corrected,
+			placeholders: vec![]
+		}]
+	}
+}
+
+/// Build a [`UseBeforeBind`](DiagnosticKind::UseBeforeBind) diagnostic with a
+/// rename [`Suggestion`] whose corrected source is guaranteed to parse and
+/// validate cleanly.
+///
+/// The primary [`span`](Diagnostic::span) points at the offending reference; a
+/// single [`RelatedLabel`] points at the later binding site. The suggestion
+/// splices a fresh name into the binding site — the forward reference is then
+/// reinterpreted as an external variable. Renaming the binding rather than the
+/// reference is consistent with [`make_binding_collides_with_parameter`] and
+/// [`make_duplicate_binding`]: always rewrite the declaration, never the
+/// references.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text from which `ast` was parsed.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `ast`: The parsed function (used to enumerate in-use names).
+/// - `name`: The name referenced before its binding.
+/// - `reference`: The span of the offending reference.
+/// - `binding`: The span of the binding-site name that appears later in the
+///   source.
+///
+/// # Returns
+/// A fully-formed [`Diagnostic`] with one rename [`Suggestion`].
+fn make_use_before_bind<'src>(
+	source: &'src str,
+	ast: &Function<'src>,
+	name: &'src str,
+	reference: SourceSpan,
+	binding: SourceSpan
+) -> Diagnostic
+{
+	let used = collect_in_use_names(ast);
+	let fresh = suggest_rename_with_pool(name, &used);
+	let corrected = splice(source, binding, &fresh);
+	Diagnostic {
+		kind: DiagnosticKind::UseBeforeBind {
+			name: name.to_string()
+		},
+		span: reference,
+		message: format!(
+			"reference to `{}` precedes its binding; references to a local \
+			 binding must lexically follow the binding site, including \
+			 references inside the bound expression itself (self-reference \
+			 is not permitted)",
+			name
+		),
+		related: vec![RelatedLabel {
+			span: binding,
+			message: "bound here".into()
+		}],
+		suggestions: vec![Suggestion {
+			description: format!("rename local binding to `{}`", fresh),
+			corrected_source: corrected,
+			placeholders: vec![]
+		}]
+	}
+}
+
+/// Splice `replacement` into `source` at the byte range described by `span`.
+///
+/// # Parameters
+/// - `source`: The original source text.
+/// - `span`: The byte range to replace.
+/// - `replacement`: The text to substitute.
+///
+/// # Returns
+/// A fresh [`String`] identical to `source` except that the bytes inside `span`
+/// are replaced by `replacement`.
+fn splice(source: &str, span: SourceSpan, replacement: &str) -> String
+{
+	let mut corrected = String::with_capacity(
+		source.len() + replacement.len() - (span.end - span.start)
+	);
+	corrected.push_str(&source[..span.start]);
+	corrected.push_str(replacement);
+	corrected.push_str(&source[span.end..]);
+	corrected
+}
+
+/// Collect every name that is in use anywhere in `ast`: formal parameters,
+/// [local-binding](crate::ast::Binding) names, and
+/// [variable references](crate::ast::Variable). A fresh name suggested against
+/// this pool is guaranteed to collide with nothing currently in the function.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `ast`: The parsed function.
+///
+/// # Returns
+/// A set containing every parameter, binding, and variable-reference name.
+fn collect_in_use_names<'src>(ast: &Function<'src>) -> HashSet<&'src str>
+{
+	let mut names: HashSet<&'src str> = HashSet::new();
+	if let Some(ref parameters) = ast.parameters
+	{
+		for param in parameters
+		{
+			names.insert(param.name);
+		}
+	}
+	gather_expression_names(&ast.body, &mut names);
+	names
+}
+
+/// Recursively gather [binding](crate::ast::Binding) names and
+/// [variable reference](crate::ast::Variable) names from the given expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `expr`: The expression to walk.
+/// - `out`: The accumulator for names.
+fn gather_expression_names<'src>(
+	expr: &Expression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match expr
+	{
+		Expression::Variable(v) =>
+		{
+			out.insert(v.name);
+		},
+		Expression::Binding(b) =>
+		{
+			out.insert(b.name);
+			gather_expression_names(&b.expression, out);
+		},
+		Expression::Group(g) => gather_expression_names(&g.expression, out),
+		Expression::Range(r) =>
+		{
+			gather_expression_names(&r.start, out);
+			gather_expression_names(&r.end, out);
+		},
+		Expression::Dice(d) => gather_dice_names(d, out),
+		Expression::Arithmetic(a) => gather_arithmetic_names(a, out),
+		Expression::Constant(_) =>
+		{}
+	}
+}
+
+/// Recursively gather names from a dice expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `dice`: The dice expression to walk.
+/// - `out`: The accumulator for names.
+fn gather_dice_names<'src>(
+	dice: &DiceExpression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match dice
+	{
+		DiceExpression::Standard(d) =>
+		{
+			gather_expression_names(&d.count, out);
+			gather_expression_names(&d.faces, out);
+		},
+		DiceExpression::Custom(d) => gather_expression_names(&d.count, out),
+		DiceExpression::DropLowest(d) =>
+		{
+			gather_dice_names(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				gather_expression_names(drop, out);
+			}
+		},
+		DiceExpression::DropHighest(d) =>
+		{
+			gather_dice_names(&d.dice, out);
+			if let Some(ref drop) = d.drop
+			{
+				gather_expression_names(drop, out);
+			}
+		}
+	}
+}
+
+/// Recursively gather names from an arithmetic expression.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+///
+/// # Parameters
+/// - `arith`: The arithmetic expression to walk.
+/// - `out`: The accumulator for names.
+fn gather_arithmetic_names<'src>(
+	arith: &ArithmeticExpression<'src>,
+	out: &mut HashSet<&'src str>
+)
+{
+	match arith
+	{
+		ArithmeticExpression::Add(a) =>
+		{
+			gather_expression_names(&a.left, out);
+			gather_expression_names(&a.right, out);
+		},
+		ArithmeticExpression::Sub(s) =>
+		{
+			gather_expression_names(&s.left, out);
+			gather_expression_names(&s.right, out);
+		},
+		ArithmeticExpression::Mul(m) =>
+		{
+			gather_expression_names(&m.left, out);
+			gather_expression_names(&m.right, out);
+		},
+		ArithmeticExpression::Div(d) =>
+		{
+			gather_expression_names(&d.left, out);
+			gather_expression_names(&d.right, out);
+		},
+		ArithmeticExpression::Mod(m) =>
+		{
+			gather_expression_names(&m.left, out);
+			gather_expression_names(&m.right, out);
+		},
+		ArithmeticExpression::Exp(e) =>
+		{
+			gather_expression_names(&e.left, out);
+			gather_expression_names(&e.right, out);
+		},
+		ArithmeticExpression::Neg(n) => gather_expression_names(&n.operand, out)
 	}
 }
 
@@ -1627,11 +2058,7 @@ fn make_duplicate_parameter<'src>(
 {
 	let parameters = ast.parameters.as_deref().unwrap_or(&[]);
 	let fresh = suggest_rename(name, parameters);
-	let mut corrected =
-		String::with_capacity(source.len() + fresh.len() - name.len());
-	corrected.push_str(&source[..duplicate.start]);
-	corrected.push_str(&fresh);
-	corrected.push_str(&source[duplicate.end..]);
+	let corrected = splice(source, duplicate, &fresh);
 	Diagnostic {
 		kind: DiagnosticKind::DuplicateParameter {
 			name: name.to_string()
@@ -1686,17 +2113,36 @@ fn make_duplicate_parameter<'src>(
 fn suggest_rename(duplicate: &str, parameters: &[Parameter<'_>]) -> String
 {
 	let used: HashSet<&str> = parameters.iter().map(|p| p.name).collect();
+	suggest_rename_with_pool(duplicate, &used)
+}
+
+/// Suggest a fresh name that does not collide with any name in `used`. Shares
+/// the core algorithm with [`suggest_rename`] so that the rename suggestions
+/// for [local-binding](crate::ast::Binding) errors use the same heuristics as
+/// the original duplicate-parameter flow: single-letter inputs bump forward
+/// through the same-case alphabet, wrapping past the highest attested letter
+/// in the pool, and everything else falls back to `newN`.
+///
+/// # Parameters
+/// - `duplicate`: The name to rename.
+/// - `used`: The set of names already in use, against which the candidate must
+///   not collide.
+///
+/// # Returns
+/// A fresh name that does not appear in `used`.
+fn suggest_rename_with_pool(duplicate: &str, used: &HashSet<&str>) -> String
+{
 	let mut chars = duplicate.chars();
 	if let (Some(c), None) = (chars.next(), chars.next())
 		&& c.is_ascii_alphabetic()
 	{
 		let start = if c.is_ascii_uppercase() { b'A' } else { b'a' };
-		// The highest attested same-case single-letter parameter. The duplicate
+		// The highest attested same-case single-letter name. The duplicate
 		// itself is always attested, so `highest` is at least `c`.
-		let highest = parameters
+		let highest = used
 			.iter()
-			.filter_map(|p| {
-				let mut cs = p.name.chars();
+			.filter_map(|n| {
+				let mut cs = n.chars();
 				match (cs.next(), cs.next())
 				{
 					(Some(ch), None)

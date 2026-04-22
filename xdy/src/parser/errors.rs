@@ -343,6 +343,11 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		DROP_EXPRESSION_CONTEXT => &["`{`", "`(`", "integer"],
 		GROUP_CONTEXT => &["`(`"],
 		VARIABLE_CONTEXT => &["`{`"],
+		BINDING_CONTEXT => &["binding"],
+		BINDING_EXPRESSION_CONTEXT =>
+		{
+			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
+		},
 		IDENTIFIER_CONTEXT => &["identifier"],
 		CONSTANT_CONTEXT => &["integer"],
 		CLOSING_PAREN_CONTEXT => &["`)`"],
@@ -414,6 +419,12 @@ pub(crate) const GROUP_CONTEXT: &str = "primary";
 
 /// Context classifier for the `variable` production rule.
 pub(crate) const VARIABLE_CONTEXT: &str = "variable";
+
+/// Context classifier for the `binding` production rule.
+pub(crate) const BINDING_CONTEXT: &str = "binding";
+
+/// Context classifier for the bound expression of a `binding` production.
+pub(crate) const BINDING_EXPRESSION_CONTEXT: &str = "binding expression";
 
 /// Context classifier for the `IDENTIFIER` production rule.
 pub(crate) const IDENTIFIER_CONTEXT: &str = "identifier";

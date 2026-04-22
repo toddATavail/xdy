@@ -369,3 +369,59 @@ x: ({x} + 1) - ({x} + 1)
 {x} + {y} * {z}
 =
 (function [] (add x (mul y z)))
+
+x@(3D6)
+=
+(function [] (binding x (standard-dice 3 6)))
+
+x@(3D6) + {x}
+=
+(function [] (add (binding x (standard-dice 3 6)) x))
+
+x@(3D6) + {x} + {x}
+=
+(function [] (add (add (binding x (standard-dice 3 6)) x) x))
+
+x@(3D6) * {x}
+=
+(function [] (mul (binding x (standard-dice 3 6)) x))
+
+x@(2+3)D{x}
+=
+(function [] (standard-dice (binding x (add 2 3)) x))
+
+n@(3)D6
+=
+(function [] (standard-dice (binding n 3) 6))
+
+4Df@(6)
+=
+(function [] (standard-dice 4 (binding f 6)))
+
+4D6 drop lowest k@(2)
+=
+(function [] (drop-lowest (standard-dice 4 6) (binding k 2)))
+
+a@(b@(3D6) + {b})
+=
+(function [] (binding a (add (binding b (standard-dice 3 6)) b)))
+
+a@(b@(3D6) + {b}) + {a} + {b}
+=
+(function [] (add (add (binding a (add (binding b (standard-dice 3 6)) b)) a) b))
+
+a new id@(2D4) + {a new id}
+=
+(function [] (add (binding "a new id" (standard-dice 2 4)) "a new id"))
+
+x.y.z@(4D8) + {x.y.z}
+=
+(function [] (add (binding x.y.z (standard-dice 4 8)) x.y.z))
+
+(x@(3D6) + {x})
+=
+(function [] (add (binding x (standard-dice 3 6)) x))
+
+x@(3)
+=
+(function [] (binding x 3))

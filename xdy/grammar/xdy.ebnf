@@ -20,11 +20,13 @@
 
 <exponent_tail> ::= "^" <unary>
 
-<primary> ::= <range> | <dice> | <group> | <variable> | <CONSTANT>
+<primary> ::= <range> | <dice> | <group> | <variable> | <binding> | <CONSTANT>
 
 <group> ::= "(" <expression> ")"
 
 <variable> ::= "{" <IDENTIFIER> "}"
+
+<binding> ::= <IDENTIFIER> "@" "(" <expression> ")"
 
 <range> ::= "[" <expression> ":" <expression> "]"
 
@@ -32,15 +34,15 @@
 
 <base_dice> ::= <dice_count> <D_OPERATOR> <standard_faces> | <dice_count> <D_OPERATOR> <custom_faces>
 
-<dice_count> ::= <CONSTANT> | <variable> | <group>
+<dice_count> ::= <CONSTANT> | <variable> | <binding> | <group>
 
-<standard_faces> ::= <CONSTANT> | <variable> | <group>
+<standard_faces> ::= <CONSTANT> | <variable> | <binding> | <group>
 
 <custom_faces> ::= "[" <CONSTANT> ("," <CONSTANT>)* "]"
 
 <drop_clause> ::= "drop" "lowest" <drop_expression>? | "drop" "highest" <drop_expression>?
 
-<drop_expression> ::= <CONSTANT> | <variable> | <group>
+<drop_expression> ::= <CONSTANT> | <variable> | <binding> | <group>
 
 <IDENTIFIER> ::= <IDENTIFIER_START> <IDENTIFIER_CONTINUE>*
 

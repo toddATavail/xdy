@@ -645,6 +645,11 @@ fn test_expression_span_dispatches_to_variant()
 	assert_eq!(range_expr.span(), span(0, 5));
 	assert!(matches!(range_expr, Expression::Range(_)));
 
+	// Binding.
+	let binding_expr = expression(Span::new("x@(3D6)")).unwrap().1;
+	assert_eq!(binding_expr.span(), span(0, 7));
+	assert!(matches!(binding_expr, Expression::Binding(_)));
+
 	// Dice.
 	let dice_expr = expression(Span::new("2D8")).unwrap().1;
 	assert_eq!(dice_expr.span(), span(0, 3));
@@ -882,4 +887,133 @@ fn test_untethered_matches_hand_built_equivalent()
 		span: SourceSpan::default()
 	};
 	assert_eq!(untethered, handbuilt);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                          Local-binding spans.                              //
+////////////////////////////////////////////////////////////////////////////////
+
+/// A [`Binding`] parsed from `x@(3D6)` has a full span covering the bound name
+/// through the closing `)`, and a [`Binding::name_span`] covering just the
+/// identifier.
+#[test]
+fn test_binding_span_covers_name_through_close_paren()
+{
+	let (_, expr) = expression(Span::new("x@(3D6)")).unwrap();
+	match expr
+	{
+		Expression::Binding(b) =>
+		{
+			assert_eq!(b.name, "x");
+			assert_eq!(b.name_span, span(0, 1));
+			assert_eq!(b.span, span(0, 7));
+			assert_eq!(b.expression.span(), span(3, 6));
+		},
+		other => panic!("expected Binding, got {:?}", other)
+	}
+}
+
+/// A multi-word [`Binding`] identifier carries internal whitespace in its
+/// [`Binding::name_span`], which covers the entire trimmed name.
+#[test]
+fn test_binding_multiword_name_span()
+{
+	let (_, expr) = expression(Span::new("a new id@(1D4)")).unwrap();
+	match expr
+	{
+		Expression::Binding(b) =>
+		{
+			assert_eq!(b.name, "a new id");
+			assert_eq!(b.name_span, span(0, 8));
+			assert_eq!(b.span, span(0, 14));
+		},
+		other => panic!("expected Binding, got {:?}", other)
+	}
+}
+
+/// Whitespace between the bound name, the `@`, and the parenthesized
+/// expression is tolerated by the parser. [`Binding::name_span`] excludes the
+/// whitespace; the full span extends through the closing `)`.
+#[test]
+fn test_binding_allows_whitespace_around_at_sign()
+{
+	let (_, expr) = expression(Span::new("x @ ( 3 + 2 )")).unwrap();
+	match expr
+	{
+		Expression::Binding(b) =>
+		{
+			assert_eq!(b.name, "x");
+			assert_eq!(b.name_span, span(0, 1));
+			assert_eq!(b.span, span(0, 13));
+		},
+		other => panic!("expected Binding, got {:?}", other)
+	}
+}
+
+/// Nested bindings — `a@(b@(1D4) + {b})` — preserve the full and name spans
+/// of both the outer and inner [`Binding`]s.
+#[test]
+fn test_nested_binding_spans()
+{
+	let source = "a@(b@(1D4) + {b})";
+	let (_, expr) = expression(Span::new(source)).unwrap();
+	match expr
+	{
+		Expression::Binding(outer) =>
+		{
+			assert_eq!(outer.name, "a");
+			assert_eq!(outer.name_span, span(0, 1));
+			assert_eq!(outer.span, span(0, 17));
+			// The bound expression is an `Add`; its left operand is the
+			// inner binding.
+			match outer.expression.as_ref()
+			{
+				Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
+				{
+					match add.left.as_ref()
+					{
+						Expression::Binding(inner) =>
+						{
+							assert_eq!(inner.name, "b");
+							assert_eq!(inner.name_span, span(3, 4));
+							assert_eq!(inner.span, span(3, 10));
+						},
+						other =>
+						{
+							panic!("expected inner Binding, got {:?}", other)
+						}
+					}
+				},
+				other => panic!("expected Add, got {:?}", other)
+			}
+		},
+		other => panic!("expected outer Binding, got {:?}", other)
+	}
+}
+
+/// [`Spanned::untethered`] on a [`Binding`] zeroes both [`Binding::span`] and
+/// [`Binding::name_span`], and recurses into the bound expression.
+#[test]
+fn test_untethered_binding_zeroes_all_spans()
+{
+	let ast = Parser::parse("x@(3D6) + {x}").unwrap();
+	let untethered = ast.untethered();
+	match &untethered.body
+	{
+		Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
+		{
+			match add.left.as_ref()
+			{
+				Expression::Binding(b) =>
+				{
+					assert_eq!(b.name, "x");
+					assert_eq!(b.name_span, SourceSpan::default());
+					assert_eq!(b.span, SourceSpan::default());
+					assert_eq!(b.expression.span(), SourceSpan::default());
+				},
+				other => panic!("expected Binding, got {:?}", other)
+			}
+		},
+		other => panic!("expected Add, got {:?}", other)
+	}
 }

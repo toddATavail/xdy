@@ -610,3 +610,123 @@ fn test_range()
 		);
 	}
 }
+
+/// Ensure that [`binding`] accepts every well-formed binding form and rejects
+/// shapes that are not bindings.
+#[test]
+fn test_binding()
+{
+	// Happy paths — single-character, multi-char, dotted, multi-word, with
+	// surrounding whitespace, with a rich bound expression, and nested.
+	for (input, expected) in [
+		("x@(3D6)", "x@(3D6)"),
+		("long_name@(1D20)", "long_name@(1D20)"),
+		("x-y@(1D4)", "x-y@(1D4)"),
+		("x.y.z@(4D8)", "x.y.z@(4D8)"),
+		("a new id@(2D4)", "a new id@(2D4)"),
+		("x @ (3D6)", "x@(3D6)"),
+		("x@ ( 3D6 )", "x@(3D6)"),
+		("x@(1 + 2)", "x@(1 + 2)"),
+		("x@(3D6 + 2)", "x@(3D6 + 2)"),
+		("x@(1D6 drop lowest)", "x@(1D6 drop lowest)"),
+		("a@(b@(1D4) + {b})", "a@(b@(1D4) + {b})"),
+		("x@([1:6])", "x@([1:6])"),
+		("x@(-3)", "x@(-3)")
+	]
+	{
+		let span = Span::new(input);
+		match binding(span)
+		{
+			Ok((residue, result)) =>
+			{
+				assert!(
+					residue.fragment().is_empty(),
+					"Residue not empty for input: {}",
+					input
+				);
+				assert_eq!(
+					result.to_string(),
+					expected,
+					"Rendering mismatch for input: {}",
+					input
+				);
+			},
+			Err(e) => panic!("Parsing failed for input: {}: {}", input, e)
+		}
+	}
+
+	// Invalid inputs — missing `@`, missing parentheses, empty bound
+	// expression, leading digit in name, or a bare identifier that isn't
+	// followed by `@`. A plain identifier must rewind so the enclosing
+	// grammar can try other alternatives.
+	for input in [
+		"x", "xyz", "3@(1)", "x(1D6)", "x@1D6", "x@()", "@x(1D6)", ""
+	]
+	{
+		let span = Span::new(input);
+		let result = binding(span);
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {:?}",
+			input
+		);
+	}
+}
+
+/// The `binding` combinator must appear transparently in every grammar
+/// position where a variable reference is legal — `primary`, `dice_count`,
+/// `standard_faces`, and `drop_expression`. This test drives each combinator
+/// with a binding form and asserts successful recognition.
+#[test]
+fn test_binding_in_restricted_positions()
+{
+	// dice_count: `x@(2+3)D6` — the dice_count is the full binding.
+	let (residue, expr) = dice_count(Span::new("x@(2+3)")).unwrap();
+	assert!(residue.fragment().is_empty());
+	assert!(matches!(expr, Expression::Binding(_)));
+	// standard_faces: `3Df@(6)` — after `3D`, standard_faces sees `f@(6)`.
+	let (residue, expr) = standard_faces(Span::new("f@(6)")).unwrap();
+	assert!(residue.fragment().is_empty());
+	assert!(matches!(expr, Expression::Binding(_)));
+	// drop_expression: `4D6 drop lowest k@(2)` — the drop_expression sees
+	// `k@(2)`.
+	let (residue, expr) = drop_expression(Span::new("k@(2)")).unwrap();
+	assert!(residue.fragment().is_empty());
+	assert!(matches!(expr, Expression::Binding(_)));
+	// primary: bindings are legal primaries, so a binding after a binary
+	// operator flows through the expression pipeline cleanly.
+	let (residue, expr) = expression(Span::new("1 + x@(3D6)")).unwrap();
+	assert!(residue.fragment().is_empty());
+	let rendered = expr.to_string();
+	assert_eq!(rendered, "1 + x@(3D6)");
+}
+
+/// A binding that fails on its `@` peek must not consume input — otherwise an
+/// [`alt`](nom::branch::alt) combinator would see an error span past the
+/// identifier and mask the real parse failure. This is the mechanism that
+/// preserves [`BareIdentifier`](crate::diagnostics::DiagnosticKind::BareIdentifier)
+/// detection for `4 + hello`.
+#[test]
+fn test_binding_rewinds_on_no_at_sign()
+{
+	let input = "hello";
+	let span = Span::new(input);
+	let result = binding(span);
+	assert!(result.is_err(), "binding should reject `{}`", input);
+	if let Err(nom::Err::Error(e)) = result
+	{
+		// The recorded error position must be at offset 0 (the start of
+		// `hello`), not after the identifier — that's how the enclosing
+		// `alt` learns to keep its rightmost-error pointer undisturbed.
+		assert_eq!(
+			e.errors[0].0.location_offset(),
+			0,
+			"binding error should rewind to the start of the input, not \
+			 point past the consumed identifier"
+		);
+	}
+	else
+	{
+		panic!("expected nom::Err::Error, got: {:?}", result);
+	}
+}
