@@ -4,7 +4,7 @@
 [![Latest version](https://img.shields.io/crates/v/xdy.svg)](https://crates.io/crates/xdy)
 [![Documentation](https://docs.rs/xdy/badge.svg)](https://docs.rs/xdy)
 [![Build Status](https://github.com/toddATavail/xdy/workflows/Rust/badge.svg)](https://github.com/toddATavail/xdy/actions/workflows/rust.yml)
-[![BSD](https://img.shields.io/badge/license-BSD3-blue.svg)](https://github.com/toddATavail/xdy/blob/master/LICENSE)
+[![BSD](https://img.shields.io/badge/license-BSD3-blue.svg)](https://github.com/toddATavail/xdy/blob/main/LICENSE)
 
 `xDy` is an extremely fast dice expression compiler that can be used to generate pseudorandom numbers. It is designed for use within a variety of applications, such as role-playing games (RPGs) and simulations, but also suits other applications that must introduce controlled randomness or generate specific probability distributions. It is written in Rust for maximum performance, safety, and portability.
 
@@ -49,9 +49,12 @@ Beyond generating just a final tally, `xDy` also provides detailed information a
 * Drop highest: `1D6 drop highest 1`, `2D8 drop highest 2`, …
 * Formal parameters: `x: 1D6 + {x}`, `y: 1D6 + {y}`, `x, y: {x}D{y}`, …
 * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
+* Subexpression naming: `x@(3D6) + {x}`, `y: x@(3D6) + {x} + {y}`, `x@(2 + 3)D6`, …
 * Dynamic expressions: `3D(2D6)`, `x: ({x}D3)D8`, …
 
 Environmental variables permit background state to be associated with an evaluator, while formal parameters permit dynamic state to be passed into each evaluation. Both features can be used to parameterize dice expressions and make them more flexible. Environmental variables could easily cover, for example, the attributes and skills of a character in an RPG, while formal parameters could cover the situational modifiers applied to a particular roll.
+
+Subexpression naming binds the integer result of a parenthesized subexpression to a name with `name@(expr)`, making it available as `{name}` at any later position. The bound expression is evaluated exactly once — even when it contains dice — so `x@(3D6)` rolls its dice a single time and reuses the total wherever `{x}` appears. A name must be referenced only after it is bound, and binding names share a single namespace with formal parameters and environmental variables, so a binding may not reuse any of their names.
 
 ## Examples
 
@@ -126,6 +129,24 @@ assert!(
     1 <= result.records[2].results[0]
         && result.records[2].results[0] <= 10
 );
+```
+
+Binding a subexpression to a name with `name@(expr)` and reusing it as `{name}`.
+The bound `3D6` is rolled exactly once and its total is reused, so the result is
+twice that total and only a single rolling record is produced:
+
+```rust
+use xdy::evaluate;
+use rand::rng;
+
+let result = evaluate("x@(3D6) + {x}", vec![], vec![], &mut rng()).unwrap();
+
+assert!(result.records.len() == 1);
+assert!(result.records[0].results.len() == 3);
+
+let total = result.records[0].results.iter().sum::<i32>();
+assert!(3 <= total && total <= 18);
+assert!(result.result == 2 * total);
 ```
 
 ### Repeated evaluation
@@ -211,7 +232,7 @@ Only 3 pathological cases (deeply right-nested with repeated subexpressions) sho
 
 ## Safety
 
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains no `unsafe` code.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains a single small block of `unsafe` code in the parser, where it reconstructs a source span after trimming trailing whitespace from an identifier; it is sound because every value it uses derives from a span that `nom` has already validated against the same source text. No foreign function interfaces are involved.
 
 ## Cargo features
 
@@ -239,7 +260,6 @@ I plan to introduce an `xdy!` macro for compiling statically known dice expressi
 
 Other language features that I plan to add include:
 
-* Subexpression naming: `{x}@(1D6) + {x}`, `x, y: {z}@({x} + {y}) + {z}D6`, …
 * Keep lowest: `1D6 keep lowest 1`, `2D8 keep lowest 2`, …
 * Keep highest: `1D6 keep highest 1`, `2D8 keep highest 2`, …
 * Reroll: `1D6 reroll =1`, `2D8 reroll >=5`, `2D8 reroll >=5 1 time`,

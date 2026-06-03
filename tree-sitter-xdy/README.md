@@ -37,7 +37,7 @@ $ tree-sitter build
 After the parser has been generated, you can run the tests using `npm`:
 
 ```shell
-$ tree-sitter test
+$ npm test
 ```
 
 Or you can run the grammar tests and the Rust integration test piecewise:

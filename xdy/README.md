@@ -44,7 +44,7 @@ graph LR
 
 **Parser.** A [nom](https://docs.rs/nom)-based combinator parser recognizes the xDy grammar and produces an abstract syntax tree (`ast::Function`). The grammar supports operator precedence via recursive descent: `add_sub` → `mul_div_mod` → `unary` → `exponent` → `primary`. See `parser::combinators` for the full set of production rules; the Rustdoc includes a railroad diagram generated from the EBNF grammar. Every AST node carries a `SourceSpan` referencing its byte range in the original input — see [Source spans](#source-spans) below.
 
-**Validator.** The `Validator` performs semantic checks on the parsed AST before code generation. Currently it catches duplicate formal parameter names; the design admits further checks (use-before-bind, rebinding, etc.) as downstream language features demand them. See [Semantic validation](#semantic-validation).
+**Validator.** The `Validator` performs semantic checks on the parsed AST before code generation. It catches duplicate formal parameter names and enforces the invariants of local bindings — use-before-bind (including self-reference), rebinding, and collision with a formal parameter — with room for further checks as downstream language features demand them. See [Semantic validation](#semantic-validation).
 
 **Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout. Keeping validation as a separate pass lets the compiler's `ASTVisitor::Error` be `Infallible`.
 
@@ -60,13 +60,16 @@ Spans flow end-to-end: parser combinators compute them from `nom_locate::Located
 
 The `Validator` pass sits between parsing and code generation and rejects ASTs that are syntactically well-formed but semantically invalid. It implements `ASTVisitor` so callers can drive it directly (e.g., to interleave it with other analyses), but `Validator::validate()` is the ordinary entry point.
 
-The current check:
+The current checks:
 
 | Error | Example | Payload |
 |-------|---------|---------|
-| `DuplicateParameter` | `x, x: {x} + 1` | both occurrence spans, duplicated name |
+| `DuplicateParameter` | `x, x: {x} + 1` | name, first and duplicate occurrence spans |
+| `BindingCollidesWithParameter` | `x: x@(3D6) + {x}` | name, parameter span, binding-site span |
+| `DuplicateBinding` | `x@(3D6) + x@(1D4)` | name, first and duplicate binding-site spans |
+| `UseBeforeBind` | `{x} + x@(3D6)` | name, reference span, binding-site span |
 
-Additional checks will be added here as language features land.
+The binding checks (`BindingCollidesWithParameter`, `DuplicateBinding`, `UseBeforeBind`) enforce the single flat namespace and forward-only reference rules of subexpression naming; `UseBeforeBind` also rejects self-reference inside a bound expression, such as `x@(1 + {x})`. Additional checks will be added here as further language features land.
 
 ### Intermediate representation
 
@@ -249,4 +252,4 @@ All arithmetic instructions saturate on overflow/underflow.
 
 ## Safety
 
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains no `unsafe` code.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains a single small block of `unsafe` code in the parser, where it reconstructs a source span after trimming trailing whitespace from an identifier; it is sound because every value it uses derives from a span that `nom` has already validated against the same source text. No foreign function interfaces are involved.
