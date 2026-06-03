@@ -23,28 +23,22 @@
     "src/**"
   ],
   "author": "Todd L Smith <todd@availlang.org>",
-  "license": "UNLICENSED",
+  "license": "BSD-3-Clause",
   "dependencies": {
-    "node-addon-api": "^7.1.0",
+    "node-addon-api": "^8.8.0",
     "node-gyp-build": "^4.8.0"
   },
   "peerDependencies": {
-    "tree-sitter": "^0.21.0"
+    "tree-sitter": "^0.25.0"
   },
   "peerDependenciesMeta": {
-    "tree_sitter": {
+    "tree-sitter": {
       "optional": true
     }
   },
   "devDependencies": {
     "prebuildify": "^6.0.0",
-    "tree-sitter-cli": "^0.22.6"
+    "tree-sitter-cli": "^0.26.9"
   },
-  "types": "bindings/node",
-  "tree-sitter": [
-    {
-      "scope": "source.dice",
-      "injection-regex": "^dice$"
-    }
-  ]
+  "types": "bindings/node"
 }

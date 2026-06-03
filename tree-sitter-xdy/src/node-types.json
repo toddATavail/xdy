@@ -12,6 +12,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -78,6 +82,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -138,6 +146,92 @@
     }
   },
   {
+    "type": "binding",
+    "named": true,
+    "fields": {
+      "expression": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "div",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "exp",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "mod",
+            "named": true
+          },
+          {
+            "type": "mul",
+            "named": true
+          },
+          {
+            "type": "neg",
+            "named": true
+          },
+          {
+            "type": "range",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          },
+          {
+            "type": "sub",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "custom_dice",
     "named": true,
     "fields": {
@@ -145,6 +239,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
           {
             "type": "constant",
             "named": true
@@ -204,6 +302,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -267,6 +369,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -360,6 +466,10 @@
         "required": false,
         "types": [
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -406,6 +516,10 @@
         "required": false,
         "types": [
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -431,6 +545,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -500,6 +618,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -562,6 +684,7 @@
   {
     "type": "function",
     "named": true,
+    "root": true,
     "fields": {
       "body": {
         "multiple": false,
@@ -569,6 +692,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -654,6 +781,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -726,6 +857,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -789,6 +924,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -864,6 +1003,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -927,6 +1070,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -999,6 +1146,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -1105,6 +1256,10 @@
             "named": true
           },
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -1168,6 +1323,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -1239,6 +1398,10 @@
         "required": true,
         "types": [
           {
+            "type": "binding",
+            "named": true
+          },
+          {
             "type": "constant",
             "named": true
           },
@@ -1256,6 +1419,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
           {
             "type": "constant",
             "named": true
@@ -1282,6 +1449,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -1348,6 +1519,10 @@
         "types": [
           {
             "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
             "named": true
           },
           {
@@ -1452,6 +1627,10 @@
   },
   {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": "@",
     "named": false
   },
   {

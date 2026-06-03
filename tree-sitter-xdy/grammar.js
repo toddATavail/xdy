@@ -28,13 +28,33 @@ module.exports = grammar({
 
     // A dice expression.
     _expression: ($) =>
-      choice($.group, $.constant, $.variable, $.range, $._dice, $._arithmetic),
+      choice(
+        $.group,
+        $.constant,
+        $.variable,
+        $.binding,
+        $.range,
+        $._dice,
+        $._arithmetic,
+      ),
 
     // A parenthesized expression.
     group: ($) => seq("(", field("expression", $._expression), ")"),
 
-    // A variable, representing a parameter or an external variable.
+    // A variable, representing a parameter, a local binding, or an external
+    // variable.
     variable: ($) => seq("{", field("identifier", $.identifier), "}"),
+
+    // A local binding, naming the integer result of a subexpression so it can
+    // be referenced as a variable at later lexical positions.
+    binding: ($) =>
+      seq(
+        field("name", $.identifier),
+        "@",
+        "(",
+        field("expression", $._expression),
+        ")",
+      ),
 
     // A range expression.
     range: ($) =>
@@ -66,10 +86,10 @@ module.exports = grammar({
       seq(field("count", $._dice_count), $._d, field("faces", $.custom_faces)),
 
     // An expression that represents the number of dice to roll.
-    _dice_count: ($) => choice($.constant, $.variable, $.group),
+    _dice_count: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // An expression that represents the faces of a standard die.
-    _standard_faces: ($) => choice($.constant, $.variable, $.group),
+    _standard_faces: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // The faces of a custom die.
     custom_faces: ($) =>
@@ -109,7 +129,7 @@ module.exports = grammar({
       ),
 
     // An expression that represents the number of dice to drop.
-    _drop_expression: ($) => choice($.constant, $.variable, $.group),
+    _drop_expression: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // A negative constant, for custom faces only.
     negative_constant: ($) => /\-\d+/,

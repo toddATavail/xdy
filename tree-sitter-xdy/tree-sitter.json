@@ -1,0 +1,33 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "xdy",
+      "camelcase": "Xdy",
+      "scope": "source.xdy",
+      "injection-regex": "^xdy$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "BSD-3-Clause",
+    "description": "tree-sitter grammar for the xDy dice expression language.",
+    "authors": [
+      {
+        "name": "Todd L Smith",
+        "email": "todd@availlang.org"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/toddATavail/xdy"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

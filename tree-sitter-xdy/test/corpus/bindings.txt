@@ -1,0 +1,248 @@
+==================
+Binding: simple
+==================
+
+x@(3D6)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(standard_dice
+			(constant)
+			(constant))))
+
+==================
+Binding: constant value
+==================
+
+x@(5)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(constant)))
+
+==================
+Binding: referenced after definition
+==================
+
+total@(2d6) + {total}
+
+---
+
+(function
+	(add
+		(binding
+			(identifier)
+			(standard_dice
+				(constant)
+				(constant)))
+		(variable
+			(identifier))))
+
+==================
+Binding: as dice count
+==================
+
+x@(2)D6
+
+---
+
+(function
+	(standard_dice
+		(binding
+			(identifier)
+			(constant))
+		(constant)))
+
+==================
+Binding: as standard faces
+==================
+
+3Dx@(6)
+
+---
+
+(function
+	(standard_dice
+		(constant)
+		(binding
+			(identifier)
+			(constant))))
+
+==================
+Binding: as drop expression
+==================
+
+3D6 drop lowest x@(2)
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice
+			(constant)
+			(constant))
+		(binding
+			(identifier)
+			(constant))))
+
+==================
+Binding: nested binding in bound expression
+==================
+
+a@(b@(2)D6)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(standard_dice
+			(binding
+				(identifier)
+				(constant))
+			(constant))))
+
+==================
+Binding: multiple bindings with references
+==================
+
+x@(1d6) + y@(2d4) + {x} + {y}
+
+---
+
+(function
+	(add
+		(add
+			(add
+				(binding
+					(identifier)
+					(standard_dice
+						(constant)
+						(constant)))
+				(binding
+					(identifier)
+					(standard_dice
+						(constant)
+						(constant))))
+			(variable
+				(identifier)))
+		(variable
+			(identifier))))
+
+==================
+Binding: inside a group
+==================
+
+(x@(2))
+
+---
+
+(function
+	(group
+		(binding
+			(identifier)
+			(constant))))
+
+==================
+Binding: as range bounds
+==================
+
+[x@(1) : y@(6)]
+
+---
+
+(function
+	(range
+		(binding
+			(identifier)
+			(constant))
+		(binding
+			(identifier)
+			(constant))))
+
+==================
+Binding: kebab-case name
+==================
+
+kebab-case@(2)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(constant)))
+
+==================
+Binding: qualified name
+==================
+
+qualified.access@(2)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(constant)))
+
+==================
+Binding: Unicode name
+==================
+
+дайс@(2)
+
+---
+
+(function
+	(binding
+		(identifier)
+		(constant)))
+
+==================
+Binding: alongside a parameter
+==================
+
+a: x@(2D6) + {a} + {x}
+
+---
+
+(function
+	(parameters
+		(parameter
+			(identifier)))
+	(add
+		(add
+			(binding
+				(identifier)
+				(standard_dice
+					(constant)
+					(constant)))
+			(variable
+				(identifier)))
+		(variable
+			(identifier))))
+
+==================
+Binding: variable as name is rejected
+:error
+==================
+
+{n}@(2)
+
+---
+
+==================
+Binding: empty bound expression is rejected
+:error
+==================
+
+x@()
+
+---
