@@ -1510,7 +1510,7 @@ fn make_incomplete_drop(
 
 /// Create a diagnostic for a bare closing delimiter with no matching opener.
 /// The fix removes the spurious closer. Emitted from
-/// [`analyze_error`](analyze_error) when an expression was expected at the
+/// [`analyze_error`] when an expression was expected at the
 /// error position but the source has `)`, `]`, or `}` there instead.
 ///
 /// # Parameters

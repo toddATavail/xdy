@@ -159,7 +159,7 @@ pub fn parameters(
 
 /// Parse a formal parameter, without leading whitespace.
 ///
-/// A parameter is an [identifier](identifier), with one caveat: if the
+/// A parameter is an [identifier], with one caveat: if the
 /// identifier is immediately followed by an `@` (after optional inline
 /// whitespace), it is the head of a [local binding](binding) rather than a
 /// parameter declaration, so the combinator fails without consuming input. The
@@ -328,12 +328,12 @@ pub fn unary(input: Span) -> IResult<Span, Expression, ParseError>
 		.parse_complete(input)
 }
 
-/// Parse the general negation path of a [unary](unary) expression: a leading
-/// `-`, optional whitespace, and a [unary](unary) operand.
+/// Parse the general negation path of a [unary] expression: a leading
+/// `-`, optional whitespace, and a [unary] operand.
 ///
 /// Factored out of [`unary`] so that the span start offset can be captured
 /// before the leading `-` is consumed without running afoul of the lifetime
-/// elision rules that govern inline closures inside [`alt`](nom::branch::alt).
+/// elision rules that govern inline closures inside [`alt`].
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -554,8 +554,8 @@ pub fn variable(input: Span) -> IResult<Span, Variable, ParseError>
 }
 
 /// Parse a local binding, without leading whitespace. The syntax is
-/// `name@(expr)`, where `name` is an [identifier](identifier) and `expr` is any
-/// [expression](expression). The bound name must appear to the left of the `@`
+/// `name@(expr)`, where `name` is an [identifier] and `expr` is any
+/// [expression]. The bound name must appear to the left of the `@`
 /// without delimiters — note that this is distinct from a [variable
 /// reference](variable), which uses `{name}`.
 ///

@@ -7,7 +7,7 @@
 //! but semantically invalid.
 //!
 //! Keeping validation as a distinct pass keeps the code generator infallible
-//! (its [`ASTVisitor::Error`](crate::ast::ASTVisitor::Error) type is
+//! (its [`ASTVisitor::Error`] type is
 //! [`Infallible`](std::convert::Infallible)) while allowing semantic errors to
 //! carry typed, span-bearing payloads suitable for rich diagnostics.
 //!
@@ -48,7 +48,7 @@ use crate::{
 
 /// A semantic-validation pass over an [abstract syntax tree](crate::ast)
 /// (AST). Use [`Validator::validate`] as the high-level entry point; the
-/// [`Validator`] type also implements [`ASTVisitor`](ast::ASTVisitor) for
+/// [`Validator`] type also implements [`ASTVisitor`] for
 /// callers who want to drive validation directly — e.g., to interleave it
 /// with other AST analyses.
 #[derive(Copy, Clone, Debug, Default)]

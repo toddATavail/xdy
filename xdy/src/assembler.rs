@@ -88,7 +88,7 @@
 //! assert_eq!(format!("{}", function).trim(), text.trim());
 //! ```
 //!
-//! Round-trip [`FromStr`](std::str::FromStr) via [`parse`](str::parse):
+//! Round-trip [`FromStr`] via [`parse`](str::parse):
 //!
 //! ```rust
 //! use xdy::Function;

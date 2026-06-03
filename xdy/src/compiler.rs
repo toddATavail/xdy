@@ -4,14 +4,15 @@
 //! (IR). The IR is generated using static single assignment (SSA) form, where
 //! all registers have a uniform type, `i32`.
 //!
-//! The [`Compiler`] implements the [`ASTVisitor`](crate::ast::ASTVisitor)
+//! The [`Compiler`] implements the [`ASTVisitor`]
 //! trait, producing an [`AddressingMode`] from each node. Users who want to
 //! walk the AST for their own purposes can implement [`ASTVisitor`] directly;
 //! the [`Compiler`] serves as the reference implementation.
 //!
 //! # Usage
 //!
-//! Most users should use the top-level [`compile()`] and [`evaluate()`]
+//! Most users should use the top-level [`compile()`] and
+//! [`evaluate()`](crate::evaluate)
 //! functions, which handle the full pipeline automatically. The compiler is
 //! exposed for advanced users who want to drive the pipeline manually — e.g.,
 //! to insert custom AST analysis or transformation passes between parsing and

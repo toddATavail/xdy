@@ -30,12 +30,17 @@ doc-test *args:
 bench *args:
     cargo bench -p xdy {{args}}
 
-# Full verification: fmt check, clippy, tests.
+# Full verification: fmt check, clippy, tests, doc links.
 verify:
     @just fmt-check
     @just clippy
     @just test
+    @just doc-check
 
 # Build documentation.
 doc *args:
     cargo doc --workspace --no-deps {{args}}
+
+# Check documentation for broken intra-doc links and other rustdoc warnings.
+doc-check:
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items

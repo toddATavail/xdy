@@ -255,9 +255,12 @@
 //! are `i32` and all arithmetic operations saturate on overflow or underflow.
 //! Neither the compiler nor evaluator should panic or cause undefined behavior,
 //! even for invalid dice expressions and inputs, though client misuse of vector
-//! results can lead to panics. `unsafe` code is limited to the `tree-sitter`
-//! dependency, and pertains exclusively to foreign function interfaces (FFIs)
-//! that are not exposed to users of the main crate.
+//! results can lead to panics. `unsafe` code is confined to the parser, where
+//! [`nom_locate::LocatedSpan::new_from_raw_offset`] reconstructs a span after
+//! trimming trailing whitespace from an identifier. The reconstruction is sound
+//! because every offset, line, and slice fed to it is derived from a span that
+//! `nom` has already validated against the same source text, so no invariant of
+//! `LocatedSpan` is violated. No foreign function interfaces are involved.
 //!
 //! ## Cargo features
 //!
