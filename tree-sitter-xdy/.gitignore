@@ -1,5 +1,5 @@
 # Build artifacts
-xdy.dylib.dSYM/
+*.dylib.dSYM/
 
 # Rust artifacts
 Cargo.lock
