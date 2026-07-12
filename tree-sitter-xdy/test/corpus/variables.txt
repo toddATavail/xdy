@@ -138,3 +138,105 @@ Bare identifier: a
 ===================
 
 ---
+
+==================
+External: $env start
+==================
+
+{$env}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: #tag start
+==================
+
+{#tag}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: 'quote start
+==================
+
+{'quoted}
+
+---
+
+(function (variable (identifier)))
+
+============================
+External: pipe selector
+============================
+
+{env|selector}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: predicate ?
+==================
+
+{ready?}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: bang !
+==================
+
+{bang!}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: tilde ~
+==================
+
+{approx~}
+
+---
+
+(function (variable (identifier)))
+
+==================
+External: interior $ #
+==================
+
+{price$per#unit}
+
+---
+
+(function (variable (identifier)))
+
+===================================
+External: selector on env variable
+===================================
+
+$env|weapon: {$env|weapon}
+
+---
+
+(function
+	(parameters (parameter (identifier)))
+	(variable (identifier)))
+
+===============================
+External: Nl letter (Alphabetic)
+===============================
+
+{Ⅻ}
+
+---
+
+(function (variable (identifier)))

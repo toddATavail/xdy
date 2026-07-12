@@ -600,3 +600,58 @@ fn test_expected_char_distinguishes_eoi_from_mismatch()
 	assert_eq!(expected, ')');
 	assert_eq!(found, Some(']'));
 }
+
+/// Input that ends where an expression is required (rather than at a closing
+/// delimiter) yields `ExpectedExpression`.
+#[test]
+fn test_reader_rejects_missing_expression_at_eof()
+{
+	assert_reader_error(
+		"(function [] ",
+		"expected expression, found end of input",
+		13
+	);
+}
+
+/// The reader wraps every leaf failure in an explicit [`SExprError`] variant,
+/// so [`nom`] never drives the [`ParseError`](nom::error::ParseError) impl
+/// through the public API. Exercise it directly so the trait plumbing — and the
+/// `Syntax` variant it constructs, including its `Display` rendering and
+/// `location` — stays correct for any future reader change that lets a raw
+/// `nom` error surface.
+#[test]
+fn test_sexpr_error_nom_parse_error_impl()
+{
+	use nom::error::{ErrorKind, ParseError};
+	use nom_locate::LocatedSpan;
+
+	let span = LocatedSpan::new("abc");
+	let err = SExprError::from_error_kind(span, ErrorKind::Tag);
+	assert!(
+		matches!(err, SExprError::Syntax { .. }),
+		"from_error_kind must produce Syntax, got: {:?}",
+		err
+	);
+	assert_eq!(err.location().offset, 0);
+	assert_eq!(
+		err.to_string(),
+		"S-expression error at line 1, column 1 (byte 0): syntax error \
+		 (nom::Tag)"
+	);
+
+	// `append` accumulates by returning the incoming error unchanged.
+	let other = SExprError::ExpectedExpression {
+		location: SExprLocation {
+			offset: 3,
+			line: 1,
+			column: 4
+		}
+	};
+	let appended = SExprError::append(span, ErrorKind::Tag, other);
+	assert!(
+		matches!(appended, SExprError::ExpectedExpression { .. }),
+		"append must return the accumulated error, got: {:?}",
+		appended
+	);
+	assert_eq!(appended.location().offset, 3);
+}

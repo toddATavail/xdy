@@ -631,3 +631,68 @@ message: local binding `a` collides with a formal parameter of the same name; bi
 rendered: local binding `a` collides with formal parameter (6..7): local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
 related: 0..1 "declared as a parameter here"
 suggestion: a, b: c@(3D6) + {a}
+
+4 + weapon|melee
+=
+kind: BareIdentifier
+span: 4..16
+message: bare identifier `weapon|melee` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..16): bare identifier `weapon|melee` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {weapon|melee}
+
+4 + $weapon
+=
+kind: BareIdentifier
+span: 4..11
+message: bare identifier `$weapon` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..11): bare identifier `$weapon` is not valid here; variables must be wrapped in `{}`
+suggestion: 4 + {$weapon}
+
+$xD6
+=
+kind: BareIdentifier
+span: 0..2
+message: bare identifier `$x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..2): bare identifier `$x` is not valid here; variables must be wrapped in `{}`
+suggestion: {$x}D6
+suggestion: {$xD6}
+
+a, a: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
+=
+kind: DuplicateParameter
+span: 3..4
+message: parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+rendered: duplicate parameter `a` (3..4): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+related: 0..1 "first declared here"
+suggestion: a, b: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
+
+[1
+=
+kind: UnexpectedEof
+span: 2..2
+message: unexpected end of input
+rendered: unexpected end of input (2..2): unexpected end of input
+
+[1:]
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `]` to close `[`
+rendered: unclosed `[` (0..1): expected `]` to close `[`
+suggestion: [1:0]]
+placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
+---
+kind: TrailingInput
+span: 3..4
+message: unexpected `]` after expression
+rendered: trailing input (3..4): unexpected `]` after expression
+suggestion: [1:0]
+
+x: x@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)
+=
+kind: BindingCollidesWithParameter
+span: 3..4
+message: local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+rendered: local binding `x` collides with formal parameter (3..4): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 0..1 "declared as a parameter here"
+suggestion: x: a@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)

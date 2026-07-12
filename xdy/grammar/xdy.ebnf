@@ -46,9 +46,15 @@
 
 <IDENTIFIER> ::= <IDENTIFIER_START> <IDENTIFIER_CONTINUE>*
 
-<IDENTIFIER_START> ::= <ALPHA> | "_"
+<IDENTIFIER_START> ::= <ALPHA> | "_" | "$" | "#" | "'"
 
-<IDENTIFIER_CONTINUE> ::= <ALPHANUMERIC> | "_" | "-"
+<IDENTIFIER_CONTINUE> ::= <IDENTIFIER_START> | <NUMERIC> | "-" | "." | "|" | "?" | "!" | "~" | <INLINE_WHITESPACE>
+
+<ALPHA> ::= "any Unicode alphabetic code point"
+
+<NUMERIC> ::= "any Unicode numeric code point"
+
+<INLINE_WHITESPACE> ::= "any Unicode whitespace code point except U+000A or U+000D"
 
 <CONSTANT> ::= "-"? <DIGIT>+
 

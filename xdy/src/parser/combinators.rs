@@ -16,7 +16,7 @@ use std::num::IntErrorKind;
 use nom::{
 	IResult, Parser,
 	branch::alt,
-	bytes::complete::{tag, take_while_m_n, take_while1},
+	bytes::complete::{tag, take_while, take_while_m_n, take_while1},
 	character::complete::{anychar, char, digit1, multispace0, one_of},
 	combinator::{cut, eof, fail, map, opt, recognize},
 	error::{ErrorKind, ParseError as NomParseError, context},
@@ -1091,7 +1091,58 @@ pub fn d_operator(input: Span) -> IResult<Span, char, ParseError>
 	one_of("dD")(input)
 }
 
+/// Answer whether `c` may begin an [identifier].
+///
+/// The permitted starting characters are any Unicode alphabetic code point
+/// (per [`char::is_alphabetic`]) plus the sigils `_`, `$`, `#`, and `'`. The
+/// sigils are admitted chiefly so that environmental variables can serve as
+/// selector expressions; the grammar does not distinguish parameters from
+/// environmental variables, so any identifier may use them.
+///
+/// This predicate, together with [`is_identifier_continue`], is the single
+/// source of truth for the identifier character set. Both [`identifier`] and
+/// the diagnostic heuristics in [`crate::diagnostics`] classify characters
+/// through these functions so that they cannot drift apart.
+///
+/// # Parameters
+/// - `c`: The character to classify.
+///
+/// # Returns
+/// `true` if `c` may start an identifier; `false` otherwise.
+pub fn is_identifier_start(c: char) -> bool
+{
+	c.is_alphabetic() || matches!(c, '_' | '$' | '#' | '\'')
+}
+
+/// Answer whether `c` may continue an [identifier] after its first
+/// character.
+///
+/// Every [start character](is_identifier_start) is also a continuation
+/// character. The continuation set additionally admits any Unicode numeric
+/// code point (per [`char::is_numeric`], which combined with the alphabetic
+/// start characters yields exactly [`char::is_alphanumeric`]), the connectors
+/// `-` and `.`, the selector characters `|`, `?`, `!`, and `~`, and inline
+/// whitespace (any [`char::is_whitespace`] code point other than `\n` or
+/// `\r`). Inline whitespace lets identifiers read as natural phrases such as
+/// `an external variable`; [`identifier`] trims any trailing whitespace.
+///
+/// # Parameters
+/// - `c`: The character to classify.
+///
+/// # Returns
+/// `true` if `c` may continue an identifier; `false` otherwise.
+pub fn is_identifier_continue(c: char) -> bool
+{
+	is_identifier_start(c)
+		|| c.is_numeric()
+		|| matches!(c, '-' | '.' | '|' | '?' | '!' | '~')
+		|| (c.is_whitespace() && !matches!(c, '\n' | '\r'))
+}
+
 /// Parse an identifier, without leading whitespace.
+///
+/// The recognized character set is defined by [`is_identifier_start`] and
+/// [`is_identifier_continue`].
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -1108,16 +1159,8 @@ pub fn identifier(input: Span) -> IResult<Span, Span, ParseError>
 	// match the full identifier including any inline whitespace, then
 	// trim trailing whitespace by rewinding the input span.
 	let (remaining, span) = recognize(pair(
-		alt((alpha, tag("_"))),
-		many0(alt((
-			alphanumeric1,
-			tag("_"),
-			tag("-"),
-			tag("."),
-			recognize(take_while_m_n(1, 1, |c: char| {
-				c.is_whitespace() && !matches!(c, '\n' | '\r')
-			}))
-		)))
+		take_while_m_n(1, 1, is_identifier_start),
+		take_while(is_identifier_continue)
 	))
 	.parse_complete(input)?;
 	// Rewind the input to just after the trimmed identifier, giving back

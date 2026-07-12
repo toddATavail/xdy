@@ -193,7 +193,21 @@ fn test_identifier()
 		("hello world", "hello world"),
 		("hello.world", "hello.world"),
 		("an external variable", "an external variable"),
-		("a.b.c", "a.b.c")
+		("a.b.c", "a.b.c"),
+		// Sigil start characters.
+		("$env", "$env"),
+		("#tag", "#tag"),
+		("'quoted", "'quoted"),
+		("_leading", "_leading"),
+		// Selector / suffix continuation characters.
+		("env|selector", "env|selector"),
+		("ready?", "ready?"),
+		("bang!", "bang!"),
+		("approx~", "approx~"),
+		("price$usd", "price$usd"),
+		("a#b|c", "a#b|c"),
+		("has'apostrophe", "has'apostrophe"),
+		("$env|weapon", "$env|weapon")
 	]
 	{
 		let span = Span::new(input);
@@ -215,10 +229,15 @@ fn test_identifier()
 		"-hello",
 		" hello",
 		"",
-		"!hello world",
-		"hello!world",
 		"hello@world",
-		"x "
+		"x ",
+		// Continuation-only characters may not start an identifier.
+		"|selector",
+		"?ready",
+		"!bang",
+		"~approx",
+		".dotted",
+		"-dashed"
 	]
 	{
 		let span = Span::new(input);
@@ -227,6 +246,58 @@ fn test_identifier()
 			result.is_err() || !result.unwrap().0.fragment().is_empty(),
 			"Failed to reject invalid input: {}",
 			input
+		);
+	}
+}
+
+/// Ensure that [`is_identifier_start`] and [`is_identifier_continue`] classify
+/// characters as the shared source of truth for the identifier grammar.
+#[test]
+fn test_identifier_char_classes()
+{
+	// Start characters: Unicode letters plus the four sigils.
+	for c in ['a', 'Z', 'δ', 'Ⅻ' /* Nl letter */, '_', '$', '#', '\'']
+	{
+		assert!(
+			is_identifier_start(c),
+			"expected {:?} to be an identifier start",
+			c
+		);
+		assert!(
+			is_identifier_continue(c),
+			"every start character must also continue: {:?}",
+			c
+		);
+	}
+
+	// Continuation-only characters.
+	for c in [
+		'0', '9', '²', // No numeric
+		'-', '.', '|', '?', '!', '~', ' ', '\t'
+	]
+	{
+		assert!(
+			is_identifier_continue(c),
+			"expected {:?} to continue an identifier",
+			c
+		);
+	}
+	for c in ['0', '-', '.', '|', '?', '!', '~', ' ', '\t']
+	{
+		assert!(
+			!is_identifier_start(c),
+			"expected {:?} not to start an identifier",
+			c
+		);
+	}
+
+	// Neither: structural characters and the excluded vertical whitespace.
+	for c in ['@', ',', ':', '(', ')', '[', ']', '{', '}', '\n', '\r']
+	{
+		assert!(
+			!is_identifier_start(c) && !is_identifier_continue(c),
+			"expected {:?} to be excluded from identifiers",
+			c
 		);
 	}
 }

@@ -59,7 +59,7 @@ use crate::{
 	ast::{
 		ArithmeticExpression, DiceExpression, Expression, Function, Parameter
 	},
-	parser::ParseError,
+	parser::{ParseError, is_identifier_continue, is_identifier_start},
 	span::SourceSpan
 };
 
@@ -730,17 +730,13 @@ fn detect_bare_identifier_at_pos(
 	let remaining = &source[pos..];
 	// Check if the text starts with an identifier character.
 	let first = remaining.chars().next()?;
-	if !first.is_alphabetic() && first != '_'
+	if !is_identifier_start(first)
 	{
 		return None;
 	}
 	// Find the end of the identifier.
 	let ident_end = remaining
-		.find(|c: char| {
-			!(c.is_alphanumeric()
-				|| c == '_' || c == '-'
-				|| c == '.' || (c.is_whitespace() && !matches!(c, '\n' | '\r')))
-		})
+		.find(|c: char| !is_identifier_continue(c))
 		.unwrap_or(remaining.len());
 	let name = remaining[..ident_end].trim_end();
 	if name.is_empty()
@@ -756,8 +752,7 @@ fn detect_bare_identifier_at_pos(
 	// (e.g., `{x}D6`) and a whole-variable fix (e.g., `{xD6}`).
 	let split_pos = name.char_indices().find(|&(i, c)| {
 		(c == 'd' || c == 'D')
-			&& i > 0 && name[..i]
-			.starts_with(|c: char| c.is_alphabetic() || c == '_')
+			&& i > 0 && name[..i].starts_with(is_identifier_start)
 	});
 	if let Some((d_offset, _)) = split_pos
 	{
@@ -843,9 +838,7 @@ fn detect_incomplete_parameter(
 		.filter(|s| !s.is_empty())
 		.collect();
 	if params.is_empty()
-		|| !params
-			.iter()
-			.all(|p| p.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+		|| !params.iter().all(|p| p.starts_with(is_identifier_start))
 	{
 		return None;
 	}
@@ -986,9 +979,7 @@ fn detect_bare_identifier(
 	let ident_start = before
 		.char_indices()
 		.rev()
-		.take_while(|(_, c)| {
-			c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.'
-		})
+		.take_while(|(_, c)| is_identifier_continue(*c))
 		.last()
 		.map(|(i, _)| i)?;
 
@@ -1009,7 +1000,7 @@ fn detect_bare_identifier(
 			{
 				let name = &ident[..i];
 				// Verify the name part is a valid identifier start.
-				if name.starts_with(|c: char| c.is_alphabetic() || c == '_')
+				if name.starts_with(is_identifier_start)
 				{
 					let orig_start = offset_map.to_original(ident_start);
 					let orig_end = offset_map.to_original(ident_start + i);

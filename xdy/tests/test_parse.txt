@@ -425,3 +425,23 @@ x.y.z@(4D8) + {x.y.z}
 x@(3)
 =
 (function [] (binding x 3))
+
+{$env|weapon}
+=
+(function [] $env|weapon)
+
+$str, ready?: {ready?}
+=
+(function [$str ready?] ready?)
+
+weapon|melee@(3)
+=
+(function [] (binding weapon|melee 3))
+
+#tag|a@(2D6) + {#tag|a}
+=
+(function [] (add (binding #tag|a (standard-dice 2 6)) #tag|a))
+
+{'dragon~breath!}
+=
+(function [] 'dragon~breath!)

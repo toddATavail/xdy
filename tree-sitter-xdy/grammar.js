@@ -190,10 +190,17 @@ module.exports = grammar({
     // The dice operator.
     _d: ($) => /[dD]/,
 
-    // An identifier, representing a parameter or an external variable. Must
-    // start with a letter or an underscore, and can contain letters, numbers,
-    // underscores, hyphens, and spaces. Note that many CJK characters are not
-    // currently supported by Tree-sitter.
-    identifier: ($) => /[\p{L}_][\p{L}\p{N}\p{Z}._-]*/u,
+    // An identifier, representing a parameter or an external variable. The
+    // character set is byte-exact with the reference nom parser (see
+    // parser::combinators::is_identifier_start and is_identifier_continue): a
+    // start character is any Unicode Alphabetic code point
+    // (char::is_alphabetic) or one of _ $ # '; a continuation character
+    // additionally allows any Unicode numeric code point (char::is_numeric),
+    // the connectors - and ., the selector characters | ? ! ~, and inline
+    // whitespace -- every White_Space code point (char::is_whitespace) except
+    // U+000A and U+000D, enumerated explicitly below. The $ # ' start
+    // characters and the | ? ! ~ continuation characters admit environmental
+    // variables used as selector expressions.
+    identifier: ($) => /[\p{Alphabetic}_$#'][\p{Alphabetic}\p{N}\u0009\u000B\u000C\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000._|#$?!~'-]*/u,
   },
 });

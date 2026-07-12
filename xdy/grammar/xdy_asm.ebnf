@@ -46,6 +46,8 @@
 
 <NAME> ::= <NAME_CHAR>+
 
+<NAME_CHAR> ::= "any code point except '@', ',', ')', ']', tab, carriage return, or line feed"
+
 <INDEX> ::= <DIGIT>+
 
 <INTEGER> ::= "-"? <DIGIT>+

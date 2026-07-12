@@ -29,8 +29,22 @@
 //! drop_expression::= CONSTANT | variable | binding | group
 //! CONSTANT       ::= '-'? DIGIT+
 //! D_OPERATOR     ::= 'd' | 'D'
-//! IDENTIFIER     ::= (ALPHA | '_') (ALPHANUMERIC | '_' | '-')*
+//! IDENTIFIER     ::= IDENTIFIER_START IDENTIFIER_CONTINUE*
+//! IDENTIFIER_START    ::= ALPHA | '_' | '$' | '#' | '\''
+//! IDENTIFIER_CONTINUE ::= IDENTIFIER_START | NUMERIC | '-' | '.' | '|'
+//!                       | '?' | '!' | '~' | INLINE_WHITESPACE
+//! ALPHA          ::= any Unicode alphabetic code point (char::is_alphabetic)
+//! NUMERIC        ::= any Unicode numeric code point (char::is_numeric)
+//! INLINE_WHITESPACE   ::= any Unicode whitespace code point
+//!                       (char::is_whitespace) other than '\n' or '\r'
 //! ```
+//!
+//! `ALPHA` together with `NUMERIC` is exactly [`char::is_alphanumeric`]. The
+//! `$`, `#`, and `'` start characters and the `|`, `?`, `!`, and `~`
+//! continuation characters admit environmental variables used as selector
+//! expressions. The identifier character set is defined once, by
+//! [`is_identifier_start`] and [`is_identifier_continue`], which both the
+//! parser and the [diagnostics](crate::diagnostics) share.
 //!
 //! The following railroad diagram is generated from the EBNF grammar above:
 #![doc = include_str!("../doc/xdy.svg")]

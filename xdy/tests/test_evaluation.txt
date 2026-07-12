@@ -3373,3 +3373,18 @@ y: x@(1D6) + {x} + {y}
 =
 args: 3
 value ∈ [5, 15], count = 6
+
+{$weapon|melee}
+=
+externs: $weapon|melee=5
+value ∈ [5, 5], count = 1
+
+{$weapon|melee} + {#bonus}
+=
+externs: $weapon|melee=5, #bonus=3
+value ∈ [8, 8], count = 1
+
+{$env|count}D6
+=
+externs: $env|count=2
+value ∈ [2, 12], count = 36

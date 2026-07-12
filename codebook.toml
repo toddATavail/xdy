@@ -1,4 +1,3 @@
-dictionaries = []
 words = [
     "allocator",
     "alphanumberic",
@@ -28,6 +27,7 @@ words = [
     "reroll",
     "rpg",
     "serde",
+    "sigils",
     "subexpression",
     "subexpressions",
     "substate",
@@ -39,6 +39,3 @@ words = [
     "xdy",
     "µ",
 ]
-flag_words = []
-ignore_paths = []
-ignore_patterns = []

@@ -22,8 +22,8 @@
 use pretty_assertions::assert_eq;
 
 use crate::{
-	AddressingMode, Assembler, AssemblyError, DropKind, Function, Immediate,
-	Instruction, RegisterIndex, RollingRecordIndex,
+	AddressingMode, Assembler, AssemblyError, AssemblyLocation, DropKind,
+	Function, Immediate, Instruction, RegisterIndex, RollingRecordIndex,
 	support::{compile_valid, read_compilation_test_cases}
 };
 
@@ -1000,4 +1000,204 @@ fn test_from_str_propagates_errors()
 {
 	let result: Result<Function, _> = "not a function".parse();
 	assert!(result.is_err());
+}
+
+/// Exercise the [`Display`] rendering and [`AssemblyError::location`] accessor
+/// for every [`AssemblyError`] variant, including the defensive variants that
+/// the parser prevents [`Assembler::assemble`] from ever producing. Each error
+/// is constructed directly so its user-facing message and location are pinned
+/// against regression, and both [`DropKind`] arms are covered.
+#[test]
+fn test_assembly_error_display_and_location()
+{
+	let loc = |n: usize| AssemblyLocation {
+		offset: n,
+		line: n as u32,
+		column: n
+	};
+	let cases: Vec<(AssemblyError, &str)> = vec![
+		(
+			AssemblyError::Syntax {
+				description: "bad token".to_string(),
+				location: loc(1)
+			},
+			"assembly error at line 1, column 1 (byte 1): syntax error (bad \
+			 token)"
+		),
+		(
+			AssemblyError::NonContiguousParameter {
+				name: "x".to_string(),
+				index: 3,
+				position: 1,
+				location: loc(2)
+			},
+			"assembly error at line 2, column 2 (byte 2): parameter `x` has \
+			 index 3 but appears in position 1; parameters must be contiguous \
+			 from @0"
+		),
+		(
+			AssemblyError::NonContiguousExternal {
+				name: "y".to_string(),
+				index: 5,
+				expected: 2,
+				arity: 1,
+				location: loc(3)
+			},
+			"assembly error at line 3, column 3 (byte 3): external `y` has \
+			 index 5 but expected @2 (externs must be contiguous, starting at \
+			 @1)"
+		),
+		(
+			AssemblyError::InsufficientRegisterCount {
+				register_count: 1,
+				required: 3,
+				location: loc(4)
+			},
+			"assembly error at line 4, column 4 (byte 4): header declares r#1 \
+			 registers but parameters and externs together require at least @2"
+		),
+		(
+			AssemblyError::RegisterOutOfBounds {
+				index: 5,
+				register_count: 1,
+				location: loc(5)
+			},
+			"assembly error at line 5, column 5 (byte 5): register @5 exceeds \
+			 declared register count r#1"
+		),
+		(
+			AssemblyError::RollingRecordOutOfBounds {
+				index: 4,
+				rolling_record_count: 2,
+				location: loc(6)
+			},
+			"assembly error at line 6, column 6 (byte 6): rolling record ⚅4 \
+			 exceeds declared rolling record count ⚅#2"
+		),
+		(
+			AssemblyError::RegisterGap {
+				index: 2,
+				register_count: 4,
+				location: loc(7)
+			},
+			"assembly error at line 7, column 7 (byte 7): register @2 is \
+			 declared by r#4 but is never referenced (no gaps are permitted in \
+			 the register file)"
+		),
+		(
+			AssemblyError::RollingRecordGap {
+				index: 1,
+				rolling_record_count: 3,
+				location: loc(8)
+			},
+			"assembly error at line 8, column 8 (byte 8): rolling record ⚅1 is \
+			 declared by ⚅#3 but is never referenced (no gaps are permitted in \
+			 the rolling record file)"
+		),
+		(
+			AssemblyError::FacelessCustomDice { location: loc(9) },
+			"assembly error at line 9, column 9 (byte 9): custom dice must have \
+			 at least one face"
+		),
+		(
+			AssemblyError::DropSourceMismatch {
+				kind: DropKind::Lowest,
+				destination: 1,
+				source: 2,
+				location: loc(10)
+			},
+			"assembly error at line 10, column 10 (byte 10): drop lowest \
+			 destination ⚅1 disagrees with its `from` source ⚅2"
+		),
+		(
+			AssemblyError::DropSourceMismatch {
+				kind: DropKind::Highest,
+				destination: 3,
+				source: 4,
+				location: loc(11)
+			},
+			"assembly error at line 11, column 11 (byte 11): drop highest \
+			 destination ⚅3 disagrees with its `from` source ⚅4"
+		),
+		(
+			AssemblyError::UnexpectedRollingRecordOperand { location: loc(12) },
+			"assembly error at line 12, column 12 (byte 12): rolling record \
+			 operand is not permitted here"
+		),
+	];
+	for (err, expected) in cases
+	{
+		let n = err.location().offset;
+		assert_eq!(
+			err.to_string(),
+			expected,
+			"Display mismatch for variant at loc {}",
+			n
+		);
+		assert_eq!(err.location(), loc(n), "location() mismatch for {:?}", err);
+	}
+}
+
+/// An out-of-bounds register in an *operand* slot (as opposed to the
+/// destination) is caught by the addressing-mode check, not the destination
+/// check, and surfaces the offending index and declared count.
+#[test]
+fn test_reject_operand_register_out_of_bounds()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#0\n\textern[]\n\t\
+		 body:\n\t\t@0 <- @5 + 2\n\t\treturn @0\n"
+	);
+	let AssemblyError::RegisterOutOfBounds {
+		index,
+		register_count,
+		..
+	} = e
+	else
+	{
+		panic!("expected RegisterOutOfBounds, got: {:?}", e);
+	};
+	assert_eq!(index, 5);
+	assert_eq!(register_count, 1);
+}
+
+/// Integer operands that overflow `i32` saturate to the nearest bound rather
+/// than failing to assemble, matching the parser's saturating constants.
+#[test]
+fn test_assemble_integer_saturation()
+{
+	let max = Assembler::assemble(
+		"Function() r#0 ⚅#0\n\textern[]\n\tbody:\n\t\t\
+		 return 99999999999999\n"
+	)
+	.unwrap();
+	assert_eq!(
+		max.instructions[0],
+		Instruction::r#return(AddressingMode::Immediate(Immediate(i32::MAX)))
+	);
+	let min = Assembler::assemble(
+		"Function() r#0 ⚅#0\n\textern[]\n\tbody:\n\t\t\
+		 return -99999999999999\n"
+	)
+	.unwrap();
+	assert_eq!(
+		min.instructions[0],
+		Instruction::r#return(AddressingMode::Immediate(Immediate(i32::MIN)))
+	);
+}
+
+/// A register name consisting solely of Unicode whitespace (a non-breaking
+/// space here) survives the bare-word scan — which excludes only ASCII
+/// horizontal whitespace and delimiters — but trims to empty, and is rejected.
+#[test]
+fn test_reject_blank_named_register()
+{
+	let e = assert_rejects(
+		"Function(\u{A0}@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+	);
+	assert!(
+		matches!(e, AssemblyError::Syntax { .. }),
+		"expected Syntax, got: {:?}",
+		e
+	);
 }
