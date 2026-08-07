@@ -33,7 +33,7 @@ fn test_evaluation()
 	{
 		let key = (source, args.clone(), externs.clone());
 		let key = format!("{:?}", key);
-		assert!(seen.insert(key.clone()), "duplicate test case: {}", &key);
+		assert!(seen.insert(key.clone()), "duplicate test case: {}", key);
 		let function = compile_valid(source);
 		let function = optimize(function, Passes::all());
 		let mut evaluator = Evaluator::new(function);
@@ -48,7 +48,7 @@ fn test_evaluation()
 			*expected,
 			"case {}: {}",
 			index + 1,
-			&key
+			key
 		);
 		// The seed is arbitrary, chosen by smashing the keyboard. This is to
 		// ensure that the test cases are deterministic.
@@ -64,7 +64,7 @@ fn test_evaluation()
 				bounds.contains(&result.result),
 				"case {}: {}: result out of bounds: {} ∉ {}..={}: rolls: {}",
 				index + 1,
-				&key,
+				key,
 				result.result,
 				bounds.start(),
 				bounds.end(),
@@ -89,7 +89,7 @@ fn test_evaluation()
 							1,
 							"case {}: {}: wrong number of results",
 							index + 1,
-							&key
+							key
 						);
 						if end < start
 						{
@@ -98,7 +98,7 @@ fn test_evaluation()
 								0,
 								"case {}: {}: roll out of bounds: {} ∉ {}..={}",
 								index + 1,
-								&key,
+								key,
 								record.results[0],
 								start,
 								end
@@ -110,7 +110,7 @@ fn test_evaluation()
 								(start..=end).contains(&record.results[0]),
 								"case {}: {}: roll out of bounds: {} ∉ {}..={}",
 								index + 1,
-								&key,
+								key,
 								record.results[0],
 								start,
 								end
@@ -124,7 +124,7 @@ fn test_evaluation()
 							count.max(0) as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,
-							&key
+							key
 						);
 						for result in record.results
 						{
@@ -134,7 +134,7 @@ fn test_evaluation()
 									(1..=faces).contains(&result),
 									"case {}: {}: roll out of bounds: {} ∉ 1..={}",
 									index + 1,
-									&key,
+									key,
 									result,
 									faces
 								),
@@ -143,7 +143,7 @@ fn test_evaluation()
 									0,
 									"case {}: {}: roll out of bounds: {} ≠ 0",
 									index + 1,
-									&key,
+									key,
 									result
 								)
 							}
@@ -156,7 +156,7 @@ fn test_evaluation()
 							count as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,
-							&key
+							key
 						);
 						for result in record.results
 						{
@@ -164,7 +164,7 @@ fn test_evaluation()
 								faces.contains(&result),
 								"case {}: {}: roll out of bounds: {} ∉ {:?}",
 								index + 1,
-								&key,
+								key,
 								result,
 								faces
 							);

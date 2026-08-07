@@ -36,7 +36,7 @@ where
 	{
 		let key = (source, args.clone(), externs.clone());
 		let key = format!("{:?}", key);
-		assert!(seen.insert(key.clone()), "duplicate test case: {}", &key);
+		assert!(seen.insert(key.clone()), "duplicate test case: {}", key);
 		let function = compile_valid(source);
 		let function = optimize(function, Passes::all());
 		let mut evaluator = Evaluator::new(function);
@@ -50,7 +50,7 @@ where
 			bounds.count.map(|c| c <= 50000).unwrap_or(true),
 			"case {}: {}: too many outcomes: {} > 50000",
 			index + 1,
-			&key,
+			key,
 			bounds.count.unwrap()
 		);
 		// Set up the map of expected results.
@@ -66,7 +66,7 @@ where
 				.iter()
 				.map(|(outcome, count)| (*outcome, *count))
 				.collect::<BTreeMap<_, _>>();
-			assert_eq!(histogram_map, expected, "case {}: {}", index + 1, &key);
+			assert_eq!(histogram_map, expected, "case {}: {}", index + 1, key);
 		}
 		// Ensure that the histogram bounds are correct.
 		let value_bounds = bounds.value;
@@ -75,14 +75,14 @@ where
 			value_bounds.min,
 			"case {}: {}: min value bound mismatch",
 			index + 1,
-			&key
+			key
 		);
 		assert_eq!(
 			*histogram.keys().max().unwrap(),
 			value_bounds.max,
 			"case {}: {}: max value bound mismatch",
 			index + 1,
-			&key
+			key
 		);
 		// Ensure that the outcome counts are correct.
 		if let Some(expected_outcomes) = bounds.count
@@ -94,7 +94,7 @@ where
 				expected_outcomes,
 				"case {}: {}: outcome count mismatch",
 				index + 1,
-				&key
+				key
 			);
 		}
 		// Ensure that the odds are correct.
@@ -108,7 +108,7 @@ where
 				expected_odds,
 				"case {}: {}: odds mismatch for outcome {}",
 				index + 1,
-				&key,
+				key,
 				outcome
 			);
 			let percent = histogram.percent_chance(*outcome);
@@ -118,7 +118,7 @@ where
 				expected_percent,
 				"case {}: {}: percent mismatch for outcome {}",
 				index + 1,
-				&key,
+				key,
 				outcome
 			);
 		}

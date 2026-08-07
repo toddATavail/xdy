@@ -608,7 +608,7 @@ fn analyze_error(
 			},
 			message: format!(
 				"unexpected `{}` after expression",
-				&source[pos..].split_whitespace().next().unwrap_or("")
+				source[pos..].split_whitespace().next().unwrap_or("")
 			),
 			related: vec![],
 			suggestions: vec![Suggestion {
