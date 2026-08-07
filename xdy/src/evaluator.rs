@@ -1639,6 +1639,125 @@ impl std::ops::DivAssign for EvaluationBounds
 	fn div_assign(&mut self, rhs: Self) { *self = *self / rhs; }
 }
 
+/// The greatest number of divisor magnitudes that [`Rem`](std::ops::Rem) will
+/// enumerate in pursuit of an exact answer. Beyond this it approximates. The
+/// budget is generous enough to cover any single die — percentile dice span a
+/// hundred magnitudes — while bounding the work at a fixed, trivial cost paid
+/// once per remainder instruction during bounds analysis.
+const REM_ENUMERATION_BUDGET: i64 = 128;
+
+/// Compute the interval of magnitudes assumed by a divisor interval, i.e.,
+/// `{|y| : y ∈ divisor}`.
+///
+/// `x % y == x % -y`, so only the magnitude of a divisor affects the remainder.
+/// Reducing the divisor to its magnitudes up front is what keeps
+/// [`Rem`](std::ops::Rem) from having to case on signs, which is where the
+/// original implementation went wrong: it bounded the remainder by the divisor
+/// endpoint *nearest* zero rather than the one *farthest* from it.
+///
+/// # Parameters
+/// - `divisor`: The divisor interval.
+///
+/// # Returns
+/// The least and greatest magnitudes, as `i64`. The widening is load bearing:
+/// `|i32::MIN|` does not fit in an `i32`, and clamping it to [`i32::MAX`] would
+/// discard exactly the magnitude that makes `i32::MAX % i32::MIN == i32::MAX`
+/// escape the bound.
+///
+/// # Notes
+/// The magnitudes of a contiguous interval are themselves contiguous: an
+/// interval straddling zero contributes every magnitude from zero up to that of
+/// its farthest endpoint, and an interval on one side of zero contributes the
+/// magnitudes of its endpoints and everything between.
+fn magnitudes(divisor: EvaluationBounds) -> (i64, i64)
+{
+	let (min, max) = (divisor.min as i64, divisor.max as i64);
+	match (min, max)
+	{
+		(min, max) if min <= 0 && max >= 0 => (0, (-min).max(max)),
+		(min, max) if min > 0 => (min, max),
+		(min, max) => (-max, -min)
+	}
+}
+
+/// Compute the exact hull of `{p % magnitude : p ∈ [low, high]}`, for
+/// nonnegative dividends and a single divisor magnitude.
+///
+/// # Parameters
+/// - `low`: The least dividend. Must be nonnegative and no greater than `high`.
+/// - `high`: The greatest dividend.
+/// - `magnitude`: The magnitude of the divisor. Zero denotes division by zero,
+///   which the expression language defines to answer zero.
+///
+/// # Returns
+/// The least and greatest remainders.
+///
+/// # Notes
+/// `p % magnitude` ascends by one with `p` until it wraps to zero at each
+/// multiple of `magnitude`. Three cases follow. If the dividends span at least
+/// a full period, every residue occurs. Otherwise the dividends span part of a
+/// period, and either lie within a single period — whence the endpoints give
+/// the extrema — or straddle exactly one wrap, whence the hull is again the
+/// whole period, since the wrap contributes zero and its immediate predecessor
+/// contributes `magnitude - 1`.
+fn remainders_of(low: i64, high: i64, magnitude: i64) -> (i64, i64)
+{
+	debug_assert!(0 <= low && low <= high);
+	if magnitude == 0
+	{
+		return (0, 0)
+	}
+	if high - low >= magnitude - 1
+	{
+		return (0, magnitude - 1)
+	}
+	match (low % magnitude, high % magnitude)
+	{
+		(low, high) if low <= high => (low, high),
+		_ => (0, magnitude - 1)
+	}
+}
+
+/// Compute a hull of `{p % m : p ∈ [low, high], m ∈ [least, greatest]}`, for
+/// nonnegative dividends and an interval of divisor magnitudes.
+///
+/// # Parameters
+/// - `low`: The least dividend. Must be nonnegative and no greater than `high`.
+/// - `high`: The greatest dividend.
+/// - `least`: The least divisor magnitude.
+/// - `greatest`: The greatest divisor magnitude. Must be positive and no less
+///   than `least`.
+///
+/// # Returns
+/// The least and greatest remainders. Exact when the magnitudes fall within
+/// [`REM_ENUMERATION_BUDGET`], and otherwise a sound over-approximation.
+///
+/// # Notes
+/// Hulling distributes over a union, so hulling the union of the per-magnitude
+/// hulls answers the exact hull of the whole. That is affordable only for
+/// narrow magnitude intervals, so two approximations cover the rest. A divisor
+/// magnitude exceeding every dividend leaves the dividend unchanged, so the
+/// dividends are their own remainders. Failing that, a remainder is smaller
+/// than the magnitude that produced it and no larger than the dividend that
+/// produced it, and zero is assumed to be attainable.
+fn remainders(low: i64, high: i64, least: i64, greatest: i64) -> (i64, i64)
+{
+	debug_assert!(0 <= low && low <= high);
+	debug_assert!(0 <= least && least <= greatest && greatest > 0);
+	if greatest - least < REM_ENUMERATION_BUDGET
+	{
+		return (least..=greatest).fold((i64::MAX, i64::MIN), |hull, m| {
+			let (min, max) = remainders_of(low, high, m);
+			(hull.0.min(min), hull.1.max(max))
+		})
+	}
+	if least > high
+	{
+		return (low, high)
+	}
+	(0, high.min(greatest - 1))
+}
+
 impl std::ops::Rem for EvaluationBounds
 {
 	type Output = Self;
@@ -1646,60 +1765,41 @@ impl std::ops::Rem for EvaluationBounds
 	fn rem(self, rhs: Self) -> Self::Output
 	{
 		// Remainder is quite complex, especially because of the singularity at
-		// zero and the saturation semantics.
-		match (self.into(), rhs.into())
+		// zero and the saturation semantics. Reduce the divisor to the
+		// magnitudes it assumes, since the sign of a divisor cannot affect a
+		// remainder.
+		let (least, greatest) = magnitudes(rhs);
+		if greatest == 0
 		{
-			((_, _), (0, 0)) => 0.into(),
-			((op1_min, op1_max), (op2_min, op2_max))
-				if op2_min == op2_max
-					&& op1_min.saturating_div(op2_min)
-						== op1_max.saturating_div(op2_min) =>
-			{
-				// The divisor is known exactly, and the quotients are the same,
-				// so we can tighten the bounds by performing the remainder
-				// operation and sorting the results.
-				let rem1 = r#mod(op1_min, op2_min);
-				let rem2 = r#mod(op1_max, op2_min);
-				(rem1.min(rem2), rem1.max(rem2)).into()
-			},
-			((_, ..0), (op2_min @ ..0, _)) =>
-			{
-				// The dividend is negative, so the remainder is negative. The
-				// divisor is negative, so we just bump the minimum up by one.
-				(op2_min + 1, 0).into()
-			},
-			((_, ..0), (op2_min, _)) =>
-			{
-				// The dividend is negative, so the remainder is negative.
-				(-op2_min + 1, 0).into()
-			},
-			((0.., _), (_, op2_max @ 0..)) =>
-			{
-				// The dividend is positive, so the remainder is positive.
-				(0, (op2_max - 1).max(0)).into()
-			},
-			((0.., _), (_, op2_max)) =>
-			{
-				// The dividend is positive, so the remainder is positive.
-				(0, (op2_max.saturating_neg() - 1).max(0)).into()
-			},
-			((_, _), (op2_min, op2_max)) if op2_min == op2_max =>
-			{
-				// The dividend could be negative, zero, or positive, so we can
-				// only bound the result by the divisor.
-				let abs = op2_min.saturating_abs();
-				(-abs + 1, abs - 1).into()
-			},
-			((_, _), (op2_min, op2_max)) =>
-			{
-				// The dividend could be negative, zero, or positive, so we can
-				// only bound the result by the divisor.
-				let op2_min = op2_min.saturating_abs();
-				let op2_max = op2_max.saturating_abs();
-				let abs_min = op2_min.min(op2_max);
-				let abs_max = op2_min.max(op2_max);
-				(-abs_min, abs_max - 1).into()
-			}
+			// The divisor is known to be zero, which the expression language
+			// defines to answer zero.
+			return 0.into()
+		}
+		// A remainder takes the sign of its dividend, and negating a dividend
+		// negates its remainder, so the negative dividends are a mirror image
+		// of the nonnegative ones. Treat each side as a nonnegative problem,
+		// reflecting the negative side through zero on the way in and on the
+		// way out. Note that the sides overlap only at zero, and that at least
+		// one side is inhabited, since the interval is never inverted.
+		let (low, high) = ((self.min as i64).max(0), self.max as i64);
+		let (mirror_low, mirror_high) =
+			((-(self.max as i64)).max(0), -(self.min as i64));
+		let min = match self.min <= 0
+		{
+			true => -remainders(mirror_low, mirror_high, least, greatest).1,
+			false => remainders(low, high, least, greatest).0
+		};
+		let max = match self.max >= 0
+		{
+			true => remainders(low, high, least, greatest).1,
+			false => -remainders(mirror_low, mirror_high, least, greatest).0
+		};
+		// Both are back within `i32`: a remainder is smaller in magnitude than
+		// its divisor, and no divisor magnitude exceeds `|i32::MIN|`, so no
+		// remainder can reach `|i32::MIN|` itself.
+		Self {
+			min: min as i32,
+			max: max as i32
 		}
 	}
 }

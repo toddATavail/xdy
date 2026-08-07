@@ -19,7 +19,7 @@
 //!   soundness against sampled members, plus the structural invariant that no
 //!   operation may answer an inverted interval.
 
-use crate::{EvaluationBounds, exp};
+use crate::{EvaluationBounds, Evaluator, exp, r#mod, support::compile_valid};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                  Support.                                  //
@@ -201,4 +201,211 @@ fn test_exp_bounds_at_boundaries()
 			}
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                             Remainder bounds.                              //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The inclusive range of endpoints covered by the exhaustive remainder grid.
+/// Every divisor interval drawn from this range spans at most fifteen
+/// magnitudes, and so lies within the enumeration budget of
+/// [`Rem`](std::ops::Rem); the grid therefore exercises only the exact path.
+/// [`test_rem_bounds_wide_divisors`] covers the approximating path.
+const REM_ENDPOINTS: std::ops::RangeInclusive<i32> = -14..=14;
+
+/// Divisor intervals spanning more magnitudes than [`Rem`](std::ops::Rem) will
+/// enumerate, which therefore reach the approximating path that
+/// [`test_rem_bounds_exhaustive`] cannot. Each is narrow enough to brute-force
+/// against a dividend drawn from [`REM_ENDPOINTS`], and together they cover
+/// every shape that path distinguishes: divisors straddling zero, wholly
+/// positive, and wholly negative; divisors that dominate every dividend and
+/// divisors that do not; and both `i32` extremes.
+const WIDE_DIVISORS: [(i32, i32); 12] = [
+	(-129, 129),
+	(-200, 60),
+	(-60, 200),
+	(0, 140),
+	(-140, 0),
+	(1, 140),
+	(-140, -1),
+	(14, 153),
+	(-153, -14),
+	(200, 340),
+	(i32::MIN, i32::MIN + 140),
+	(i32::MAX - 140, i32::MAX)
+];
+
+/// Test that [`Rem`](std::ops::Rem) is *exact* over an exhaustive grid of small
+/// dividend and divisor intervals.
+///
+/// Exactness is asserted rather than containment, on the same reasoning as
+/// [`test_exp_bounds_exhaustive`]: containment would pass for an implementation
+/// that widened every answer to the whole of `i32`. Every divisor interval here
+/// falls within the enumeration budget, where the operation is exact by
+/// construction — it hulls a union of per-magnitude hulls, each of which is
+/// itself exact.
+#[test]
+fn test_rem_bounds_exhaustive()
+{
+	let mut checked = 0usize;
+	for min in REM_ENDPOINTS
+	{
+		for max in min..=*REM_ENDPOINTS.end()
+		{
+			let dividend: EvaluationBounds = (min, max).into();
+			for divisor_min in REM_ENDPOINTS
+			{
+				for divisor_max in divisor_min..=*REM_ENDPOINTS.end()
+				{
+					let divisor: EvaluationBounds =
+						(divisor_min, divisor_max).into();
+					let expected = brute_force(dividend, divisor, r#mod);
+					let actual = dividend % divisor;
+					assert_eq!(
+						actual, expected,
+						"[{}] % [{}]: expected [{}], got [{}]",
+						dividend, divisor, expected, actual
+					);
+					checked += 1;
+				}
+			}
+		}
+	}
+	// Guard against the loop bounds silently collapsing.
+	assert_eq!(checked, 189225);
+}
+
+/// Test that [`Rem`](std::ops::Rem) is sound for divisor intervals too wide to
+/// enumerate.
+///
+/// Beyond the enumeration budget the operation approximates, so soundness is
+/// asserted rather than exactness. This is the only test that reaches that
+/// path: the exhaustive grid stays within the budget, and the boundary set is
+/// too wide to brute-force.
+#[test]
+fn test_rem_bounds_wide_divisors()
+{
+	for (divisor_min, divisor_max) in WIDE_DIVISORS
+	{
+		// Guard against an entry drifting back within the enumeration budget,
+		// which would silently stop testing the approximating path.
+		let low = match (divisor_min, divisor_max)
+		{
+			(min, max) if min <= 0 && max >= 0 => 0,
+			(min, max) => (min as i64).abs().min((max as i64).abs())
+		};
+		let high = (divisor_min as i64).abs().max((divisor_max as i64).abs());
+		assert!(
+			high - low >= 128,
+			"[{}, {}] spans only {} magnitudes",
+			divisor_min,
+			divisor_max,
+			high - low + 1
+		);
+		let divisor: EvaluationBounds = (divisor_min, divisor_max).into();
+		for min in REM_ENDPOINTS
+		{
+			for max in min..=*REM_ENDPOINTS.end()
+			{
+				let dividend: EvaluationBounds = (min, max).into();
+				let expected = brute_force(dividend, divisor, r#mod);
+				let actual = dividend % divisor;
+				assert!(
+					actual.min <= actual.max,
+					"[{}] % [{}]: inverted interval [{}]",
+					dividend,
+					divisor,
+					actual
+				);
+				assert!(
+					actual.min <= expected.min && actual.max >= expected.max,
+					"[{}] % [{}]: [{}] ⊉ [{}]",
+					dividend,
+					divisor,
+					actual,
+					expected
+				);
+			}
+		}
+	}
+}
+
+/// Test that [`Rem`](std::ops::Rem) is total and sound at the `i32` boundaries.
+///
+/// As with [`test_exp_bounds_at_boundaries`], the exhaustive grid cannot reach
+/// the widened arithmetic, truth cannot be brute-forced over intervals this
+/// wide, and a debug-mode overflow panic reachable through a public entry point
+/// would be a defect.
+#[test]
+fn test_rem_bounds_at_boundaries()
+{
+	for dividend in boundary_intervals()
+	{
+		for divisor in boundary_intervals()
+		{
+			let actual = dividend % divisor;
+			assert!(
+				actual.min <= actual.max,
+				"[{}] % [{}]: inverted interval [{}]",
+				dividend,
+				divisor,
+				actual
+			);
+			for x in samples(dividend)
+			{
+				for y in samples(divisor)
+				{
+					let value = r#mod(x, y);
+					assert!(
+						actual.contains(value),
+						"[{}] % [{}]: {} % {} = {} ∉ [{}]",
+						dividend,
+						divisor,
+						x,
+						y,
+						value,
+						actual
+					);
+				}
+			}
+		}
+	}
+}
+
+/// Test the two defect shapes that motivated the repair of
+/// [`Rem`](std::ops::Rem), pinned as named cases so that a regression reports
+/// the original symptom rather than an anonymous grid coordinate.
+///
+/// Both arose from bounding the remainder by the divisor endpoint *nearest*
+/// zero, when `|x % y|` is bounded by the magnitude of the endpoint *farthest*
+/// from zero.
+#[test]
+fn test_rem_bounds_regressions()
+{
+	// Under-approximation: the divisor endpoint nearest zero is -1, whose
+	// remainders are all zero, but -4 admits remainders as large as 3.
+	let dividend: EvaluationBounds = (1, 6).into();
+	let divisor: EvaluationBounds = (-4, -1).into();
+	assert_eq!(dividend % divisor, (0, 3).into());
+	// Inversion: the answer was [1, 0], which contains nothing at all.
+	let dividend: EvaluationBounds = i32::MIN.into();
+	let divisor: EvaluationBounds = (0, i32::MAX).into();
+	let actual = dividend % divisor;
+	assert!(actual.min <= actual.max, "inverted interval [{}]", actual);
+	assert!(actual.contains(r#mod(i32::MIN, i32::MAX)));
+}
+
+/// Test that the under-approximation is unreachable through the public bounds
+/// evaluator, which is where it would actually harm a caller.
+///
+/// `1D6 % (1D4 - 5)` has a divisor of `[-4, -1]`, and reported `[0, 0]` while
+/// the expression can plainly produce 3, as `5 % -4`.
+#[test]
+fn test_rem_bounds_end_to_end()
+{
+	let function = compile_valid("1D6 % (1D4 - 5)");
+	let evaluator = Evaluator::new(function);
+	let bounds = evaluator.bounds([].iter().copied()).unwrap().value;
+	assert!(bounds.contains(3), "1D6 % (1D4 - 5): 3 ∉ [{}]", bounds);
 }
