@@ -44,7 +44,12 @@ where
 		{
 			evaluator.bind(name, *value).unwrap();
 		}
-		let bounds = evaluator.bounds(args.iter().copied()).unwrap();
+		let bounds = evaluator
+			.bounds_over(
+				args.iter().map(|arg| Some((*arg).into())),
+				externs.iter().map(|(name, value)| (*name, (*value).into()))
+			)
+			.unwrap();
 		// Ensure that the number of outcomes is reasonable for testing.
 		assert!(
 			bounds.count.map(|c| c <= 50000).unwrap_or(true),

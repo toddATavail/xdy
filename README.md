@@ -25,7 +25,7 @@
 
 Beyond generating just a final tally, `xDy` also provides detailed information about the individual dice rolls that contributed to the total. So `3D6 + 1D8` might produce a total of `18`, but it also tells you that the six-sided dice produced [`3`, `5`, `4`] and the eight-sided die produced `6`.
 
-`xDy` also provides analytical capabilities. `xDy` can compute the bounds and probability distribution of a dice expression. For example, `xDy` can determine that `3D6 + 1D8` has a minimum value of `4`, has a maximum value of `26`, and puts the probability of rolling a `10` at `0.125` (`27/216`). Probability distributions can be computed serially or in parallel (with the `parallel-histogram` feature). For static dice expressions, `xDy` can calculate the total number of outcomes without iterating through the state space.
+`xDy` also provides analytical capabilities. `xDy` can compute the bounds and probability distribution of a dice expression. For example, `xDy` can determine that `3D6 + 1D8` has a minimum value of `4`, has a maximum value of `26`, and puts the probability of rolling a `10` at `0.125` (`27/216`). Bounds are computed by interval arithmetic over a static analysis, so a parameter or environmental variable need not be pinned to a single value: it may be given an interval, or left unsupplied entirely, in which case it is bounded by the whole of `i32` and the answer remains sound. Probability distributions can be computed serially or in parallel (with the `parallel-histogram` feature). For static dice expressions, `xDy` can calculate the total number of outcomes without iterating through the state space.
 
 ## Language features
 
@@ -205,6 +205,44 @@ assert!(results.len() == 10);
 assert!(
     results.iter().all(|result| 4 <= result.result && result.result <= 9)
 );
+```
+
+### Bounds analysis
+
+Computing the bounds of a dice expression, without rolling anything:
+
+```rust
+use xdy::{compile, Evaluator};
+
+let function = compile("3D6 + 1D8")?;
+let evaluator = Evaluator::new(function);
+let bounds = evaluator.bounds_over([], [])?;
+
+assert_eq!(bounds.value, (4, 26).into());
+assert_eq!(bounds.count, Some(1728));
+```
+
+Bindings need not be single values. Each may be an interval, and each may be
+omitted; an omitted binding is bounded by the whole of `i32`, so the bounds
+remain sound no matter how little the caller knows:
+
+```rust
+use xdy::{compile, Evaluator};
+
+let function = compile("x: {x}D6 + {y}")?;
+let evaluator = Evaluator::new(function);
+
+// Roll between 1 and 20 dice, and add a `y` known to be 3.
+let bounds =
+    evaluator.bounds_over([Some((1, 20).into())], [("y", 3.into())])?;
+assert_eq!(bounds.value, (4, 123).into());
+// The outcome count is exact only when every binding is a single value, so an
+// interval binding withdraws it rather than inventing one.
+assert_eq!(bounds.count, None);
+
+// Say nothing about `y`, and the bounds say so in turn.
+let bounds = evaluator.bounds_over([Some((1, 20).into())], [])?;
+assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
 ```
 
 ## Performance

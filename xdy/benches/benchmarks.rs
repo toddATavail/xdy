@@ -82,7 +82,16 @@ fn bench_evaluate<M: Measurement>(g: &mut BenchmarkGroup<M>)
 		});
 		let label = format!("{}: bounds", label);
 		g.bench_function(label, |b| {
-			b.iter(|| evaluator.bounds(args.iter().copied()).unwrap());
+			b.iter(|| {
+				evaluator
+					.bounds_over(
+						args.iter().map(|arg| Some((*arg).into())),
+						externs
+							.iter()
+							.map(|(name, value)| (*name, (*value).into()))
+					)
+					.unwrap()
+			});
 		});
 	}
 }

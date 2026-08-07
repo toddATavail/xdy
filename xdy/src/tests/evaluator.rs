@@ -41,8 +41,15 @@ fn test_evaluation()
 		{
 			evaluator.bind(name, *value).unwrap();
 		}
-		// Ensure that the evaluator produces the expected bounds.
-		let bounds = evaluator.bounds(args.iter().copied()).unwrap();
+		// Ensure that the evaluator produces the expected bounds. Every binding
+		// is supplied, and supplied exactly, so the bounds are as tight as the
+		// interval arithmetic can make them.
+		let bounds = evaluator
+			.bounds_over(
+				args.iter().map(|arg| Some((*arg).into())),
+				externs.iter().map(|(name, value)| (*name, (*value).into()))
+			)
+			.unwrap();
 		assert_eq!(
 			bounds.to_string(),
 			*expected,
@@ -201,14 +208,14 @@ fn test_bad_arity()
 		})
 	);
 	assert_eq!(
-		evaluator.bounds([].iter().copied()),
+		evaluator.bounds_over([], []),
 		Err(EvaluationError::BadArity {
 			expected: 1,
 			given: 0
 		})
 	);
 	assert_eq!(
-		evaluator.bounds([1, 2].iter().copied()),
+		evaluator.bounds_over([Some(1.into()), Some(2.into())], []),
 		Err(EvaluationError::BadArity {
 			expected: 1,
 			given: 2

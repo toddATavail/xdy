@@ -19,7 +19,10 @@
 //!   soundness against sampled members, plus the structural invariant that no
 //!   operation may answer an inverted interval.
 
-use crate::{EvaluationBounds, Evaluator, exp, r#mod, support::compile_valid};
+use crate::{
+	EvaluationBounds, EvaluationError, Evaluator, exp, r#mod,
+	support::compile_valid
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                  Support.                                  //
@@ -406,6 +409,244 @@ fn test_rem_bounds_end_to_end()
 {
 	let function = compile_valid("1D6 % (1D4 - 5)");
 	let evaluator = Evaluator::new(function);
-	let bounds = evaluator.bounds([].iter().copied()).unwrap().value;
+	let bounds = evaluator.bounds_over([], []).unwrap().value;
 	assert!(bounds.contains(3), "1D6 % (1D4 - 5): 3 ∉ [{}]", bounds);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                         Interval-valued bindings.                          //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Brute-force the truth of a single-parameter function over an interval-valued
+/// argument, by unioning the bounds answered at every member of the interval.
+///
+/// Each member is itself a bounds query, so this is not ground truth about the
+/// dice — the roll bounds are still computed rather than rolled — but it is
+/// ground truth about the *interval* binding, which is what
+/// [`Evaluator::bounds_over`] adds. An interval binding that fails to contain
+/// this union has lost a value that the same analysis finds at a fixed binding.
+///
+/// # Parameters
+/// - `source`: The source of a function of exactly one formal parameter.
+/// - `binding`: The interval to enumerate.
+///
+/// # Returns
+/// The union of the bounds over every member of the interval.
+fn union_over_members(
+	source: &str,
+	binding: EvaluationBounds
+) -> EvaluationBounds
+{
+	let evaluator = Evaluator::new(compile_valid(source));
+	let mut min = i32::MAX;
+	let mut max = i32::MIN;
+	for x in binding.min..=binding.max
+	{
+		let bounds = evaluator.bounds_over([Some(x.into())], []).unwrap().value;
+		min = min.min(bounds.min);
+		max = max.max(bounds.max);
+	}
+	(min, max).into()
+}
+
+/// Assert that a single-parameter function answers the expected bounds over an
+/// interval-valued argument, and that those bounds are sound with respect to
+/// [`union_over_members`].
+///
+/// # Parameters
+/// - `source`: The source of a function of exactly one formal parameter.
+/// - `binding`: The interval to bind to the parameter.
+/// - `expected`: The expected value bounds.
+fn assert_interval_binding(
+	source: &str,
+	binding: EvaluationBounds,
+	expected: EvaluationBounds
+)
+{
+	let evaluator = Evaluator::new(compile_valid(source));
+	let actual = evaluator.bounds_over([Some(binding)], []).unwrap();
+	assert_eq!(
+		actual.value, expected,
+		"{} over [{}]: expected [{}], got [{}]",
+		source, binding, expected, actual.value
+	);
+	assert_eq!(
+		actual.count, None,
+		"{} over [{}]: outcome count survived a non-degenerate binding",
+		source, binding
+	);
+	let truth = union_over_members(source, binding);
+	assert!(
+		actual.value.min <= truth.min && truth.max <= actual.value.max,
+		"{} over [{}]: [{}] ⊉ [{}]",
+		source,
+		binding,
+		actual.value,
+		truth
+	);
+}
+
+/// Test that an interval-valued argument bounds a dynamic die count, which is
+/// the motivating case for [`Evaluator::bounds_over`].
+#[test]
+fn test_bounds_over_interval_argument()
+{
+	assert_interval_binding("x: {x}D6", (1, 20).into(), (1, 120).into());
+}
+
+/// Test that an unsupplied binding is bounded by the whole of `i32` rather than
+/// by zero.
+///
+/// This is the defect that motivated deprecating
+/// [`bounds`](Evaluator::bounds), which answers `[1, 6]` here — a confidently
+/// wrong bound, since `{x}` is unknown and the expression can produce very
+/// nearly any `i32` at all.
+///
+/// The minimum is `i32::MIN + 1` rather than `i32::MIN`, because the die
+/// contributes at least one and the addition saturates rather than clamps. The
+/// bound is therefore not merely wide but correct at the edge.
+#[test]
+fn test_bounds_over_unsupplied_external()
+{
+	let evaluator = Evaluator::new(compile_valid("1D6 + {x}"));
+	let bounds = evaluator.bounds_over([], []).unwrap();
+	assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
+	assert_eq!(bounds.count, None);
+	// The bound that the zero-default convention would have answered.
+	assert!(bounds.value.contains(1) && bounds.value.contains(6));
+	// And the values that convention would have excluded.
+	assert!(bounds.value.contains(i32::MIN + 1));
+	assert!(bounds.value.contains(i32::MAX));
+}
+
+/// Test that an unsupplied formal parameter is likewise bounded by the whole of
+/// `i32`, and that supplying it in the same position constrains it again.
+#[test]
+fn test_bounds_over_unsupplied_argument()
+{
+	let evaluator = Evaluator::new(compile_valid("x: 1D6 + {x}"));
+	let bounds = evaluator.bounds_over([None], []).unwrap();
+	assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
+	let bounds = evaluator.bounds_over([Some(10.into())], []).unwrap();
+	assert_eq!(bounds.value, (11, 16).into());
+}
+
+/// Test that [`Evaluator::bounds_over`] ignores the environment.
+///
+/// A binding established for the benefit of [`Evaluator::evaluate`] is a
+/// roll-time convention. Inheriting it here would make the same static query
+/// answer differently depending on which [`Evaluator::bind`] calls happened to
+/// precede it.
+#[test]
+fn test_bounds_over_ignores_environment()
+{
+	let mut evaluator = Evaluator::new(compile_valid("1D6 + {x}"));
+	evaluator.bind("x", 3).unwrap();
+	let bounds = evaluator.bounds_over([], []).unwrap();
+	assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
+	// The remedy: supply the external explicitly.
+	let bounds = evaluator.bounds_over([], [("x", 3.into())]).unwrap();
+	assert_eq!(bounds.value, (4, 9).into());
+	assert_eq!(bounds.count, Some(6));
+}
+
+/// Test that the outcome count survives exactly the degenerate bindings.
+///
+/// The count is an exact count of the outcomes of one binding of the function.
+/// A non-degenerate binding picks out many such functions, so an exact-looking
+/// number would be wrong for all but one of them.
+#[test]
+fn test_bounds_over_count_requires_degenerate_bindings()
+{
+	let evaluator = Evaluator::new(compile_valid("x: 1D6 + {x}"));
+	assert_eq!(
+		evaluator.bounds_over([Some(2.into())], []).unwrap().count,
+		Some(6)
+	);
+	assert_eq!(
+		evaluator
+			.bounds_over([Some((2, 3).into())], [])
+			.unwrap()
+			.count,
+		None
+	);
+	assert_eq!(evaluator.bounds_over([None], []).unwrap().count, None);
+	// An unsupplied external is non-degenerate too, even though nothing was
+	// passed in the argument channel.
+	let evaluator = Evaluator::new(compile_valid("1D6 + {x}"));
+	assert_eq!(evaluator.bounds_over([], []).unwrap().count, None);
+	assert_eq!(
+		evaluator.bounds_over([], [("x", 3.into())]).unwrap().count,
+		Some(6)
+	);
+}
+
+/// Test that the argument list is still checked against the arity, and that an
+/// undeclared external is still rejected.
+#[test]
+fn test_bounds_over_rejects_bad_bindings()
+{
+	let evaluator = Evaluator::new(compile_valid("x: {x}D6"));
+	assert_eq!(
+		evaluator.bounds_over([], []),
+		Err(EvaluationError::BadArity {
+			expected: 1,
+			given: 0
+		})
+	);
+	assert_eq!(
+		evaluator.bounds_over([None, None], []),
+		Err(EvaluationError::BadArity {
+			expected: 1,
+			given: 2
+		})
+	);
+	assert_eq!(
+		evaluator.bounds_over([None], [("y", 1.into())]),
+		Err(EvaluationError::UnrecognizedExternal("y"))
+	);
+}
+
+/// Test that an interval die count spanning negative values folds to zero dice
+/// rather than to negative dice.
+///
+/// The clamp in `visit_sum_rolling_record` already handled this for dynamic
+/// counts; an interval binding is simply a second way to reach it.
+#[test]
+fn test_bounds_over_negative_interval_count()
+{
+	assert_interval_binding("x: {x}D6", (-3, 5).into(), (0, 30).into());
+	// The dynamic form of the same shape, which has no binding to vary.
+	let evaluator = Evaluator::new(compile_valid("(1D[-5, -4, 0, 4, 5])D6"));
+	let bounds = evaluator.bounds_over([], []).unwrap().value;
+	assert_eq!(bounds, (0, 30).into());
+}
+
+/// Test that an interval face count spanning zero and negative values yields a
+/// sound face bound.
+///
+/// Each standard die spans the faces `[1, faces]`, which is empty for a
+/// non-positive face count, so the minimum folds to zero rather than going
+/// negative.
+#[test]
+fn test_bounds_over_interval_faces()
+{
+	assert_interval_binding("x: 1D{x}", (-4, 6).into(), (0, 6).into());
+}
+
+/// Test that an interval drop count cannot keep more dice than were rolled, nor
+/// fewer than none.
+#[test]
+fn test_bounds_over_interval_drop_count()
+{
+	assert_interval_binding(
+		"x: 5D6 drop lowest {x}",
+		(0, 10).into(),
+		(0, 30).into()
+	);
+	assert_interval_binding(
+		"x: 5D6 drop highest {x}",
+		(-2, 3).into(),
+		(2, 30).into()
+	);
 }

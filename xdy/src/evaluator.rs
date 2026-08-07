@@ -922,13 +922,122 @@ impl Evaluator
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
+	///
+	/// # Notes
+	/// Unsupplied external variables default to zero, which is a roll-time
+	/// convention that does not survive contact with a static analysis: on
+	/// `1D6 + {x}` with nothing bound, this answers `[1, 6]`, which is a
+	/// confidently wrong bound rather than a diagnosable one. Use
+	/// [`bounds_over`](Self::bounds_over) instead, which treats an unsupplied
+	/// binding as the whole of `i32`.
 	#[inline]
+	#[deprecated(
+		since = "0.12.0",
+		note = "unsupplied externals silently default to zero, which \
+			under-approximates the bounds; use `bounds_over`, which treats an \
+			unsupplied binding as the whole of `i32`. Removed in 1.0.0."
+	)]
 	pub fn bounds(
 		&self,
 		args: impl IntoIterator<Item = i32>
 	) -> Result<Bounds, EvaluationError<'_>>
 	{
-		BoundsEvaluator::new(&self.function, &self.environment).evaluate(args)
+		BoundsEvaluator::new(&self.function).evaluate(
+			args.into_iter().map(|arg| Some(arg.into())),
+			self.environment
+				.iter()
+				.map(|(index, value)| (*index, (*value).into())),
+			EvaluationBounds::default()
+		)
+	}
+
+	/// Compute the bounds of the function over interval-valued bindings, where
+	/// each binding may be supplied or left unconstrained. An unsupplied
+	/// binding is bounded by the whole of `i32`, so the answer is sound no
+	/// matter what the caller knows.
+	///
+	/// # Parameters
+	/// - `args`: The intervals of the arguments, one per formal parameter, in
+	///   declaration order. `None` constrains nothing, and is an explicit
+	///   admission of ignorance rather than an omission; the list is therefore
+	///   always exactly as long as the arity.
+	/// - `externals`: The intervals of the external variables, by name. Names
+	///   may be supplied in any order, and any subset may be supplied; an
+	///   unmentioned external constrains nothing. A name supplied more than
+	///   once takes its last interval.
+	///
+	/// # Returns
+	/// The bounds of the function, covering both the value and the number of
+	/// possible outcomes. The possible outcome count is `None` if the function
+	/// contains dynamic range or roll expressions, i.e., range or roll
+	/// expressions whose count or faces are themselves determined by range or
+	/// roll expressions, and also whenever any binding is non-degenerate — see
+	/// the notes below.
+	///
+	/// # Errors
+	/// - [`BadArity`](EvaluationError::BadArity) if the number of argument
+	///   intervals disagrees with the number of formal parameters in the
+	///   function signature.
+	/// - [`UnrecognizedExternal`](EvaluationError::UnrecognizedExternal) if a
+	///   name in `externals` is not declared by the function.
+	///
+	/// # Notes
+	/// This is a static query, and it deliberately **ignores**
+	/// [`environment`](Self::environment). A binding established by
+	/// [`bind`](Self::bind) for the benefit of [`evaluate`](Self::evaluate) is
+	/// a roll-time convention, and silently inheriting it would make the same
+	/// call answer differently depending on which [`bind`](Self::bind) calls
+	/// happened to precede it. To constrain an external here, pass it in
+	/// `externals`.
+	///
+	/// The outcome count is exact only when every binding is degenerate, i.e.,
+	/// a single value. As soon as one is an interval, the count would be an
+	/// exact-looking number that is merely one of the counts the function might
+	/// have, so it is reported as `None` instead.
+	///
+	/// The analysis is interval arithmetic, which is subject to the dependency
+	/// problem: two occurrences of the same binding are not recognized as one
+	/// value. So `x: {x} - {x}` over `x ∈ [-a, a]` answers `[-2a, 2a]` rather
+	/// than `[0, 0]`. Over-approximation is the safe direction — the bounds
+	/// always contain every reachable value — but they are not always tight.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::{compile, EvaluationBounds, Evaluator};
+	///
+	/// let function = compile("x: {x}D6")?;
+	/// let evaluator = Evaluator::new(function);
+	/// let bounds = evaluator.bounds_over([Some((1, 20).into())], [])?;
+	///
+	/// assert_eq!(bounds.value, (1, 120).into());
+	/// assert_eq!(bounds.count, None);
+	/// # Ok::<(), xdy::EvaluationError>(())
+	/// ```
+	pub fn bounds_over<'s>(
+		&self,
+		args: impl IntoIterator<Item = Option<EvaluationBounds>>,
+		externals: impl IntoIterator<Item = (&'s str, EvaluationBounds)>
+	) -> Result<Bounds, EvaluationError<'s>>
+	{
+		// Resolve the external names before evaluating anything, so that an
+		// unrecognized name is reported rather than silently ignored.
+		let externals = externals
+			.into_iter()
+			.map(|(name, bounds)| {
+				let index = self
+					.function
+					.externals
+					.iter()
+					.position(|external| external == name)
+					.ok_or(EvaluationError::UnrecognizedExternal(name))?;
+				Ok((index, bounds))
+			})
+			.collect::<Result<Vec<_>, EvaluationError>>()?;
+		BoundsEvaluator::new(&self.function).evaluate(
+			args,
+			externals,
+			EvaluationBounds::unconstrained()
+		)
 	}
 }
 
@@ -941,11 +1050,6 @@ struct BoundsEvaluator<'eval>
 {
 	/// The function for which to calculate bounds.
 	function: &'eval Function,
-
-	/// The environment in which to evaluate the bounds of the function, as a
-	/// map from external variable indices to values. Missing bindings default
-	/// to zero.
-	environment: &'eval HashMap<usize, i32>,
 
 	/// The current program counter.
 	pc: ProgramCounter,
@@ -983,6 +1087,34 @@ pub struct EvaluationBounds
 
 impl EvaluationBounds
 {
+	/// Answer the bounds that constrain nothing, i.e., the whole of `i32`.
+	///
+	/// # Returns
+	/// The unconstrained bounds.
+	///
+	/// # Notes
+	/// [`Default`] answers `[0, 0]`, which constrains a value to exactly zero,
+	/// so it must not be pressed into service here.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::EvaluationBounds;
+	///
+	/// let bounds = EvaluationBounds::unconstrained();
+	///
+	/// assert!(bounds.contains(i32::MIN));
+	/// assert!(bounds.contains(0));
+	/// assert!(bounds.contains(i32::MAX));
+	/// ```
+	#[inline]
+	pub const fn unconstrained() -> Self
+	{
+		Self {
+			min: i32::MIN,
+			max: i32::MAX
+		}
+	}
+
 	/// Determine whether the specified value is contained within the bounds.
 	///
 	/// # Parameters
@@ -1119,14 +1251,10 @@ impl<'eval> BoundsEvaluator<'eval>
 	///
 	/// # Returns
 	/// The requested bounds evaluator.
-	fn new(
-		function: &'eval Function,
-		environment: &'eval HashMap<usize, i32>
-	) -> Self
+	fn new(function: &'eval Function) -> Self
 	{
 		Self {
 			function,
-			environment,
 			pc: ProgramCounter::default(),
 			registers: vec![
 				EvaluationBounds::default();
@@ -1142,27 +1270,40 @@ impl<'eval> BoundsEvaluator<'eval>
 		}
 	}
 
-	/// Evaluate the bounds of the function using the given arguments. Missing
-	/// external variables default to zero during evaluation, but all parameters
-	/// must be bound.
+	/// Evaluate the bounds of the function over the given bindings. Both
+	/// channels admit a partial supply; whatever is not supplied is bounded by
+	/// `unsupplied`, which is the sole point of difference between the two
+	/// public entry points.
 	///
 	/// # Parameters
-	/// - `args`: The arguments to the function.
+	/// - `args`: The intervals of the arguments, one per formal parameter, in
+	///   declaration order, where `None` denotes an unsupplied argument.
+	/// - `externals`: The intervals of the external variables, by index into
+	///   [`externals`](Function::externals). An index absent from the iterable
+	///   is unsupplied.
+	/// - `unsupplied`: The interval that bounds an unsupplied binding in either
+	///   channel.
 	///
 	/// # Returns
 	/// The bounds of the function, covering both the value and the number of
-	/// possible outcomes.
+	/// possible outcomes. The outcome count is `None` whenever any binding is
+	/// non-degenerate, as it would otherwise be an exact-looking number that
+	/// holds for only one member of the interval.
 	///
 	/// # Errors
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
-	pub fn evaluate(
+	pub fn evaluate<'error>(
 		mut self,
-		args: impl IntoIterator<Item = i32>
-	) -> Result<Bounds, EvaluationError<'eval>>
+		args: impl IntoIterator<Item = Option<EvaluationBounds>>,
+		externals: impl IntoIterator<Item = (usize, EvaluationBounds)>,
+		unsupplied: EvaluationBounds
+	) -> Result<Bounds, EvaluationError<'error>>
 	{
-		// Check the argument count.
+		// Check the argument count. `None` is an explicit admission of
+		// ignorance rather than an omission, so the list is as long as the
+		// arity no matter how little the caller knows.
 		let arity = self.function.arity();
 		let args = args.into_iter().collect::<Vec<_>>();
 		if args.len() != arity
@@ -1172,20 +1313,45 @@ impl<'eval> BoundsEvaluator<'eval>
 				given: args.len()
 			});
 		}
-		// Bind the arguments to their registers.
-		for (i, arg) in args.into_iter().enumerate()
+		// Assemble the intervals of every binding, arguments first and then
+		// external variables, taking the unsupplied interval wherever the
+		// caller supplied nothing.
+		let mut bindings = args
+			.into_iter()
+			.map(|arg| arg.unwrap_or(unsupplied))
+			.collect::<Vec<_>>();
+		bindings.resize(arity + self.function.externals.len(), unsupplied);
+		for (index, bounds) in externals
 		{
-			self.registers[i] = (arg, arg).into();
+			if let Some(binding) = bindings.get_mut(arity + index)
+			{
+				*binding = bounds;
+			}
 		}
-		// Bind the external variables to their registers.
-		for (index, value) in self.environment
+		let degenerate = bindings.iter().all(|bounds| bounds.min == bounds.max);
+		// Seed the binding registers. The optimizer recomputes the register
+		// count from the surviving instructions, so a binding that no
+		// instruction reads may have no register at all; such a binding cannot
+		// influence the result, so skip it rather than indexing past the
+		// register file.
+		for (index, bounds) in bindings.into_iter().enumerate()
 		{
-			self.registers[arity + *index] = (*value, *value).into();
+			if let Some(register) = self.registers.get_mut(index)
+			{
+				*register = bounds;
+			}
 		}
 		for instruction in &self.function.instructions
 		{
 			instruction.visit(&mut self).unwrap();
 			self.pc.allocate();
+		}
+		if !degenerate
+		{
+			// The outcome count is an exact count of the outcomes of one
+			// binding of the function. That is a meaningful answer only when
+			// the bindings pick out exactly one such function.
+			self.count = None;
 		}
 		Ok(self.into())
 	}
