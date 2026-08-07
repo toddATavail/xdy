@@ -6,6 +6,7 @@
 //! print rendition.
 
 mod assembler;
+mod bounds;
 mod compiler;
 mod diagnostics;
 mod evaluator;

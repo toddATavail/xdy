@@ -1742,17 +1742,30 @@ impl EvaluationBounds
 
 	/// Compute the bounds of exponentiation for two bounds.
 	///
+	/// Unlike its siblings, this is not a structural interval operation. It
+	/// evaluates [`exp`] at a small set of interesting bases and exponents and
+	/// unions the results, relying on the fact that the extrema of integer
+	/// exponentiation over an interval always occur at one of them. The
+	/// sampling is exact over every case reachable with small operands; see
+	/// `tests::bounds` for the exhaustive grid that establishes this.
+	///
 	/// # Parameters
 	/// - `rhs`: The bounds of the exponent.
 	///
 	/// # Returns
 	/// The bounds of the result.
-	fn exp(self, rhs: EvaluationBounds) -> Self
+	pub(crate) fn exp(self, rhs: EvaluationBounds) -> Self
 	{
 		let interesting_bases = HashSet::from([self.min, -1, 0, 1, self.max]);
+		// Zero must be sampled explicitly. It is the only exponent for which
+		// `exp(0, power)` is one rather than zero, so omitting it
+		// under-approximates whenever the base is exactly zero and the exponent
+		// interval straddles zero without either neighbor of an endpoint
+		// landing on it.
 		let interesting_powers = HashSet::from([
 			rhs.min,
 			rhs.min.saturating_add(1),
+			0,
 			(rhs.max.saturating_sub(1)).max(0),
 			rhs.max
 		]);
