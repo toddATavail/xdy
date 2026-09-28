@@ -124,7 +124,10 @@ fn recurse(depth: u64) -> u64
 	frame[1].wrapping_add(recurse(depth + 1))
 }
 
-/// Occupy a frame of `N` bytes.
+/// Occupy a frame of `N` bytes, once. The frame is never passed by value,
+/// which a debug build may copy, so that the stack holds a single copy on
+/// every platform: on Windows, a 1 MiB array passed through
+/// [`black_box`] by value overflowed a 2 MiB stack.
 ///
 /// # Type parameters
 /// - `N`: The size of the frame, in bytes.
@@ -134,6 +137,7 @@ fn recurse(depth: u64) -> u64
 #[inline(never)]
 fn big_frame<const N: usize>() -> u8
 {
-	let frame = black_box([0u8; N]);
+	let mut frame = [0u8; N];
+	black_box(&mut frame);
 	frame[0]
 }
