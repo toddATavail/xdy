@@ -8,13 +8,13 @@ use std::collections::HashMap;
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor, Mod,
-	Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor, Max,
+	Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
 	ir::Instruction
 };
 
-use crate::{Optimizer, add, div, exp, r#mod, mul, neg, sub};
+use crate::{Optimizer, add, div, exp, max, r#mod, mul, neg, sub};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                             Constant folding.                              //
@@ -27,6 +27,11 @@ pub struct ConstantFolder
 {
 	/// The previous version of the function body.
 	previous: Option<Vec<Instruction>>,
+
+	/// The program counters of the drop instructions of the previous version
+	/// of the function body, by the rolling record that they target, so that
+	/// finding the drops of a roll takes time proportional to their number.
+	drops: HashMap<RollingRecordIndex, Vec<usize>>,
 
 	/// Replacements for registers, due to renumbering or folding, as a map
 	/// from originals to replacements. The keys are relative to the original
@@ -62,6 +67,17 @@ impl Optimizer<()> for ConstantFolder
 			// Preserve the previous version of the function body, to support
 			// forward scanning of instructions.
 			self.previous = Some(function.instructions.clone());
+			self.drops.clear();
+			for (pc, instruction) in function.instructions.iter().enumerate()
+			{
+				let target = match instruction
+				{
+					Instruction::DropLowest(drop) => drop.dest,
+					Instruction::DropHighest(drop) => drop.dest,
+					_ => continue
+				};
+				self.drops.entry(target).or_default().push(pc);
+			}
 			// Visit each instruction in the function body.
 			for instruction in &function.instructions
 			{
@@ -92,10 +108,21 @@ impl InstructionVisitor<()> for ConstantFolder
 {
 	fn visit_roll_range(&mut self, range: &RollRange) -> Result<(), ()>
 	{
+		// Resolve the operands once, so that an operand that an earlier
+		// instruction of this pass folded is constant here too, and the whole
+		// of a chain folds in a single pass.
+		let range = &RollRange {
+			dest: range.dest,
+			start: self.replacement(range.start),
+			end: self.replacement(range.end)
+		};
 		if let Some((start, end)) = range.const_ops()
 		{
-			// Ranges can't have drop expressions, so we can fold the range if
-			// it contains one or fewer possible outcomes. Folding involves
+			// We can fold the range if it contains one or fewer possible
+			// outcomes. An empty range is zero whatever it drops, but a range
+			// with a single value folds only if nothing may drop it: the
+			// grammar admits no drop expressions on ranges, but strength
+			// reduction turns 1Dn into [1:n], drops and all. Folding involves
 			// eliminating the instruction completely and replacing its rolling
 			// record with the new constant value. When we subsequently
 			// encounter the corresponding SumRollingRecord instruction, we
@@ -109,7 +136,10 @@ impl InstructionVisitor<()> for ConstantFolder
 					self.replace(range.dest, Immediate(0));
 					return Ok(())
 				},
-				1 =>
+				1 if self
+					.find_drop_instructions(range.dest)
+					.next()
+					.is_none() =>
 				{
 					// The range contains a single value, which must be the
 					// result.
@@ -128,8 +158,8 @@ impl InstructionVisitor<()> for ConstantFolder
 		self.replace(range.dest, dest);
 		self.emit(RollRange {
 			dest,
-			start: self.replacement(range.start),
-			end: self.replacement(range.end)
+			start: range.start,
+			end: range.end
 		});
 		Ok(())
 	}
@@ -139,6 +169,12 @@ impl InstructionVisitor<()> for ConstantFolder
 		roll: &RollStandardDice
 	) -> Result<(), ()>
 	{
+		// Resolve the operands once, as for ranges.
+		let roll = &RollStandardDice {
+			dest: roll.dest,
+			count: self.replacement(roll.count),
+			faces: self.replacement(roll.faces)
+		};
 		if let AddressingMode::Immediate(Immediate(..=0)) = roll.count
 		{
 			// There are no dice, so it doesn't matter what the faces are.
@@ -157,16 +193,18 @@ impl InstructionVisitor<()> for ConstantFolder
 			// rolling record. If we are guaranteed to drop all the dice,
 			// then it doesn't matter how many faces the dice have.
 			let drops = self.find_drop_instructions(roll.dest);
-			let can_fold =
-				drops.map(|drop| drop.const_ops()).collect::<Vec<_>>();
+			let can_fold = drops
+				.map(|drop| self.resolved_count(drop))
+				.collect::<Vec<_>>();
 			if can_fold.iter().all(Option::is_some)
 			{
 				// Identify the number of dice to drop, then reduce the
-				// count accordingly.
+				// count accordingly. A drop count of zero or less drops
+				// nothing.
 				let dropped = can_fold
 					.iter()
-					.map(|can_fold| can_fold.unwrap().0)
-					.sum::<i32>();
+					.map(|can_fold| can_fold.unwrap().max(0))
+					.fold(0, i32::saturating_add);
 				let count = (count.saturating_sub(dropped)).clamp(0, i32::MAX);
 				if count <= 0
 				{
@@ -191,8 +229,8 @@ impl InstructionVisitor<()> for ConstantFolder
 		self.replace(roll.dest, dest);
 		self.emit(RollStandardDice {
 			dest,
-			count: self.replacement(roll.count),
-			faces: self.replacement(roll.faces)
+			count: roll.count,
+			faces: roll.faces
 		});
 		Ok(())
 	}
@@ -202,6 +240,12 @@ impl InstructionVisitor<()> for ConstantFolder
 		roll: &RollCustomDice
 	) -> Result<(), ()>
 	{
+		// Resolve the count once, as for ranges.
+		let roll = &RollCustomDice {
+			dest: roll.dest,
+			count: self.replacement(roll.count),
+			faces: roll.faces.clone()
+		};
 		if let AddressingMode::Immediate(Immediate(..=0)) = roll.count
 		{
 			// There are no dice, so it doesn't matter what the faces are.
@@ -223,16 +267,18 @@ impl InstructionVisitor<()> for ConstantFolder
 			// rolling record. If we are guaranteed to drop all the dice,
 			// then it doesn't matter how many faces the dice have.
 			let drops = self.find_drop_instructions(roll.dest);
-			let can_fold =
-				drops.map(|drop| drop.const_ops()).collect::<Vec<_>>();
+			let can_fold = drops
+				.map(|drop| self.resolved_count(drop))
+				.collect::<Vec<_>>();
 			if can_fold.iter().all(Option::is_some)
 			{
 				// Identify the number of dice to drop, then reduce the
-				// count accordingly.
+				// count accordingly. A drop count of zero or less drops
+				// nothing.
 				let dropped = can_fold
 					.iter()
-					.map(|can_fold| can_fold.unwrap().0)
-					.sum::<i32>();
+					.map(|can_fold| can_fold.unwrap().max(0))
+					.fold(0, i32::saturating_add);
 				let count = (count.saturating_sub(dropped)).clamp(0, i32::MAX);
 				if count <= 0
 				{
@@ -261,7 +307,7 @@ impl InstructionVisitor<()> for ConstantFolder
 		self.replace(roll.dest, dest);
 		self.emit(RollCustomDice {
 			dest,
-			count: self.replacement(roll.count),
+			count: roll.count,
 			faces: roll.faces.clone()
 		});
 		Ok(())
@@ -409,20 +455,31 @@ impl InstructionVisitor<()> for ConstantFolder
 		)
 	}
 
+	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.maybe_fold_binary_instruction(
+			*inst,
+			|| (inst.op1, inst.op2),
+			max,
+			|dest, op1, op2| Max { dest, op1, op2 }
+		)
+	}
+
 	fn visit_neg(&mut self, inst: &Neg) -> Result<(), ()>
 	{
-		if let Some(op1) = inst.const_ops()
+		// Resolve the operand once, as for binary instructions.
+		match self.replacement(inst.op)
 		{
-			self.replace(inst.dest, Immediate(neg(op1)));
-		}
-		else
-		{
-			let new = self.next_register();
-			self.replace(inst.dest, new);
-			self.emit(Neg {
-				dest: new,
-				op: self.replacement(inst.op)
-			});
+			AddressingMode::Immediate(Immediate(op)) =>
+			{
+				self.replace(inst.dest, Immediate(neg(op)));
+			},
+			op =>
+			{
+				let new = self.next_register();
+				self.replace(inst.dest, new);
+				self.emit(Neg { dest: new, op });
+			}
 		}
 		Ok(())
 	}
@@ -501,14 +558,37 @@ impl ConstantFolder
 		dest: RollingRecordIndex
 	) -> impl Iterator<Item = &Instruction>
 	{
-		self.previous.as_ref().unwrap()[self.pc.0 + 1..]
-			.iter()
-			.filter(move |inst| match inst
-			{
-				Instruction::DropLowest(inst) => inst.dest == dest,
-				Instruction::DropHighest(inst) => inst.dest == dest,
-				_ => false
-			})
+		let previous = self.previous.as_ref().unwrap();
+		let pc = self.pc.0;
+		self.drops
+			.get(&dest)
+			.into_iter()
+			.flatten()
+			.filter(move |&&drop| drop > pc)
+			.map(move |&drop| &previous[drop])
+	}
+
+	/// Answer the count of the specified drop instruction, if it is constant,
+	/// whether in the instruction or by an earlier fold of this pass.
+	///
+	/// # Parameters
+	/// - `drop`: A drop instruction.
+	///
+	/// # Returns
+	/// The constant count, or `None` if the count is not constant.
+	fn resolved_count(&self, drop: &Instruction) -> Option<i32>
+	{
+		let count = match drop
+		{
+			Instruction::DropLowest(drop) => drop.count,
+			Instruction::DropHighest(drop) => drop.count,
+			_ => return None
+		};
+		match self.replacement(count)
+		{
+			AddressingMode::Immediate(Immediate(count)) => Some(count),
+			_ => None
+		}
 	}
 
 	/// Fold a qualifying binary operation, or emit a new instruction if folding
@@ -533,20 +613,26 @@ impl ConstantFolder
 	{
 		let inst = inst.into();
 		let old = inst.destination().unwrap();
-		if let Some((op1, op2)) = inst.const_ops()
+		// Resolve the operands once, so that an operand that an earlier
+		// instruction of this pass folded is constant here too, and the whole
+		// of a chain folds in a single pass.
+		let (op1, op2) = extractor();
+		let (op1, op2) = (self.replacement(op1), self.replacement(op2));
+		match (op1, op2)
 		{
-			self.replace(old, Immediate(folder(op1, op2.unwrap())));
-		}
-		else
-		{
-			let new = self.next_register();
-			self.replacements.insert(old, new.into());
-			let (op1, op2) = extractor();
-			self.emit(constructor(
-				new,
-				self.replacement(op1),
-				self.replacement(op2)
-			));
+			(
+				AddressingMode::Immediate(Immediate(op1)),
+				AddressingMode::Immediate(Immediate(op2))
+			) =>
+			{
+				self.replace(old, Immediate(folder(op1, op2)));
+			},
+			_ =>
+			{
+				let new = self.next_register();
+				self.replacements.insert(old, new.into());
+				self.emit(constructor(new, op1, op2));
+			}
 		}
 		Ok(())
 	}
@@ -739,6 +825,21 @@ impl GetConstantOperands<(i32, i32)> for Exp
 	}
 }
 
+impl GetConstantOperands<(i32, i32)> for Max
+{
+	fn const_ops(&self) -> Option<(i32, i32)>
+	{
+		match (self.op1, self.op2)
+		{
+			(
+				AddressingMode::Immediate(Immediate(op1)),
+				AddressingMode::Immediate(Immediate(op2))
+			) => Some((op1, op2)),
+			_ => None
+		}
+	}
+}
+
 impl GetConstantOperands<i32> for Neg
 {
 	fn const_ops(&self) -> Option<i32>
@@ -806,6 +907,10 @@ impl GetConstantOperands<(i32, Option<i32>)> for Instruction
 			Instruction::Exp(exp) =>
 			{
 				exp.const_ops().map(|(op1, op2)| (op1, Some(op2)))
+			},
+			Instruction::Max(max) =>
+			{
+				max.const_ops().map(|(op1, op2)| (op1, Some(op2)))
 			},
 			Instruction::Neg(neg) =>
 			{

@@ -54,9 +54,9 @@ fn test_reader_rejects_empty_input()
 /// The top-level form must begin with `(function …)`. Any other keyword
 /// produces a dedicated [`SExprError::ExpectedTopLevelFunction`] whose offset
 /// points at the start of the rogue keyword — pinning down the keyword-mark
-/// capture in `read_function`. Leading whitespace pushes the cursor well past
-/// byte 0, so a mutation that collapses the mark to some constant origin would
-/// land a distinct offset.
+/// capture of the top-level form. Leading whitespace pushes the cursor well
+/// past byte 0, so a mutation that collapses the mark to some constant origin
+/// would land a distinct offset.
 #[test]
 fn test_reader_rejects_non_function_top_level_keyword()
 {
@@ -68,10 +68,10 @@ fn test_reader_rejects_non_function_top_level_keyword()
 }
 
 /// A `function` keyword that appears inside an expression (rather than at the
-/// top) produces a dedicated error. This pins down the explicit match arm in
-/// `read_expr` that rejects nested `function` forms — a mutation that deletes
-/// the arm would allow `function` to fall through to the generic "unknown
-/// keyword" handler with a different message.
+/// top) produces a dedicated error. This pins down the explicit match arm
+/// that rejects nested `function` forms — a mutation that deletes the arm would
+/// allow `function` to fall through to the generic "unknown keyword" handler
+/// with a different message.
 #[test]
 fn test_reader_rejects_nested_function_keyword()
 {
@@ -84,7 +84,7 @@ fn test_reader_rejects_nested_function_keyword()
 
 /// An unknown keyword in operator position produces
 /// [`SExprError::UnknownKeyword`] whose offset points at the keyword's start.
-/// This pins down the keyword-mark capture in `read_expr` alongside the
+/// This pins down the keyword-mark capture of nested forms alongside the
 /// default match arm.
 #[test]
 fn test_reader_rejects_unknown_keyword()
@@ -162,28 +162,60 @@ fn test_reader_rejects_missing_params_open_bracket()
 }
 
 /// A parameter-list missing its closing `]` (reaching end of input while
-/// scanning identifiers) fails in `read_ident` with the bare-word reader
-/// failing at EOF.
+/// scanning identifiers) fails in `read_ident`, which expects the `{` of
+/// another identifier at EOF.
 #[test]
 fn test_reader_rejects_unterminated_parameter_list()
 {
-	// End-of-input occurs inside `read_ident`'s call to `read_word` after
-	// the comma-scanning loop.
-	assert_reader_error("(function [x", "expected a word", 12);
+	assert_reader_error(
+		"(function [{x}",
+		"expected '{', found end of input",
+		14
+	);
 }
 
-/// A quoted identifier missing its closing `"` errors with
-/// "unterminated quoted identifier" and the offset points at the opening
-/// quote. Anchors the pre-advance span capture in `read_ident`.
+/// An identifier missing its closing `}` errors with "unterminated
+/// identifier" and the offset points at the opening brace. Anchors the
+/// pre-advance span capture in `read_ident`.
 #[test]
-fn test_reader_rejects_unterminated_quoted_identifier()
+fn test_reader_rejects_unterminated_identifier()
 {
-	// The unterminated string straddles the end of input.
+	// The unterminated identifier straddles the end of input.
 	assert_reader_error(
-		r#"(function ["unterminated"#,
-		"unterminated quoted identifier",
+		"(function [{unterminated",
+		"unterminated identifier",
 		11
 	);
+}
+
+/// A bare word where an identifier belongs is rejected: identifiers are always
+/// delimited by braces, as in the source language.
+#[test]
+fn test_reader_rejects_bare_identifier()
+{
+	assert_reader_error("(function [] x)", "expected '{', found 'x'", 13);
+}
+
+/// Braces that do not enclose exactly a canonical identifier are rejected with
+/// "invalid identifier", and the offset points at the opening brace: the
+/// braces admit no whitespace around the name, nor an empty name, nor any
+/// whitespace within it but single spaces, nor a character that no identifier
+/// may contain.
+#[test]
+fn test_reader_rejects_invalid_identifier()
+{
+	for (input, message) in [
+		("(function [{}] 1)", "invalid identifier \"\""),
+		("(function [{ x}] 1)", "invalid identifier \" x\""),
+		("(function [{x }] 1)", "invalid identifier \"x \""),
+		("(function [{a  b}] 1)", "invalid identifier \"a  b\""),
+		("(function [{a\tb}] 1)", "invalid identifier \"a\\tb\""),
+		("(function [{a\nb}] 1)", "invalid identifier \"a\\nb\""),
+		("(function [{{x}] 1)", "invalid identifier \"{x\"")
+	]
+	{
+		assert_reader_error(input, message, 11);
+	}
 }
 
 /// A non-integer where an integer constant is expected fails with
@@ -248,9 +280,8 @@ fn test_reader_rejects_invalid_face_value()
 }
 
 /// Passing a non-dice expression (a bare integer) as the first argument to
-/// `drop-lowest` fails type-checking inside `read_dice_child`. The offset is
-/// captured before whitespace is consumed, so it points at the space
-/// immediately after the keyword.
+/// `drop-lowest` fails type-checking. The offset is captured before whitespace
+/// is consumed, so it points at the space immediately after the keyword.
 #[test]
 fn test_reader_rejects_non_dice_child_of_drop_lowest()
 {
@@ -356,7 +387,7 @@ fn test_reader_allows_synthetic_parent_with_annotated_child()
 #[test]
 fn test_reader_allows_mixed_sibling_annotation_order()
 {
-	let ast = read_s_expr("(function [^[5 10] alpha beta] 42)").unwrap();
+	let ast = read_s_expr("(function [^[5 10] {alpha} {beta}] 42)").unwrap();
 	let params = ast.parameters.as_ref().expect("expected parameters");
 	assert_eq!(params.len(), 2);
 	assert_eq!(params[0].name, "alpha");
@@ -387,7 +418,7 @@ fn test_reader_allows_annotated_parent_with_synthetic_child()
 #[test]
 fn test_reader_rejects_parameter_span_escaping_parent()
 {
-	let err = read_s_expr("^[0 5] (function [^[10 11] x] 0)")
+	let err = read_s_expr("^[0 5] (function [^[10 11] {x}] 0)")
 		.expect_err("expected containment failure");
 	let rendered = err.to_string();
 	assert!(
@@ -402,12 +433,62 @@ fn test_reader_rejects_parameter_span_escaping_parent()
 	);
 }
 
+/// A binding's name whose span escapes the binding's span is rejected by the
+/// containment check, even when the bound expression is well placed
+/// (xdy-0ra).
+#[test]
+fn test_reader_rejects_binding_name_span_escaping_binding()
+{
+	for (source, name, binding) in [
+		(
+			"^[0 30] (function [] ^[5 30] (binding ^[0 3] {a} ^[10 11] 1))",
+			(0, 3),
+			(5, 30)
+		),
+		(
+			"^[0 60] (function [] ^[0 30] (binding ^[40 50] {a} ^[10 11] 1))",
+			(40, 50),
+			(0, 30)
+		)
+	]
+	{
+		let err =
+			read_s_expr(source).expect_err("expected containment failure");
+		let SExprError::ChildSpanEscapesParent {
+			child,
+			parent,
+			location
+		} = err
+		else
+		{
+			panic!("expected ChildSpanEscapesParent, got {:?}", err)
+		};
+		assert_eq!(
+			child,
+			crate::span::SourceSpan {
+				start: name.0,
+				end: name.1
+			}
+		);
+		assert_eq!(
+			parent,
+			crate::span::SourceSpan {
+				start: binding.0,
+				end: binding.1
+			}
+		);
+		// The error is attributed to the name's span prefix.
+		let prefix = format!("^[{} {}] {{a}}", name.0, name.1);
+		assert_eq!(Some(location.offset), source.find(&prefix));
+	}
+}
+
 /// Out-of-order parameters (second declared before first in source position)
 /// are rejected by the sibling-order check.
 #[test]
 fn test_reader_rejects_out_of_order_parameters()
 {
-	let err = read_s_expr("^[0 9] (function [^[5 6] a ^[2 3] b] 0)")
+	let err = read_s_expr("^[0 9] (function [^[5 6] {a} ^[2 3] {b}] 0)")
 		.expect_err("expected sibling-order failure");
 	let rendered = err.to_string();
 	assert!(
@@ -424,20 +505,19 @@ fn test_reader_rejects_out_of_order_parameters()
 
 /// The reader rejects a compound form that closes before its keyword supplies
 /// the required operand count. `(neg)` lacks its single operand; the reader's
-/// attempt to read the subexpression falls through to `read_ident`'s bare-word
-/// reader, which reports "expected a word" at the `)` position that blocked
-/// word-scanning.
+/// attempt to read the subexpression falls through to `read_ident`, which
+/// reports the `)` that it found in place of the `{` of an identifier.
 #[test]
 fn test_reader_rejects_neg_missing_operand()
 {
-	assert_reader_error("(function [] (neg))", "expected a word", 17);
+	assert_reader_error("(function [] (neg))", "expected '{', found ')'", 17);
 }
 
 /// Similar arity violation for `add`: missing right-hand operand.
 #[test]
 fn test_reader_rejects_add_missing_right_operand()
 {
-	assert_reader_error("(function [] (add 1))", "expected a word", 19);
+	assert_reader_error("(function [] (add 1))", "expected '{', found ')'", 19);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -530,7 +610,7 @@ fn test_location_crlf_line_endings()
 #[test]
 fn test_child_span_escapes_parent_variant_shape()
 {
-	let err = read_s_expr("^[0 5] (function [^[10 11] x] 0)")
+	let err = read_s_expr("^[0 5] (function [^[10 11] {x}] 0)")
 		.expect_err("expected containment failure");
 	let SExprError::ChildSpanEscapesParent { child, parent, .. } = err
 	else

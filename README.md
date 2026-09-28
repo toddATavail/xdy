@@ -47,14 +47,14 @@ Beyond generating just a final tally, `xDy` also provides detailed information a
 * Grouping: `(1 + 2) * 3`, `1 + (2 * 3D4)`, `(3 * 2)D5`, `4D(5 - 2)`, …
 * Drop lowest: `1D6 drop lowest 1`, `2D8 drop lowest 2`, …
 * Drop highest: `1D6 drop highest 1`, `2D8 drop highest 2`, …
-* Formal parameters: `x: 1D6 + {x}`, `y: 1D6 + {y}`, `x, y: {x}D{y}`, …
+* Formal parameters: `{x}: 1D6 + {x}`, `{y}: 1D6 + {y}`, `{x}, {y}: {x}D{y}`, …
 * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
-* Subexpression naming: `x@(3D6) + {x}`, `y: x@(3D6) + {x} + {y}`, `x@(2 + 3)D6`, …
-* Dynamic expressions: `3D(2D6)`, `x: ({x}D3)D8`, …
+* Subexpression naming: `{x}@(3D6) + {x}`, `{y}: {x}@(3D6) + {x} + {y}`, `{x}@(2 + 3)D6`, …
+* Dynamic expressions: `3D(2D6)`, `{x}: ({x}D3)D8`, …
 
 Environmental variables permit background state to be associated with an evaluator, while formal parameters permit dynamic state to be passed into each evaluation. Both features can be used to parameterize dice expressions and make them more flexible. Environmental variables could easily cover, for example, the attributes and skills of a character in an RPG, while formal parameters could cover the situational modifiers applied to a particular roll.
 
-Subexpression naming binds the integer result of a parenthesized subexpression to a name with `name@(expr)`, making it available as `{name}` at any later position. The bound expression is evaluated exactly once — even when it contains dice — so `x@(3D6)` rolls its dice a single time and reuses the total wherever `{x}` appears. A name must be referenced only after it is bound, and binding names share a single namespace with formal parameters and environmental variables, so a binding may not reuse any of their names.
+Subexpression naming binds the integer result of a parenthesized subexpression to a name with `{name}@(expr)`, making it available as `{name}` at any later position. Every name is written in braces, whether it names a formal parameter, an environmental variable, or a binding. The braces free a name to contain any visible character but a brace, so `{weapon: 2/3}`, `{$env|weapon}`, and `{🎲}` are all names. A name may contain whitespace of any kind, so a long name may be broken over lines, but a name is never distinguished by its whitespace: whitespace just inside the braces is not part of it, so `{ x }` is `{x}`, and every run of whitespace within it collapses to a single space, so `{a  b}`, and `{a` and `b}` on separate lines, are both `{a b}`. Supply an environmental variable by this canonical name, e.g., `a b`. The bound expression is evaluated exactly once — even when it contains dice — so `{x}@(3D6)` rolls its dice a single time and reuses the total wherever `{x}` appears. A name must be referenced only after it is bound, and binding names share a single namespace with formal parameters and environmental variables, so a binding may not reuse any of their names.
 
 ## Examples
 
@@ -81,7 +81,7 @@ number of dice to roll:
 use xdy::evaluate;
 use rand::rng;
 
-let result = evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
+let result = evaluate("{x}: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 
 assert!(3 <= result.result && result.result <= 18);
 assert!(result.records.len() == 1);
@@ -131,7 +131,7 @@ assert!(
 );
 ```
 
-Binding a subexpression to a name with `name@(expr)` and reusing it as `{name}`.
+Binding a subexpression to a name with `{name}@(expr)` and reusing it as `{name}`.
 The bound `3D6` is rolled exactly once and its total is reused, so the result is
 twice that total and only a single rolling record is produced:
 
@@ -139,7 +139,7 @@ twice that total and only a single rolling record is produced:
 use xdy::evaluate;
 use rand::rng;
 
-let result = evaluate("x@(3D6) + {x}", vec![], vec![], &mut rng()).unwrap();
+let result = evaluate("{x}@(3D6) + {x}", vec![], vec![], &mut rng()).unwrap();
 
 assert!(result.records.len() == 1);
 assert!(result.records[0].results.len() == 3);
@@ -174,7 +174,7 @@ it multiple times with different arguments:
 use xdy::{compile, Evaluator};
 use rand::rng;
 
-let function = compile("x: 1D6 + {x}")?;
+let function = compile("{x}: 1D6 + {x}")?;
 let mut evaluator = Evaluator::new(function);
 let results = (0..10)
    .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
@@ -229,7 +229,7 @@ remain sound no matter how little the caller knows:
 ```rust
 use xdy::{compile, Evaluator};
 
-let function = compile("x: {x}D6 + {y}")?;
+let function = compile("{x}: {x}D6 + {y}")?;
 let evaluator = Evaluator::new(function);
 
 // Roll between 1 and 20 dice, and add a `y` known to be 3.
@@ -245,17 +245,84 @@ let bounds = evaluator.bounds_over([Some((1, 20).into())], [])?;
 assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
 ```
 
+### Dice budgets
+
+Evaluation costs time and memory in proportion to the dice it rolls, and an
+expression like `{x}D6` rolls as many dice as `x` says, which may be over two
+billion. When the expression or its bindings are untrusted, evaluate within a
+dice budget. A roll that would exceed what remains of the budget is refused
+before it rolls anything, and a successful evaluation reports the dice it
+rolled, so one budget can be carried across several evaluations:
+
+```rust
+use rand::rng;
+use xdy::{compile, EvaluationError, Evaluator};
+
+let mut evaluator = Evaluator::new(compile("{x}: {x}D6")?);
+
+let evaluation = evaluator.evaluate_metered([3], &mut rng(), 10)?;
+assert_eq!(evaluation.dice, 3);
+
+let error = evaluator.evaluate_metered([i32::MAX], &mut rng(), 10);
+assert_eq!(
+    error,
+    Err(EvaluationError::DiceBudgetExhausted {
+        requested: i32::MAX as u64,
+        remaining: 10,
+        consumed: 0
+    })
+);
+```
+
+Bounds analysis reports the worst case, so a caller can compare it against a
+budget without evaluating anything:
+
+```rust
+use xdy::{compile, Evaluator};
+
+let evaluator = Evaluator::new(compile("{x}: ({x}D4)D6")?);
+let bounds = evaluator.bounds_over([Some((1, 3).into())], [])?;
+assert_eq!(bounds.dice, 15);
+```
+
+Computing a probability distribution enumerates every outcome of every range
+and die along every path through the expression, which costs far more than
+rolling it: the distribution of `{x}D6` has `6^x` paths. Build it within a
+budget of branches, where a range charges its width and a die its number of
+faces, once for each path that reaches it. A range or die that would exceed
+what remains of the budget is refused before any of its outcomes is
+enumerated, and whether a build fits its budget never depends on the number
+of threads that build it:
+
+```rust
+use xdy::{compile, EvaluationError, Evaluator, HistogramBuilder, serial};
+
+let function = compile("{x}: {x}D6")?;
+let builder = serial::HistogramBuilder::new(Evaluator::new(function));
+
+// 6 branches for the first die, then 6 for the second die on each of those 6
+// paths.
+let histogram = builder.build_metered([2], 42)?;
+assert_eq!(histogram.total(), 36);
+
+let error = builder.build_metered([i32::MAX], 1_000);
+assert!(matches!(
+    error,
+    Err(EvaluationError::HistogramBudgetExhausted { .. })
+));
+```
+
 ## Performance
 
 `xDy` is _very fast_. Consider the following dice expression, where `x = 5`, `y = 2`, and `z = 2`:
 
 ```text
-x, y, z: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
+{x}, {y}, {z}: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
 ```
 
-This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2026 MacBook Pro, `xDy` compiled and optimized this expression with mean time `4.357 µs` and evaluated it with mean time `146.22 ns`. Furthermore, the serial probability distribution calculation took mean time `1028.95 µs` and the parallel calculation took mean time `376.83 µs`.
+This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2026 MacBook Pro, `xDy` compiled and optimized this expression with mean time `5.304 µs` and evaluated it with mean time `115.92 ns`. Furthermore, the serial probability distribution calculation took mean time `1038.18 µs` and the parallel calculation took mean time `702.56 µs`.
 
-`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer can also reorder commutative operations and operands to improve opportunities for constant folding and strength reduction. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
+`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer also puts the operands of commutative operations in canonical order and merges chained constants, to improve opportunities for constant folding and strength reduction. Every pass is exact: an optimized function answers exactly what the unoptimized one does, even where arithmetic saturates. The optimizer runs all passes repeatedly, in predefined order, until a fixed point is reached. The optimizer is designed to be fast and effective, but it can be disabled if desired.
 
 ### `nom` > `tree-sitter`
 
@@ -270,7 +337,7 @@ Only 3 pathological cases (deeply right-nested with repeated subexpressions) sho
 
 ## Safety
 
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains a single small block of `unsafe` code in the parser, where it reconstructs a source span after trimming trailing whitespace from an identifier; it is sound because every value it uses derives from a span that `nom` has already validated against the same source text. No foreign function interfaces are involved.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains `unsafe` code in one place: the abstract syntax tree's `Drop` implementation dismantles stacked drop clauses (e.g., `4D6 drop lowest drop highest`) without recursion or allocation, by moving values out of place and back with `ptr::read` and `ptr::write`; this is sound because every value has exactly one owner throughout, and nothing can unwind while a value is out of place. The test suite checks this code under Miri. No foreign function interfaces are involved.
 
 ## Cargo features
 

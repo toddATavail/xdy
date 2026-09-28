@@ -2,7 +2,7 @@
 
 <parameters> ::= <parameter> ("," <parameter>)* ":"
 
-<parameter> ::= <IDENTIFIER>
+<parameter> ::= "{" <IDENTIFIER> "}"
 
 <expression> ::= <add_sub>
 
@@ -26,7 +26,7 @@
 
 <variable> ::= "{" <IDENTIFIER> "}"
 
-<binding> ::= <IDENTIFIER> "@" "(" <expression> ")"
+<binding> ::= "{" <IDENTIFIER> "}" "@" "(" <expression> ")"
 
 <range> ::= "[" <expression> ":" <expression> "]"
 
@@ -44,17 +44,11 @@
 
 <drop_expression> ::= <CONSTANT> | <variable> | <binding> | <group>
 
-<IDENTIFIER> ::= <IDENTIFIER_START> <IDENTIFIER_CONTINUE>*
+<IDENTIFIER> ::= <NAME_CHAR> (<NAME_CHAR> | <WHITESPACE>+ <NAME_CHAR>)*
 
-<IDENTIFIER_START> ::= <ALPHA> | "_" | "$" | "#" | "'"
+<NAME_CHAR> ::= "any code point except '{', '}', whitespace, or an invisible character"
 
-<IDENTIFIER_CONTINUE> ::= <IDENTIFIER_START> | <NUMERIC> | "-" | "." | "|" | "?" | "!" | "~" | <INLINE_WHITESPACE>
-
-<ALPHA> ::= "any Unicode alphabetic code point"
-
-<NUMERIC> ::= "any Unicode numeric code point"
-
-<INLINE_WHITESPACE> ::= "any Unicode whitespace code point except U+000A or U+000D"
+<WHITESPACE> ::= "any whitespace, e.g., space, tab, line feed, or no-break space"
 
 <CONSTANT> ::= "-"? <DIGIT>+
 

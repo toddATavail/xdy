@@ -10,7 +10,7 @@ use std::collections::{HashMap, hash_map::Entry};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
-	Mod, Mul, Neg, RegisterIndex, Return, RollCustomDice, RollRange,
+	Max, Mod, Mul, Neg, RegisterIndex, Return, RollCustomDice, RollRange,
 	RollStandardDice, Sub, SumRollingRecord
 };
 
@@ -222,6 +222,15 @@ impl InstructionVisitor<()> for CommonSubexpressionEliminator
 			*inst,
 			|| (inst.op1, inst.op2),
 			|dest, op1, op2| Exp { dest, op1, op2 }
+		)
+	}
+
+	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.canonicalize_binary_op(
+			*inst,
+			|| (inst.op1, inst.op2),
+			|dest, op1, op2| Max { dest, op1, op2 }
 		)
 	}
 
@@ -506,6 +515,18 @@ impl CanScrub for Exp
 	}
 }
 
+impl CanScrub for Max
+{
+	fn scrub(&self) -> Self
+	{
+		Max {
+			dest: SCRUBBED_DEST,
+			op1: self.op1,
+			op2: self.op2
+		}
+	}
+}
+
 impl CanScrub for Neg
 {
 	fn scrub(&self) -> Self
@@ -540,6 +561,7 @@ impl CanScrub for Instruction
 			Instruction::Div(inst) => inst.scrub().into(),
 			Instruction::Mod(inst) => inst.scrub().into(),
 			Instruction::Exp(inst) => inst.scrub().into(),
+			Instruction::Max(inst) => inst.scrub().into(),
 			Instruction::Neg(inst) => inst.scrub().into(),
 			Instruction::Return(inst) => inst.scrub().into()
 		}

@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-xdy",
-  "version": "0.1.0",
+  "version": "0.13.0",
   "description": "tree-sitter grammar for xDy dice expression language.",
   "readme": "README.md",
   "scripts": {
@@ -25,7 +25,7 @@
   "author": "Todd L Smith <todd@availlang.org>",
   "license": "BSD-3-Clause",
   "dependencies": {
-    "node-addon-api": "^8.8.0",
+    "node-addon-api": "^8.9.2",
     "node-gyp-build": "^4.8.0"
   },
   "peerDependencies": {
@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "prebuildify": "^6.0.0",
-    "tree-sitter-cli": "^0.26.9"
+    "tree-sitter-cli": "^0.27.0"
   },
   "types": "bindings/node"
 }

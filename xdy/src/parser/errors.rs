@@ -32,8 +32,38 @@ use super::Span;
 pub struct ParseError<'src>
 {
 	/// The errors accumulated during parsing, in reverse order, i.e., the last
-	/// error is the outermost error.
+	/// error is the outermost error. The first error lies at the rightmost
+	/// position that the parse reached, and so do the _leading_ errors that
+	/// immediately follow it. Only the leading errors determine the
+	/// [expectations](NomErrorKind::expectations) and the
+	/// [rendering](Display) of the parse error, so the list keeps at most one
+	/// error beyond them, and its length does not grow with the depth of the
+	/// input.
 	pub errors: Vec<(Span<'src>, NomErrorKind<'src>)>
+}
+
+impl<'src> ParseError<'src>
+{
+	/// Record an outer error, unless the list already records an error away
+	/// from the rightmost position. Every outer error lies at or before the
+	/// errors that it encloses, so once an error lies before the rightmost
+	/// position, no later error is leading. The list keeps the first error that
+	/// is not leading, which marks the end of the leading errors for the
+	/// engine's recovery mode.
+	///
+	/// # Parameters
+	/// - `input`: The input at which the error applies.
+	/// - `kind`: The kind of error.
+	fn push(&mut self, input: Span<'src>, kind: NomErrorKind<'src>)
+	{
+		match (self.errors.first(), self.errors.last())
+		{
+			(Some((first, _)), Some((last, _)))
+				if last.location_offset() != first.location_offset() =>
+			{},
+			_ => self.errors.push((input, kind))
+		}
+	}
 }
 
 /// The error kind for [`ParseError`].
@@ -133,7 +163,7 @@ impl<'src> nom::error::ParseError<Span<'src>> for ParseError<'src>
 
 	fn append(input: Span<'src>, kind: ErrorKind, mut other: Self) -> Self
 	{
-		other.errors.push((input, NomErrorKind::Nom(kind)));
+		other.push(input, NomErrorKind::Nom(kind));
 		other
 	}
 
@@ -183,7 +213,7 @@ impl<'src> nom::error::ContextError<Span<'src>> for ParseError<'src>
 		mut other: Self
 	) -> Self
 	{
-		other.errors.push((input, NomErrorKind::Context(ctx)));
+		other.push(input, NomErrorKind::Context(ctx));
 		other
 	}
 }

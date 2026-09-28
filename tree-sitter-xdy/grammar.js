@@ -24,7 +24,7 @@ module.exports = grammar({
       ),
 
     // A single formal parameter.
-    parameter: ($) => $.identifier,
+    parameter: ($) => seq("{", field("identifier", $.identifier), "}"),
 
     // A dice expression.
     _expression: ($) =>
@@ -49,7 +49,9 @@ module.exports = grammar({
     // be referenced as a variable at later lexical positions.
     binding: ($) =>
       seq(
+        "{",
         field("name", $.identifier),
+        "}",
         "@",
         "(",
         field("expression", $._expression),
@@ -190,17 +192,18 @@ module.exports = grammar({
     // The dice operator.
     _d: ($) => /[dD]/,
 
-    // An identifier, representing a parameter or an external variable. The
-    // character set is byte-exact with the reference nom parser (see
-    // parser::combinators::is_identifier_start and is_identifier_continue): a
-    // start character is any Unicode Alphabetic code point
-    // (char::is_alphabetic) or one of _ $ # '; a continuation character
-    // additionally allows any Unicode numeric code point (char::is_numeric),
-    // the connectors - and ., the selector characters | ? ! ~, and inline
-    // whitespace -- every White_Space code point (char::is_whitespace) except
-    // U+000A and U+000D, enumerated explicitly below. The $ # ' start
-    // characters and the | ? ! ~ continuation characters admit environmental
-    // variables used as selector expressions.
-    identifier: ($) => /[\p{Alphabetic}_$#'][\p{Alphabetic}\p{N}\u0009\u000B\u000C\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000._|#$?!~'-]*/u,
+    // An identifier, the name of a parameter, a local binding, or an external
+    // variable, always between braces. The character set is exact with the
+    // reference nom parser (see parser::combinators::is_identifier_char): any
+    // code point except the braces, the control characters (Cc, per
+    // char::is_control) other than whitespace, the bidirectional formatting
+    // controls, and the other invisible characters enumerated below.
+    // Whitespace of any kind (White_Space, per char::is_whitespace) may occur
+    // within an identifier, but not at either end: the whitespace around it,
+    // inside its braces, is not part of it. The nom parser collapses each run
+    // of whitespace within a name to a single space (see
+    // parser::combinators::canonical_name).
+    identifier: ($) =>
+      /[^{}\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0](\p{White_Space}*[^{}\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0])*/u,
   },
 });

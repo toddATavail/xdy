@@ -2,18 +2,24 @@
 //!
 //! The final pass in the optimizer is register coalescence. This pass breaks
 //! static single assignment (SSA) form by reassigning dead registers to reduce
-//! the number of registers used. The register coalescer uses a graph coloring
-//! algorithm to determine which registers can be merged.
+//! the number of registers used. The register coalescer colors the interval
+//! graph of the registers' live ranges by a linear scan: it visits the ranges
+//! in order of their starts, and gives each register the least color that no
+//! live range still holds, so that registers whose ranges do not overlap may
+//! share a color. The instructions never branch or loop, so each live range is
+//! a single interval, and the scan is exact and optimal, and takes time
+//! `O(n log n)` in the number of registers.
 
 use std::{
-	collections::{BTreeMap, HashSet},
+	cmp::Reverse,
+	collections::{BTreeMap, BTreeSet, BinaryHeap},
 	ops::RangeInclusive
 };
 
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, DependencyAnalyzer, Div,
 	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
-	Mod, Mul, Neg, Optimizer, ProgramCounter, RegisterIndex, Return,
+	Max, Mod, Mul, Neg, Optimizer, ProgramCounter, RegisterIndex, Return,
 	RollCustomDice, RollRange, RollStandardDice, Sub, SumRollingRecord
 };
 
@@ -24,11 +30,6 @@ use crate::{
 /// A liveness map, as a map from registers to the range of program counters
 /// wherein they are live.
 type LivenessMap = BTreeMap<RegisterIndex, RangeInclusive<ProgramCounter>>;
-
-/// An interference graph, as a map from registers to the set of registers that
-/// are contemporaneous with them. These registers interfere with each other and
-/// thus cannot be coalesced.
-type InterferenceGraph = BTreeMap<RegisterIndex, HashSet<RegisterIndex>>;
 
 /// A coloring, as a map from addressing modes to register indices. The map
 /// only contains entries for ordinary registers, not immediates or rolling
@@ -58,8 +59,7 @@ impl Optimizer<()> for RegisterCoalescer
 		let analyzer =
 			DependencyAnalyzer::analyze(&self.function().instructions);
 		let liveness = self.compute_liveness(analyzer);
-		let interference = self.compute_interference(liveness);
-		self.coloring = self.colorize(interference);
+		self.coloring = Self::colorize(&liveness);
 		// Visit each instruction to apply the coloring.
 		for instruction in &function.instructions
 		{
@@ -100,8 +100,7 @@ impl RegisterCoalescer
 		{
 			// Registers without writers represent parameters or external
 			// variables and should be considered live starting at the first
-			// instruction. If a register is unread, then it must be a parameter
-			// or external variable; in this case, the liveness range is empty.
+			// instruction.
 			let r: RegisterIndex = r.into();
 			let start = match analyzer.writers().get(&r.into())
 			{
@@ -113,10 +112,13 @@ impl RegisterCoalescer
 				},
 				None => 0.into()
 			};
+			// A register that nothing reads is live only as its writer
+			// completes, so that its writer clobbers no register that is live
+			// then.
 			let end = match analyzer.readers().get(&r.into())
 			{
 				Some(readers) => *readers.last().unwrap(),
-				None => 0.into()
+				None => start
 			};
 			let range = start..=end;
 			liveness.insert(r, range);
@@ -124,64 +126,48 @@ impl RegisterCoalescer
 		liveness
 	}
 
-	/// Compute the interference graph for the function. This graph represents
-	/// the registers whose lifetimes overlap and thus cannot be coalesced.
+	/// Color the registers of the function by a linear scan of their live
+	/// ranges, so that no two registers whose ranges overlap share a color.
+	/// The scan visits the ranges in order of their starts, and gives each
+	/// register the least color that no range still live holds. The formal
+	/// parameters and external variables, which are live from the first
+	/// instruction and come first, keep their own registers.
 	///
 	/// # Parameters
 	/// - `liveness`: The liveness map.
 	///
 	/// # Returns
-	/// The interference graph.
-	fn compute_interference(&self, liveness: LivenessMap) -> InterferenceGraph
-	{
-		let mut graph = InterferenceGraph::new();
-		for r0 in 0..self.function().register_count
-		{
-			let r0 = r0.into();
-			let interference = graph.entry(r0).or_default();
-			for r1 in 0..self.function().register_count
-			{
-				let r1 = r1.into();
-				if r0 != r1 && liveness[&r0].overlaps(&liveness[&r1])
-				{
-					interference.insert(r1);
-				}
-			}
-		}
-		graph
-	}
-
-	/// Color the function using the interference graph. The algorithm assigns a
-	/// color to each register such that no two interfering registers share the
-	/// same color.
-	///
-	/// # Parameters
-	/// - `graph`: The interference graph.
-	///
-	/// # Returns
 	/// The coloring map, which maps each register to its replacement in a
 	/// potentially smaller palette.
-	fn colorize(&self, graph: InterferenceGraph) -> Coloring
+	fn colorize(liveness: &LivenessMap) -> Coloring
 	{
+		let mut order = liveness
+			.iter()
+			.map(|(r, range)| (*range.start(), *r))
+			.collect::<Vec<_>>();
+		order.sort();
 		let mut colors = Coloring::new();
-		// Bound the register palette to the original register set size.
-		let available_colors = (0..self.function().register_count)
-			.map(RegisterIndex::from)
-			.collect::<HashSet<_>>();
-		for (r, interference) in graph
+		// The colors that no live range holds, and the ranges still live, by
+		// their ends, with their colors.
+		let mut free = BTreeSet::<RegisterIndex>::new();
+		let mut live =
+			BinaryHeap::<Reverse<(ProgramCounter, RegisterIndex)>>::new();
+		let mut palette = 0;
+		for (start, r) in order
 		{
-			// Remove the colors of interfering registers from the available
-			// color choices.
-			let mut unused_colors = available_colors.clone();
-			for i in interference
+			// Free the colors of the ranges that end before this one starts.
+			while let Some(&Reverse((end, color))) = live.peek()
+				&& end < start
 			{
-				if let Some(color) = colors.get(&i)
-				{
-					unused_colors.remove(color);
-				}
+				live.pop();
+				free.insert(color);
 			}
-			// Assign the first available color to the register.
-			colors.insert(r, *unused_colors.iter().min().unwrap());
+			let color = free.pop_first().unwrap_or_else(|| {
+				palette += 1;
+				RegisterIndex(palette - 1)
+			});
+			colors.insert(r, color);
+			live.push(Reverse((*liveness[&r].end(), color)));
 		}
 		colors
 	}
@@ -332,6 +318,15 @@ impl InstructionVisitor<()> for RegisterCoalescer
 		})
 	}
 
+	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.emit(Max {
+			dest: self.color(inst.dest).try_into().unwrap(),
+			op1: self.color(inst.op1),
+			op2: self.color(inst.op2)
+		})
+	}
+
 	fn visit_neg(&mut self, inst: &Neg) -> Result<(), ()>
 	{
 		self.emit(Neg {
@@ -345,28 +340,5 @@ impl InstructionVisitor<()> for RegisterCoalescer
 		self.emit(Return {
 			src: self.color(inst.src)
 		})
-	}
-}
-
-/// Capability to detect overlap between two instances.
-pub trait CanOverlap
-{
-	/// Determine if the receiver overlaps with the argument.
-	///
-	/// # Parameters
-	/// * `other` - The other instance to compare against.
-	///
-	/// # Returns
-	fn overlaps(&self, other: &Self) -> bool;
-}
-
-impl<T> CanOverlap for RangeInclusive<T>
-where
-	T: PartialOrd
-{
-	#[inline]
-	fn overlaps(&self, other: &Self) -> bool
-	{
-		self.start() <= other.end() && other.start() <= self.end()
 	}
 }

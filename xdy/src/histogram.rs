@@ -7,8 +7,9 @@
 //! but it can be computationally expensive for dice expressions with many
 //! ranges, many dice, and/or many-sided dice. When the `rayon` feature is
 //! enabled, we use parallelism to speed up histogram computation. Mechanisms
-//! are provided to bound the total number of outcomes considered and to
-//! control the number of threads used.
+//! are provided to bound the work of the computation with a
+//! [budget](HistogramBuilder::build_metered), to bound the total number of
+//! outcomes considered, and to control the number of threads used.
 
 #[cfg(feature = "parallel-histogram")]
 pub mod parallel;
@@ -18,7 +19,10 @@ use std::{
 	collections::{HashMap, hash_map::IntoIter},
 	fmt::{Display, Formatter},
 	ops::{Deref, DerefMut, Index},
-	sync::atomic::{AtomicU64, Ordering}
+	sync::{
+		OnceLock,
+		atomic::{AtomicU64, Ordering}
+	}
 };
 
 #[cfg(feature = "serde")]
@@ -27,10 +31,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions, Div, DropHighest,
 	DropLowest, EvaluationError, Evaluator, Exp, Function, Instruction,
-	InstructionVisitor, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return,
-	RollCustomDice, RollRange, RollStandardDice, RollingRecord,
+	InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
+	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecord,
 	RollingRecordIndex, RollingRecordKind, Sub, SumRollingRecord, add, div,
-	exp, r#mod, mul, neg, sub
+	exp, max, r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -193,13 +197,82 @@ where
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
+	///
+	/// # Notes
+	/// The build is unmetered, so its work is bounded only by the expression
+	/// and its bindings: `{n}D6` with `n` bound to [`i32::MAX`] never
+	/// finishes. When the expression or its bindings are untrusted, use
+	/// [`build_metered`](Self::build_metered) instead.
 	fn build(
 		&self,
 		args: impl IntoIterator<Item = i32> + Send
 	) -> Result<Histogram, EvaluationError<'_>>
 	{
-		self.build_while(args, |_| true)
+		// No build can enumerate `u64::MAX` branches in any reasonable time,
+		// so this budget never refuses.
+		self.build_metered(args, u64::MAX)
 	}
+
+	/// Build the histogram of the outcomes of the dice expression, as
+	/// [`build`](Self::build) does, but enumerate no more than `budget`
+	/// branches in total. The builder enumerates every outcome of every range
+	/// and die along every path through the expression, so a range charges
+	/// its width and a die charges its number of faces (or `1`, if it has
+	/// none), once for each path that reaches it. The whole charge of a range
+	/// or die is made before any of its outcomes is enumerated, so a range or
+	/// die that would exceed what remains of the budget is refused at once,
+	/// and the refusal ends the build; there is no partial histogram.
+	///
+	/// The total charge of a complete build is the number of edges in the tree
+	/// of outcomes, which depends only on the expression and its arguments,
+	/// not on the order of enumeration, so whether a build succeeds or is
+	/// refused does not depend on the scheduling of threads.
+	///
+	/// # Parameters
+	/// - `args`: The arguments to the dice expression.
+	/// - `budget`: The greatest number of branches that the build may
+	///   enumerate.
+	///
+	/// # Returns
+	/// The histogram of the outcomes of the dice expression, exactly that of
+	/// [`build`](Self::build) for the same arguments.
+	///
+	/// # Errors
+	/// - [`BadArity`](EvaluationError::BadArity) if the number of arguments
+	///   provided disagrees with the number of formal parameters in the
+	///   function signature.
+	/// - [`HistogramBudgetExhausted`](EvaluationError::HistogramBudgetExhausted)
+	///   if the build asks for more branches than the budget allows. When
+	///   several threads build the histogram, which range or die is refused,
+	///   and so the error's `requested`, `remaining`, and `consumed`, may vary
+	///   from build to build.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::{
+	///     compile, EvaluationError, Evaluator, HistogramBuilder, serial
+	/// };
+	///
+	/// let function = compile("{n}: {n}D6")?;
+	/// let builder = serial::HistogramBuilder::new(Evaluator::new(function));
+	///
+	/// // Two dice: 6 branches for the first die, then 6 for the second die
+	/// // on each of those 6 paths.
+	/// let histogram = builder.build_metered([2], 42)?;
+	/// assert_eq!(histogram.total(), 36);
+	///
+	/// let error = builder.build_metered([i32::MAX], 1_000);
+	/// assert!(matches!(
+	///     error,
+	///     Err(EvaluationError::HistogramBudgetExhausted { .. })
+	/// ));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	fn build_metered(
+		&self,
+		args: impl IntoIterator<Item = i32> + Send,
+		budget: u64
+	) -> Result<Histogram, EvaluationError<'static>>;
 
 	/// Build the histogram of the outcomes of the dice expression, stopping
 	/// short after `limit` outcomes have been rolled. The histogram will
@@ -216,6 +289,12 @@ where
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
+	///
+	/// # Notes
+	/// The limit bounds the outcomes, not the work of finding them: the
+	/// builder may enumerate without bound before it finds a single outcome,
+	/// e.g., for `{n}D6` with `n` bound to [`i32::MAX`]. To bound the work,
+	/// use [`build_metered`](Self::build_metered).
 	fn build_with_limit(
 		&self,
 		args: impl IntoIterator<Item = i32> + Send,
@@ -245,6 +324,12 @@ where
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
+	///
+	/// # Notes
+	/// The condition bounds the outcomes, not the work of finding them: the
+	/// builder may enumerate without bound before it finds a single outcome,
+	/// e.g., for `{n}D6` with `n` bound to [`i32::MAX`]. To bound the work,
+	/// use [`build_metered`](Self::build_metered).
 	fn build_while(
 		&self,
 		args: impl IntoIterator<Item = i32> + Send,
@@ -265,6 +350,11 @@ where
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
 	/// provided disagrees with the number of formal parameters in the function
 	/// signature.
+	///
+	/// # Notes
+	/// The iterator is unmetered, but the work of producing each of its
+	/// states is bounded by the size of the function, so a consumer can bound
+	/// the work of the whole iteration by the number of states that it takes.
 	fn iter(
 		&'inst self,
 		args: impl IntoIterator<Item = i32>
@@ -293,8 +383,9 @@ pub struct EvaluationState<'inst>
 
 	/// The internal state of a range or roll instruction, expressed as the
 	/// current iteration and the next index within the iteration,
-	/// respectively.
-	substate: (i32, i32),
+	/// respectively. The index is wide enough to count every value of the
+	/// widest range, which exceeds [`i32::MAX`].
+	substate: (i32, i64),
 
 	/// Whether the evaluation has run out of gas. Stored as separate state to
 	/// allow early exits from range and roll expressions.
@@ -305,8 +396,124 @@ pub struct EvaluationState<'inst>
 	/// [iterator](serial::EvaluationStateIterator).
 	successors: Option<Vec<EvaluationState<'inst>>>,
 
+	/// The [meter](Meter) that the evaluation charges for each range and die
+	/// before enumerating its outcomes, if the evaluation is metered. Shared
+	/// by every state of the evaluation.
+	meter: Option<&'inst Meter>,
+
 	/// The final result of the dice expression, if it has been computed.
 	pub result: Option<i32>
+}
+
+/// The meter of a [metered](HistogramBuilder::build_metered) histogram build,
+/// which charges the branches that the build enumerates against a budget.
+/// Shared by every state of the build, and by every thread that builds it.
+#[derive(Debug)]
+pub(crate) struct Meter
+{
+	/// The budget of the build.
+	budget: u64,
+
+	/// The part of the budget that remains.
+	remaining: AtomicU64,
+
+	/// The first refusal of a charge, as the branches requested, the budget
+	/// remaining, and the branches already consumed, respectively.
+	refusal: OnceLock<(u64, u64, u64)>
+}
+
+impl Meter
+{
+	/// Construct a meter with the specified budget.
+	///
+	/// # Parameters
+	/// - `budget`: The greatest number of branches that the build may
+	///   enumerate.
+	///
+	/// # Returns
+	/// The meter.
+	pub(crate) fn new(budget: u64) -> Self
+	{
+		Meter {
+			budget,
+			remaining: AtomicU64::new(budget),
+			refusal: OnceLock::new()
+		}
+	}
+
+	/// Charge the specified number of branches against the budget, unless they
+	/// exceed what remains of it, in which case charge nothing and record the
+	/// refusal.
+	///
+	/// # Parameters
+	/// - `branches`: The number of branches requested.
+	///
+	/// # Returns
+	/// `true` if the branches were charged, `false` if they were refused.
+	fn charge(&self, branches: u64) -> bool
+	{
+		let mut remaining = self.remaining.load(Ordering::Relaxed);
+		loop
+		{
+			if branches > remaining
+			{
+				let consumed = self.budget - remaining;
+				let _ = self.refusal.set((branches, remaining, consumed));
+				return false
+			}
+			match self.remaining.compare_exchange_weak(
+				remaining,
+				remaining - branches,
+				Ordering::Relaxed,
+				Ordering::Relaxed
+			)
+			{
+				Ok(_) => return true,
+				Err(actual) => remaining = actual
+			}
+		}
+	}
+
+	/// Answer the meter, if its budget is limited. An unlimited budget,
+	/// [`u64::MAX`], never refuses, since no build can enumerate that many
+	/// branches in any reasonable time, so a build within it need not charge
+	/// anything, and threads that build it need not contend for the meter.
+	///
+	/// # Returns
+	/// The meter, or `None` if its budget is unlimited.
+	#[inline]
+	pub(crate) fn limited(&self) -> Option<&Self>
+	{
+		(self.budget < u64::MAX).then_some(self)
+	}
+
+	/// Answer whether the meter has refused a charge, which ends the build.
+	///
+	/// # Returns
+	/// `true` if the meter has refused a charge, `false` otherwise.
+	#[inline]
+	pub(crate) fn refused(&self) -> bool { self.refusal.get().is_some() }
+
+	/// Answer the outcome of the build that the meter metered.
+	///
+	/// # Errors
+	/// [`HistogramBudgetExhausted`](EvaluationError::HistogramBudgetExhausted)
+	/// if the meter refused a charge, describing the first refusal.
+	pub(crate) fn verdict(&self) -> Result<(), EvaluationError<'static>>
+	{
+		match self.refusal.get()
+		{
+			None => Ok(()),
+			Some(&(requested, remaining, consumed)) =>
+			{
+				Err(EvaluationError::HistogramBudgetExhausted {
+					requested,
+					remaining,
+					consumed
+				})
+			},
+		}
+	}
 }
 
 /// Denotes a type that can build a histogram.
@@ -335,11 +542,16 @@ where
 	///
 	/// # Parameters
 	/// - `initial_state`: The initial state of the evaluation machine.
+	/// - `meter`: The meter of the evaluation, if it is metered. The iterator
+	///   ends early if the meter refuses a charge.
 	///
 	/// # Returns
 	/// An iterator of outcomes.
-	fn create_iterator(&'inst self, initial_state: EvaluationState<'inst>)
-	-> T;
+	fn create_iterator(
+		&'inst self,
+		initial_state: EvaluationState<'inst>,
+		meter: Option<&'inst Meter>
+	) -> T;
 
 	/// Answer an iterator that can be consumed to compute the histogram of the
 	/// outcomes of the dice expression. The iterator will compute the histogram
@@ -347,14 +559,23 @@ where
 	/// the desired maximum number of outcomes or running out of time.
 	///
 	/// # Parameters
-	/// - `initial_state`: The initial state of the evaluation machine.
+	/// - `args`: The arguments to the dice expression.
+	/// - `meter`: The meter to charge for each range and die before enumerating
+	///   its outcomes, if the evaluation is metered. The iterator ends early if
+	///   the meter refuses a charge.
 	///
 	/// # Returns
 	/// An iterator of outcomes.
+	///
+	/// # Errors
+	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
+	/// provided disagrees with the number of formal parameters in the function
+	/// signature.
 	fn iter(
 		&'inst self,
-		args: impl IntoIterator<Item = i32>
-	) -> Result<T, EvaluationError<'inst>>
+		args: impl IntoIterator<Item = i32>,
+		meter: Option<&'inst Meter>
+	) -> Result<T, EvaluationError<'static>>
 	{
 		// Check the argument count.
 		let function = self.function();
@@ -369,7 +590,7 @@ where
 		}
 		// Initialize the state, which will cause evaluation to begin with the
 		// first instruction.
-		let mut state = EvaluationState::initial(function);
+		let mut state = EvaluationState::initial(function, meter);
 		// Bind the arguments to their registers.
 		for (i, arg) in args.into_iter().enumerate()
 		{
@@ -382,7 +603,7 @@ where
 		}
 		// Everything is ready, so answer the iterator. The caller consumes the
 		// iterator to build as much of the histogram as desired.
-		Ok(self.create_iterator(state))
+		Ok(self.create_iterator(state, meter))
 	}
 }
 
@@ -406,15 +627,15 @@ trait CanIterate<'inst>: Sized
 
 impl<'inst> EvaluationState<'inst>
 {
-	/// Construct an initial evaluation state with the given number of
-	/// registers.
+	/// Construct an initial evaluation state for the given function.
 	///
 	/// # Parameters
-	/// - `registers`: The number of registers to allocate.
+	/// - `function`: The function to evaluate.
+	/// - `meter`: The meter of the evaluation, if it is metered.
 	///
 	/// # Returns
 	/// An initial evaluation state.
-	fn initial(function: &'inst Function) -> Self
+	fn initial(function: &'inst Function, meter: Option<&'inst Meter>) -> Self
 	{
 		EvaluationState {
 			instructions: &function.instructions,
@@ -427,6 +648,7 @@ impl<'inst> EvaluationState<'inst>
 			substate: (0, 0),
 			out_of_gas: false,
 			successors: None,
+			meter,
 			result: None
 		}
 	}
@@ -456,6 +678,26 @@ impl<'inst> EvaluationState<'inst>
 			}
 		}
 		self.result
+	}
+
+	/// Charge the [meter](Meter), if any, for the specified number of branches,
+	/// before enumerating any of them. If the meter refuses the charge, then
+	/// discontinue the evaluation, generating no successors.
+	///
+	/// # Parameters
+	/// - `branches`: The number of branches that a range or die requests.
+	///
+	/// # Returns
+	/// `true` if the evaluation may enumerate the branches, `false` if the
+	/// meter refused them.
+	fn charge(&mut self, branches: u64) -> bool
+	{
+		let charged = self.meter.is_none_or(|meter| meter.charge(branches));
+		if !charged
+		{
+			self.out_of_gas = true;
+		}
+		charged
 	}
 
 	/// Obtain the value associated with the specified operand. The operand may
@@ -594,7 +836,7 @@ impl<'inst> EvaluationState<'inst>
 	///
 	/// # Returns
 	/// A new successor state.
-	fn new_index_successor(&self, iteration: i32, index: i32) -> Self
+	fn new_index_successor(&self, iteration: i32, index: i64) -> Self
 	{
 		let mut successor = self.new_successor();
 		successor.substate = (iteration, index);
@@ -651,13 +893,20 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 		let (iteration, index) = self.substate;
 		if iteration == 0
 		{
-			for index in index..=end - start
+			// Compute the width in 64 bits, since the widest range has more
+			// than `i32::MAX` values.
+			let width = end as i64 - start as i64 + 1;
+			if index == 0 && !self.charge(width as u64)
+			{
+				return Ok(())
+			}
+			for index in index..width
 			{
 				if !self.add_successor(self.new_iteration_successor(
 					inst.dest,
 					iteration + 1,
 					1,
-					start + index
+					(start as i64 + index) as i32
 				))
 				{
 					// We ran out of gas, so add a successor that will resume
@@ -702,6 +951,11 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 		let (iteration, index) = self.substate;
 		if iteration < count
 		{
+			// A die without faces has a single outcome, zero.
+			if index == 0 && !self.charge(faces.max(1) as u64)
+			{
+				return Ok(())
+			}
 			if faces <= 0
 			{
 				// There are no faces on the die, so the result is a single
@@ -714,13 +968,13 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 				));
 			}
 			// Generate a successor for each possible face of the die.
-			for index in index..faces
+			for index in index..faces as i64
 			{
 				if !self.add_successor(self.new_iteration_successor(
 					inst.dest,
 					iteration + 1,
 					count,
-					index + 1
+					index as i32 + 1
 				))
 				{
 					// We ran out of gas, so add a successor that will resume
@@ -769,6 +1023,11 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 		let (iteration, index) = self.substate;
 		if iteration < count
 		{
+			// A die without faces has a single outcome, zero.
+			if index == 0 && !self.charge(faces.max(1) as u64)
+			{
+				return Ok(())
+			}
 			if faces == 0
 			{
 				// There are no faces on the die, so the result is a single
@@ -782,7 +1041,7 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 			}
 			// This isn't the final iteration, so all we want to do is generate
 			// a successor for each possible face value.
-			for index in index..faces as i32
+			for index in index..faces as i64
 			{
 				if !self.add_successor(self.new_iteration_successor(
 					inst.dest,
@@ -884,6 +1143,14 @@ impl InstructionVisitor<()> for EvaluationState<'_>
 		let op1 = self.value(inst.op1);
 		let op2 = self.value(inst.op2);
 		self.set_register(inst.dest, exp(op1, op2));
+		Ok(())
+	}
+
+	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		let op1 = self.value(inst.op1);
+		let op2 = self.value(inst.op2);
+		self.set_register(inst.dest, max(op1, op2));
 		Ok(())
 	}
 

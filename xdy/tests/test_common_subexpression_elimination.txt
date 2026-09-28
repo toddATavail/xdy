@@ -105,9 +105,9 @@ Function() r#3 ⚅#2
 		@2 <- @0 + @1
 		return @2
 
-x: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1)
+{x}: 9D6 drop lowest ({x} + 1) + 9D6 drop lowest ({x} + 1)
 =
-Function(x@0) r#5 ⚅#2
+Function({x}@0) r#5 ⚅#2
 	extern[]
 	body:
 		⚅0 <- roll standard dice 9D6
@@ -139,108 +139,108 @@ Function() r#3 ⚅#0
 		@2 <- @0 + @1
 		return @2
 
-x: ({x} + 1) - ({x} + 1)
+{x}: ({x} + 1) - ({x} + 1)
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 + 1
 		@2 <- @1 - @1
 		return @2
 
-x: (1 + {x}) - (1 + {x})
+{x}: (1 + {x}) - (1 + {x})
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- 1 + @0
 		@2 <- @1 - @1
 		return @2
 
-x: ({x} - 1) + ({x} - 1)
+{x}: ({x} - 1) + ({x} - 1)
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 - 1
 		@2 <- @1 + @1
 		return @2
 
-x: (1 - {x}) + (1 - {x})
+{x}: (1 - {x}) + (1 - {x})
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- 1 - @0
 		@2 <- @1 + @1
 		return @2
 
-x: ({x} / 3) + ({x} / 3)
+{x}: ({x} / 3) + ({x} / 3)
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 / 3
 		@2 <- @1 + @1
 		return @2
 
-x: (3 / {x}) + (3 / {x})
+{x}: (3 / {x}) + (3 / {x})
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- 3 / @0
 		@2 <- @1 + @1
 		return @2
 
-x: ({x} % 3) + ({x} % 3)
+{x}: ({x} % 3) + ({x} % 3)
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 % 3
 		@2 <- @1 + @1
 		return @2
 
-x: (3 % {x}) + (3 % {x})
+{x}: (3 % {x}) + (3 % {x})
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- 3 % @0
 		@2 <- @1 + @1
 		return @2
 
-x: ({x} ^ 3) + ({x} ^ 3)
+{x}: ({x} ^ 3) + ({x} ^ 3)
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 ^ 3
 		@2 <- @1 + @1
 		return @2
 
-x: (3 ^ {x}) + (3 ^ {x})
+{x}: (3 ^ {x}) + (3 ^ {x})
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- 3 ^ @0
 		@2 <- @1 + @1
 		return @2
 
-x: -{x} + -{x}
+{x}: -{x} + -{x}
 =
-Function(x@0) r#3 ⚅#0
+Function({x}@0) r#3 ⚅#0
 	extern[]
 	body:
 		@1 <- -@0
 		@2 <- @1 + @1
 		return @2
 
-x: ({x} + 1) + -({x} + 1)
+{x}: ({x} + 1) + -({x} + 1)
 =
-Function(x@0) r#4 ⚅#0
+Function({x}@0) r#4 ⚅#0
 	extern[]
 	body:
 		@1 <- @0 + 1
@@ -248,9 +248,9 @@ Function(x@0) r#4 ⚅#0
 		@3 <- @1 + @2
 		return @3
 
-x, y: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y})
+{x}, {y}: ({x} + {y}) - ({x} + {y}) * ({x} + {y}) / ({x} + {y}) % ({x} + {y})
 =
-Function(x@0, y@1) r#7 ⚅#0
+Function({x}@0, {y}@1) r#7 ⚅#0
 	extern[]
 	body:
 		@2 <- @0 + @1
@@ -260,9 +260,9 @@ Function(x@0, y@1) r#7 ⚅#0
 		@6 <- @2 - @5
 		return @6
 
-x, y: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y}))
+{x}, {y}: (({x} + {y}) + ({x} + {y})) + (({x} + {y}) + ({x} + {y}))
 =
-Function(x@0, y@1) r#5 ⚅#0
+Function({x}@0, {y}@1) r#5 ⚅#0
 	extern[]
 	body:
 		@2 <- @0 + @1

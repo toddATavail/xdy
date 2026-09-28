@@ -171,9 +171,12 @@ pub enum Pass
 	/// expressions. Iterate until no further changes are made.
 	CommonSubexpressionElimination = 0x01,
 
-	/// Commute immediate operands to the left side of instructions, thereby
-	/// creating new opportunities for constant folding and strength reduction.
-	/// Iterate until no further changes are made.
+	/// Put the operands of commutative instructions in canonical order,
+	/// immediates first, and merge an instruction that applies a constant to
+	/// the result of another that applies one, e.g., `(x + 1) + 2` into
+	/// `x + 3`, wherever the merged instruction is exact despite saturation,
+	/// thereby creating new opportunities for constant folding and strength
+	/// reduction. Iterate until no further changes are made.
 	ConstantCommuting = 0x02,
 
 	/// Fold expressions with constant operands into
@@ -209,8 +212,9 @@ impl BitOr<Passes> for Pass
 }
 
 /// A set of optimization passes. An [optimizer](Optimizer) applies a
-/// [set of passes](Passes) to a function until a fixed point is reached.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// [set of passes](Passes) to a function until a fixed point is reached. The
+/// [default](Passes::default) is [every pass](Passes::all).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Passes(u8);
 
 impl Passes
@@ -221,6 +225,14 @@ impl Passes
 	/// A set of all optimization passes.
 	#[inline]
 	pub fn all() -> Self { Self(0xFF) }
+
+	/// Create an empty set of passes. An [optimizer](StandardOptimizer) with no
+	/// passes answers its function unchanged.
+	///
+	/// # Returns
+	/// A set of no optimization passes.
+	#[inline]
+	pub fn none() -> Self { Self(0) }
 
 	/// Check if the receiver is empty.
 	///
@@ -238,6 +250,17 @@ impl Passes
 	/// `true` if the pass is present in the receiver, otherwise `false`.
 	#[inline]
 	pub fn contains(&self, pass: Pass) -> bool { self.0 & (pass as u8) != 0 }
+}
+
+impl Default for Passes
+{
+	/// Answer the default set of passes, which is [every pass](Passes::all),
+	/// so that a default optimizer optimizes fully.
+	///
+	/// # Returns
+	/// A set of all optimization passes.
+	#[inline]
+	fn default() -> Self { Self::all() }
 }
 
 impl std::ops::BitOr<Pass> for Passes
@@ -325,7 +348,7 @@ mod tests
 		assert!(!passes.contains(Pass::DeadCodeElimination));
 		assert!(!passes.contains(Pass::RegisterCoalescing));
 
-		let passes = Passes::default()
+		let passes = Passes::none()
 			| Pass::CommonSubexpressionElimination
 			| Pass::ConstantCommuting
 			| Pass::ConstantFolding
@@ -345,9 +368,16 @@ mod tests
 	#[test]
 	fn test_no_passes()
 	{
-		let passes = Passes::default();
+		let passes = Passes::none();
 		assert!(passes.is_empty());
-		let function = compile_valid("x: 3D6 + {x}");
-		assert_eq!(function, optimize(function.clone(), Passes::default()));
+		let function = compile_valid("{x}: 3D6 + {x}");
+		assert_eq!(function, optimize(function.clone(), Passes::none()));
+	}
+
+	/// Test that the default set of passes is every pass.
+	#[test]
+	fn test_default_passes()
+	{
+		assert_eq!(Passes::default(), Passes::all());
 	}
 }

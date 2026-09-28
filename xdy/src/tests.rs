@@ -6,11 +6,18 @@
 //! print rendition.
 
 mod assembler;
+mod ast;
 mod bounds;
 mod compiler;
+mod corpus;
 mod diagnostics;
 mod evaluator;
 mod histogram;
 mod optimizer;
 mod parser;
+mod property;
+mod recovery;
+mod recovery_parity;
+mod small_stack;
 mod validator;
+mod visitor;

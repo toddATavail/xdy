@@ -31,6 +31,7 @@
 //! ```
 
 use std::{
+	borrow::Cow,
 	collections::{HashMap, HashSet},
 	convert::Infallible,
 	error::Error,
@@ -41,12 +42,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	CanAllocate as _, Optimizer as _, Parser, SourceSpan, StandardOptimizer,
-	Validator,
-	ast::{
-		self, ASTVisitor, ArithmeticExpression, Binding, Constant,
-		DiceExpression, Expression
-	},
+	CanAllocate as _, Optimizer as _, Parser, Passes, SourceSpan,
+	StandardOptimizer, Validator,
+	ast::{self, ASTVisitor, Binding, Constant, Event, Expression, Node, Walk},
 	ir::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
@@ -163,7 +161,7 @@ pub fn compile_unoptimized(
 /// use rand::rng;
 ///
 /// # fn main() -> Result<(), CompilationError<'static>> {
-/// let function = compile("x: 1D6 + {x}")?;
+/// let function = compile("{x}: 1D6 + {x}")?;
 /// let mut evaluator = Evaluator::new(function);
 /// let results = (0..10)
 ///    .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
@@ -204,7 +202,7 @@ pub fn compile(source: &str) -> Result<Function, CompilationError<'_>>
 	let ast = Parser::parse(source).map_err(CompilationError::ParseError)?;
 	Validator::validate(&ast)?;
 	let function = Compiler::compile(&ast);
-	let optimizer = StandardOptimizer::new(Default::default());
+	let optimizer = StandardOptimizer::new(Passes::all());
 	let function = optimizer
 		.optimize(function)
 		.map_err(|_| CompilationError::OptimizationFailed)?;
@@ -225,8 +223,10 @@ pub enum CompilationError<'src>
 	/// signature.
 	DuplicateParameter
 	{
-		/// The duplicated parameter name, borrowed from the source text.
-		name: &'src str,
+		/// The [canonical](crate::parser::canonical_name) duplicated parameter
+		/// name, borrowed from the source text wherever it is spelled
+		/// canonically there.
+		name: Cow<'src, str>,
 
 		/// The span of the first occurrence of the name in the parameter list.
 		first: SourceSpan,
@@ -241,8 +241,10 @@ pub enum CompilationError<'src>
 	/// cross-category collisions are not permitted.
 	BindingCollidesWithParameter
 	{
-		/// The colliding name, borrowed from the source text.
-		name: &'src str,
+		/// The [canonical](crate::parser::canonical_name) colliding name,
+		/// borrowed from the source text wherever it is spelled canonically
+		/// there.
+		name: Cow<'src, str>,
 
 		/// The span of the parameter declaration in the function signature.
 		parameter: SourceSpan,
@@ -257,8 +259,10 @@ pub enum CompilationError<'src>
 	/// not permitted.
 	DuplicateBinding
 	{
-		/// The rebound name, borrowed from the source text.
-		name: &'src str,
+		/// The [canonical](crate::parser::canonical_name) rebound name,
+		/// borrowed from the source text wherever it is spelled canonically
+		/// there.
+		name: Cow<'src, str>,
 
 		/// The span of the first binding-site name.
 		first: SourceSpan,
@@ -275,9 +279,10 @@ pub enum CompilationError<'src>
 	/// self-reference is rejected as use-before-bind).
 	UseBeforeBind
 	{
-		/// The name that was referenced before being bound, borrowed from the
-		/// source text.
-		name: &'src str,
+		/// The [canonical](crate::parser::canonical_name) name that was
+		/// referenced before being bound, borrowed from the source text
+		/// wherever it is spelled canonically there.
+		name: Cow<'src, str>,
 
 		/// The span of the offending reference.
 		reference: SourceSpan,
@@ -373,11 +378,10 @@ impl Error for CompilationError<'_> {}
 /// output.
 ///
 /// # Type parameters
-/// - `'src`: The lifetime of the source text from which the AST was parsed.
-///   Variable names are borrowed from the AST (and transitively from the source
-///   text) during compilation, then copied into owned strings when assembling
-///   the output [`Function`].
-pub struct Compiler<'src>
+/// - `'a`: The lifetime of the borrow of the AST. Variable names are borrowed
+///   from the AST during compilation, then copied into owned strings when
+///   assembling the output [`Function`].
+pub struct Compiler<'a>
 {
 	/// The instructions emitted by the compiler.
 	instructions: Vec<Instruction>,
@@ -394,22 +398,22 @@ pub struct Compiler<'src>
 	/// The parameters and external variables, mapped to their register
 	/// indices. Local bindings are tracked separately in
 	/// [`bindings`](Self::bindings).
-	variables: HashMap<&'src str, RegisterIndex>,
+	variables: HashMap<&'a str, RegisterIndex>,
 
-	/// [Local bindings](crate::ast::Binding) introduced by `name@(expr)`
+	/// [Local bindings](crate::ast::Binding) introduced by `{name}@(expr)`
 	/// forms, mapped to the [addressing mode](AddressingMode) of the bound
 	/// expression. A binding is stored as whatever
-	/// [`accept_expression`](Self::accept_expression) produced for its
+	/// [`visit_expression`](ASTVisitor::visit_expression) produced for its
 	/// right-hand side — an [`Immediate`] for a constant RHS, a register for
 	/// everything else — so subsequent [references](ast::Variable) resolve to
 	/// the same value without reallocating or re-emitting the bound
 	/// expression. The [`Validator`] guarantees that binding names are
 	/// disjoint from parameter and external names, so the two tables never
 	/// need to be consulted together during name resolution.
-	bindings: HashMap<&'src str, AddressingMode>
+	bindings: HashMap<&'a str, AddressingMode>
 }
 
-impl<'src> Compiler<'src>
+impl<'a> Compiler<'a>
 {
 	/// Compile the specified AST into a [`Function`] in intermediate
 	/// representation (IR).
@@ -432,7 +436,7 @@ impl<'src> Compiler<'src>
 	/// let function = Compiler::compile(&ast);
 	/// assert_eq!(function.arity(), 0);
 	/// ```
-	pub fn compile(ast: &'src ast::Function<'src>) -> Function
+	pub fn compile(ast: &'a ast::Function<'_>) -> Function
 	{
 		let mut compiler = Self {
 			instructions: Vec::new(),
@@ -442,7 +446,7 @@ impl<'src> Compiler<'src>
 			variables: HashMap::new(),
 			bindings: HashMap::new()
 		};
-		let _ = compiler.visit_function(ast);
+		let _ = ast.accept(&mut compiler);
 		compiler.finish()
 	}
 
@@ -489,7 +493,7 @@ impl<'src> Compiler<'src>
 	///
 	/// # Returns
 	/// The register index for the variable.
-	fn variable(&mut self, name: &'src str) -> RegisterIndex
+	fn variable(&mut self, name: &'a str) -> RegisterIndex
 	{
 		match self.variables.get(name)
 		{
@@ -533,48 +537,19 @@ impl<'src> Compiler<'src>
 		self.instructions.push(instruction);
 	}
 
-	/// Accept an expression and ensure the result is not an unsummed rolling
-	/// record. If the expression produces a
-	/// [`RollingRecord`](AddressingMode::RollingRecord), emit a
-	/// [`SumRollingRecord`](crate::ir::SumRollingRecord) instruction to reduce
-	/// it to a register.
-	///
-	/// # Parameters
-	/// - `expr`: The expression to accept.
-	///
-	/// # Returns
-	/// The [`AddressingMode`] for the result.
-	fn accept_expression(
-		&mut self,
-		expr: &'src Expression<'src>
-	) -> AddressingMode
-	{
-		let value = expr.accept(self).unwrap();
-		match value
-		{
-			AddressingMode::RollingRecord(record) =>
-			{
-				let sum = self.allocate_register();
-				self.emit(Instruction::sum_rolling_record(sum, record));
-				sum.into()
-			},
-			other => other
-		}
-	}
-
 	/// Generate IR for a binary arithmetic expression.
 	///
 	/// # Parameters
-	/// - `left`: The left operand.
-	/// - `right`: The right operand.
+	/// - `op1`: The left operand.
+	/// - `op2`: The right operand.
 	/// - `constructor`: The instruction constructor.
 	///
 	/// # Returns
 	/// The [`AddressingMode`] for the result register.
 	fn generate_binary(
 		&mut self,
-		left: &'src Expression<'src>,
-		right: &'src Expression<'src>,
+		op1: AddressingMode,
+		op2: AddressingMode,
 		constructor: fn(
 			RegisterIndex,
 			AddressingMode,
@@ -582,8 +557,6 @@ impl<'src> Compiler<'src>
 		) -> Instruction
 	) -> AddressingMode
 	{
-		let op1 = self.accept_expression(left);
-		let op2 = self.accept_expression(right);
 		let dest = self.allocate_register();
 		self.emit(constructor(dest, op1, op2));
 		dest.into()
@@ -594,27 +567,27 @@ impl<'src> Compiler<'src>
 //                          ASTVisitor for Compiler.                          //
 ////////////////////////////////////////////////////////////////////////////////
 
-impl<'src> ASTVisitor<'src> for Compiler<'src>
+impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 {
 	type Output = AddressingMode;
 	type Error = Infallible;
 
-	fn visit_function(
+	fn enter_function(
 		&mut self,
-		node: &'src ast::Function<'src>
-	) -> Result<AddressingMode, Infallible>
+		node: &'a ast::Function<'src>
+	) -> Result<(), Infallible>
 	{
 		// Register formal parameters first, in declaration order.
 		if let Some(ref parameters) = node.parameters
 		{
 			for param in parameters
 			{
-				self.variable(param.name);
+				self.variable(&param.name);
 			}
 			self.arity = self.variables.len();
 		}
 		// Discover local binding names before external discovery so that
-		// `{x}` inside `x@(...) + {x}` is not misclassified as an external.
+		// `{x}` inside `{x}@(...) + {x}` is not misclassified as an external.
 		// The [`Validator`] has already guaranteed that binding names are
 		// disjoint from parameter names and that every reference lexically
 		// follows its binding, so a name present in this set belongs to a
@@ -631,23 +604,31 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 				self.variable(external);
 			}
 		}
-		// Generate the body.
-		let return_value = self.accept_expression(&node.body);
-		self.emit(Instruction::r#return(return_value));
-		Ok(return_value)
+		Ok(())
+	}
+
+	fn visit_function(
+		&mut self,
+		_node: &'a ast::Function<'src>,
+		body: AddressingMode
+	) -> Result<AddressingMode, Infallible>
+	{
+		self.emit(Instruction::r#return(body));
+		Ok(body)
 	}
 
 	fn visit_group(
 		&mut self,
-		node: &'src ast::Group<'src>
+		_node: &'a ast::Group<'src>,
+		expression: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.accept_expression(&node.expression))
+		Ok(expression)
 	}
 
 	fn visit_constant(
 		&mut self,
-		node: &Constant
+		node: &'a Constant
 	) -> Result<AddressingMode, Infallible>
 	{
 		Ok(Immediate(node.value).into())
@@ -655,45 +636,45 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 
 	fn visit_variable(
 		&mut self,
-		node: &'src ast::Variable<'src>
+		node: &'a ast::Variable<'src>
 	) -> Result<AddressingMode, Infallible>
 	{
 		// Local bindings take precedence over the parameter/external table:
 		// the [`Validator`] guarantees disjoint namespaces, so at most one
 		// match is possible, and consulting bindings first avoids allocating
 		// a spurious register for a name that has already been bound.
-		if let Some(&addr) = self.bindings.get(node.name)
+		if let Some(&addr) = self.bindings.get(&*node.name)
 		{
 			return Ok(addr);
 		}
-		let register = self.variable(node.name);
+		let register = self.variable(&node.name);
 		Ok(register.into())
 	}
 
 	fn visit_binding(
 		&mut self,
-		node: &'src Binding<'src>
+		node: &'a Binding<'src>,
+		expression: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		// Compile the bound expression, coercing a rolling record to its sum
-		// register so the binding always captures the integer main effect.
-		// The resulting [addressing mode](AddressingMode) — a register for
-		// derived values, an immediate for a constant RHS — becomes the
-		// single shared source for every subsequent [reference](ast::Variable),
-		// which is how "single-evaluation" semantics fall out of linear IR
-		// without an explicit marker.
-		let value = self.accept_expression(&node.expression);
-		self.bindings.insert(node.name, value);
-		Ok(value)
+		// The bound expression has already been compiled, and a rolling record
+		// coerced to its sum register, so the binding always captures the
+		// integer main effect. The resulting [addressing mode](AddressingMode)
+		// — a register for derived values, an immediate for a constant RHS —
+		// becomes the single shared source for every subsequent
+		// [reference](ast::Variable), which is how "single-evaluation"
+		// semantics fall out of linear IR without an explicit marker.
+		self.bindings.insert(&node.name, expression);
+		Ok(expression)
 	}
 
 	fn visit_range(
 		&mut self,
-		node: &'src ast::Range<'src>
+		_node: &'a ast::Range<'src>,
+		start: AddressingMode,
+		end: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		let start = self.accept_expression(&node.start);
-		let end = self.accept_expression(&node.end);
 		let dest = self.allocate_rolling_record();
 		self.emit(Instruction::roll_range(dest, start, end));
 		let sum = self.allocate_register();
@@ -703,11 +684,11 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 
 	fn visit_standard_dice(
 		&mut self,
-		node: &'src ast::StandardDice<'src>
+		_node: &'a ast::StandardDice<'src>,
+		count: AddressingMode,
+		faces: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		let count = self.accept_expression(&node.count);
-		let faces = self.accept_expression(&node.faces);
 		let dest = self.allocate_rolling_record();
 		self.emit(Instruction::roll_standard_dice(dest, count, faces));
 		Ok(dest.into())
@@ -715,10 +696,10 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 
 	fn visit_custom_dice(
 		&mut self,
-		node: &'src ast::CustomDice<'src>
+		node: &'a ast::CustomDice<'src>,
+		count: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		let count = self.accept_expression(&node.count);
 		let dest = self.allocate_rolling_record();
 		self.emit(Instruction::roll_custom_dice(
 			dest,
@@ -730,107 +711,132 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 
 	fn visit_drop_lowest(
 		&mut self,
-		node: &'src ast::DropLowest<'src>
+		_node: &'a ast::DropLowest<'src>,
+		dice: AddressingMode,
+		drop: Option<AddressingMode>
 	) -> Result<AddressingMode, Infallible>
 	{
-		let record: RollingRecordIndex = node
-			.dice
-			.accept(self)
-			.unwrap()
+		let record: RollingRecordIndex = dice
 			.try_into()
 			.expect("dice visitor must return RollingRecord");
-		let count = match &node.drop
-		{
-			Some(expr) => self.accept_expression(expr),
-			None => Immediate(1).into()
-		};
+		let count = drop.unwrap_or(Immediate(1).into());
 		self.emit(Instruction::drop_lowest(record, count));
 		Ok(record.into())
 	}
 
 	fn visit_drop_highest(
 		&mut self,
-		node: &'src ast::DropHighest<'src>
+		_node: &'a ast::DropHighest<'src>,
+		dice: AddressingMode,
+		drop: Option<AddressingMode>
 	) -> Result<AddressingMode, Infallible>
 	{
-		let record: RollingRecordIndex = node
-			.dice
-			.accept(self)
-			.unwrap()
+		let record: RollingRecordIndex = dice
 			.try_into()
 			.expect("dice visitor must return RollingRecord");
-		let count = match &node.drop
-		{
-			Some(expr) => self.accept_expression(expr),
-			None => Immediate(1).into()
-		};
+		let count = drop.unwrap_or(Immediate(1).into());
 		self.emit(Instruction::drop_highest(record, count));
 		Ok(record.into())
 	}
 
 	fn visit_add(
 		&mut self,
-		node: &'src ast::Add<'src>
+		_node: &'a ast::Add<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::add))
+		Ok(self.generate_binary(left, right, Instruction::add))
 	}
 
 	fn visit_sub(
 		&mut self,
-		node: &'src ast::Sub<'src>
+		_node: &'a ast::Sub<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::sub))
+		Ok(self.generate_binary(left, right, Instruction::sub))
 	}
 
 	fn visit_mul(
 		&mut self,
-		node: &'src ast::Mul<'src>
+		_node: &'a ast::Mul<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::mul))
+		Ok(self.generate_binary(left, right, Instruction::mul))
 	}
 
 	fn visit_div(
 		&mut self,
-		node: &'src ast::Div<'src>
+		_node: &'a ast::Div<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::div))
+		Ok(self.generate_binary(left, right, Instruction::div))
 	}
 
 	fn visit_mod(
 		&mut self,
-		node: &'src ast::Mod<'src>
+		_node: &'a ast::Mod<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::r#mod))
+		Ok(self.generate_binary(left, right, Instruction::r#mod))
 	}
 
 	fn visit_exp(
 		&mut self,
-		node: &'src ast::Exp<'src>
+		_node: &'a ast::Exp<'src>,
+		left: AddressingMode,
+		right: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		Ok(self.generate_binary(&node.left, &node.right, Instruction::exp))
+		Ok(self.generate_binary(left, right, Instruction::exp))
 	}
 
 	fn visit_neg(
 		&mut self,
-		node: &'src ast::Neg<'src>
+		node: &'a ast::Neg<'src>,
+		operand: AddressingMode
 	) -> Result<AddressingMode, Infallible>
 	{
-		// Fold negation of constants into a single immediate.
+		// Fold negation of constants into a single immediate. Visiting the
+		// constant emitted nothing, so there is nothing to discard.
 		if let Expression::Constant(Constant { value, .. }) =
 			node.operand.as_ref()
 		{
 			return Ok(Immediate(value.saturating_neg()).into());
 		}
-		let op = self.accept_expression(&node.operand);
 		let dest = self.allocate_register();
-		self.emit(Instruction::neg(dest, op));
+		self.emit(Instruction::neg(dest, operand));
 		Ok(dest.into())
+	}
+
+	fn visit_expression(
+		&mut self,
+		_node: &'a Expression<'src>,
+		output: AddressingMode
+	) -> Result<AddressingMode, Infallible>
+	{
+		// Every expression slot consumes an integer, so reduce an unsummed
+		// rolling record to its sum at once, before any sibling is compiled.
+		// Only the dice beneath a drop clause, which is not an expression slot,
+		// keeps its rolling record, for the drop to operate upon.
+		match output
+		{
+			AddressingMode::RollingRecord(record) =>
+			{
+				let sum = self.allocate_register();
+				self.emit(Instruction::sum_rolling_record(sum, record));
+				Ok(sum.into())
+			},
+			other => Ok(other)
+		}
 	}
 }
 
@@ -842,63 +848,30 @@ impl<'src> ASTVisitor<'src> for Compiler<'src>
 /// depth-first, left-to-right order. This ensures deterministic register
 /// allocation.
 ///
+/// # Type parameters
+/// - `'a`: The lifetime of the borrow of the expression.
+///
 /// # Parameters
 /// - `expr`: The expression to search.
 ///
 /// # Returns
 /// The variable names, in discovery order, with duplicates included (the caller
 /// is expected to deduplicate via the variable map).
-fn discover_externals<'src>(expr: &'src Expression<'src>) -> Vec<&'src str>
+fn discover_externals<'a>(expr: &'a Expression<'_>) -> Vec<&'a str>
 {
-	let mut externals = Vec::new();
-	collect_variables(expr, &mut externals);
-	externals
-}
-
-/// Recursively collect variable references from the given expression.
-///
-/// # Parameters
-/// - `expr`: The expression to search.
-/// - `out`: The accumulator for variable names.
-fn collect_variables<'src>(
-	expr: &'src Expression<'src>,
-	out: &mut Vec<&'src str>
-)
-{
-	match expr
+	let mut externals: Vec<&'a str> = Vec::new();
+	for event in Walk::new(Node::Expression(expr))
 	{
-		Expression::Variable(v) =>
+		// The name of a binding is not a free variable — it is introduced by
+		// the binding, not referenced from outside — but any
+		// [references](ast::Variable) inside the bound expression may still be
+		// externals, and the walk reaches them in turn.
+		if let Event::Enter(Node::Expression(Expression::Variable(v))) = event
 		{
-			out.push(v.name);
-		},
-		Expression::Binding(b) =>
-		{
-			// The binding name itself is not a free variable — it is
-			// introduced by the binding, not referenced from outside — but
-			// any [references](ast::Variable) inside the bound expression
-			// may still be externals, so the RHS is walked recursively.
-			collect_variables(&b.expression, out);
-		},
-		Expression::Group(g) =>
-		{
-			collect_variables(&g.expression, out);
-		},
-		Expression::Range(r) =>
-		{
-			collect_variables(&r.start, out);
-			collect_variables(&r.end, out);
-		},
-		Expression::Dice(d) =>
-		{
-			collect_dice_variables(d, out);
-		},
-		Expression::Arithmetic(a) =>
-		{
-			collect_arithmetic_variables(a, out);
-		},
-		Expression::Constant(_) =>
-		{}
+			externals.push(&v.name);
+		}
 	}
+	externals
 }
 
 /// Collect the names introduced by every [local binding](crate::ast::Binding)
@@ -908,231 +881,24 @@ fn collect_variables<'src>(
 /// inconsistency in the pipeline and are merely deduplicated by the set.
 ///
 /// # Type parameters
-/// - `'src`: The lifetime of the source text.
+/// - `'a`: The lifetime of the borrow of the expression.
 ///
 /// # Parameters
 /// - `expr`: The expression to walk.
 ///
 /// # Returns
 /// The set of binding names discovered in `expr`.
-fn collect_binding_names<'src>(
-	expr: &'src Expression<'src>
-) -> HashSet<&'src str>
+fn collect_binding_names<'a>(expr: &'a Expression<'_>) -> HashSet<&'a str>
 {
-	let mut names = HashSet::new();
-	gather_binding_names(expr, &mut names);
+	let mut names: HashSet<&'a str> = HashSet::new();
+	for event in Walk::new(Node::Expression(expr))
+	{
+		if let Event::Enter(Node::Expression(Expression::Binding(b))) = event
+		{
+			names.insert(&b.name);
+		}
+	}
 	names
-}
-
-/// Recursively collect binding names from the given expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `expr`: The expression to walk.
-/// - `out`: The accumulator for binding names.
-fn gather_binding_names<'src>(
-	expr: &'src Expression<'src>,
-	out: &mut HashSet<&'src str>
-)
-{
-	match expr
-	{
-		Expression::Binding(b) =>
-		{
-			out.insert(b.name);
-			gather_binding_names(&b.expression, out);
-		},
-		Expression::Group(g) => gather_binding_names(&g.expression, out),
-		Expression::Range(r) =>
-		{
-			gather_binding_names(&r.start, out);
-			gather_binding_names(&r.end, out);
-		},
-		Expression::Dice(d) => gather_dice_binding_names(d, out),
-		Expression::Arithmetic(a) => gather_arithmetic_binding_names(a, out),
-		Expression::Variable(_) | Expression::Constant(_) =>
-		{}
-	}
-}
-
-/// Recursively collect binding names from a dice expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `dice`: The dice expression to walk.
-/// - `out`: The accumulator for binding names.
-fn gather_dice_binding_names<'src>(
-	dice: &'src DiceExpression<'src>,
-	out: &mut HashSet<&'src str>
-)
-{
-	match dice
-	{
-		DiceExpression::Standard(d) =>
-		{
-			gather_binding_names(&d.count, out);
-			gather_binding_names(&d.faces, out);
-		},
-		DiceExpression::Custom(d) => gather_binding_names(&d.count, out),
-		DiceExpression::DropLowest(d) =>
-		{
-			gather_dice_binding_names(&d.dice, out);
-			if let Some(ref drop) = d.drop
-			{
-				gather_binding_names(drop, out);
-			}
-		},
-		DiceExpression::DropHighest(d) =>
-		{
-			gather_dice_binding_names(&d.dice, out);
-			if let Some(ref drop) = d.drop
-			{
-				gather_binding_names(drop, out);
-			}
-		}
-	}
-}
-
-/// Recursively collect binding names from an arithmetic expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `arith`: The arithmetic expression to walk.
-/// - `out`: The accumulator for binding names.
-fn gather_arithmetic_binding_names<'src>(
-	arith: &'src ArithmeticExpression<'src>,
-	out: &mut HashSet<&'src str>
-)
-{
-	match arith
-	{
-		ArithmeticExpression::Add(a) =>
-		{
-			gather_binding_names(&a.left, out);
-			gather_binding_names(&a.right, out);
-		},
-		ArithmeticExpression::Sub(s) =>
-		{
-			gather_binding_names(&s.left, out);
-			gather_binding_names(&s.right, out);
-		},
-		ArithmeticExpression::Mul(m) =>
-		{
-			gather_binding_names(&m.left, out);
-			gather_binding_names(&m.right, out);
-		},
-		ArithmeticExpression::Div(d) =>
-		{
-			gather_binding_names(&d.left, out);
-			gather_binding_names(&d.right, out);
-		},
-		ArithmeticExpression::Mod(m) =>
-		{
-			gather_binding_names(&m.left, out);
-			gather_binding_names(&m.right, out);
-		},
-		ArithmeticExpression::Exp(e) =>
-		{
-			gather_binding_names(&e.left, out);
-			gather_binding_names(&e.right, out);
-		},
-		ArithmeticExpression::Neg(n) => gather_binding_names(&n.operand, out)
-	}
-}
-
-/// Recursively collect variable references from a dice expression.
-///
-/// # Parameters
-/// - `dice`: The dice expression to search.
-/// - `out`: The accumulator for variable names.
-fn collect_dice_variables<'src>(
-	dice: &'src DiceExpression<'src>,
-	out: &mut Vec<&'src str>
-)
-{
-	match dice
-	{
-		DiceExpression::Standard(d) =>
-		{
-			collect_variables(&d.count, out);
-			collect_variables(&d.faces, out);
-		},
-		DiceExpression::Custom(d) =>
-		{
-			collect_variables(&d.count, out);
-		},
-		DiceExpression::DropLowest(d) =>
-		{
-			collect_dice_variables(&d.dice, out);
-			if let Some(ref drop) = d.drop
-			{
-				collect_variables(drop, out);
-			}
-		},
-		DiceExpression::DropHighest(d) =>
-		{
-			collect_dice_variables(&d.dice, out);
-			if let Some(ref drop) = d.drop
-			{
-				collect_variables(drop, out);
-			}
-		}
-	}
-}
-
-/// Recursively collect variable references from an arithmetic expression.
-///
-/// # Parameters
-/// - `arith`: The arithmetic expression to search.
-/// - `out`: The accumulator for variable names.
-fn collect_arithmetic_variables<'src>(
-	arith: &'src ArithmeticExpression<'src>,
-	out: &mut Vec<&'src str>
-)
-{
-	match arith
-	{
-		ArithmeticExpression::Add(a) =>
-		{
-			collect_variables(&a.left, out);
-			collect_variables(&a.right, out);
-		},
-		ArithmeticExpression::Sub(s) =>
-		{
-			collect_variables(&s.left, out);
-			collect_variables(&s.right, out);
-		},
-		ArithmeticExpression::Mul(m) =>
-		{
-			collect_variables(&m.left, out);
-			collect_variables(&m.right, out);
-		},
-		ArithmeticExpression::Div(d) =>
-		{
-			collect_variables(&d.left, out);
-			collect_variables(&d.right, out);
-		},
-		ArithmeticExpression::Mod(m) =>
-		{
-			collect_variables(&m.left, out);
-			collect_variables(&m.right, out);
-		},
-		ArithmeticExpression::Exp(e) =>
-		{
-			collect_variables(&e.left, out);
-			collect_variables(&e.right, out);
-		},
-		ArithmeticExpression::Neg(n) =>
-		{
-			collect_variables(&n.operand, out);
-		}
-	}
 }
 
 /// A function in the intermediate representation. This is the output of the
@@ -1178,7 +944,7 @@ impl Display for Function
 			{
 				write!(f, ", ")?;
 			}
-			write!(f, "{}@{}", parameter, i)?;
+			write!(f, "{{{}}}@{}", parameter, i)?;
 		}
 		writeln!(
 			f,
@@ -1192,7 +958,7 @@ impl Display for Function
 			{
 				write!(f, ", ")?;
 			}
-			write!(f, "{}@{}", external, i + self.parameters.len())?;
+			write!(f, "{{{}}}@{}", external, i + self.parameters.len())?;
 		}
 		writeln!(f, "]")?;
 		writeln!(f, "\tbody:")?;

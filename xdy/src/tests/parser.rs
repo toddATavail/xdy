@@ -3,7 +3,9 @@
 //! Herein are the test cases for the various parser functions. The suite is
 //! partitioned into submodules by combinator cluster, with the large
 //! data-driven, span-metadata, internal, and source-span tests broken out
-//! separately to keep each file navigable.
+//! separately to keep each file navigable. The deep tests hold the parser, and
+//! the deep and wide S-expression tests hold the S-expression reader, to
+//! constant stack depth and linear time.
 
 mod combinators_add_sub;
 mod combinators_atoms;
@@ -13,7 +15,9 @@ mod combinators_function;
 mod combinators_mul_div_mod;
 mod combinators_primary;
 mod data_driven;
+mod deep;
 mod internals;
+mod s_expr_deep;
 mod s_expr_format;
 mod s_expr_multiline;
 mod s_expr_reader_errors;

@@ -491,7 +491,7 @@ fn assert_interval_binding(
 #[test]
 fn test_bounds_over_interval_argument()
 {
-	assert_interval_binding("x: {x}D6", (1, 20).into(), (1, 120).into());
+	assert_interval_binding("{x}: {x}D6", (1, 20).into(), (1, 120).into());
 }
 
 /// Test that an unsupplied binding is bounded by the whole of `i32` rather than
@@ -524,7 +524,7 @@ fn test_bounds_over_unsupplied_external()
 #[test]
 fn test_bounds_over_unsupplied_argument()
 {
-	let evaluator = Evaluator::new(compile_valid("x: 1D6 + {x}"));
+	let evaluator = Evaluator::new(compile_valid("{x}: 1D6 + {x}"));
 	let bounds = evaluator.bounds_over([None], []).unwrap();
 	assert_eq!(bounds.value, (i32::MIN + 1, i32::MAX).into());
 	let bounds = evaluator.bounds_over([Some(10.into())], []).unwrap();
@@ -558,7 +558,7 @@ fn test_bounds_over_ignores_environment()
 #[test]
 fn test_bounds_over_count_requires_degenerate_bindings()
 {
-	let evaluator = Evaluator::new(compile_valid("x: 1D6 + {x}"));
+	let evaluator = Evaluator::new(compile_valid("{x}: 1D6 + {x}"));
 	assert_eq!(
 		evaluator.bounds_over([Some(2.into())], []).unwrap().count,
 		Some(6)
@@ -586,7 +586,7 @@ fn test_bounds_over_count_requires_degenerate_bindings()
 #[test]
 fn test_bounds_over_rejects_bad_bindings()
 {
-	let evaluator = Evaluator::new(compile_valid("x: {x}D6"));
+	let evaluator = Evaluator::new(compile_valid("{x}: {x}D6"));
 	assert_eq!(
 		evaluator.bounds_over([], []),
 		Err(EvaluationError::BadArity {
@@ -615,7 +615,7 @@ fn test_bounds_over_rejects_bad_bindings()
 #[test]
 fn test_bounds_over_negative_interval_count()
 {
-	assert_interval_binding("x: {x}D6", (-3, 5).into(), (0, 30).into());
+	assert_interval_binding("{x}: {x}D6", (-3, 5).into(), (0, 30).into());
 	// The dynamic form of the same shape, which has no binding to vary.
 	let evaluator = Evaluator::new(compile_valid("(1D[-5, -4, 0, 4, 5])D6"));
 	let bounds = evaluator.bounds_over([], []).unwrap().value;
@@ -631,7 +631,7 @@ fn test_bounds_over_negative_interval_count()
 #[test]
 fn test_bounds_over_interval_faces()
 {
-	assert_interval_binding("x: 1D{x}", (-4, 6).into(), (0, 6).into());
+	assert_interval_binding("{x}: 1D{x}", (-4, 6).into(), (0, 6).into());
 }
 
 /// Test that an interval drop count cannot keep more dice than were rolled, nor
@@ -640,12 +640,12 @@ fn test_bounds_over_interval_faces()
 fn test_bounds_over_interval_drop_count()
 {
 	assert_interval_binding(
-		"x: 5D6 drop lowest {x}",
+		"{x}: 5D6 drop lowest {x}",
 		(0, 10).into(),
 		(0, 30).into()
 	);
 	assert_interval_binding(
-		"x: 5D6 drop highest {x}",
+		"{x}: 5D6 drop highest {x}",
 		(-2, 3).into(),
 		(2, 30).into()
 	);

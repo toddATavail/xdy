@@ -1,6 +1,5 @@
 # Rust artifacts.
 /target
-Cargo.lock
 
 # cargo-mutants artifacts.
 /mutants.out
@@ -11,6 +10,7 @@ repl.rs
 
 # Beads / Dolt files (added by bd init)
 .beads/
+.beads.gate.lock
 .dolt/
 *.db
 .beads-credential-key

@@ -102,7 +102,7 @@ External: έκφραση ζαριών
 Parameter: a
 ==================
 
-a: {a}
+{a}: {a}
 
 ---
 
@@ -114,7 +114,7 @@ a: {a}
 Parameter: a, an external variable
 ===================================
 
-a, an external variable: {an external variable}
+{a}, {an external variable}: {an external variable}
 
 ---
 
@@ -223,7 +223,7 @@ External: interior $ #
 External: selector on env variable
 ===================================
 
-$env|weapon: {$env|weapon}
+{$env|weapon}: {$env|weapon}
 
 ---
 
@@ -240,3 +240,65 @@ External: Nl letter (Alphabetic)
 ---
 
 (function (variable (identifier)))
+
+==================
+Variable: any visible character but a brace
+==================
+
+{weapon: 2/3} + {1} + {-x} + {🎲}
+
+---
+
+(function
+	(add
+		(add
+			(add
+				(variable (identifier))
+				(variable (identifier)))
+			(variable (identifier)))
+		(variable (identifier))))
+
+==================
+Variable: spaces around the name
+==================
+
+{ a  b }
+
+---
+
+(function
+	(variable (identifier)))
+
+==================
+Variable: empty name is rejected
+:error
+==================
+
+{ }
+
+---
+
+==================
+Variable: whitespace of any kind within the name
+==================
+
+{a	b} + {a
+   b} + {a b}
+
+---
+
+(function
+	(add
+		(add
+			(variable (identifier))
+			(variable (identifier)))
+		(variable (identifier))))
+
+==================
+Variable: control character in name is rejected
+:error
+==================
+
+{ab}
+
+---

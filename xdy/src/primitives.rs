@@ -215,8 +215,9 @@ where
 
 impl RollingRecord
 {
-	/// Mark the lowest `count` results as dropped, clamping the drop count to
-	/// the number of results.
+	/// Mark the lowest `count` results as dropped. A `count` of zero or less
+	/// drops nothing. Drops accumulate across calls, and the total is clamped
+	/// to the number of results, so the order of the calls does not matter.
 	///
 	/// # Parameters
 	/// - `count`: The number of results to drop.
@@ -248,11 +249,23 @@ impl RollingRecord
 	/// assert_eq!(rolling_record.results.len(), 3);
 	/// assert_eq!(rolling_record.lowest_dropped, 3);
 	/// ```
+	///
+	/// Roll `3D12` and drop the lowest 3 results, then try to drop `-1`
+	/// results, which restores none of them:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
+	/// rolling_record.drop_lowest(3);
+	/// rolling_record.drop_lowest(-1);
+	/// assert_eq!(rolling_record.lowest_dropped, 3);
+	/// ```
 	pub fn drop_lowest(&mut self, count: i32)
 	{
 		self.lowest_dropped = self
 			.lowest_dropped
-			.saturating_add(count)
+			.saturating_add(count.max(0))
 			.clamp(0, self.results.len() as i32);
 	}
 
@@ -271,8 +284,9 @@ impl RollingRecord
 			.collect::<Vec<_>>()
 	}
 
-	/// Mark the highest `count` results as dropped, clamping the drop count to
-	/// the number of results.
+	/// Mark the highest `count` results as dropped. A `count` of zero or less
+	/// drops nothing. Drops accumulate across calls, and the total is clamped
+	/// to the number of results, so the order of the calls does not matter.
 	///
 	/// # Parameters
 	/// - `count`: The number of results to drop.
@@ -304,11 +318,23 @@ impl RollingRecord
 	/// assert_eq!(rolling_record.results.len(), 5);
 	/// assert_eq!(rolling_record.highest_dropped, 5);
 	/// ```
+	///
+	/// Roll `5D8` and drop the highest 5 results, then try to drop `-1`
+	/// results, which restores none of them:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
+	/// rolling_record.drop_highest(5);
+	/// rolling_record.drop_highest(-1);
+	/// assert_eq!(rolling_record.highest_dropped, 5);
+	/// ```
 	pub fn drop_highest(&mut self, count: i32)
 	{
 		self.highest_dropped = self
 			.highest_dropped
-			.saturating_add(count)
+			.saturating_add(count.max(0))
 			.clamp(0, self.results.len() as i32);
 	}
 
@@ -603,3 +629,25 @@ pub fn exp(op1: i32, op2: i32) -> i32
 /// ```
 #[inline]
 pub fn neg(op: i32) -> i32 { op.saturating_neg() }
+
+/// Computes the greater of the two operands. The dice expression language has
+/// no maximum operation, but the optimizer uses this one to clamp values that
+/// the language clamps implicitly, e.g., a negative count of dice, which rolls
+/// nothing, without rolling any dice.
+///
+/// # Parameters
+/// - `op1`: The first operand.
+/// - `op2`: The second operand.
+///
+/// # Returns
+/// The greater of the operands.
+///
+/// # Examples
+/// ```rust
+/// # use xdy::max;
+/// assert_eq!(max(1, 2), 2);
+/// assert_eq!(max(0, -3), 0);
+/// assert_eq!(max(i32::MIN, i32::MAX), i32::MAX);
+/// ```
+#[inline]
+pub fn max(op1: i32, op2: i32) -> i32 { op1.max(op2) }

@@ -8,7 +8,7 @@
 
 <externals> ::= <named_reg> ("," <named_reg>)*
 
-<named_reg> ::= <NAME> "@" <INDEX>
+<named_reg> ::= "{" <NAME> "}" "@" <INDEX>
 
 <body_header> ::= "body:" <EOL>
 
@@ -46,7 +46,7 @@
 
 <NAME> ::= <NAME_CHAR>+
 
-<NAME_CHAR> ::= "any code point except '@', ',', ')', ']', tab, carriage return, or line feed"
+<NAME_CHAR> ::= "any code point except '{', '}', carriage return, or line feed"
 
 <INDEX> ::= <DIGIT>+
 
@@ -54,6 +54,6 @@
 
 <DIGIT> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 
-<BINARY_OP> ::= "+" | "-" | "*" | "/" | "%" | "^"
+<BINARY_OP> ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
 
 <EOL> ::= "\n" | "\r\n"

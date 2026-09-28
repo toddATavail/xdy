@@ -162,11 +162,11 @@ fn test_dice()
 			"{count}D{faces}",
 			DiceExpression::Standard(StandardDice {
 				count: Box::new(Expression::Variable(Variable {
-					name: "count",
+					name: "count".into(),
 					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Variable(Variable {
-					name: "faces",
+					name: "faces".into(),
 					span: SourceSpan::default()
 				})),
 				span: SourceSpan::default()
@@ -345,11 +345,11 @@ fn test_standard_dice()
 			"{count}D{faces}",
 			StandardDice {
 				count: Box::new(Expression::Variable(Variable {
-					name: "count",
+					name: "count".into(),
 					span: SourceSpan::default()
 				})),
 				faces: Box::new(Expression::Variable(Variable {
-					name: "faces",
+					name: "faces".into(),
 					span: SourceSpan::default()
 				})),
 				span: SourceSpan::default()
@@ -498,7 +498,7 @@ fn test_custom_dice()
 			"{count}D[1, 2, 3]",
 			CustomDice {
 				count: Box::new(Expression::Variable(Variable {
-					name: "count",
+					name: "count".into(),
 					span: SourceSpan::default()
 				})),
 				faces: vec![1, 2, 3],
@@ -675,7 +675,7 @@ fn test_dice_count()
 			"{count}",
 			"{count}",
 			Expression::Variable(Variable {
-				name: "count",
+				name: "count".into(),
 				span: SourceSpan::default()
 			})
 		),
@@ -767,7 +767,7 @@ fn test_standard_faces()
 			"{faces}",
 			"{faces}",
 			Expression::Variable(Variable {
-				name: "faces",
+				name: "faces".into(),
 				span: SourceSpan::default()
 			})
 		),
@@ -1010,7 +1010,7 @@ fn test_drop_expression()
 			"{var}",
 			"{var}",
 			Expression::Variable(Variable {
-				name: "var",
+				name: "var".into(),
 				span: SourceSpan::default()
 			})
 		),

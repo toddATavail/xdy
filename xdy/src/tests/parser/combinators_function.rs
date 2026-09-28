@@ -21,11 +21,11 @@ fn test_function()
 	// Happy paths.
 	for (input, expected_string, expected_ast) in [
 		(
-			"x: 42",
-			"x: 42",
+			"{x}: 42",
+			"{x}: 42",
 			Function {
 				parameters: Some(vec![Parameter {
-					name: "x",
+					name: "x".into(),
 					span: SourceSpan::default()
 				}]),
 				body: Expression::Constant(Constant {
@@ -57,26 +57,26 @@ fn test_function()
 			}
 		),
 		(
-			"x, y: {x} + {y}",
-			"x, y: {x} + {y}",
+			"{x}, {y}: {x} + {y}",
+			"{x}, {y}: {x} + {y}",
 			Function {
 				parameters: Some(vec![
 					Parameter {
-						name: "x",
+						name: "x".into(),
 						span: SourceSpan::default()
 					},
 					Parameter {
-						name: "y",
+						name: "y".into(),
 						span: SourceSpan::default()
 					},
 				]),
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(Expression::Variable(Variable {
-						name: "x",
+						name: "x".into(),
 						span: SourceSpan::default()
 					})),
 					right: Box::new(Expression::Variable(Variable {
-						name: "y",
+						name: "y".into(),
 						span: SourceSpan::default()
 					})),
 					span: SourceSpan::default()
@@ -113,20 +113,20 @@ fn test_function()
 			}
 		),
 		(
-			"a, b, c: ({a} + {b}) * {c}",
-			"a, b, c: ({a} + {b}) * {c}",
+			"{a}, {b}, {c}: ({a} + {b}) * {c}",
+			"{a}, {b}, {c}: ({a} + {b}) * {c}",
 			Function {
 				parameters: Some(vec![
 					Parameter {
-						name: "a",
+						name: "a".into(),
 						span: SourceSpan::default()
 					},
 					Parameter {
-						name: "b",
+						name: "b".into(),
 						span: SourceSpan::default()
 					},
 					Parameter {
-						name: "c",
+						name: "c".into(),
 						span: SourceSpan::default()
 					},
 				]),
@@ -136,13 +136,13 @@ fn test_function()
 							ArithmeticExpression::Add(Add {
 								left: Box::new(Expression::Variable(
 									Variable {
-										name: "a",
+										name: "a".into(),
 										span: SourceSpan::default()
 									}
 								)),
 								right: Box::new(Expression::Variable(
 									Variable {
-										name: "b",
+										name: "b".into(),
 										span: SourceSpan::default()
 									}
 								)),
@@ -152,7 +152,7 @@ fn test_function()
 						span: SourceSpan::default()
 					})),
 					right: Box::new(Expression::Variable(Variable {
-						name: "c",
+						name: "c".into(),
 						span: SourceSpan::default()
 					})),
 					span: SourceSpan::default()
@@ -216,7 +216,7 @@ fn test_function()
 							}
 						)),
 						drop: Some(Box::new(Expression::Variable(Variable {
-							name: "z",
+							name: "z".into(),
 							span: SourceSpan::default()
 						}))),
 						span: SourceSpan::default()
@@ -226,18 +226,18 @@ fn test_function()
 			}
 		),
 		(
-			"x: {x} * 2 + 1",
-			"x: {x} * 2 + 1",
+			"{x}: {x} * 2 + 1",
+			"{x}: {x} * 2 + 1",
 			Function {
 				parameters: Some(vec![Parameter {
-					name: "x",
+					name: "x".into(),
 					span: SourceSpan::default()
 				}]),
 				body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 					left: Box::new(Expression::Arithmetic(
 						ArithmeticExpression::Mul(Mul {
 							left: Box::new(Expression::Variable(Variable {
-								name: "x",
+								name: "x".into(),
 								span: SourceSpan::default()
 							})),
 							right: Box::new(Expression::Constant(Constant {
@@ -257,26 +257,26 @@ fn test_function()
 			}
 		),
 		(
-			"a, b: [{a}:{b}]",
-			"a, b: [{a}:{b}]",
+			"{a}, {b}: [{a}:{b}]",
+			"{a}, {b}: [{a}:{b}]",
 			Function {
 				parameters: Some(vec![
 					Parameter {
-						name: "a",
+						name: "a".into(),
 						span: SourceSpan::default()
 					},
 					Parameter {
-						name: "b",
+						name: "b".into(),
 						span: SourceSpan::default()
 					},
 				]),
 				body: Expression::Range(Range {
 					start: Box::new(Expression::Variable(Variable {
-						name: "a",
+						name: "a".into(),
 						span: SourceSpan::default()
 					})),
 					end: Box::new(Expression::Variable(Variable {
-						name: "b",
+						name: "b".into(),
 						span: SourceSpan::default()
 					})),
 					span: SourceSpan::default()
@@ -359,40 +359,40 @@ fn test_parameters()
 	fn param(name: &str) -> Parameter<'_>
 	{
 		Parameter {
-			name,
+			name: name.into(),
 			span: SourceSpan::default()
 		}
 	}
 	for (input, expected_names, expected_ast) in [
-		("x:", vec!["x"], vec![param("x")]),
-		("x, y:", vec!["x", "y"], vec![param("x"), param("y")]),
+		("{x}:", vec!["x"], vec![param("x")]),
+		("{x}, {y}:", vec!["x", "y"], vec![param("x"), param("y")]),
 		(
-			"x, y, z:",
+			"{x}, {y}, {z}:",
 			vec!["x", "y", "z"],
 			vec![param("x"), param("y"), param("z")]
 		),
 		(
-			"long_variable_name:",
+			"{long_variable_name}:",
 			vec!["long_variable_name"],
 			vec![param("long_variable_name")]
 		),
 		(
-			"x1, x2, x3:",
+			"{x1}, {x2}, {x3}:",
 			vec!["x1", "x2", "x3"],
 			vec![param("x1"), param("x2"), param("x3")]
 		),
 		(
-			"hello-world:",
+			"{hello-world}:",
 			vec!["hello-world"],
 			vec![param("hello-world")]
 		),
 		(
-			"x, y, z:",
+			"{x}, {y}, {z}:",
 			vec!["x", "y", "z"],
 			vec![param("x"), param("y"), param("z")]
 		),
 		(
-			" x , y , z :",
+			" {x} , { y } , {z} :",
 			vec!["x", "y", "z"],
 			vec![param("x"), param("y"), param("z")]
 		)
@@ -409,7 +409,8 @@ fn test_parameters()
 					input
 				);
 				let result = result.unwrap();
-				let names: Vec<&str> = result.iter().map(|p| p.name).collect();
+				let names: Vec<&str> =
+					result.iter().map(|p| &*p.name).collect();
 				assert_eq!(
 					names, expected_names,
 					"Failed for input: {}",
@@ -431,7 +432,16 @@ fn test_parameters()
 
 	// Invalid inputs.
 	for input in [
-		"x", "x,", "x, ", "x, y", "x, y,", ":x", "x:y", "1, 2, 3:", "x, 1, y:"
+		"{x},",
+		"{x}, ",
+		"{x}, {y}",
+		"{x}, {y},",
+		":{x}",
+		"{x}:{y}",
+		"1, 2, 3:",
+		"{x}, 1, {y}:",
+		"x:",
+		"x, y:"
 	]
 	{
 		let span = Span::new(input);
@@ -439,6 +449,20 @@ fn test_parameters()
 		assert!(
 			result.is_err() || !result.unwrap().0.fragment().is_empty(),
 			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+
+	// A lone braced name without a `:` after it begins the body, so there are
+	// no parameters, and nothing is consumed.
+	for input in ["{x}", "{x}@(1)", "{x} + 1", " {x} d6"]
+	{
+		let (residue, result) = parameters(Span::new(input)).unwrap();
+		assert_eq!(result, None, "Parameters found for input: {}", input);
+		assert_eq!(
+			*residue.fragment(),
+			input,
+			"Input consumed for input: {}",
 			input
 		);
 	}
@@ -450,16 +474,24 @@ fn test_parameter()
 {
 	// Happy paths.
 	for (input, expected) in [
-		("x", "x"),
-		("variable", "variable"),
-		("long_variable_name", "long_variable_name"),
-		("hello-world", "hello-world"),
-		("こんにちは", "こんにちは"),
-		("Здравствуй-мир", "Здравствуй-мир"),
-		("Γειά-σου-κόσμε", "Γειά-σου-κόσμε"),
-		("x1", "x1"),
-		("x_1", "x_1"),
-		("x-1", "x-1")
+		("{x}", "x"),
+		("{ x }", "x"),
+		("{variable}", "variable"),
+		("{long_variable_name}", "long_variable_name"),
+		("{hello-world}", "hello-world"),
+		("{an argument}", "an argument"),
+		("{こんにちは}", "こんにちは"),
+		("{Здравствуй-мир}", "Здравствуй-мир"),
+		("{Γειά-σου-κόσμε}", "Γειά-σου-κόσμε"),
+		("{x1}", "x1"),
+		("{x_1}", "x_1"),
+		("{x-1}", "x-1"),
+		("{1x}", "1x"),
+		("{a  b}", "a  b"),
+		("{a\tb}", "a\tb"),
+		("{\u{00A0}a\n b\u{00A0}}", "a\n b"),
+		("{weapon: 2/3}", "weapon: 2/3"),
+		("{x, y}", "x, y")
 	]
 	{
 		let span = Span::new(input);
@@ -485,7 +517,20 @@ fn test_parameter()
 
 	// Invalid inputs.
 	for input in [
-		"", " ", "1x", "x:", "x,", "x{", "x}", "x(", "x)", "x[", "x]"
+		"",
+		" ",
+		"x",
+		"{",
+		"{}",
+		"{ }",
+		"{\t}",
+		"{x",
+		"x}",
+		"{x}:",
+		"{x},",
+		"{x}(",
+		"{a\u{0}b}",
+		"{a\u{200B}b}"
 	]
 	{
 		let span = Span::new(input);
@@ -493,6 +538,17 @@ fn test_parameter()
 		assert!(
 			result.is_err() || !result.unwrap().0.fragment().is_empty(),
 			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+
+	// A malformed parameter fails recoverably, so that the body, which may
+	// begin with a variable, can have its turn.
+	for input in ["{", "{}", "{a\u{0}b}", "{x"]
+	{
+		assert!(
+			matches!(parameter(Span::new(input)), Err(nom::Err::Error(_))),
+			"Failed unrecoverably for input: {}",
 			input
 		);
 	}

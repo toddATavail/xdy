@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0c108be429b6e28ae755877d7acc972d9292e808adffc2b84c8632e601c0182b # shrinks to "{x}, \u{a0}hit points}: -[0:0] + {x}@({hit points}@(10 + 10))"
+cc 759f9543b9cbe0ca54fe1dc54f3c74ea429fb76ed50e89283d66f1cd0e36b9a1 # shrinks to ("((1)d1 drop lowest {x} drop lowest -1)d0", [-2147483648, -2147483648], [2, -2147483648, -2147483648, -2147483648, -2147483648], 1, 0)
+cc 42f28b619541202706d244ad0e195b522a31e36185837f870af08018f1004a7d # shrinks to ("-{x}d[2] ^ -{x}", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648], 0, 0)
+cc 721f4e7c6d408191eaaf5283ea5ff2f636954f28a244827bbc5aea3b4df589f7 # shrinks to "1 /- {x } / -1 ^ 0"

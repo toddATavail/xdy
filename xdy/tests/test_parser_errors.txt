@@ -62,20 +62,111 @@ placeholder: 9..15 "direction" [lowest, highest]
 xD6
 =
 kind: BareIdentifier
-span: 0..1
+span: 0..3
 message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..3): bare identifier `x` is not valid here; variables must be wrapped in `{}`
 suggestion: {x}D6
 suggestion: {xD6}
 
 abcD12
 =
 kind: BareIdentifier
-span: 0..3
+span: 0..6
 message: bare identifier `abc` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..3): bare identifier `abc` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..6): bare identifier `abc` is not valid here; variables must be wrapped in `{}`
 suggestion: {abc}D12
 suggestion: {abcD12}
+
+abc d6
+=
+kind: BareIdentifier
+span: 0..6
+message: bare identifier `abc` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..6): bare identifier `abc` is not valid here; variables must be wrapped in `{}`
+suggestion: {abc} d6
+suggestion: {abc d6}
+
+(1) drop dz (
+=
+kind: MisplacedDropClause
+span: 4..8
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (4..8): `drop` must follow a dice expression
+suggestion: (1)D6 drop dz (
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+---
+kind: IncompleteDropClause
+span: 4..8
+message: expected `lowest` or `highest` after `drop`
+rendered: incomplete drop clause (4..8): expected `lowest` or `highest` after `drop`
+suggestion: (1)D6 drop lowest dz (
+placeholder: 11..17 "direction" [lowest, highest]
+---
+kind: TrailingInput
+span: 9..13
+message: unexpected `dz` after expression
+rendered: trailing input (9..13): unexpected `dz` after expression
+suggestion: (1)D6 drop lowest
+
+3 drop lowest
+=
+kind: MisplacedDropClause
+span: 2..6
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (2..6): `drop` must follow a dice expression
+suggestion: 3D6 drop lowest
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+(1)drop highest 2
+=
+kind: MisplacedDropClause
+span: 3..7
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (3..7): `drop` must follow a dice expression
+suggestion: (1)D6 drop highest 2
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+
+x drop lowest
+=
+kind: BareIdentifier
+span: 0..13
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..13): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x} drop lowest
+suggestion: {x drop lowest}
+---
+kind: MisplacedDropClause
+span: 2..6
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (2..6): `drop` must follow a dice expression
+suggestion: {x}D6 drop lowest
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+
+1 + drop highest
+=
+kind: MisplacedDropClause
+span: 4..8
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (4..8): `drop` must follow a dice expression
+suggestion: 1 + 1D6 drop highest
+placeholder: 4..7 "dice expression" [dice expression]
+
+-drop lowest
+=
+kind: MisplacedDropClause
+span: 1..5
+message: `drop` must follow a dice expression
+rendered: misplaced drop clause (1..5): `drop` must follow a dice expression
+suggestion: - 1D6 drop lowest
+placeholder: 2..5 "dice expression" [dice expression]
+
+1 + dropout
+=
+kind: BareIdentifier
+span: 4..11
+message: bare identifier `dropout` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..11): bare identifier `dropout` is not valid here; variables must be wrapped in `{}`
+suggestion: 1 + {dropout}
 
 + 3D6
 =
@@ -110,6 +201,90 @@ span: 6..7
 message: expected `)` to close `(`
 rendered: unclosed `(` (6..7): expected `)` to close `(`
 suggestion: 3d6 + (2d4)
+
+{a(b}@(1
+=
+kind: UnclosedDelimiter
+span: 6..7
+message: expected `)` to close `(`
+rendered: unclosed `(` (6..7): expected `)` to close `(`
+suggestion: {a(b}@(1)
+
+{x + 2
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x} + 2
+suggestion: {x + 2}
+
+({x + 2) * 3
+=
+kind: UnclosedDelimiter
+span: 1..2
+message: expected `}` to close `{`
+rendered: unclosed `{` (1..2): expected `}` to close `{`
+suggestion: ({x} + 2) * 3
+
+{hit-points + 2
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {hit-points} + 2
+suggestion: {hit-points + 2}
+
+{x: 1 + 2
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x: 1} + 2
+suggestion: {x}: 1 + 2
+suggestion: {x: 1 + 2}
+
+{x+2
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x}+2
+suggestion: {x+2}
+
+{x@(3)
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x}@(3)
+suggestion: {x@(3)}
+
+{x + {y}
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x} + {y}
+
+{x {y}
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x }{y}
+---
+kind: TrailingInput
+span: 3..6
+message: unexpected `{y}` after expression
+rendered: trailing input (3..6): unexpected `{y}` after expression
+suggestion: {x }
 
 1 + * 2
 =
@@ -158,22 +333,20 @@ suggestion: 4 + {hello}
 
 hello
 =
-kind: IncompleteParameterDefinition
+kind: BareIdentifier
 span: 0..5
-message: expected `:` and expression body after parameter
-rendered: incomplete parameter definition (0..5): expected `:` and expression body after parameter
-suggestion: hello: 0
-placeholder: 7..8 "expression" [integer, {variable}, (expression), dice expression]
+message: bare identifier `hello` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..5): bare identifier `hello` is not valid here; variables must be wrapped in `{}`
 suggestion: {hello}
 
-x, y
+{x}, {y}
 =
 kind: IncompleteParameterDefinition
-span: 0..4
+span: 0..8
 message: expected `:` and expression body after parameters
-rendered: incomplete parameter definition (0..4): expected `:` and expression body after parameters
-suggestion: x, y: 0
-placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expression]
+rendered: incomplete parameter definition (0..8): expected `:` and expression body after parameters
+suggestion: {x}, {y}: 0
+placeholder: 10..11 "expression" [integer, {variable}, (expression), dice expression]
 
 (
 =
@@ -240,47 +413,45 @@ placeholder: 8..9 "face count" [integer, {variable}, (expression)]
 
 hello * 3
 =
-kind: IncompleteParameterDefinition
-span: 0..6
-message: expected `:` and expression body after parameter
-rendered: incomplete parameter definition (0..6): expected `:` and expression body after parameter
+kind: BareIdentifier
+span: 0..5
+message: bare identifier `hello` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..5): bare identifier `hello` is not valid here; variables must be wrapped in `{}`
 suggestion: {hello} * 3
-suggestion: hello : 0
-placeholder: 8..9 "expression" [integer, {variable}, (expression), dice expression]
 
 dD6
 =
 kind: BareIdentifier
-span: 0..1
+span: 0..3
 message: bare identifier `d` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..1): bare identifier `d` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..3): bare identifier `d` is not valid here; variables must be wrapped in `{}`
 suggestion: {d}D6
 suggestion: {dD6}
 
 _xD6
 =
 kind: BareIdentifier
-span: 0..2
+span: 0..4
 message: bare identifier `_x` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..2): bare identifier `_x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..4): bare identifier `_x` is not valid here; variables must be wrapped in `{}`
 suggestion: {_x}D6
 suggestion: {_xD6}
 
 dropD6
 =
 kind: BareIdentifier
-span: 0..4
+span: 0..6
 message: bare identifier `drop` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..4): bare identifier `drop` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..6): bare identifier `drop` is not valid here; variables must be wrapped in `{}`
 suggestion: {drop}D6
 suggestion: {dropD6}
 
 xd
 =
 kind: BareIdentifier
-span: 0..1
+span: 0..2
 message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..2): bare identifier `x` is not valid here; variables must be wrapped in `{}`
 suggestion: {x}d
 suggestion: {xd}
 ---
@@ -294,9 +465,9 @@ placeholder: 4..5 "face count" [integer, {variable}, (expression)]
 aD
 =
 kind: BareIdentifier
-span: 0..1
+span: 0..2
 message: bare identifier `a` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..1): bare identifier `a` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..2): bare identifier `a` is not valid here; variables must be wrapped in `{}`
 suggestion: {a}D
 suggestion: {aD}
 ---
@@ -307,77 +478,77 @@ rendered: missing dice faces (1..2): expected face count after `D`
 suggestion: {a}D6
 placeholder: 4..5 "face count" [integer, {variable}, (expression)]
 
-x, x: {x}
+{x}, {x}: {x}
 =
 kind: DuplicateParameter
-span: 3..4
+span: 6..7
 message: parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `x` (3..4): parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
-related: 0..1 "first declared here"
-suggestion: x, y: {x}
+rendered: duplicate parameter `x` (6..7): parameter `x` is declared more than once; review references to `x` in the body — one may have meant a different parameter or an external variable
+related: 1..2 "first declared here"
+suggestion: {x}, {y}: {x}
 
-a, b, b: {a}
+{a}, {b}, {b}: {a}
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-related: 3..4 "first declared here"
-suggestion: a, b, c: {a}
+rendered: duplicate parameter `b` (11..12): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 6..7 "first declared here"
+suggestion: {a}, {b}, {c}: {a}
 
-a, b, b, c: {a}
+{a}, {b}, {b}, {c}: {a}
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-related: 3..4 "first declared here"
-suggestion: a, b, d, c: {a}
+rendered: duplicate parameter `b` (11..12): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 6..7 "first declared here"
+suggestion: {a}, {b}, {d}, {c}: {a}
 
-abc, abc: {abc}
+{abc}, {abc}: {abc}
 =
 kind: DuplicateParameter
-span: 5..8
+span: 8..11
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `abc` (5..8): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-related: 0..3 "first declared here"
-suggestion: abc, new0: {abc}
+rendered: duplicate parameter `abc` (8..11): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 1..4 "first declared here"
+suggestion: {abc}, {new0}: {abc}
 
-A, A: 1
+{A}, {A}: 1
 =
 kind: DuplicateParameter
-span: 3..4
+span: 6..7
 message: parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `A` (3..4): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
-related: 0..1 "first declared here"
-suggestion: A, B: 1
+rendered: duplicate parameter `A` (6..7): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+related: 1..2 "first declared here"
+suggestion: {A}, {B}: 1
 
-a, z, z: {a}
+{a}, {z}, {z}: {a}
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `z` (6..7): parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
-related: 3..4 "first declared here"
-suggestion: a, z, b: {a}
+rendered: duplicate parameter `z` (11..12): parameter `z` is declared more than once; review references to `z` in the body — one may have meant a different parameter or an external variable
+related: 6..7 "first declared here"
+suggestion: {a}, {z}, {b}: {a}
 
-abc, new0, abc: {abc}
+{abc}, {new0}, {abc}: {abc}
 =
 kind: DuplicateParameter
-span: 11..14
+span: 16..19
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `abc` (11..14): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-related: 0..3 "first declared here"
-suggestion: abc, new0, new1: {abc}
+rendered: duplicate parameter `abc` (16..19): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 1..4 "first declared here"
+suggestion: {abc}, {new0}, {new1}: {abc}
 
-abc, new0, new1, abc: {abc}
+{abc}, {new0}, {new1}, {abc}: {abc}
 =
 kind: DuplicateParameter
-span: 17..20
+span: 24..27
 message: parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `abc` (17..20): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
-related: 0..3 "first declared here"
-suggestion: abc, new0, new1, new2: {abc}
+rendered: duplicate parameter `abc` (24..27): parameter `abc` is declared more than once; review references to `abc` in the body — one may have meant a different parameter or an external variable
+related: 1..4 "first declared here"
+suggestion: {abc}, {new0}, {new1}, {new2}: {abc}
 
 4 + xD6
 =
@@ -404,12 +575,11 @@ rendered: unexpected token (0..1): unexpected `~`
 
 x (3)
 =
-kind: IncompleteParameterDefinition
-span: 0..2
-message: expected `:` and expression body after parameter
-rendered: incomplete parameter definition (0..2): expected `:` and expression body after parameter
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
 suggestion: {x} (3)
-suggestion: x : (3)
 ---
 kind: TrailingInput
 span: 2..5
@@ -447,38 +617,36 @@ suggestion: 4 + {foo.barD6}
 foo-barD6
 =
 kind: BareIdentifier
-span: 0..7
+span: 0..9
 message: bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..7): bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..9): bare identifier `foo-bar` is not valid here; variables must be wrapped in `{}`
 suggestion: {foo-bar}D6
 suggestion: {foo-barD6}
 
 foo.barD6
 =
 kind: BareIdentifier
-span: 0..7
+span: 0..9
 message: bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..7): bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..9): bare identifier `foo.bar` is not valid here; variables must be wrapped in `{}`
 suggestion: {foo.bar}D6
 suggestion: {foo.barD6}
 
 _barD6
 =
 kind: BareIdentifier
-span: 0..4
+span: 0..6
 message: bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..4): bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..6): bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
 suggestion: {_bar}D6
 suggestion: {_barD6}
 
 _bar
 =
-kind: IncompleteParameterDefinition
+kind: BareIdentifier
 span: 0..4
-message: expected `:` and expression body after parameter
-rendered: incomplete parameter definition (0..4): expected `:` and expression body after parameter
-suggestion: _bar: 0
-placeholder: 6..7 "expression" [integer, {variable}, (expression), dice expression]
+message: bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..4): bare identifier `_bar` is not valid here; variables must be wrapped in `{}`
 suggestion: {_bar}
 
 3d[
@@ -493,37 +661,37 @@ placeholder: 3..4 "face value" [integer]
 ((3)
 =
 kind: UnclosedDelimiter
-span: 1..2
+span: 0..1
 message: expected `)` to close `(`
-rendered: unclosed `(` (1..2): expected `)` to close `(`
+rendered: unclosed `(` (0..1): expected `)` to close `(`
 suggestion: ((3))
 
-a, c, a: 1
+{a}, {c}, {a}: 1
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `a` (6..7): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
-related: 0..1 "first declared here"
-suggestion: a, c, d: 1
+rendered: duplicate parameter `a` (11..12): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+related: 1..2 "first declared here"
+suggestion: {a}, {c}, {d}: 1
 
-z, A, A: 1
+{z}, {A}, {A}: 1
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `A` (6..7): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
-related: 3..4 "first declared here"
-suggestion: z, A, B: 1
+rendered: duplicate parameter `A` (11..12): parameter `A` is declared more than once; review references to `A` in the body — one may have meant a different parameter or an external variable
+related: 6..7 "first declared here"
+suggestion: {z}, {A}, {B}: 1
 
-A, b, b: 1
+{A}, {b}, {b}: 1
 =
 kind: DuplicateParameter
-span: 6..7
+span: 11..12
 message: parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `b` (6..7): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
-related: 3..4 "first declared here"
-suggestion: A, b, c: 1
+rendered: duplicate parameter `b` (11..12): parameter `b` is declared more than once; review references to `b` in the body — one may have meant a different parameter or an external variable
+related: 6..7 "first declared here"
+suggestion: {A}, {b}, {c}: 1
 
 )
 =
@@ -578,59 +746,77 @@ message: unexpected `)` with no matching opener
 rendered: unexpected `)` (0..1): unexpected `)` with no matching opener
 suggestion: 3D6
 
-x: x@(3D6) + {x}
+{x}: {x}@(3D6) + {x}
 =
 kind: BindingCollidesWithParameter
-span: 3..4
+span: 6..7
 message: local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-rendered: local binding `x` collides with formal parameter (3..4): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-related: 0..1 "declared as a parameter here"
-suggestion: x: y@(3D6) + {x}
+rendered: local binding `x` collides with formal parameter (6..7): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 1..2 "declared as a parameter here"
+suggestion: {x}: {y}@(3D6) + {x}
 
-x@(3D6) + x@(1D4)
+{x}@(3D6) + {x}@(1D4)
 =
 kind: DuplicateBinding
-span: 10..11
+span: 13..14
 message: local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
-rendered: duplicate local binding `x` (10..11): local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
-related: 0..1 "first bound here"
-suggestion: x@(3D6) + y@(1D4)
+rendered: duplicate local binding `x` (13..14): local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 1..2 "first bound here"
+suggestion: {x}@(3D6) + {y}@(1D4)
 
-{x} + x@(3D6)
+{x} + {x}@(3D6)
 =
 kind: UseBeforeBind
 span: 0..3
 message: reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
 rendered: reference to `x` precedes its binding (0..3): reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
-related: 6..7 "bound here"
-suggestion: {x} + y@(3D6)
+related: 7..8 "bound here"
+suggestion: {x} + {y}@(3D6)
 
-x@(1 + {x})
+{x}@(1 + {x})
 =
 kind: UseBeforeBind
-span: 7..10
+span: 9..12
 message: reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
-rendered: reference to `x` precedes its binding (7..10): reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
-related: 0..1 "bound here"
-suggestion: y@(1 + {x})
+rendered: reference to `x` precedes its binding (9..12): reference to `x` precedes its binding; references to a local binding must lexically follow the binding site, including references inside the bound expression itself (self-reference is not permitted)
+related: 1..2 "bound here"
+suggestion: {y}@(1 + {x})
 
-abc@(3D6) + abc@(1D4)
+{abc}@(3D6) + {abc}@(1D4)
 =
 kind: DuplicateBinding
-span: 12..15
+span: 15..18
 message: local binding `abc` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
-rendered: duplicate local binding `abc` (12..15): local binding `abc` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
-related: 0..3 "first bound here"
-suggestion: abc@(3D6) + new0@(1D4)
+rendered: duplicate local binding `abc` (15..18): local binding `abc` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 1..4 "first bound here"
+suggestion: {abc}@(3D6) + {new0}@(1D4)
 
-a, b: a@(3D6) + {a}
+{x}@({x}@(1))
+=
+kind: DuplicateBinding
+span: 6..7
+message: local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+rendered: duplicate local binding `x` (6..7): local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 1..2 "first bound here"
+suggestion: {x}@({y}@(1))
+
+{x}@({x}@(1)) + {x}
+=
+kind: DuplicateBinding
+span: 6..7
+message: local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+rendered: duplicate local binding `x` (6..7): local binding `x` is bound more than once; a function body provides a single flat namespace, so rebinding is not permitted
+related: 1..2 "first bound here"
+suggestion: {x}@({y}@(1)) + {x}
+
+{a}, {b}: {a}@(3D6) + {a}
 =
 kind: BindingCollidesWithParameter
-span: 6..7
+span: 11..12
 message: local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-rendered: local binding `a` collides with formal parameter (6..7): local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-related: 0..1 "declared as a parameter here"
-suggestion: a, b: c@(3D6) + {a}
+rendered: local binding `a` collides with formal parameter (11..12): local binding `a` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 1..2 "declared as a parameter here"
+suggestion: {a}, {b}: {c}@(3D6) + {a}
 
 4 + weapon|melee
 =
@@ -651,20 +837,20 @@ suggestion: 4 + {$weapon}
 $xD6
 =
 kind: BareIdentifier
-span: 0..2
+span: 0..4
 message: bare identifier `$x` is not valid here; variables must be wrapped in `{}`
-rendered: bare identifier (0..2): bare identifier `$x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..4): bare identifier `$x` is not valid here; variables must be wrapped in `{}`
 suggestion: {$x}D6
 suggestion: {$xD6}
 
-a, a: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
+{a}, {a}: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
 =
 kind: DuplicateParameter
-span: 3..4
+span: 6..7
 message: parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
-rendered: duplicate parameter `a` (3..4): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
-related: 0..1 "first declared here"
-suggestion: a, b: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
+rendered: duplicate parameter `a` (6..7): parameter `a` is declared more than once; review references to `a` in the body — one may have meant a different parameter or an external variable
+related: 1..2 "first declared here"
+suggestion: {a}, {b}: (1) + [1:2] + 1D[2,3] + 2d6 drop lowest + 2d6 drop highest + 1 - 2 * 3 / 4 % 5 ^ 6 + -7
 
 [1
 =
@@ -675,24 +861,300 @@ rendered: unexpected end of input (2..2): unexpected end of input
 
 [1:]
 =
-kind: UnclosedDelimiter
+kind: MissingExpression
 span: 0..1
-message: expected `]` to close `[`
-rendered: unclosed `[` (0..1): expected `]` to close `[`
-suggestion: [1:0]]
-placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
----
-kind: TrailingInput
-span: 3..4
-message: unexpected `]` after expression
-rendered: trailing input (3..4): unexpected `]` after expression
+message: expected range end before `]`
+rendered: missing expression in `[` (0..1): expected range end before `]`
 suggestion: [1:0]
+placeholder: 3..4 "range end" [integer, {variable}, (expression), dice expression]
 
-x: x@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)
+{x}: {x}@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)
 =
 kind: BindingCollidesWithParameter
-span: 3..4
+span: 6..7
 message: local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-rendered: local binding `x` collides with formal parameter (3..4): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
-related: 0..1 "declared as a parameter here"
-suggestion: x: a@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)
+rendered: local binding `x` collides with formal parameter (6..7): local binding `x` collides with a formal parameter of the same name; bindings, parameters, and environment variables share one flat namespace per function
+related: 1..2 "declared as a parameter here"
+suggestion: {x}: {a}@(1) + (1) + [{y}:2] + {z}D[2,3] + 2d6 drop lowest 1 + 2d6 drop highest 1 + 1 - 2 * 3 / 4 % 5 ^ 6 + -(1)
+
+{x}, {y} {x} + {y}
+=
+kind: IncompleteParameterDefinition
+span: 0..8
+message: expected `:` and expression body after parameters
+rendered: incomplete parameter definition (0..8): expected `:` and expression body after parameters
+suggestion: {x}, {y}: {x} + {y}
+
+{x}, {y}  {x}
+=
+kind: IncompleteParameterDefinition
+span: 0..8
+message: expected `:` and expression body after parameters
+rendered: incomplete parameter definition (0..8): expected `:` and expression body after parameters
+suggestion: {x}, {y}: {x}
+
+x + x
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x} + x
+---
+kind: BareIdentifier
+span: 4..5
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..5): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x} + {x}
+
+x  +  x
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}  +  x
+---
+kind: BareIdentifier
+span: 6..7
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (6..7): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}  +  {x}
+
+{x}, y: 1
+=
+kind: BareIdentifier
+span: 5..6
+message: bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (5..6): bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}: 1
+
+1 +  * 2
+=
+kind: MissingRightOperand
+span: 2..5
+message: expected operand after `+`
+rendered: missing right operand of `+` (2..5): expected operand after `+`
+suggestion: 1 +  0 * 2
+placeholder: 5..6 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 1 * 2
+
+1   2
+=
+kind: TrailingInput
+span: 4..5
+message: unexpected `2` after expression
+rendered: trailing input (4..5): unexpected `2` after expression
+suggestion: 1
+
+{x  + 1
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x}  + 1
+suggestion: {x  + 1}
+
+(1 + )
+=
+kind: MissingRightOperand
+span: 3..5
+message: expected operand after `+`
+rendered: missing right operand of `+` (3..5): expected operand after `+`
+suggestion: (1 + 0)
+placeholder: 5..6 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: (1)
+
+(1 +)
+=
+kind: MissingRightOperand
+span: 3..4
+message: expected operand after `+`
+rendered: missing right operand of `+` (3..4): expected operand after `+`
+suggestion: (1 + 0)
+placeholder: 5..6 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: (1)
+
+[1 + :2]
+=
+kind: MissingRightOperand
+span: 3..5
+message: expected operand after `+`
+rendered: missing right operand of `+` (3..5): expected operand after `+`
+suggestion: [1 + 0:2]
+placeholder: 5..6 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: [1:2]
+
+{a}@(1 * )
+=
+kind: MissingRightOperand
+span: 7..9
+message: expected operand after `*`
+rendered: missing right operand of `*` (7..9): expected operand after `*`
+suggestion: {a}@(1 * 0)
+placeholder: 9..10 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: {a}@(1)
+
+{x},: 1
+=
+kind: MissingParameter
+span: 3..4
+message: expected a formal parameter after `,`
+rendered: missing parameter (3..4): expected a formal parameter after `,`
+suggestion: {x}: 1
+
+{x}, , {y}: 1
+=
+kind: MissingParameter
+span: 3..4
+message: expected a formal parameter after `,`
+rendered: missing parameter (3..4): expected a formal parameter after `,`
+suggestion: {x}, {y}: 1
+
+{x},,{y}: 1
+=
+kind: MissingParameter
+span: 3..4
+message: expected a formal parameter after `,`
+rendered: missing parameter (3..4): expected a formal parameter after `,`
+suggestion: {x},{y}: 1
+
+{x}, {y},: {x}
+=
+kind: MissingParameter
+span: 8..9
+message: expected a formal parameter after `,`
+rendered: missing parameter (8..9): expected a formal parameter after `,`
+suggestion: {x}, {y}: {x}
+
+{x},,: 1
+=
+kind: MissingParameter
+span: 3..4
+message: expected a formal parameter after `,`
+rendered: missing parameter (3..4): expected a formal parameter after `,`
+suggestion: {x},: 1
+---
+kind: MissingParameter
+span: 4..5
+message: expected a formal parameter after `,`
+rendered: missing parameter (4..5): expected a formal parameter after `,`
+suggestion: {x}: 1
+
+x, y: {x}
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, y: {x}
+---
+kind: BareIdentifier
+span: 3..4
+message: bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (3..4): bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}: {x}
+
+x, y: x + y
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, y: x + y
+---
+kind: BareIdentifier
+span: 3..4
+message: bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (3..4): bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}: x + y
+---
+kind: BareIdentifier
+span: 6..7
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (6..7): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}, {y}: {x} + y
+---
+kind: BareIdentifier
+span: 10..11
+message: bare identifier `y` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (10..11): bare identifier `y` is not valid here; variables must be wrapped in `{}`
+suggestion: {x}, {y}: {x} + {y}
+
+hit points: {hit points}D6
+=
+kind: BareIdentifier
+span: 0..10
+message: bare identifier `hit points` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (0..10): bare identifier `hit points` is not valid here; parameters must be wrapped in `{}`
+suggestion: {hit points}: {hit points}D6
+
+{x}, y: {x} + {y}
+=
+kind: BareIdentifier
+span: 5..6
+message: bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (5..6): bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}: {x} + {y}
+
+x, {y}: {x} + {y}
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}: {x} + {y}
+
+x, y
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, y
+---
+kind: BareIdentifier
+span: 3..4
+message: bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+rendered: bare identifier (3..4): bare identifier `y` is not valid here; parameters must be wrapped in `{}`
+suggestion: {x}, {y}
+---
+kind: IncompleteParameterDefinition
+span: 0..4
+message: expected `:` and expression body after parameters
+rendered: incomplete parameter definition (0..4): expected `:` and expression body after parameters
+suggestion: {x}, {y}: 0
+placeholder: 10..11 "expression" [integer, {variable}, (expression), dice expression]
+
+{x, {y}: {x}
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x}, {y}: {x}
+
+{x: {x}
+=
+kind: UnclosedDelimiter
+span: 0..1
+message: expected `}` to close `{`
+rendered: unclosed `{` (0..1): expected `}` to close `{`
+suggestion: {x}: {x}
+
+x@(3D6) + {x}
+=
+kind: BareIdentifier
+span: 0..1
+message: bare identifier `x` is not valid here; bindings must be wrapped in `{}`
+rendered: bare identifier (0..1): bare identifier `x` is not valid here; bindings must be wrapped in `{}`
+suggestion: {x}@(3D6) + {x}
+
+hd@(3) + {hd}
+=
+kind: BareIdentifier
+span: 0..2
+message: bare identifier `hd` is not valid here; bindings must be wrapped in `{}`
+rendered: bare identifier (0..2): bare identifier `hd` is not valid here; bindings must be wrapped in `{}`
+suggestion: {hd}@(3) + {hd}

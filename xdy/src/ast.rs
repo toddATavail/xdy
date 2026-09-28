@@ -15,8 +15,38 @@
 //! structural comparison.
 //!
 //! The root of the AST is a [`Function`].
+//!
+//! # Deep nesting
+//!
+//! Every recursive field of the AST is an [`Expression`] or a
+//! [`DiceExpression`], whose implementations of [`Debug`](std::fmt::Debug),
+//! [`Clone`], [`PartialEq`], [`Eq`], [`Hash`](std::hash::Hash), and [`Drop`]
+//! use explicit stacks rather than recursion. An AST of any depth can therefore
+//! be formatted, cloned, compared, hashed, and dropped without exhausting the
+//! stack. The other AST types derive these traits, and reach the iterative
+//! implementations after a single level. Because [`Expression`] and
+//! [`DiceExpression`] implement [`Drop`], their variants cannot be moved out by
+//! pattern; match on a reference instead.
+//!
+//! Every AST type's [`Display`] implementation, and the
+//! [`untethered`](Spanned::untethered) operation of [`Expression`] and
+//! [`DiceExpression`], likewise use explicit stacks, as do the
+//! [S-expression](crate::s_expr) writer and sizer, and the driver that walks
+//! an AST with an [`ASTVisitor`]. The crate's other analyses of an AST, in the
+//! compiler, the validator, and the diagnostics, loop over the same iterative
+//! walk.
 
-use std::fmt::{self, Display, Formatter};
+mod display;
+mod impls;
+mod traversal;
+mod walk;
+
+use std::{
+	borrow::Cow,
+	fmt::{self, Display, Formatter}
+};
+
+pub(crate) use walk::{Event, Node, Walk};
 
 use crate::span::{SourceSpan, Spanned};
 
@@ -43,23 +73,40 @@ pub struct Function<'src>
 	pub span: SourceSpan
 }
 
+impl<'src> Function<'src>
+{
+	/// Walk this function with the given [`ASTVisitor`], iteratively, as the
+	/// [trait](ASTVisitor) describes: enter the function, walk its body, and
+	/// then visit the function with the output of its body.
+	///
+	/// # Type parameters
+	/// - `'a`: The lifetime of the borrowed function.
+	/// - `V`: The type of the visitor.
+	///
+	/// # Parameters
+	/// - `visitor`: The visitor.
+	///
+	/// # Returns
+	/// The output of this function.
+	///
+	/// # Errors
+	/// Propagates the first error returned by the visitor.
+	pub fn accept<'a, V: ASTVisitor<'a, 'src>>(
+		&'a self,
+		visitor: &mut V
+	) -> Result<V::Output, V::Error>
+	{
+		visitor.enter_function(self)?;
+		let body = self.body.accept(visitor)?;
+		visitor.visit_function(self, body)
+	}
+}
+
 impl Display for Function<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		if let Some(ref parameters) = self.parameters
-		{
-			for (i, param) in parameters.iter().enumerate()
-			{
-				if i > 0
-				{
-					write!(f, ", ")?;
-				}
-				write!(f, "{}", param)?;
-			}
-			write!(f, ": ")?;
-		}
-		write!(f, "{}", self.body)
+		display::render(self, f)
 	}
 }
 
@@ -67,14 +114,17 @@ impl Display for Function<'_>
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text. The parameter name is borrowed
-///   directly from the source.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+///   directly from the source whenever the source spells it
+///   [canonically](crate::parser::canonical_name).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Parameter<'src>
 {
-	/// The name of the parameter.
-	pub name: &'src str,
+	/// The [canonical](crate::parser::canonical_name) name of the parameter.
+	pub name: Cow<'src, str>,
 
-	/// The span of this parameter in the original source.
+	/// The span of this parameter in the original source. The source text
+	/// that it covers is the name exactly as written, which may differ from
+	/// the canonical [`name`](Self::name) in its whitespace.
 	pub span: SourceSpan
 }
 
@@ -82,7 +132,7 @@ impl Display for Parameter<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}", self.name)
+		display::render(self, f)
 	}
 }
 
@@ -101,7 +151,7 @@ impl Display for Group<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "({})", self.expression)
+		display::render(self, f)
 	}
 }
 
@@ -120,16 +170,22 @@ impl Display for Constant
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}", self.value)
+		display::render(self, f)
 	}
 }
 
 /// A variable reference.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text. The variable name is borrowed
+///   directly from the source whenever the source spells it
+///   [canonically](crate::parser::canonical_name).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Variable<'src>
 {
-	/// The name of the variable, without the surrounding braces.
-	pub name: &'src str,
+	/// The [canonical](crate::parser::canonical_name) name of the variable,
+	/// without the surrounding braces.
+	pub name: Cow<'src, str>,
 
 	/// The span of the variable reference, including the surrounding braces.
 	pub span: SourceSpan
@@ -139,16 +195,15 @@ impl Display for Variable<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{{{}}}", self.name)
+		display::render(self, f)
 	}
 }
 
 /// A local binding that names a subexpression so its integer result can be
 /// referred to by [variable reference](Variable) later in the same enclosing
-/// function body. The syntax is `name@(expr)`: the bound name appears to the
-/// left of the `@` operator without delimiters (unlike a
-/// [variable reference](Variable), which uses `{name}`), followed by the bound
-/// expression enclosed in parentheses.
+/// function body. The syntax is `{name}@(expr)`: the bound name appears to the
+/// left of the `@` operator, braced just as in a [variable reference](Variable)
+/// to it, followed by the bound expression enclosed in parentheses.
 ///
 /// # Semantics
 /// - The binding introduces `name` into a single flat namespace shared by
@@ -170,15 +225,18 @@ impl Display for Variable<'_>
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text. The bound name is borrowed
-///   directly from the source.
+///   directly from the source whenever the source spells it
+///   [canonically](crate::parser::canonical_name).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Binding<'src>
 {
-	/// The bound name.
-	pub name: &'src str,
+	/// The [canonical](crate::parser::canonical_name) bound name.
+	pub name: Cow<'src, str>,
 
 	/// The span of the bound name alone in the original source, excluding the
-	/// `@` operator and the parenthesized bound expression.
+	/// `@` operator and the parenthesized bound expression. The source text
+	/// that it covers is the name exactly as written, which may differ from
+	/// the canonical [`name`](Self::name) in its whitespace.
 	pub name_span: SourceSpan,
 
 	/// The bound expression.
@@ -193,7 +251,7 @@ impl Display for Binding<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}@({})", self.name, self.expression)
+		display::render(self, f)
 	}
 }
 
@@ -215,7 +273,7 @@ impl Display for Range<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "[{}:{}]", self.start, self.end)
+		display::render(self, f)
 	}
 }
 
@@ -225,7 +283,6 @@ impl Display for Range<'_>
 /// - `'src`: The lifetime of the source text. Inherited from the enclosing
 ///   [`Function`]; individual expression nodes borrow variable names from the
 ///   source.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expression<'src>
 {
 	/// A parenthesized expression.
@@ -252,34 +309,29 @@ pub enum Expression<'src>
 
 impl<'src> Expression<'src>
 {
-	/// Dispatch this expression to the appropriate method on the given
-	/// [`ASTVisitor`]. Enum variants that are themselves enums
-	/// ([`Dice`](Self::Dice), [`Arithmetic`](Self::Arithmetic)) delegate to
-	/// their own [`accept()`](DiceExpression::accept) methods.
+	/// Walk this expression with the given [`ASTVisitor`], iteratively, as
+	/// the [trait](ASTVisitor) describes. The walk ends with a call to
+	/// [`visit_expression`](ASTVisitor::visit_expression) for this
+	/// expression.
+	///
+	/// # Type parameters
+	/// - `'a`: The lifetime of the borrowed expression.
+	/// - `V`: The type of the visitor.
 	///
 	/// # Parameters
-	/// - `visitor`: The visitor to dispatch to.
+	/// - `visitor`: The visitor.
 	///
 	/// # Returns
-	/// The value produced by the visitor.
+	/// The output of this expression.
 	///
 	/// # Errors
-	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'src>>(
-		&'src self,
+	/// Propagates the first error returned by the visitor.
+	pub fn accept<'a, V: ASTVisitor<'a, 'src>>(
+		&'a self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{
-		match self
-		{
-			Expression::Group(g) => visitor.visit_group(g),
-			Expression::Constant(c) => visitor.visit_constant(c),
-			Expression::Variable(v) => visitor.visit_variable(v),
-			Expression::Binding(b) => visitor.visit_binding(b),
-			Expression::Range(r) => visitor.visit_range(r),
-			Expression::Dice(d) => d.accept(visitor),
-			Expression::Arithmetic(a) => a.accept(visitor)
-		}
+		walk::fold(walk::Node::Expression(self), visitor)
 	}
 }
 
@@ -287,16 +339,7 @@ impl Display for Expression<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		match self
-		{
-			Expression::Group(group) => write!(f, "{}", group),
-			Expression::Constant(constant) => write!(f, "{}", constant),
-			Expression::Variable(variable) => write!(f, "{}", variable),
-			Expression::Binding(binding) => write!(f, "{}", binding),
-			Expression::Range(range) => write!(f, "{}", range),
-			Expression::Dice(dice) => write!(f, "{}", dice),
-			Expression::Arithmetic(arithmetic) => write!(f, "{}", arithmetic)
-		}
+		display::render(self, f)
 	}
 }
 
@@ -318,7 +361,7 @@ impl Display for StandardDice<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}D{}", self.count, self.faces)
+		display::render(self, f)
 	}
 }
 
@@ -341,16 +384,7 @@ impl Display for CustomDice<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{}D[", self.count)?;
-		for (i, face) in self.faces.iter().enumerate()
-		{
-			if i > 0
-			{
-				write!(f, ", ")?;
-			}
-			write!(f, "{}", face)?;
-		}
-		write!(f, "]")
+		display::render(self, f)
 	}
 }
 
@@ -373,12 +407,7 @@ impl Display for DropLowest<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} drop lowest", self.dice)?;
-		if let Some(ref drop) = self.drop
-		{
-			write!(f, " {}", drop)?;
-		}
-		Ok(())
+		display::render(self, f)
 	}
 }
 
@@ -401,17 +430,11 @@ impl Display for DropHighest<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} drop highest", self.dice)?;
-		if let Some(ref drop) = self.drop
-		{
-			write!(f, " {}", drop)?;
-		}
-		Ok(())
+		display::render(self, f)
 	}
 }
 
 /// A dice expression.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DiceExpression<'src>
 {
 	/// A standard dice expression.
@@ -429,29 +452,29 @@ pub enum DiceExpression<'src>
 
 impl<'src> DiceExpression<'src>
 {
-	/// Dispatch this dice expression to the appropriate method on the given
-	/// [`ASTVisitor`].
+	/// Walk this dice expression with the given [`ASTVisitor`], iteratively,
+	/// as the [trait](ASTVisitor) describes. A dice expression does not fill
+	/// a slot of type [`Expression`], so the walk does not call
+	/// [`visit_expression`](ASTVisitor::visit_expression) for it.
+	///
+	/// # Type parameters
+	/// - `'a`: The lifetime of the borrowed dice expression.
+	/// - `V`: The type of the visitor.
 	///
 	/// # Parameters
-	/// - `visitor`: The visitor to dispatch to.
+	/// - `visitor`: The visitor.
 	///
 	/// # Returns
-	/// The value produced by the visitor.
+	/// The output of this dice expression.
 	///
 	/// # Errors
-	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'src>>(
-		&'src self,
+	/// Propagates the first error returned by the visitor.
+	pub fn accept<'a, V: ASTVisitor<'a, 'src>>(
+		&'a self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{
-		match self
-		{
-			DiceExpression::Standard(d) => visitor.visit_standard_dice(d),
-			DiceExpression::Custom(d) => visitor.visit_custom_dice(d),
-			DiceExpression::DropLowest(d) => visitor.visit_drop_lowest(d),
-			DiceExpression::DropHighest(d) => visitor.visit_drop_highest(d)
-		}
+		walk::fold(walk::Node::Dice(self), visitor)
 	}
 }
 
@@ -459,13 +482,7 @@ impl Display for DiceExpression<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		match self
-		{
-			DiceExpression::Standard(dice) => write!(f, "{}", dice),
-			DiceExpression::Custom(dice) => write!(f, "{}", dice),
-			DiceExpression::DropLowest(drop) => write!(f, "{}", drop),
-			DiceExpression::DropHighest(drop) => write!(f, "{}", drop)
-		}
+		display::render(self, f)
 	}
 }
 
@@ -487,7 +504,7 @@ impl Display for Add<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} + {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -509,7 +526,7 @@ impl Display for Sub<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} - {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -531,7 +548,7 @@ impl Display for Mul<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} * {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -553,7 +570,7 @@ impl Display for Div<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} / {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -575,7 +592,7 @@ impl Display for Mod<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} % {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -597,7 +614,7 @@ impl Display for Exp<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "{} ^ {}", self.left, self.right)
+		display::render(self, f)
 	}
 }
 
@@ -617,7 +634,7 @@ impl Display for Neg<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		write!(f, "-{}", self.operand)
+		display::render(self, f)
 	}
 }
 
@@ -625,24 +642,154 @@ impl Display for Neg<'_>
 //                                AST visitor.                                //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A visitor for walking the abstract syntax tree (AST).
+/// A visitor for walking the abstract syntax tree (AST), folding it bottom-up
+/// into a single value.
 ///
-/// Each method visits a single AST node type and returns a value of the
-/// associated [`Output`](Self::Output) type. The enum types ([`Expression`],
-/// [`DiceExpression`], [`ArithmeticExpression`]) are not visited directly —
-/// they provide [`accept()`](Expression::accept) methods that dispatch to the
-/// appropriate visitor method.
+/// A driver walks the tree iteratively, with an explicit stack, so a visitor
+/// can walk an AST of any depth without exhausting the machine stack. Start a
+/// walk by calling `accept` on a [`Function`], an [`Expression`], a
+/// [`DiceExpression`], or an [`ArithmeticExpression`].
+///
+/// The walk visits children left to right, in source order. For each node, the
+/// driver calls:
+///
+/// 1. the node's `enter_*` hook, before any of the node's children. The hooks
+///    do nothing by default.
+/// 2. the node's `visit_*` method, after all of the node's children. The method
+///    receives the node and the [outputs](Self::Output) of its children, in
+///    source order, and produces the node's own output.
+/// 3. [`visit_expression`](Self::visit_expression), if the node fills a slot of
+///    type [`Expression`], i.e., if it is not the [`DiceExpression`] beneath a
+///    [drop-lowest](DropLowest) or [drop-highest](DropHighest) expression. The
+///    hook receives the node's output and may replace it. By default, it
+///    returns the output unchanged.
+///
+/// The enum types ([`Expression`], [`DiceExpression`],
+/// [`ArithmeticExpression`]) are not visited directly; the driver visits the
+/// node inside each variant. If any method answers an error, the walk stops at
+/// once and `accept` answers that error.
 ///
 /// The [`Compiler`](crate::Compiler) is the reference implementation of this
 /// trait.
 ///
+/// # Migrating from 0.12
+///
+/// In 0.12, each `visit_*` method received only its node, and walked the node's
+/// children itself by calling `accept` on them, so every visitor recursed once
+/// per level of nesting and overflowed the stack on deep trees. Since 0.13, the
+/// driver walks the tree, and a visitor only answers for each node:
+///
+/// - The trait takes two lifetimes, `ASTVisitor<'a, 'src>`, where 0.12 took
+///   one, `ASTVisitor<'src>`: `'a` borrows the tree and `'src` the source text,
+///   so a visitor's outputs and errors may borrow the source for longer than
+///   the walk.
+/// - A `visit_*` method receives the outputs of the node's children as
+///   arguments, in source order, and must not call `accept` on them. The drop
+///   count of a drop clause, which may be absent, arrives as an [`Option`].
+/// - Work that must happen before the children, e.g., opening a scope, moves to
+///   the node's `enter_*` hook.
+/// - Work that applies to every expression once it is complete, e.g., reducing
+///   a rolling record to its sum, moves to
+///   [`visit_expression`](Self::visit_expression).
+///
 /// # Type parameters
-/// - `'src`: The lifetime of the borrowed source text within the AST.
+/// - `'a`: The lifetime of the borrowed AST.
+/// - `'src`: The lifetime of the source text within the AST.
 ///
 /// # Associated types
 /// - `Output`: The value produced by visiting a node.
 /// - `Error`: The error type returned on failure.
-pub trait ASTVisitor<'src>
+///
+/// # Examples
+/// The driver calls the visitor in this order to walk `1 + 2`, which parses
+/// to an [`Add`] of two [`Constant`]s.
+///
+/// ```mermaid
+/// sequenceDiagram
+///     participant D as Driver
+///     participant V as Visitor
+///     D->>V: enter_add(1 + 2)
+///     D->>V: enter_constant(1)
+///     D->>V: visit_constant(1)
+///     V-->>D: a
+///     D->>V: visit_expression(1, a)
+///     V-->>D: a′
+///     D->>V: enter_constant(2)
+///     D->>V: visit_constant(2)
+///     V-->>D: b
+///     D->>V: visit_expression(2, b)
+///     V-->>D: b′
+///     D->>V: visit_add(1 + 2, a′, b′)
+///     V-->>D: c
+///     D->>V: visit_expression(1 + 2, c)
+///     V-->>D: c′
+/// ```
+///
+/// A visitor that counts the dice in an expression:
+///
+/// ```rust
+/// use std::convert::Infallible;
+///
+/// use xdy::{
+///     Parser,
+///     ast::{
+///         ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
+///         DropLowest, Exp, Function, Group, Mod, Mul, Neg, Range,
+///         StandardDice, Sub, Variable
+///     }
+/// };
+///
+/// struct DiceCounter;
+///
+/// impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for DiceCounter
+/// {
+///     type Output = usize;
+///     type Error = Infallible;
+///
+///     fn visit_function(&mut self, _: &'a Function<'src>, body: usize)
+///         -> Result<usize, Infallible> { Ok(body) }
+///     fn visit_group(&mut self, _: &'a Group<'src>, expression: usize)
+///         -> Result<usize, Infallible> { Ok(expression) }
+///     fn visit_constant(&mut self, _: &'a Constant)
+///         -> Result<usize, Infallible> { Ok(0) }
+///     fn visit_variable(&mut self, _: &'a Variable<'src>)
+///         -> Result<usize, Infallible> { Ok(0) }
+///     fn visit_binding(&mut self, _: &'a Binding<'src>, expression: usize)
+///         -> Result<usize, Infallible> { Ok(expression) }
+///     fn visit_range(&mut self, _: &'a Range<'src>, start: usize, end: usize)
+///         -> Result<usize, Infallible> { Ok(start + end) }
+///     fn visit_standard_dice(
+///         &mut self, _: &'a StandardDice<'src>, count: usize, faces: usize
+///     ) -> Result<usize, Infallible> { Ok(1 + count + faces) }
+///     fn visit_custom_dice(&mut self, _: &'a CustomDice<'src>, count: usize)
+///         -> Result<usize, Infallible> { Ok(1 + count) }
+///     fn visit_drop_lowest(
+///         &mut self, _: &'a DropLowest<'src>, dice: usize, drop: Option<usize>
+///     ) -> Result<usize, Infallible> { Ok(dice + drop.unwrap_or(0)) }
+///     fn visit_drop_highest(
+///         &mut self, _: &'a DropHighest<'src>, dice: usize, drop: Option<usize>
+///     ) -> Result<usize, Infallible> { Ok(dice + drop.unwrap_or(0)) }
+///     fn visit_add(&mut self, _: &'a Add<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_sub(&mut self, _: &'a Sub<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_mul(&mut self, _: &'a Mul<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_div(&mut self, _: &'a Div<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_mod(&mut self, _: &'a Mod<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_exp(&mut self, _: &'a Exp<'src>, left: usize, right: usize)
+///         -> Result<usize, Infallible> { Ok(left + right) }
+///     fn visit_neg(&mut self, _: &'a Neg<'src>, operand: usize)
+///         -> Result<usize, Infallible> { Ok(operand) }
+/// }
+///
+/// let ast = Parser::parse("(1D6)D[1, 2] + 3D8 drop lowest").unwrap();
+/// assert_eq!(ast.accept(&mut DiceCounter), Ok(3));
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
+pub trait ASTVisitor<'a, 'src: 'a>
 {
 	/// The value produced by visiting a node.
 	type Output;
@@ -650,107 +797,364 @@ pub trait ASTVisitor<'src>
 	/// The error type returned on failure.
 	type Error;
 
-	/// Visit a [function](Function) definition.
+	/// Enter a [function](Function) definition, before its body.
+	fn enter_function(
+		&mut self,
+		_node: &'a Function<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [group](Group) (parenthesized expression), before its
+	/// expression.
+	fn enter_group(&mut self, _node: &'a Group<'src>)
+	-> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [constant](Constant) value.
+	fn enter_constant(&mut self, _node: &'a Constant)
+	-> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [variable](Variable) reference.
+	fn enter_variable(
+		&mut self,
+		_node: &'a Variable<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a local [binding](Binding), before its bound expression.
+	fn enter_binding(
+		&mut self,
+		_node: &'a Binding<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [range](Range) expression, before its bounds.
+	fn enter_range(&mut self, _node: &'a Range<'src>)
+	-> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [standard dice](StandardDice) expression, before its count and
+	/// faces.
+	fn enter_standard_dice(
+		&mut self,
+		_node: &'a StandardDice<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [custom dice](CustomDice) expression, before its count.
+	fn enter_custom_dice(
+		&mut self,
+		_node: &'a CustomDice<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [drop-lowest](DropLowest) expression, before its dice and drop
+	/// count.
+	fn enter_drop_lowest(
+		&mut self,
+		_node: &'a DropLowest<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [drop-highest](DropHighest) expression, before its dice and
+	/// drop count.
+	fn enter_drop_highest(
+		&mut self,
+		_node: &'a DropHighest<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter an [addition](Add) expression, before its operands.
+	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [subtraction](Sub) expression, before its operands.
+	fn enter_sub(&mut self, _node: &'a Sub<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [multiplication](Mul) expression, before its operands.
+	fn enter_mul(&mut self, _node: &'a Mul<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [division](Div) expression, before its operands.
+	fn enter_div(&mut self, _node: &'a Div<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [modulo](Mod) expression, before its operands.
+	fn enter_mod(&mut self, _node: &'a Mod<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter an [exponentiation](Exp) expression, before its operands.
+	fn enter_exp(&mut self, _node: &'a Exp<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [negation](Neg) expression, before its operand.
+	fn enter_neg(&mut self, _node: &'a Neg<'src>) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Visit a [function](Function) definition, after its body.
+	///
+	/// # Parameters
+	/// - `node`: The function.
+	/// - `body`: The output of the body.
 	fn visit_function(
 		&mut self,
-		node: &'src Function<'src>
+		node: &'a Function<'src>,
+		body: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [group](Group) (parenthesized expression).
+	/// Visit a [group](Group) (parenthesized expression), after its
+	/// expression.
+	///
+	/// # Parameters
+	/// - `node`: The group.
+	/// - `expression`: The output of the expression inside the parentheses.
 	fn visit_group(
 		&mut self,
-		node: &'src Group<'src>
+		node: &'a Group<'src>,
+		expression: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [constant](Constant) value.
+	///
+	/// # Parameters
+	/// - `node`: The constant.
 	fn visit_constant(
 		&mut self,
-		node: &Constant
+		node: &'a Constant
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [variable](Variable) reference.
+	///
+	/// # Parameters
+	/// - `node`: The variable reference.
 	fn visit_variable(
 		&mut self,
-		node: &'src Variable<'src>
+		node: &'a Variable<'src>
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a local [binding](Binding).
+	/// Visit a local [binding](Binding), after its bound expression.
+	///
+	/// # Parameters
+	/// - `node`: The binding.
+	/// - `expression`: The output of the bound expression.
 	fn visit_binding(
 		&mut self,
-		node: &'src Binding<'src>
+		node: &'a Binding<'src>,
+		expression: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [range](Range) expression.
+	/// Visit a [range](Range) expression, after its bounds.
+	///
+	/// # Parameters
+	/// - `node`: The range.
+	/// - `start`: The output of the start of the range.
+	/// - `end`: The output of the end of the range.
 	fn visit_range(
 		&mut self,
-		node: &'src Range<'src>
+		node: &'a Range<'src>,
+		start: Self::Output,
+		end: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [standard dice](StandardDice) expression.
+	/// Visit a [standard dice](StandardDice) expression, after its count and
+	/// faces.
+	///
+	/// # Parameters
+	/// - `node`: The dice expression.
+	/// - `count`: The output of the count.
+	/// - `faces`: The output of the faces.
 	fn visit_standard_dice(
 		&mut self,
-		node: &'src StandardDice<'src>
+		node: &'a StandardDice<'src>,
+		count: Self::Output,
+		faces: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [custom dice](CustomDice) expression.
+	/// Visit a [custom dice](CustomDice) expression, after its count.
+	///
+	/// # Parameters
+	/// - `node`: The dice expression.
+	/// - `count`: The output of the count.
 	fn visit_custom_dice(
 		&mut self,
-		node: &'src CustomDice<'src>
+		node: &'a CustomDice<'src>,
+		count: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [drop-lowest](DropLowest) expression.
+	/// Visit a [drop-lowest](DropLowest) expression, after its dice and drop
+	/// count.
+	///
+	/// # Parameters
+	/// - `node`: The drop-lowest expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `drop`: The output of the drop count, if the expression has one.
 	fn visit_drop_lowest(
 		&mut self,
-		node: &'src DropLowest<'src>
+		node: &'a DropLowest<'src>,
+		dice: Self::Output,
+		drop: Option<Self::Output>
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [drop-highest](DropHighest) expression.
+	/// Visit a [drop-highest](DropHighest) expression, after its dice and drop
+	/// count.
+	///
+	/// # Parameters
+	/// - `node`: The drop-highest expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `drop`: The output of the drop count, if the expression has one.
 	fn visit_drop_highest(
 		&mut self,
-		node: &'src DropHighest<'src>
+		node: &'a DropHighest<'src>,
+		dice: Self::Output,
+		drop: Option<Self::Output>
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit an [addition](Add) expression.
+	/// Visit an [addition](Add) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The addition.
+	/// - `left`: The output of the augend.
+	/// - `right`: The output of the addend.
 	fn visit_add(
 		&mut self,
-		node: &'src Add<'src>
+		node: &'a Add<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [subtraction](Sub) expression.
+	/// Visit a [subtraction](Sub) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The subtraction.
+	/// - `left`: The output of the minuend.
+	/// - `right`: The output of the subtrahend.
 	fn visit_sub(
 		&mut self,
-		node: &'src Sub<'src>
+		node: &'a Sub<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [multiplication](Mul) expression.
+	/// Visit a [multiplication](Mul) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The multiplication.
+	/// - `left`: The output of the multiplicand.
+	/// - `right`: The output of the multiplier.
 	fn visit_mul(
 		&mut self,
-		node: &'src Mul<'src>
+		node: &'a Mul<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [division](Div) expression.
+	/// Visit a [division](Div) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The division.
+	/// - `left`: The output of the dividend.
+	/// - `right`: The output of the divisor.
 	fn visit_div(
 		&mut self,
-		node: &'src Div<'src>
+		node: &'a Div<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [modulo](Mod) expression.
+	/// Visit a [modulo](Mod) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The modulo expression.
+	/// - `left`: The output of the dividend.
+	/// - `right`: The output of the divisor.
 	fn visit_mod(
 		&mut self,
-		node: &'src Mod<'src>
+		node: &'a Mod<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit an [exponentiation](Exp) expression.
+	/// Visit an [exponentiation](Exp) expression, after its operands.
+	///
+	/// # Parameters
+	/// - `node`: The exponentiation.
+	/// - `left`: The output of the base.
+	/// - `right`: The output of the exponent.
 	fn visit_exp(
 		&mut self,
-		node: &'src Exp<'src>
+		node: &'a Exp<'src>,
+		left: Self::Output,
+		right: Self::Output
 	) -> Result<Self::Output, Self::Error>;
 
-	/// Visit a [negation](Neg) expression.
+	/// Visit a [negation](Neg) expression, after its operand.
+	///
+	/// # Parameters
+	/// - `node`: The negation.
+	/// - `operand`: The output of the operand.
 	fn visit_neg(
 		&mut self,
-		node: &'src Neg<'src>
+		node: &'a Neg<'src>,
+		operand: Self::Output
 	) -> Result<Self::Output, Self::Error>;
+
+	/// Finish an [expression](Expression) that fills a slot of type
+	/// [`Expression`], after the `visit_*` method of the node inside it.
+	/// Every node but the [`DiceExpression`] beneath a
+	/// [drop-lowest](DropLowest) or [drop-highest](DropHighest) expression
+	/// fills such a slot, as does the root of a walk that starts at an
+	/// [`Expression`] or a [`Function`].
+	///
+	/// # Parameters
+	/// - `node`: The expression.
+	/// - `output`: The output of the node inside the expression.
+	///
+	/// # Returns
+	/// The output of the expression. By default, `output` unchanged.
+	fn visit_expression(
+		&mut self,
+		_node: &'a Expression<'src>,
+		output: Self::Output
+	) -> Result<Self::Output, Self::Error>
+	{
+		Ok(output)
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -785,32 +1189,29 @@ pub enum ArithmeticExpression<'src>
 
 impl<'src> ArithmeticExpression<'src>
 {
-	/// Dispatch this arithmetic expression to the appropriate method on the
-	/// given [`ASTVisitor`].
+	/// Walk this arithmetic expression with the given [`ASTVisitor`],
+	/// iteratively, as the [trait](ASTVisitor) describes. The walk does not
+	/// call [`visit_expression`](ASTVisitor::visit_expression) for this
+	/// arithmetic expression itself, since it is not an [`Expression`].
+	///
+	/// # Type parameters
+	/// - `'a`: The lifetime of the borrowed arithmetic expression.
+	/// - `V`: The type of the visitor.
 	///
 	/// # Parameters
-	/// - `visitor`: The visitor to dispatch to.
+	/// - `visitor`: The visitor.
 	///
 	/// # Returns
-	/// The value produced by the visitor.
+	/// The output of this arithmetic expression.
 	///
 	/// # Errors
-	/// Propagates any error returned by the visitor.
-	pub fn accept<V: ASTVisitor<'src>>(
-		&'src self,
+	/// Propagates the first error returned by the visitor.
+	pub fn accept<'a, V: ASTVisitor<'a, 'src>>(
+		&'a self,
 		visitor: &mut V
 	) -> Result<V::Output, V::Error>
 	{
-		match self
-		{
-			ArithmeticExpression::Add(a) => visitor.visit_add(a),
-			ArithmeticExpression::Sub(s) => visitor.visit_sub(s),
-			ArithmeticExpression::Mul(m) => visitor.visit_mul(m),
-			ArithmeticExpression::Div(d) => visitor.visit_div(d),
-			ArithmeticExpression::Mod(m) => visitor.visit_mod(m),
-			ArithmeticExpression::Exp(e) => visitor.visit_exp(e),
-			ArithmeticExpression::Neg(n) => visitor.visit_neg(n)
-		}
+		walk::fold(walk::Node::Arithmetic(self), visitor)
 	}
 }
 
@@ -818,16 +1219,7 @@ impl Display for ArithmeticExpression<'_>
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
-		match self
-		{
-			ArithmeticExpression::Add(add) => write!(f, "{}", add),
-			ArithmeticExpression::Sub(sub) => write!(f, "{}", sub),
-			ArithmeticExpression::Mul(mul) => write!(f, "{}", mul),
-			ArithmeticExpression::Div(div) => write!(f, "{}", div),
-			ArithmeticExpression::Mod(r#mod) => write!(f, "{}", r#mod),
-			ArithmeticExpression::Exp(exp) => write!(f, "{}", exp),
-			ArithmeticExpression::Neg(neg) => write!(f, "{}", neg)
-		}
+		display::render(self, f)
 	}
 }
 
@@ -859,7 +1251,7 @@ impl Spanned for Parameter<'_>
 	fn untethered(&self) -> Self
 	{
 		Parameter {
-			name: self.name,
+			name: self.name.clone(),
 			span: SourceSpan::default()
 		}
 	}
@@ -898,7 +1290,7 @@ impl Spanned for Variable<'_>
 	fn untethered(&self) -> Self
 	{
 		Variable {
-			name: self.name,
+			name: self.name.clone(),
 			span: SourceSpan::default()
 		}
 	}
@@ -911,7 +1303,7 @@ impl Spanned for Binding<'_>
 	fn untethered(&self) -> Self
 	{
 		Binding {
-			name: self.name,
+			name: self.name.clone(),
 			name_span: SourceSpan::default(),
 			expression: Box::new(self.expression.untethered()),
 			span: SourceSpan::default()
@@ -949,19 +1341,7 @@ impl Spanned for Expression<'_>
 		}
 	}
 
-	fn untethered(&self) -> Self
-	{
-		match self
-		{
-			Expression::Group(g) => Expression::Group(g.untethered()),
-			Expression::Constant(c) => Expression::Constant(c.untethered()),
-			Expression::Variable(v) => Expression::Variable(v.untethered()),
-			Expression::Binding(b) => Expression::Binding(b.untethered()),
-			Expression::Range(r) => Expression::Range(r.untethered()),
-			Expression::Dice(d) => Expression::Dice(d.untethered()),
-			Expression::Arithmetic(a) => Expression::Arithmetic(a.untethered())
-		}
-	}
+	fn untethered(&self) -> Self { impls::untether(self) }
 }
 
 impl Spanned for StandardDice<'_>
@@ -1033,25 +1413,7 @@ impl Spanned for DiceExpression<'_>
 		}
 	}
 
-	fn untethered(&self) -> Self
-	{
-		match self
-		{
-			DiceExpression::Standard(d) =>
-			{
-				DiceExpression::Standard(d.untethered())
-			},
-			DiceExpression::Custom(d) => DiceExpression::Custom(d.untethered()),
-			DiceExpression::DropLowest(d) =>
-			{
-				DiceExpression::DropLowest(d.untethered())
-			},
-			DiceExpression::DropHighest(d) =>
-			{
-				DiceExpression::DropHighest(d.untethered())
-			},
-		}
-	}
+	fn untethered(&self) -> Self { impls::untether_dice(self) }
 }
 
 impl Spanned for Add<'_>

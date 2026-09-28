@@ -14,21 +14,21 @@
 //! # Current checks
 //!
 //! - **Duplicate parameters.** A function may not declare the same formal
-//!   parameter name more than once. `x, x: {x} + 1` is rejected as
+//!   parameter name more than once. `{x}, {x}: {x} + 1` is rejected as
 //!   [`DuplicateParameter`](CompilationError::DuplicateParameter), carrying the
 //!   spans of both occurrences for caret-level reporting.
 //! - **Binding collides with parameter.** A [local binding](ast::Binding) may
-//!   not reuse a formal-parameter name. `x: x@(3D6) + {x}` is rejected as
+//!   not reuse a formal-parameter name. `{x}: {x}@(3D6) + {x}` is rejected as
 //!   [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter),
 //!   since binding, parameter, and environment-variable names share a single
 //!   flat namespace per function.
 //! - **Duplicate binding.** The same name may not be bound twice within a
-//!   function body. `x@(3D6) + x@(1D4)` is rejected as
+//!   function body. `{x}@(3D6) + {x}@(1D4)` is rejected as
 //!   [`DuplicateBinding`](CompilationError::DuplicateBinding).
 //! - **Use before bind.** A [variable reference](ast::Variable) must lexically
 //!   follow the [binding](ast::Binding) that introduces its name, including any
 //!   reference inside the bound expression itself (self-reference). `{x} +
-//!   x@(3D6)` and `x@({x})` are both rejected as
+//!   {x}@(3D6)` and `{x}@({x})` are both rejected as
 //!   [`UseBeforeBind`](CompilationError::UseBeforeBind).
 
 use std::collections::{HashMap, HashSet};
@@ -36,9 +36,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
 	CompilationError, SourceSpan,
 	ast::{
-		self, ASTVisitor, Add, ArithmeticExpression, Binding, Constant,
-		CustomDice, DiceExpression, Div, DropHighest, DropLowest, Exp,
-		Expression, Group, Mod, Mul, Neg, Range, StandardDice, Sub, Variable
+		self, ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
+		DropLowest, Event, Exp, Expression, Group, Mod, Mul, Neg, Node, Range,
+		StandardDice, Sub, Variable, Walk
 	}
 };
 
@@ -68,8 +68,9 @@ impl Validator
 	///
 	/// # Type parameters
 	/// - `'src`: The lifetime of the source text from which the AST was parsed.
-	///   Parameter names and spans reported in errors are borrowed directly
-	///   from the source, so the error borrows for `'src`.
+	///   Names reported in errors are borrowed from the source wherever it
+	///   spells them [canonically](crate::parser::canonical_name), so the error
+	///   borrows for `'src`, but not from the AST.
 	///
 	/// # Parameters
 	/// - `ast`: The parsed function definition.
@@ -92,13 +93,7 @@ impl Validator
 
 /// The [duplicate-parameter](CompilationError::DuplicateParameter) check,
 /// factored out so both [`Validator::validate`] and the [`ASTVisitor`]
-/// implementation share a single source of truth. Writing the check here —
-/// rather than inside [`Validator::visit_function`] — lets the reported error
-/// borrow for the full source-text lifetime `'src`, independent of the AST
-/// reference's (possibly shorter) borrow lifetime. The [`ASTVisitor`] trait
-/// ties [`Error`](ASTVisitor::Error) to a single lifetime shared with the
-/// node reference, so calling through the trait would constrain the error to
-/// the reborrow lifetime.
+/// implementation share a single source of truth.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text.
@@ -118,19 +113,19 @@ fn check_duplicate_parameters<'src>(
 {
 	if let Some(ref parameters) = ast.parameters
 	{
-		let mut seen: HashMap<&'src str, SourceSpan> =
+		let mut seen: HashMap<&str, SourceSpan> =
 			HashMap::with_capacity(parameters.len());
 		for param in parameters
 		{
-			if let Some(&first) = seen.get(param.name)
+			if let Some(&first) = seen.get(&*param.name)
 			{
 				return Err(CompilationError::DuplicateParameter {
-					name: param.name,
+					name: param.name.clone(),
 					first,
 					duplicate: param.span
 				});
 			}
-			seen.insert(param.name, param.span);
+			seen.insert(&param.name, param.span);
 		}
 	}
 	Ok(())
@@ -144,8 +139,9 @@ fn check_duplicate_parameters<'src>(
 /// when reporting an offending reference.
 ///
 /// # Type parameters
-/// - `'src`: The lifetime of the source text. Binding names and spans are
-///   borrowed directly from the source.
+/// - `'a`: The lifetime of the borrow of the AST. Binding names are borrowed
+///   from the AST.
+/// - `'src`: The lifetime of the source text.
 ///
 /// # Parameters
 /// - `ast`: The parsed function definition.
@@ -158,196 +154,48 @@ fn check_duplicate_parameters<'src>(
 ///   if a binding name matches a formal parameter name.
 /// * [`DuplicateBinding`](CompilationError::DuplicateBinding) if the same name
 ///   appears as a binding more than once in the function body.
-fn collect_bindings_and_check_collisions<'src>(
-	ast: &ast::Function<'src>
-) -> Result<HashMap<&'src str, SourceSpan>, CompilationError<'src>>
+fn collect_bindings_and_check_collisions<'a, 'src>(
+	ast: &'a ast::Function<'src>
+) -> Result<HashMap<&'a str, SourceSpan>, CompilationError<'src>>
 {
 	let parameter_spans = match ast.parameters
 	{
 		Some(ref parameters) => parameters
 			.iter()
-			.map(|p| (p.name, p.span))
+			.map(|p| (&*p.name, p.span))
 			.collect::<HashMap<_, _>>(),
 		None => HashMap::new()
 	};
-	let mut bindings: HashMap<&'src str, SourceSpan> = HashMap::new();
-	gather_bindings(&ast.body, &parameter_spans, &mut bindings)?;
-	Ok(bindings)
-}
-
-/// Recursively walk `expr` accumulating [binding](Binding) name spans into
-/// `bindings`, producing the collision errors described by
-/// [`collect_bindings_and_check_collisions`].
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `expr`: The expression to walk.
-/// - `parameters`: Formal-parameter names mapped to their declaration spans.
-/// - `bindings`: Accumulator for binding-site name spans, keyed by name.
-///
-/// # Errors
-/// See [`collect_bindings_and_check_collisions`].
-fn gather_bindings<'src>(
-	expr: &Expression<'src>,
-	parameters: &HashMap<&'src str, SourceSpan>,
-	bindings: &mut HashMap<&'src str, SourceSpan>
-) -> Result<(), CompilationError<'src>>
-{
-	match expr
+	let mut bindings: HashMap<&'a str, SourceSpan> = HashMap::new();
+	for event in Walk::new(Node::Expression(&ast.body))
 	{
-		Expression::Binding(b) =>
+		if let Event::Enter(Node::Expression(Expression::Binding(b))) = event
 		{
-			if let Some(&parameter) = parameters.get(b.name)
+			if let Some(&parameter) = parameter_spans.get(&*b.name)
 			{
 				return Err(CompilationError::BindingCollidesWithParameter {
-					name: b.name,
+					name: b.name.clone(),
 					parameter,
 					binding: b.name_span
 				});
 			}
-			if let Some(&first) = bindings.get(b.name)
+			if let Some(&first) = bindings.get(&*b.name)
 			{
 				return Err(CompilationError::DuplicateBinding {
-					name: b.name,
+					name: b.name.clone(),
 					first,
 					duplicate: b.name_span
 				});
 			}
-			// Walk the bound expression first so that a self-reference inside
-			// the RHS is recorded as a [binding](Binding) of the same name (via
-			// nested binding) or surfaces later as a use-before-bind, never as
-			// a duplicate against the binding we are about to add.
-			gather_bindings(&b.expression, parameters, bindings)?;
-			bindings.insert(b.name, b.name_span);
-		},
-		Expression::Group(g) =>
-		{
-			gather_bindings(&g.expression, parameters, bindings)?
-		},
-		Expression::Range(r) =>
-		{
-			gather_bindings(&r.start, parameters, bindings)?;
-			gather_bindings(&r.end, parameters, bindings)?;
-		},
-		Expression::Dice(d) => gather_dice_bindings(d, parameters, bindings)?,
-		Expression::Arithmetic(a) =>
-		{
-			gather_arithmetic_bindings(a, parameters, bindings)?
-		},
-		Expression::Variable(_) | Expression::Constant(_) =>
-		{}
-	}
-	Ok(())
-}
-
-/// Recursively collect [binding](Binding) name spans from a dice expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `dice`: The dice expression to walk.
-/// - `parameters`: Formal-parameter names mapped to their declaration spans.
-/// - `bindings`: Accumulator for binding-site name spans, keyed by name.
-///
-/// # Errors
-/// See [`collect_bindings_and_check_collisions`].
-fn gather_dice_bindings<'src>(
-	dice: &DiceExpression<'src>,
-	parameters: &HashMap<&'src str, SourceSpan>,
-	bindings: &mut HashMap<&'src str, SourceSpan>
-) -> Result<(), CompilationError<'src>>
-{
-	match dice
-	{
-		DiceExpression::Standard(d) =>
-		{
-			gather_bindings(&d.count, parameters, bindings)?;
-			gather_bindings(&d.faces, parameters, bindings)?;
-		},
-		DiceExpression::Custom(d) =>
-		{
-			gather_bindings(&d.count, parameters, bindings)?;
-		},
-		DiceExpression::DropLowest(d) =>
-		{
-			gather_dice_bindings(&d.dice, parameters, bindings)?;
-			if let Some(ref drop) = d.drop
-			{
-				gather_bindings(drop, parameters, bindings)?;
-			}
-		},
-		DiceExpression::DropHighest(d) =>
-		{
-			gather_dice_bindings(&d.dice, parameters, bindings)?;
-			if let Some(ref drop) = d.drop
-			{
-				gather_bindings(drop, parameters, bindings)?;
-			}
+			// Record the binding on entering it, before its bound
+			// expression, so that a binding of the same name nested
+			// within the bound expression is a duplicate of this one. A
+			// self-reference within the bound expression is a variable,
+			// not a binding, and surfaces as a use-before-bind instead.
+			bindings.insert(&b.name, b.name_span);
 		}
 	}
-	Ok(())
-}
-
-/// Recursively collect [binding](Binding) name spans from an arithmetic
-/// expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `arith`: The arithmetic expression to walk.
-/// - `parameters`: Formal-parameter names mapped to their declaration spans.
-/// - `bindings`: Accumulator for binding-site name spans, keyed by name.
-///
-/// # Errors
-/// See [`collect_bindings_and_check_collisions`].
-fn gather_arithmetic_bindings<'src>(
-	arith: &ArithmeticExpression<'src>,
-	parameters: &HashMap<&'src str, SourceSpan>,
-	bindings: &mut HashMap<&'src str, SourceSpan>
-) -> Result<(), CompilationError<'src>>
-{
-	match arith
-	{
-		ArithmeticExpression::Add(a) =>
-		{
-			gather_bindings(&a.left, parameters, bindings)?;
-			gather_bindings(&a.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Sub(s) =>
-		{
-			gather_bindings(&s.left, parameters, bindings)?;
-			gather_bindings(&s.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Mul(m) =>
-		{
-			gather_bindings(&m.left, parameters, bindings)?;
-			gather_bindings(&m.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Div(d) =>
-		{
-			gather_bindings(&d.left, parameters, bindings)?;
-			gather_bindings(&d.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Mod(m) =>
-		{
-			gather_bindings(&m.left, parameters, bindings)?;
-			gather_bindings(&m.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Exp(e) =>
-		{
-			gather_bindings(&e.left, parameters, bindings)?;
-			gather_bindings(&e.right, parameters, bindings)?;
-		},
-		ArithmeticExpression::Neg(n) =>
-		{
-			gather_bindings(&n.operand, parameters, bindings)?
-		},
-	}
-	Ok(())
+	Ok(bindings)
 }
 
 /// Walk the body of a function in lexical order, rejecting any
@@ -358,6 +206,7 @@ fn gather_arithmetic_bindings<'src>(
 /// — the sole mechanism by which self-reference is rejected.
 ///
 /// # Type parameters
+/// - `'a`: The lifetime of the borrow of the function body.
 /// - `'src`: The lifetime of the source text.
 ///
 /// # Parameters
@@ -368,179 +217,39 @@ fn gather_arithmetic_bindings<'src>(
 /// # Errors
 /// [`UseBeforeBind`](CompilationError::UseBeforeBind) at the first offending
 /// reference encountered in a left-to-right, depth-first walk.
-fn check_use_before_bind<'src>(
-	body: &Expression<'src>,
-	bindings: &HashMap<&'src str, SourceSpan>
+fn check_use_before_bind<'a, 'src>(
+	body: &'a Expression<'src>,
+	bindings: &HashMap<&'a str, SourceSpan>
 ) -> Result<(), CompilationError<'src>>
 {
-	let mut seen: HashSet<&'src str> = HashSet::new();
-	walk_use_before_bind(body, bindings, &mut seen)
-}
-
-/// Recursive implementation of [`check_use_before_bind`]. `seen` grows as
-/// bindings are encountered during the left-to-right walk; a reference to a
-/// name that appears in `bindings` but not yet in `seen` is a use-before-bind
-/// error. Names not in `bindings` at all are not local bindings and flow
-/// through to the compiler as external variables or parameters.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `expr`: The expression to walk.
-/// - `bindings`: Binding-site name spans, keyed by name.
-/// - `seen`: The set of binding names encountered so far in the walk.
-///
-/// # Errors
-/// See [`check_use_before_bind`].
-fn walk_use_before_bind<'src>(
-	expr: &Expression<'src>,
-	bindings: &HashMap<&'src str, SourceSpan>,
-	seen: &mut HashSet<&'src str>
-) -> Result<(), CompilationError<'src>>
-{
-	match expr
+	// The names of the bindings reached so far. A reference to a name that
+	// appears in `bindings` but not yet here is a use-before-bind error. Names
+	// not in `bindings` at all are not local bindings, and flow through to the
+	// compiler as external variables or parameters.
+	let mut seen: HashSet<&'a str> = HashSet::new();
+	for event in Walk::new(Node::Expression(body))
 	{
-		Expression::Variable(v) =>
+		match event
 		{
-			if let Some(&binding_span) = bindings.get(v.name)
-				&& !seen.contains(v.name)
+			Event::Enter(Node::Expression(Expression::Variable(v))) =>
 			{
-				return Err(CompilationError::UseBeforeBind {
-					name: v.name,
-					reference: v.span,
-					binding: binding_span
-				});
-			}
-		},
-		Expression::Binding(b) =>
-		{
-			walk_use_before_bind(&b.expression, bindings, seen)?;
-			seen.insert(b.name);
-		},
-		Expression::Group(g) =>
-		{
-			walk_use_before_bind(&g.expression, bindings, seen)?
-		},
-		Expression::Range(r) =>
-		{
-			walk_use_before_bind(&r.start, bindings, seen)?;
-			walk_use_before_bind(&r.end, bindings, seen)?;
-		},
-		Expression::Dice(d) => walk_dice_use_before_bind(d, bindings, seen)?,
-		Expression::Arithmetic(a) =>
-		{
-			walk_arithmetic_use_before_bind(a, bindings, seen)?
-		},
-		Expression::Constant(_) =>
-		{}
-	}
-	Ok(())
-}
-
-/// Recursively check use-before-bind in a dice expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `dice`: The dice expression to walk.
-/// - `bindings`: Binding-site name spans, keyed by name.
-/// - `seen`: The set of binding names encountered so far in the walk.
-///
-/// # Errors
-/// See [`check_use_before_bind`].
-fn walk_dice_use_before_bind<'src>(
-	dice: &DiceExpression<'src>,
-	bindings: &HashMap<&'src str, SourceSpan>,
-	seen: &mut HashSet<&'src str>
-) -> Result<(), CompilationError<'src>>
-{
-	match dice
-	{
-		DiceExpression::Standard(d) =>
-		{
-			walk_use_before_bind(&d.count, bindings, seen)?;
-			walk_use_before_bind(&d.faces, bindings, seen)?;
-		},
-		DiceExpression::Custom(d) =>
-		{
-			walk_use_before_bind(&d.count, bindings, seen)?;
-		},
-		DiceExpression::DropLowest(d) =>
-		{
-			walk_dice_use_before_bind(&d.dice, bindings, seen)?;
-			if let Some(ref drop) = d.drop
+				if let Some(&binding_span) = bindings.get(&*v.name)
+					&& !seen.contains(&*v.name)
+				{
+					return Err(CompilationError::UseBeforeBind {
+						name: v.name.clone(),
+						reference: v.span,
+						binding: binding_span
+					});
+				}
+			},
+			Event::Leave(Node::Expression(Expression::Binding(b))) =>
 			{
-				walk_use_before_bind(drop, bindings, seen)?;
-			}
-		},
-		DiceExpression::DropHighest(d) =>
-		{
-			walk_dice_use_before_bind(&d.dice, bindings, seen)?;
-			if let Some(ref drop) = d.drop
-			{
-				walk_use_before_bind(drop, bindings, seen)?;
-			}
+				seen.insert(&b.name);
+			},
+			_ =>
+			{}
 		}
-	}
-	Ok(())
-}
-
-/// Recursively check use-before-bind in an arithmetic expression.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `arith`: The arithmetic expression to walk.
-/// - `bindings`: Binding-site name spans, keyed by name.
-/// - `seen`: The set of binding names encountered so far in the walk.
-///
-/// # Errors
-/// See [`check_use_before_bind`].
-fn walk_arithmetic_use_before_bind<'src>(
-	arith: &ArithmeticExpression<'src>,
-	bindings: &HashMap<&'src str, SourceSpan>,
-	seen: &mut HashSet<&'src str>
-) -> Result<(), CompilationError<'src>>
-{
-	match arith
-	{
-		ArithmeticExpression::Add(a) =>
-		{
-			walk_use_before_bind(&a.left, bindings, seen)?;
-			walk_use_before_bind(&a.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Sub(s) =>
-		{
-			walk_use_before_bind(&s.left, bindings, seen)?;
-			walk_use_before_bind(&s.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Mul(m) =>
-		{
-			walk_use_before_bind(&m.left, bindings, seen)?;
-			walk_use_before_bind(&m.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Div(d) =>
-		{
-			walk_use_before_bind(&d.left, bindings, seen)?;
-			walk_use_before_bind(&d.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Mod(m) =>
-		{
-			walk_use_before_bind(&m.left, bindings, seen)?;
-			walk_use_before_bind(&m.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Exp(e) =>
-		{
-			walk_use_before_bind(&e.left, bindings, seen)?;
-			walk_use_before_bind(&e.right, bindings, seen)?;
-		},
-		ArithmeticExpression::Neg(n) =>
-		{
-			walk_use_before_bind(&n.operand, bindings, seen)?
-		},
 	}
 	Ok(())
 }
@@ -549,35 +258,46 @@ fn walk_arithmetic_use_before_bind<'src>(
 //                         ASTVisitor for Validator.                          //
 ////////////////////////////////////////////////////////////////////////////////
 
-impl<'src> ASTVisitor<'src> for Validator
+impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator
 {
 	type Error = CompilationError<'src>;
 	type Output = ();
 
-	fn visit_function(
+	fn enter_function(
 		&mut self,
-		node: &'src ast::Function<'src>
+		node: &'a ast::Function<'src>
 	) -> Result<(), Self::Error>
 	{
 		check_duplicate_parameters(node)
 	}
 
-	fn visit_group(
+	fn visit_function(
 		&mut self,
-		_node: &'src Group<'src>
+		_node: &'a ast::Function<'src>,
+		_body: ()
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_constant(&mut self, _node: &Constant) -> Result<(), Self::Error>
+	fn visit_group(
+		&mut self,
+		_node: &'a Group<'src>,
+		_expression: ()
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	fn visit_constant(&mut self, _node: &'a Constant)
+	-> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
 	fn visit_variable(
 		&mut self,
-		_node: &'src Variable<'src>
+		_node: &'a Variable<'src>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -585,7 +305,8 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_binding(
 		&mut self,
-		_node: &'src Binding<'src>
+		_node: &'a Binding<'src>,
+		_expression: ()
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -593,7 +314,9 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_range(
 		&mut self,
-		_node: &'src Range<'src>
+		_node: &'a Range<'src>,
+		_start: (),
+		_end: ()
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -601,7 +324,9 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_standard_dice(
 		&mut self,
-		_node: &'src StandardDice<'src>
+		_node: &'a StandardDice<'src>,
+		_count: (),
+		_faces: ()
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -609,7 +334,8 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_custom_dice(
 		&mut self,
-		_node: &'src CustomDice<'src>
+		_node: &'a CustomDice<'src>,
+		_count: ()
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -617,7 +343,9 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_drop_lowest(
 		&mut self,
-		_node: &'src DropLowest<'src>
+		_node: &'a DropLowest<'src>,
+		_dice: (),
+		_drop: Option<()>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -625,43 +353,79 @@ impl<'src> ASTVisitor<'src> for Validator
 
 	fn visit_drop_highest(
 		&mut self,
-		_node: &'src DropHighest<'src>
+		_node: &'a DropHighest<'src>,
+		_dice: (),
+		_drop: Option<()>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_add(&mut self, _node: &'src Add<'src>) -> Result<(), Self::Error>
+	fn visit_add(
+		&mut self,
+		_node: &'a Add<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_sub(&mut self, _node: &'src Sub<'src>) -> Result<(), Self::Error>
+	fn visit_sub(
+		&mut self,
+		_node: &'a Sub<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_mul(&mut self, _node: &'src Mul<'src>) -> Result<(), Self::Error>
+	fn visit_mul(
+		&mut self,
+		_node: &'a Mul<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_div(&mut self, _node: &'src Div<'src>) -> Result<(), Self::Error>
+	fn visit_div(
+		&mut self,
+		_node: &'a Div<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_mod(&mut self, _node: &'src Mod<'src>) -> Result<(), Self::Error>
+	fn visit_mod(
+		&mut self,
+		_node: &'a Mod<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_exp(&mut self, _node: &'src Exp<'src>) -> Result<(), Self::Error>
+	fn visit_exp(
+		&mut self,
+		_node: &'a Exp<'src>,
+		_left: (),
+		_right: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
 
-	fn visit_neg(&mut self, _node: &'src Neg<'src>) -> Result<(), Self::Error>
+	fn visit_neg(
+		&mut self,
+		_node: &'a Neg<'src>,
+		_operand: ()
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}

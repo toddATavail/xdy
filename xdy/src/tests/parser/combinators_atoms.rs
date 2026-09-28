@@ -1,7 +1,10 @@
 //! # Atom combinator test cases
 //!
 //! Herein are the test cases for the atom-level combinators: [`constant`],
-//! [`d_operator`], [`identifier`], [`alpha`], and [`alphanumeric1`].
+//! [`d_operator`], [`identifier`], [`alpha`], and [`alphanumeric1`], and the
+//! identifier character set.
+
+use std::borrow::Cow;
 
 use crate::{
 	ast::*,
@@ -184,30 +187,43 @@ fn test_identifier()
 		("hello123", "hello123"),
 		("hello_world", "hello_world"),
 		("hello-world", "hello-world"),
-		("_hello", "_hello"),
 		("_", "_"),
-		("h3llo_w0rld-123_test", "h3llo_w0rld-123_test"),
 		("αβγ", "αβγ"),
-		("_123", "_123"),
 		("a", "a"),
 		("hello world", "hello world"),
-		("hello.world", "hello.world"),
 		("an external variable", "an external variable"),
-		("a.b.c", "a.b.c"),
-		// Sigil start characters.
-		("$env", "$env"),
-		("#tag", "#tag"),
-		("'quoted", "'quoted"),
-		("_leading", "_leading"),
-		// Selector / suffix continuation characters.
-		("env|selector", "env|selector"),
-		("ready?", "ready?"),
-		("bang!", "bang!"),
-		("approx~", "approx~"),
-		("price$usd", "price$usd"),
-		("a#b|c", "a#b|c"),
-		("has'apostrophe", "has'apostrophe"),
-		("$env|weapon", "$env|weapon")
+		// Interior whitespace is exactly as written.
+		("a  b", "a  b"),
+		("a\tb", "a\tb"),
+		("a\n   b", "a\n   b"),
+		("a\u{00A0}b", "a\u{00A0}b"),
+		("a\u{2028}b", "a\u{2028}b"),
+		// Trailing whitespace is not part of the identifier.
+		("a b ", "a b"),
+		("a b\t\n", "a b"),
+		("a\u{00A0}", "a"),
+		// Any visible character, other than a brace.
+		("123hello", "123hello"),
+		("-1", "-1"),
+		("0", "0"),
+		("weapon: 2/3", "weapon: 2/3"),
+		("hello@world", "hello@world"),
+		("f(x), g[y]", "f(x), g[y]"),
+		("1d6 drop lowest", "1d6 drop lowest"),
+		("$env|weapon", "$env|weapon"),
+		("|selector", "|selector"),
+		("日本語", "日本語"),
+		("🎲", "🎲"),
+		// Joiners join visible characters.
+		("👨\u{200D}👩\u{200D}👧", "👨\u{200D}👩\u{200D}👧"),
+		("می\u{200C}خواهم", "می\u{200C}خواهم"),
+		// An excluded character ends the identifier.
+		("a}", "a"),
+		("a{", "a"),
+		("a\u{0}b", "a"),
+		("a\u{1B}b", "a"),
+		("a\u{200B}b", "a"),
+		("a\u{202E}b", "a")
 	]
 	{
 		let span = Span::new(input);
@@ -216,89 +232,145 @@ fn test_identifier()
 			Ok(result) => assert_eq!(
 				result.1.fragment(),
 				&expected,
-				"Failed for input: {}",
+				"Failed for input: {:?}",
 				input
 			),
-			Err(e) => panic!("Parsing failed for input: {}: {}", input, e)
+			Err(e) => panic!("Parsing failed for input: {:?}: {}", input, e)
 		}
 	}
 
 	// Test cases that should fail
 	for input in [
-		"123hello",
-		"-hello",
-		" hello",
 		"",
-		"hello@world",
-		"x ",
-		// Continuation-only characters may not start an identifier.
-		"|selector",
-		"?ready",
-		"!bang",
-		"~approx",
-		".dotted",
-		"-dashed"
+		" ",
+		" hello",
+		"\nhello",
+		"\u{00A0}hello",
+		"}",
+		"{",
+		"\t",
+		"\u{00A0}",
+		"\u{0085}",
+		"\u{0}",
+		"\u{200B}",
+		"\u{FEFF}",
+		"\u{2066}"
 	]
 	{
 		let span = Span::new(input);
-		let result = identifier(span);
 		assert!(
-			result.is_err() || !result.unwrap().0.fragment().is_empty(),
-			"Failed to reject invalid input: {}",
+			identifier(span).is_err(),
+			"Failed to reject invalid input: {:?}",
 			input
 		);
 	}
 }
 
-/// Ensure that [`is_identifier_start`] and [`is_identifier_continue`] classify
-/// characters as the shared source of truth for the identifier grammar.
+/// Ensure that [`is_identifier_char`] classifies characters as the shared
+/// source of truth for the identifier grammar, and that [`is_canonical_name`]
+/// accepts exactly the canonical identifiers.
 #[test]
 fn test_identifier_char_classes()
 {
-	// Start characters: Unicode letters plus the four sigils.
-	for c in ['a', 'Z', 'δ', 'Ⅻ' /* Nl letter */, '_', '$', '#', '\'']
-	{
-		assert!(
-			is_identifier_start(c),
-			"expected {:?} to be an identifier start",
-			c
-		);
-		assert!(
-			is_identifier_continue(c),
-			"every start character must also continue: {:?}",
-			c
-		);
-	}
-
-	// Continuation-only characters.
+	// Letters, digits, sigils, operators, delimiters other than braces,
+	// symbols, the joiners, and whitespace of every kind.
 	for c in [
-		'0', '9', '²', // No numeric
-		'-', '.', '|', '?', '!', '~', ' ', '\t'
+		'a', 'Z', 'δ', 'Ⅻ', '0', '²', '_', '$', '#', '\'', '-', '.', '|', '?',
+		'!', '~', '@', ',', ':', '/', '(', ')', '[', ']', '+', '*', '^', '%',
+		'×', '÷', '🎲', '\u{200C}', '\u{200D}', '\u{FE0F}',
+		// Whitespace, including the whitespace control characters.
+		' ', '\t', '\n', '\r', '\u{0B}', '\u{0C}', '\u{85}', '\u{A0}',
+		'\u{1680}', '\u{2000}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}',
+		'\u{205F}', '\u{3000}'
 	]
 	{
 		assert!(
-			is_identifier_continue(c),
-			"expected {:?} to continue an identifier",
-			c
-		);
-	}
-	for c in ['0', '-', '.', '|', '?', '!', '~', ' ', '\t']
-	{
-		assert!(
-			!is_identifier_start(c),
-			"expected {:?} not to start an identifier",
+			is_identifier_char(c),
+			"expected {:?} to be an identifier character",
 			c
 		);
 	}
 
-	// Neither: structural characters and the excluded vertical whitespace.
-	for c in ['@', ',', ':', '(', ')', '[', ']', '{', '}', '\n', '\r']
+	for c in [
+		// The braces.
+		'{', '}', // Control characters (Cc) other than whitespace.
+		'\0', '\u{1B}', '\u{7F}', '\u{9F}',
+		// Bidirectional formatting controls.
+		'\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}',
+		'\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+		// Other invisible characters.
+		'\u{00AD}', '\u{115F}', '\u{1160}', '\u{180E}', '\u{200B}', '\u{2060}',
+		'\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{3164}', '\u{FEFF}',
+		'\u{FFA0}'
+	]
 	{
 		assert!(
-			!is_identifier_start(c) && !is_identifier_continue(c),
+			!is_identifier_char(c),
 			"expected {:?} to be excluded from identifiers",
 			c
 		);
+	}
+
+	for name in [
+		"a",
+		"a b",
+		"a b c",
+		"weapon: 2/3",
+		"-1",
+		"🎲",
+		"👨\u{200D}👩"
+	]
+	{
+		assert!(is_canonical_name(name), "Failed to accept {:?}", name);
+	}
+	for name in [
+		"",
+		" ",
+		" a",
+		"a ",
+		"a  b",
+		"a\tb",
+		"a\nb",
+		"a\u{00A0}b",
+		"a}",
+		"{x",
+		"a\u{0}b",
+		"\u{200B}"
+	]
+	{
+		assert!(!is_canonical_name(name), "Failed to reject {:?}", name);
+	}
+}
+
+/// Ensure that [`canonical_name`] trims a name and collapses every run of
+/// whitespace within it to a single space, borrowing the name whenever it is
+/// already canonical.
+#[test]
+fn test_canonical_name()
+{
+	for (name, expected, borrowed) in [
+		("a", "a", true),
+		("a b", "a b", true),
+		("a b c", "a b c", true),
+		("weapon: 2/3", "weapon: 2/3", true),
+		("a  b", "a b", false),
+		("a\tb", "a b", false),
+		("a\n   b", "a b", false),
+		("a\r\nb c", "a b c", false),
+		("a\u{00A0}b", "a b", false),
+		("a \u{2028} b", "a b", false),
+		(" a ", "a", false)
+	]
+	{
+		let canonical = canonical_name(name);
+		assert_eq!(canonical, expected, "Failed for {:?}", name);
+		assert_eq!(
+			matches!(canonical, Cow::Borrowed(_)),
+			borrowed,
+			"Wrong ownership for {:?}",
+			name
+		);
+		assert!(is_canonical_name(&canonical), "Failed for {:?}", name);
 	}
 }
 

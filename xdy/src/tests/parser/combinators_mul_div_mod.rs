@@ -39,11 +39,49 @@ fn test_mul_div_mod()
 			}))
 		),
 		(
+			"--0",
+			"0",
+			Expression::Constant(Constant {
+				value: 0,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"- - 0",
+			"0",
+			Expression::Constant(Constant {
+				value: 0,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"---0",
+			"0",
+			Expression::Constant(Constant {
+				value: 0,
+				span: SourceSpan::default()
+			})
+		),
+		(
+			"-(0)",
+			"-(0)",
+			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
+				operand: Box::new(Expression::Group(Group {
+					expression: Box::new(Expression::Constant(Constant {
+						value: 0,
+						span: SourceSpan::default()
+					})),
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
+			}))
+		),
+		(
 			"-{x}",
 			"-{x}",
 			Expression::Arithmetic(ArithmeticExpression::Neg(Neg {
 				operand: Box::new(Expression::Variable(Variable {
-					name: "x",
+					name: "x".into(),
 					span: SourceSpan::default()
 				})),
 				span: SourceSpan::default()
@@ -152,7 +190,7 @@ fn test_mul_div_mod()
 			"{x} ^ 2",
 			Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
 				left: Box::new(Expression::Variable(Variable {
-					name: "x",
+					name: "x".into(),
 					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Constant(Constant {
@@ -479,7 +517,7 @@ fn test_mul_div_mod()
 			"{x} * 2",
 			Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
 				left: Box::new(Expression::Variable(Variable {
-					name: "x",
+					name: "x".into(),
 					span: SourceSpan::default()
 				})),
 				right: Box::new(Expression::Constant(Constant {

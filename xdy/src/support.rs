@@ -3,8 +3,20 @@
 //! This module provides support for testing and benchmarking.
 
 use std::num::IntErrorKind;
+#[cfg(test)]
+use std::{
+	env,
+	fmt::{self, Display, Formatter},
+	io::Read,
+	panic,
+	process::{Command, ExitStatus, Stdio},
+	thread::{self, JoinHandle},
+	time::{Duration, Instant}
+};
 
-use crate::{Function, Optimizer as _, Passes, StandardOptimizer, compile};
+use crate::{
+	Function, Optimizer as _, Passes, StandardOptimizer, compile_unoptimized
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                            Compilation support.                            //
@@ -58,15 +70,17 @@ pub fn read_compilation_test_cases(
 }
 
 /// Compile the specified valid dice source code into a [function](Function).
+/// Do not optimize the function, so that tests and benchmarks can apply
+/// exactly the passes that they exercise.
 ///
 /// # Parameters
 /// - `source`: The source code to compile.
 ///
 /// # Returns
-/// The compiled function.
+/// The compiled, unoptimized function.
 pub fn compile_valid(source: &str) -> Function
 {
-	match compile(source)
+	match compile_unoptimized(source)
 	{
 		Ok(function) => function,
 		Err(e) => panic!("compilation error: {e}")
@@ -616,4 +630,413 @@ fn parse_expected_placeholder(text: &'static str) -> ExpectedPlaceholder
 		description,
 		valid_kinds
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                            Small-stack support.                            //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The stack size, in bytes, of the thread on which [`on_small_stack`] runs its
+/// closure: 2 MiB, the default stack size of a spawned Rust thread. Code that
+/// passes on a stack this small does not lean on the larger stack of a typical
+/// main thread.
+#[cfg(test)]
+pub const SMALL_STACK_SIZE: usize = 2 * 1024 * 1024;
+
+/// The default time budget of [`on_small_stack`]. It is a safety net for the
+/// test suite, not a limit on `xDy`: it turns a hang into a failure.
+#[cfg(test)]
+pub const SMALL_STACK_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The environment variable that marks a child process of
+/// [`try_on_small_stack`]. Its value is the name of the test that the child
+/// runs.
+#[cfg(test)]
+const SMALL_STACK_CHILD: &str = "XDY_SMALL_STACK_CHILD";
+
+/// The line that a child process prints to its standard output after its
+/// closure returns normally. Its absence means that the child never ran the
+/// closure, e.g., because the test filter matched nothing.
+#[cfg(test)]
+const SMALL_STACK_MARKER: &str = "xdy-small-stack: closure returned";
+
+/// The ways that [`try_on_small_stack`] can fail. Each variant carries the
+/// transcript of the child process's standard output and standard error.
+#[cfg(test)]
+#[derive(Debug)]
+pub enum SmallStackFailure
+{
+	/// The closure panicked, e.g., because an assertion failed.
+	Panicked
+	{
+		/// The child's output.
+		transcript: String
+	},
+
+	/// The closure overflowed the small stack.
+	Overflowed
+	{
+		/// The child's output.
+		transcript: String
+	},
+
+	/// The child did not finish within the time budget, so it was killed.
+	TimedOut
+	{
+		/// The time budget.
+		timeout: Duration,
+
+		/// The child's output.
+		transcript: String
+	},
+
+	/// The child terminated in some other abnormal way.
+	Abnormal
+	{
+		/// The child's exit status.
+		status: ExitStatus,
+
+		/// The child's output.
+		transcript: String
+	},
+
+	/// The child exited successfully without running the closure.
+	NotRun
+	{
+		/// The child's output.
+		transcript: String
+	}
+}
+
+#[cfg(test)]
+impl Display for SmallStackFailure
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		let transcript = match self
+		{
+			SmallStackFailure::Panicked { transcript } =>
+			{
+				writeln!(f, "the closure panicked on the small stack")?;
+				transcript
+			},
+			SmallStackFailure::Overflowed { transcript } =>
+			{
+				writeln!(
+					f,
+					"the closure overflowed the small stack ({} bytes)",
+					SMALL_STACK_SIZE
+				)?;
+				transcript
+			},
+			SmallStackFailure::TimedOut {
+				timeout,
+				transcript
+			} =>
+			{
+				writeln!(
+					f,
+					"the closure did not finish within {:?}: either it runs in \
+					 super-linear time, or it overflowed the stack on a host \
+					 where an overflow hangs instead of aborting",
+					timeout
+				)?;
+				transcript
+			},
+			SmallStackFailure::Abnormal { status, transcript } =>
+			{
+				writeln!(f, "the child terminated abnormally: {}", status)?;
+				transcript
+			},
+			SmallStackFailure::NotRun { transcript } =>
+			{
+				writeln!(
+					f,
+					"the child exited successfully without running the \
+					 closure; did the test filter match nothing?"
+				)?;
+				transcript
+			}
+		};
+		write!(f, "{}", transcript)
+	}
+}
+
+/// Run the specified closure on a [small stack](SMALL_STACK_SIZE) in a child
+/// process, within the [default time budget](SMALL_STACK_TIMEOUT).
+///
+/// # Parameters
+/// - `f`: The closure to run.
+///
+/// # Panics
+/// If the closure panics, overflows the stack, or does not finish in time. See
+/// [`try_on_small_stack`] for details.
+///
+/// # Examples
+/// ```ignore
+/// #[test]
+/// fn test_deep_group()
+/// {
+///     let source = format!("{}1{}", "(".repeat(100_000), ")".repeat(100_000));
+///     on_small_stack(move || assert!(Parser::parse(&source).is_ok()));
+/// }
+/// ```
+#[cfg(test)]
+pub fn on_small_stack<F>(f: F)
+where
+	F: FnOnce() + Send
+{
+	on_small_stack_within(SMALL_STACK_TIMEOUT, f)
+}
+
+/// Run the specified closure on a [small stack](SMALL_STACK_SIZE) in a child
+/// process, within the specified time budget.
+///
+/// # Parameters
+/// - `timeout`: The time budget.
+/// - `f`: The closure to run.
+///
+/// # Panics
+/// If the closure panics, overflows the stack, or does not finish in time. See
+/// [`try_on_small_stack`] for details.
+#[cfg(test)]
+pub fn on_small_stack_within<F>(timeout: Duration, f: F)
+where
+	F: FnOnce() + Send
+{
+	if let Err(failure) = try_on_small_stack(timeout, f)
+	{
+		panic!("{}", failure)
+	}
+}
+
+/// Run the specified closure on a [small stack](SMALL_STACK_SIZE) in a child
+/// process, within the specified time budget, and report how it fared.
+///
+/// A stack overflow cannot be caught: it aborts the whole process on Linux and
+/// Windows, and on macOS it hangs forever if an ancestor process installed a
+/// buggy Mach exception handler. So the closure runs in a child process, and
+/// only the child dies or hangs. The child is the current test binary,
+/// restricted to the calling test. It recognizes itself by an environment
+/// variable, runs the closure on a thread with a small stack, and prints a
+/// marker if the closure returns. The parent classifies the child's fate.
+///
+/// ```mermaid
+/// sequenceDiagram
+///     participant P as Parent test
+///     participant C as Child test binary
+///     participant T as Small-stack thread
+///     P->>C: spawn(current_exe, --exact <test>, XDY_SMALL_STACK_CHILD)
+///     C->>T: spawn with SMALL_STACK_SIZE
+///     T->>T: run the closure
+///     alt the closure returns
+///         T-->>C: Ok
+///         C-->>P: print the marker, exit 0
+///     else the closure panics
+///         T-->>C: Err(payload)
+///         C-->>P: resume the panic, exit 101
+///     else the closure overflows
+///         T-->>P: abort, "has overflowed its stack"
+///     else the time budget expires
+///         P->>C: kill
+///     end
+///     P->>P: classify the exit status and the transcript
+/// ```
+///
+/// # Parameters
+/// - `timeout`: The time budget.
+/// - `f`: The closure to run. It runs only in the child.
+///
+/// # Returns
+/// `Ok(())` if the closure returned normally.
+///
+/// # Errors
+/// * [`Panicked`](SmallStackFailure::Panicked) if the closure panicked.
+/// * [`Overflowed`](SmallStackFailure::Overflowed) if the closure overflowed
+///   the stack.
+/// * [`TimedOut`](SmallStackFailure::TimedOut) if the child did not finish
+///   within the time budget.
+/// * [`Abnormal`](SmallStackFailure::Abnormal) if the child terminated in some
+///   other abnormal way.
+/// * [`NotRun`](SmallStackFailure::NotRun) if the child never ran the closure.
+///
+/// # Panics
+/// If the caller is not a `libtest` test thread, whose name is the path of the
+/// test, or if the child process cannot be spawned.
+///
+/// # Notes
+/// In the child, this function returns only if the closure returned normally.
+#[cfg(test)]
+#[cfg_attr(doc, aquamarine::aquamarine)]
+pub fn try_on_small_stack<F>(
+	timeout: Duration,
+	f: F
+) -> Result<(), SmallStackFailure>
+where
+	F: FnOnce() + Send
+{
+	let test = thread::current()
+		.name()
+		.filter(|name| *name != "main")
+		.expect("the caller must be a libtest test thread")
+		.to_owned();
+	match env::var(SMALL_STACK_CHILD)
+	{
+		Ok(child) if child == test =>
+		{
+			run_small_stack_child(f);
+			Ok(())
+		},
+		Ok(child) => panic!(
+			"small-stack child for `{}` reached `{}` instead",
+			child, test
+		),
+		Err(_) => run_small_stack_parent(&test, timeout)
+	}
+}
+
+/// Run the specified closure on a [small stack](SMALL_STACK_SIZE), as the
+/// child process of [`try_on_small_stack`]. Print the
+/// [marker](SMALL_STACK_MARKER) if the closure returns normally, and resume
+/// its panic otherwise.
+///
+/// # Parameters
+/// - `f`: The closure to run.
+///
+/// # Panics
+/// If the closure panics, or if the thread cannot be spawned.
+#[cfg(test)]
+fn run_small_stack_child<F>(f: F)
+where
+	F: FnOnce() + Send
+{
+	let outcome = thread::scope(|scope| {
+		thread::Builder::new()
+			.name("xdy-small-stack".to_owned())
+			.stack_size(SMALL_STACK_SIZE)
+			.spawn_scoped(scope, f)
+			.expect("failed to spawn the small-stack thread")
+			.join()
+	});
+	match outcome
+	{
+		Ok(()) => println!("{}", SMALL_STACK_MARKER),
+		Err(payload) => panic::resume_unwind(payload)
+	}
+}
+
+/// Run the specified test in a child process, as the parent side of
+/// [`try_on_small_stack`], and classify the child's fate.
+///
+/// # Parameters
+/// - `test`: The path of the test.
+/// - `timeout`: The time budget.
+///
+/// # Returns
+/// `Ok(())` if the child's closure returned normally.
+///
+/// # Errors
+/// See [`try_on_small_stack`].
+///
+/// # Panics
+/// If the child process cannot be spawned or awaited.
+#[cfg(test)]
+fn run_small_stack_parent(
+	test: &str,
+	timeout: Duration
+) -> Result<(), SmallStackFailure>
+{
+	let executable =
+		env::current_exe().expect("failed to locate the test executable");
+	let mut child = Command::new(executable)
+		.args([
+			test,
+			"--exact",
+			"--nocapture",
+			"--include-ignored",
+			"--test-threads=1"
+		])
+		.env(SMALL_STACK_CHILD, test)
+		.stdin(Stdio::null())
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.spawn()
+		.expect("failed to spawn the small-stack child");
+	let stdout = drain(child.stdout.take().expect("stdout is piped"));
+	let stderr = drain(child.stderr.take().expect("stderr is piped"));
+	let deadline = Instant::now() + timeout;
+	let status = loop
+	{
+		if let Some(status) = child
+			.try_wait()
+			.expect("failed to await the small-stack child")
+		{
+			break Some(status)
+		}
+		if Instant::now() >= deadline
+		{
+			// The child may exit on its own before the kill lands, so ignore
+			// the error; the wait reaps it either way.
+			let _ = child.kill();
+			let _ = child.wait();
+			break None
+		}
+		thread::sleep(Duration::from_millis(10));
+	};
+	let stdout = stdout.join().expect("the stdout reader panicked");
+	let stderr = stderr.join().expect("the stderr reader panicked");
+	let transcript = format!(
+		"--- child stdout ---\n{}\n--- child stderr ---\n{}",
+		stdout, stderr
+	);
+	match status
+	{
+		None => Err(SmallStackFailure::TimedOut {
+			timeout,
+			transcript
+		}),
+		Some(status) if status.success() =>
+		{
+			// libtest's progress line, e.g., "test name ... ", has no newline
+			// yet when the child prints the marker, so search rather than
+			// match whole lines.
+			if stdout.contains(SMALL_STACK_MARKER)
+			{
+				Ok(())
+			}
+			else
+			{
+				Err(SmallStackFailure::NotRun { transcript })
+			}
+		},
+		Some(_) if stderr.contains("has overflowed its stack") =>
+		{
+			Err(SmallStackFailure::Overflowed { transcript })
+		},
+		// 101 is the exit code of a test binary whose test failed.
+		Some(status) if status.code() == Some(101) =>
+		{
+			Err(SmallStackFailure::Panicked { transcript })
+		},
+		Some(status) => Err(SmallStackFailure::Abnormal { status, transcript })
+	}
+}
+
+/// Read the specified pipe to its end on a new thread, so that a chatty child
+/// cannot block on a full pipe.
+///
+/// # Parameters
+/// - `pipe`: The pipe to read.
+///
+/// # Returns
+/// A handle whose result is the pipe's contents, decoded lossily as UTF-8.
+#[cfg(test)]
+fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<String>
+{
+	thread::spawn(move || {
+		let mut bytes = Vec::new();
+		// A read error just truncates the transcript, which is diagnostic.
+		let _ = pipe.read_to_end(&mut bytes);
+		String::from_utf8_lossy(&bytes).into_owned()
+	})
 }

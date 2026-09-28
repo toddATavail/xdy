@@ -27,7 +27,7 @@
 //! parameters        ::= named_reg ("," named_reg)*
 //! extern_line       ::= "extern[" externals? "]" EOL
 //! externals         ::= named_reg ("," named_reg)*
-//! named_reg         ::= NAME "@" INDEX
+//! named_reg         ::= "{" NAME "}" "@" INDEX
 //! body_header       ::= "body:" EOL
 //! instruction_line  ::= instruction EOL
 //! instruction       ::= roll_range | roll_standard_dice | roll_custom_dice
@@ -44,12 +44,11 @@
 //! unary_neg         ::= "@" INDEX "<-" "-" op
 //! return_inst       ::= "return" op
 //! op                ::= INTEGER | "@" INDEX
-//! NAME              ::= any run of characters other than "@", ",", ")",
-//!                         "]", "\t", "\r", "\n"; trimmed of leading and
-//!                         trailing ASCII whitespace
+//! NAME              ::= any run of characters other than "{", "}", "\r",
+//!                         "\n"
 //! INDEX             ::= DIGIT+
 //! INTEGER           ::= "-"? DIGIT+
-//! BINARY_OP         ::= "+" | "-" | "*" | "/" | "%" | "^"
+//! BINARY_OP         ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
 //! EOL               ::= "\n" | "\r\n"
 //! ```
 //!
@@ -94,7 +93,7 @@
 //! use xdy::Function;
 //!
 //! let text = "\
-//! Function(x@0) r#1 ⚅#0
+//! Function({x}@0) r#1 ⚅#0
 //! \textern[]
 //! \tbody:
 //! \t\treturn @0
@@ -114,7 +113,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::{tag, take_while, take_while1},
 	character::complete::{char, digit1, line_ending, one_of},
-	combinator::{eof, map, opt, recognize, value},
+	combinator::{eof, map, opt, recognize, value, verify},
 	error::Error as NomError,
 	multi::{many0, separated_list0, separated_list1},
 	sequence::{delimited, pair, terminated}
@@ -123,7 +122,8 @@ use nom_locate::LocatedSpan;
 
 use crate::{
 	AddressingMode, Function, Immediate, Instruction, RegisterIndex,
-	RollingRecordIndex
+	RollingRecordIndex,
+	parser::{is_canonical_name, is_identifier_char}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -423,6 +423,12 @@ impl Assembler
 					check_mode(inst.op2, &mut register_seen)?;
 				},
 				Instruction::Exp(inst) =>
+				{
+					check_register(inst.dest, &mut register_seen)?;
+					check_mode(inst.op1, &mut register_seen)?;
+					check_mode(inst.op2, &mut register_seen)?;
+				},
+				Instruction::Max(inst) =>
 				{
 					check_register(inst.dest, &mut register_seen)?;
 					check_mode(inst.op1, &mut register_seen)?;
@@ -1152,37 +1158,32 @@ fn value_operand(input: Span) -> AsmResult<AddressingMode>
 	.parse(input)
 }
 
-/// Parse the `NAME` portion of a `named_reg`. Accepts any run of characters
-/// other than the delimiters that bound a `named_reg`, trimmed of leading and
-/// trailing ASCII whitespace.
-///
-/// The grammar for source-level identifiers permits inline whitespace
-/// (e.g., `an external variable`), hyphens, dots, and Unicode, but not
-/// `@`. Names are thus unambiguously terminated by `@` in the print
-/// format.
+/// Parse the `NAME` portion of a `named_reg`, delimited by braces. Accepts
+/// exactly a [canonical identifier](crate::parser::is_canonical_name) of the
+/// source language, as the compiler produces every name, with no whitespace
+/// around it and none within it but single spaces, so every name survives the
+/// round trip, whatever delimiters of the print format it contains.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The trimmed name.
+/// The name, without its braces.
 ///
 /// # Errors
-/// `nom` error if the matched run is empty after trimming.
+/// `nom` error if the braces are missing or do not enclose exactly a canonical
+/// identifier.
 fn named_reg_name(input: Span) -> AsmResult<String>
 {
-	let (rest, raw) = take_while1(|c: char| {
-		!matches!(c, '@' | ',' | ')' | ']' | '\t' | '\r' | '\n')
-	})(input)?;
-	let trimmed = raw.fragment().trim();
-	if trimmed.is_empty()
-	{
-		return Err(nom::Err::Error(NomError::new(
-			input,
-			nom::error::ErrorKind::TakeWhile1
-		)))
-	}
-	Ok((rest, trimmed.to_string()))
+	let (rest, name) = delimited(
+		char('{'),
+		verify(take_while1(is_identifier_char), |name: &Span| {
+			is_canonical_name(name.fragment())
+		}),
+		char('}')
+	)
+	.parse(input)?;
+	Ok((rest, name.fragment().to_string()))
 }
 
 /// Parse a `named_reg` (name followed by `@N`).
@@ -1458,10 +1459,13 @@ enum BinaryOp
 	Mod,
 
 	// Exponentiation.
-	Exp
+	Exp,
+
+	// Maximum.
+	Max
 }
 
-/// Parse the sigil for a binary arithmetic operator.
+/// Parse the sigil or keyword for a binary arithmetic operator.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -1470,7 +1474,7 @@ enum BinaryOp
 /// The parsed operator.
 ///
 /// # Errors
-/// `nom` error if the input does not begin with a recognized sigil.
+/// `nom` error if the input does not begin with a recognized sigil or keyword.
 fn binary_op(input: Span) -> AsmResult<BinaryOp>
 {
 	alt((
@@ -1479,7 +1483,8 @@ fn binary_op(input: Span) -> AsmResult<BinaryOp>
 		value(BinaryOp::Mul, char('*')),
 		value(BinaryOp::Div, char('/')),
 		value(BinaryOp::Mod, char('%')),
-		value(BinaryOp::Exp, char('^'))
+		value(BinaryOp::Exp, char('^')),
+		value(BinaryOp::Max, tag("max"))
 	))
 	.parse(input)
 }
@@ -1517,7 +1522,8 @@ fn register_tail(input: Span, dest: RegisterIndex) -> AsmResult<Instruction>
 			BinaryOp::Mul => Instruction::mul(dest, op1, op2),
 			BinaryOp::Div => Instruction::div(dest, op1, op2),
 			BinaryOp::Mod => Instruction::r#mod(dest, op1, op2),
-			BinaryOp::Exp => Instruction::exp(dest, op1, op2)
+			BinaryOp::Exp => Instruction::exp(dest, op1, op2),
+			BinaryOp::Max => Instruction::max(dest, op1, op2)
 		};
 		Ok((tail, inst))
 	})();

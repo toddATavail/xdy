@@ -22,6 +22,12 @@ fmt-check:
 test *args:
     cargo test --workspace {{args}}
 
+# Run the stress tests, which are ignored by default: deep nesting, which needs
+# gigabytes of memory, and wall-clock linearity. Pass --release to stress the
+# release build.
+stress *args:
+    cargo test --workspace {{args}} -- --ignored
+
 # Run doc-tests only.
 doc-test *args:
     cargo test --workspace --doc {{args}}

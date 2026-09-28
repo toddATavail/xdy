@@ -156,7 +156,7 @@ fn test_size_s_expr_integer_faces_matches_written_length()
 		&[-1],
 		&[-1, 0, 1, 3, 5],
 		&[1, 10, 100, 1000, 10_000, 100_000, 1_000_000],
-		&[i32::MIN + 1, -1, 0, 1, i32::MAX]
+		&[i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX]
 	];
 	let opts = SExpressibleOptions::new(0, 4, 10_000);
 	for faces in cases
@@ -297,43 +297,41 @@ fn test_span_prefix_size_and_decimal_digits_invariant()
 
 /// Pin down [`ident_size`](crate::s_expr::ident_size) through the
 /// [`Variable`](crate::ast::Variable) and [`Parameter`](crate::ast::Parameter)
-/// sizers, which forward to it directly. Unquoted identifiers should size to
-/// their byte length; quoted identifiers (those containing whitespace or
-/// delimiter characters) should add two characters for the surrounding quotes.
+/// sizers, which forward to it directly. Every identifier should size to its
+/// byte length plus two for the surrounding braces, whether or not it contains
+/// whitespace.
 #[test]
-fn test_ident_size_unquoted_and_quoted()
+fn test_ident_size_includes_braces()
 {
-	// Bare word variable — no quotes needed.
-	let bare = Parser::parse("{alloy}").unwrap();
 	let opts = SExpressibleOptions::new(0, 4, 10_000);
-	let rendered = bare.to_s_expr(opts);
-	assert_eq!(rendered, "(function [] alloy)");
-	assert_eq!(bare.size_s_expr(opts), rendered.len());
-	// Identifier containing a space — must be quoted, adding two.
-	let quoted = Parser::parse("{hello world}").unwrap();
-	let rendered = quoted.to_s_expr(opts);
-	assert_eq!(rendered, r#"(function [] "hello world")"#);
-	assert_eq!(quoted.size_s_expr(opts), rendered.len());
+	let plain = Parser::parse("{alloy}").unwrap();
+	let rendered = plain.to_s_expr(opts);
+	assert_eq!(rendered, "(function [] {alloy})");
+	assert_eq!(plain.size_s_expr(opts), rendered.len());
+	let spaced = Parser::parse("{hello world}").unwrap();
+	let rendered = spaced.to_s_expr(opts);
+	assert_eq!(rendered, "(function [] {hello world})");
+	assert_eq!(spaced.size_s_expr(opts), rendered.len());
 }
 
-/// Pin down the quoting policy at `needs_quoting` (reached through
-/// [`ident_size`] and `write_ident`). Whitespace characters and each of the
-/// four structural delimiters independently force quoting; the writer must emit
-/// the exact character sequence that the sizer counted. Parser- originated ASTs
-/// cannot produce such identifiers (each of these characters is grammatically
-/// meaningful elsewhere), so the cases are fed through the reader, which
-/// tolerates any quoted identifier.
+/// Pin down the round trip of identifiers that contain whitespace or the
+/// characters that the S-expression format treats specially, through
+/// [`ident_size`] and `write_ident`. The braces delimit each identifier, so the
+/// writer must emit the exact character sequence that the sizer counted, and
+/// the reader must take it back unchanged.
 #[test]
-fn test_identifier_quoting_delimiter_characters()
+fn test_identifier_delimiter_characters()
 {
 	// Each case carries a variable name whose sole purpose is to include one
-	// quoting-triggering character.
+	// character that is special to the S-expression format.
 	let cases = [
-		r#"(function [] "v w")"#,
-		r#"(function [] "v(w")"#,
-		r#"(function [] "v)w")"#,
-		r#"(function [] "v[w")"#,
-		r#"(function [] "v]w")"#
+		"(function [] {v w})",
+		"(function [] {v(w})",
+		"(function [] {v)w})",
+		"(function [] {v[w})",
+		"(function [] {v]w})",
+		"(function [] {v\"w})",
+		"(function [] {v^w})"
 	];
 	let opts = SExpressibleOptions::new(0, 4, 10_000);
 	for input in cases
@@ -349,7 +347,7 @@ fn test_identifier_quoting_delimiter_characters()
 		);
 		assert_eq!(
 			rendered, input,
-			"writer did not preserve quoted identifier from {:?}: {}",
+			"writer did not preserve identifier from {:?}: {}",
 			input, rendered
 		);
 	}

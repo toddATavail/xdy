@@ -8,11 +8,14 @@
 use std::{collections::HashSet, ops::RangeInclusive};
 
 use pretty_assertions::assert_eq;
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{Rng as _, SeedableRng, rngs::StdRng};
 
 use crate::{
-	EvaluationError, Evaluator, Passes, RollingRecordKind,
-	support::{compile_valid, optimize, read_evaluation_test_cases}
+	EvaluationError, Evaluator, HistogramBuilder as _, Passes,
+	RollingRecordKind,
+	support::{
+		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
+	}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,6 +69,27 @@ fn test_evaluation()
 		{
 			let result =
 				evaluator.evaluate(args.iter().copied(), &mut rng).unwrap();
+			// Ensure that the evaluator rolls no more dice than the worst case,
+			// and reports exactly the dice that it rolled.
+			assert!(
+				result.dice <= bounds.dice,
+				"case {}: {}: too many dice: {} > {}",
+				index + 1,
+				key,
+				result.dice,
+				bounds.dice
+			);
+			assert_eq!(
+				result.dice,
+				result
+					.records
+					.iter()
+					.map(|record| record.results.len() as u64)
+					.sum::<u64>(),
+				"case {}: {}: misreported dice",
+				index + 1,
+				key
+			);
 			let bounds: RangeInclusive<i32> = bounds.value.into();
 			assert!(
 				bounds.contains(&result.result),
@@ -188,7 +212,7 @@ fn test_evaluation()
 #[test]
 fn test_bad_arity()
 {
-	let function = compile_valid("x: {x}");
+	let function = compile_valid("{x}: {x}");
 	let mut evaluator = Evaluator::new(function);
 	// The seed is arbitrary, chosen by smashing the keyboard. This is to
 	// ensure that the test cases are deterministic.
@@ -228,11 +252,26 @@ fn test_bad_arity()
 #[test]
 fn test_unrecognized_external()
 {
-	let function = compile_valid("x: {x}");
+	let function = compile_valid("{x}: {x}");
 	let mut evaluator = Evaluator::new(function);
 	assert_eq!(
 		evaluator.bind("y", 1),
 		Err(EvaluationError::UnrecognizedExternal("y"))
+	);
+}
+
+/// Test that the evaluator binds an external variable by its canonical name,
+/// whose whitespace collapses to single spaces, however the source spells it.
+#[test]
+fn test_bind_canonical_external()
+{
+	let function = compile_valid("{a\n   b} + 1");
+	assert_eq!(function.externals, vec!["a b".to_string()]);
+	let mut evaluator = Evaluator::new(function);
+	assert_eq!(evaluator.bind("a b", 1), Ok(()));
+	assert_eq!(
+		evaluator.bind("a\n   b", 1),
+		Err(EvaluationError::UnrecognizedExternal("a\n   b"))
 	);
 }
 
@@ -251,5 +290,315 @@ fn test_rolling_record_count()
 		let result = evaluator.evaluate([], &mut rng).unwrap();
 		assert_eq!(result.records.len(), 1);
 		assert_eq!(result.records[0].kind.count(), Some(expected));
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                               Dice metering.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that a roll exceeding the dice budget is refused before it rolls
+/// anything, so that even the greatest count is refused promptly, without
+/// drawing from the pRNG or allocating the dice.
+#[test]
+fn test_dice_budget_refuses_before_rolling()
+{
+	on_small_stack(|| {
+		for (source, arg) in [
+			("{x}: {x}D6", i32::MAX),
+			("{x}: {x}D[1, 2, 3]", i32::MAX),
+			// The count is computed, and saturates to the greatest count.
+			("{x}: ({x} * {x})D6", 46_341)
+		]
+		{
+			let mut evaluator = Evaluator::new(compile_valid(source));
+			// The seed is arbitrary, chosen by smashing the keyboard. This is
+			// to ensure that the test cases are deterministic.
+			let seed = 5829175027591875;
+			let mut rng = StdRng::seed_from_u64(seed);
+			let mut untouched = StdRng::seed_from_u64(seed);
+			assert_eq!(
+				evaluator.evaluate_metered([arg], &mut rng, 100),
+				Err(EvaluationError::DiceBudgetExhausted {
+					requested: i32::MAX as u64,
+					remaining: 100,
+					consumed: 0
+				}),
+				"{}",
+				source
+			);
+			assert_eq!(rng.next_u64(), untouched.next_u64(), "{}", source);
+		}
+	});
+}
+
+/// Test that a roll exactly at the dice budget succeeds and reports exactly
+/// that consumption, and that one die more is refused.
+#[test]
+fn test_dice_budget_exact()
+{
+	// The outer roll depends on the inner one, so the order of the rolls, and
+	// therefore of the charges, is fixed.
+	let mut evaluator = Evaluator::new(compile_valid("{x}: ({x}D1)D6"));
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(2098357109857129);
+	let evaluation = evaluator.evaluate_metered([7], &mut rng, 14).unwrap();
+	assert_eq!(evaluation.dice, 14);
+	assert_eq!(
+		evaluator.evaluate_metered([7], &mut rng, 13),
+		Err(EvaluationError::DiceBudgetExhausted {
+			requested: 7,
+			remaining: 6,
+			consumed: 7
+		})
+	);
+	assert_eq!(
+		evaluator.evaluate_metered([8], &mut rng, 14),
+		Err(EvaluationError::DiceBudgetExhausted {
+			requested: 8,
+			remaining: 6,
+			consumed: 8
+		})
+	);
+}
+
+/// Test that a nonpositive count of dice costs nothing, and that a range costs
+/// one die, even when it is empty.
+#[test]
+fn test_dice_budget_costs()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(7120985710298375);
+	let mut evaluator = Evaluator::new(compile_valid("{x}: {x}D6"));
+	for count in [0, -1, i32::MIN]
+	{
+		let evaluation =
+			evaluator.evaluate_metered([count], &mut rng, 0).unwrap();
+		assert_eq!(evaluation.dice, 0, "{}", count);
+	}
+	for source in ["{x}: [1:{x}]", "{x}: [{x}:1]"]
+	{
+		let mut evaluator = Evaluator::new(compile_valid(source));
+		assert_eq!(
+			evaluator.evaluate_metered([6], &mut rng, 0),
+			Err(EvaluationError::DiceBudgetExhausted {
+				requested: 1,
+				remaining: 0,
+				consumed: 0
+			}),
+			"{}",
+			source
+		);
+		let evaluation = evaluator.evaluate_metered([6], &mut rng, 1).unwrap();
+		assert_eq!(evaluation.dice, 1, "{}", source);
+	}
+}
+
+/// Test that metering within a sufficient budget does not disturb the draws
+/// from the pRNG, so that metered and unmetered evaluation agree.
+#[test]
+fn test_dice_budget_agrees_with_unmetered()
+{
+	let mut evaluator = Evaluator::new(compile_valid(
+		"4D6 drop lowest + [1:20] + 3D[-1, 0, 1] + (1D4)D8"
+	));
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let seed = 9812750918273509;
+	let bounds = evaluator.bounds_over([], []).unwrap();
+	assert_eq!(bounds.dice, 13);
+	for i in 0..100
+	{
+		let unmetered = evaluator
+			.evaluate([], &mut StdRng::seed_from_u64(seed + i))
+			.unwrap();
+		let metered = evaluator
+			.evaluate_metered([], &mut StdRng::seed_from_u64(seed + i), 13)
+			.unwrap();
+		assert_eq!(metered, unmetered);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                  Maximum.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that a [maximum](crate::Max), which only the optimizer emits, evaluates
+/// to the greater of its operands, and that its bounds are the greater of the
+/// operands' bounds.
+#[test]
+fn test_max()
+{
+	let mut evaluator = Evaluator::new(
+		crate::Assembler::assemble(
+			"\
+Function({x}@0) r#2 ⚅#0
+\textern[]
+\tbody:
+\t\t@1 <- @0 max 0
+\t\treturn @1
+"
+		)
+		.unwrap()
+	);
+	for (x, expected) in
+		[(i32::MIN, 0), (-3, 0), (0, 0), (5, 5), (i32::MAX, i32::MAX)]
+	{
+		// The seed is arbitrary, since the function rolls nothing.
+		let evaluation = evaluator
+			.evaluate([x], &mut StdRng::seed_from_u64(0))
+			.unwrap();
+		assert_eq!(evaluation.result, expected, "{}", x);
+		assert_eq!(evaluation.dice, 0, "{}", x);
+	}
+	for ((min, max), expected) in
+		[((-3, 5), (0, 5)), ((-7, -2), (0, 0)), ((2, 9), (2, 9))]
+	{
+		let bounds = evaluator
+			.bounds_over([Some((min, max).into())], [])
+			.unwrap();
+		assert_eq!(
+			(bounds.value.min, bounds.value.max),
+			expected,
+			"[{}, {}]",
+			min,
+			max
+		);
+		assert_eq!(bounds.dice, 0);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                Drop counts.                                //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that a negative drop count drops nothing, and so restores nothing that
+/// an earlier drop clause dropped: the evaluator, the worst case of the dice,
+/// and the meter agree (`xdy-i0q.20`). Before, the evaluator clamped the drop
+/// count after every clause, so a negative count restored a die that the
+/// bounds took to stay dropped, and the outer roll rolled a die more than the
+/// worst case.
+#[test]
+fn test_negative_drop_count_drops_nothing()
+{
+	for source in [
+		"(1D1 drop lowest 2 drop lowest -1)D6",
+		"(1D1 drop highest 2 drop highest -1)D6",
+		"(1D1 drop lowest -1 drop lowest 2)D6"
+	]
+	{
+		let mut evaluator = Evaluator::new(compile_valid(source));
+		let bounds = evaluator.bounds_over([], []).unwrap();
+		assert_eq!(bounds.dice, 1, "{}", source);
+		// The seed is arbitrary, chosen by smashing the keyboard. This is to
+		// ensure that the test cases are deterministic.
+		let mut rng = StdRng::seed_from_u64(6120957120985710);
+		let evaluation = evaluator.evaluate_metered([], &mut rng, 1).unwrap();
+		assert_eq!(evaluation.dice, 1, "{}", source);
+		assert_eq!(evaluation.result, 0, "{}", source);
+	}
+}
+
+/// Test that the order of drop clauses does not matter, even when a count is
+/// negative, so that the optimizer, which reorders the drop counts of a
+/// record, agrees with the unoptimized function, and the clauses agree in
+/// either order.
+#[test]
+fn test_drop_order_is_irrelevant()
+{
+	for (source, reversed) in [
+		(
+			"{x}: 3D6 drop lowest {x} drop lowest -1",
+			"{x}: 3D6 drop lowest -1 drop lowest {x}"
+		),
+		(
+			"{x}: 3D6 drop highest {x} drop highest -2",
+			"{x}: 3D6 drop highest -2 drop highest {x}"
+		)
+	]
+	{
+		let functions = [source, reversed].map(|source| {
+			let function = crate::compile_unoptimized(source).unwrap();
+			[function.clone(), optimize(function, Passes::all())]
+		});
+		for (i, x) in [-1, 0, 1, 2, 3, 4].into_iter().enumerate()
+		{
+			// The seed is arbitrary, chosen by smashing the keyboard. This is
+			// to ensure that the test cases are deterministic.
+			let seed = 1098275019827350 + i as u64;
+			let results = functions
+				.iter()
+				.flatten()
+				.map(|function| {
+					Evaluator::new(function.clone())
+						.evaluate([x], &mut StdRng::seed_from_u64(seed))
+						.unwrap()
+						.result
+				})
+				.collect::<Vec<_>>();
+			assert!(
+				results.iter().all(|&result| result == results[0]),
+				"{} with {}: {:?}",
+				source,
+				x,
+				results
+			);
+		}
+	}
+}
+
+/// Test that the optimizer respects that a negative count of dice rolls
+/// nothing and a drop count of zero or less drops nothing, so that optimized
+/// and unoptimized functions have the same distribution (`xdy-i0q.20`). The
+/// test compares exact histograms rather than evaluations from the same seed,
+/// since the optimizer rolls no dice of one face, which an unoptimized function
+/// rolls, drawing from the pRNG. Before, strength reduction
+/// replaced `{x}D1` with `{x}` and a single-face custom roll with a product,
+/// even for a negative count; rewrote a drop from such a value as a
+/// subtraction, which went negative or subtracted the drop count rather than
+/// the dropped faces; and merged stacked drops into one drop of their sum.
+/// Constant folding summed negative drop counts too, and folded a
+/// single-valued range that strength reduction had given drops.
+#[test]
+fn test_optimizer_respects_clamping()
+{
+	for source in [
+		"{x}: {x}D1",
+		"{x}: {x}D[5]",
+		"{x}: {x}D1 drop lowest 1",
+		"{x}: {x}D1 drop lowest 5",
+		"{x}: {x}D[5] drop highest 1",
+		"{x}: 3D1 drop lowest {x}",
+		"{x}: 3D[5] drop lowest {x}",
+		"{x}: 1D1 drop lowest {x}",
+		"{x}: 1D6 drop highest {x}",
+		"{x}: 1D[2, 3, 4] drop lowest {x}",
+		"{x}: 3D1 drop lowest -1 + {x}",
+		"{x}: 3D6 drop lowest 2 drop lowest -1 + {x}",
+		"{x}: 3D6 drop lowest {x} drop lowest -1",
+		"{x}: 3D6 drop lowest {x} drop lowest 1 drop lowest 1",
+		"{x}: 3D6 drop highest -2 drop highest {x} drop lowest 1",
+		"{x}: ({x}D1 drop lowest 2 drop lowest -1)D6"
+	]
+	{
+		let function = crate::compile_unoptimized(source).unwrap();
+		let optimized = optimize(function.clone(), Passes::all());
+		for x in [i32::MIN, -3, -1, 0, 1, 2, 3, 5]
+		{
+			let [unoptimized, optimized] =
+				[&function, &optimized].map(|function| {
+					crate::serial::HistogramBuilder::new(Evaluator::new(
+						function.clone()
+					))
+					.build([x])
+					.unwrap()
+					.iter()
+					.map(|(outcome, count)| (*outcome, *count))
+					.collect::<std::collections::BTreeMap<_, _>>()
+				});
+			assert_eq!(optimized, unoptimized, "{} with {}", source, x);
+		}
 	}
 }

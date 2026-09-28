@@ -170,8 +170,8 @@ fn test_s_expr_reader_accepts_parameter_span_prefixes()
 {
 	use crate::s_expr::read_s_expr;
 
-	let ast =
-		read_s_expr("^[0 7] (function [^[0 1] a ^[3 4] b] ^[6 7] 0)").unwrap();
+	let ast = read_s_expr("^[0 7] (function [^[0 1] {a} ^[3 4] {b}] ^[6 7] 0)")
+		.unwrap();
 	let params = ast.parameters.as_ref().expect("expected parameters");
 	assert_eq!(params.len(), 2);
 	assert_eq!(params[0].name, "a");
@@ -206,7 +206,7 @@ fn test_s_expr_reader_accepts_span_less_input()
 {
 	use crate::s_expr::read_s_expr;
 
-	let ast = read_s_expr("(function [x] (add {x} 1))").unwrap();
+	let ast = read_s_expr("(function [{x}] (add {x} 1))").unwrap();
 	assert_eq!(ast.span, SourceSpan::SYNTHETIC);
 	let params = ast.parameters.as_ref().unwrap();
 	assert_eq!(params[0].span, SourceSpan::SYNTHETIC);

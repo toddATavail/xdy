@@ -66,7 +66,7 @@ fn test_variable_span_includes_braces()
 fn test_variable_span_inside_expression()
 {
 	let (_, result) = expression(Span::new("{x} + 1")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
 		{
@@ -98,7 +98,7 @@ fn test_range_span_includes_brackets()
 fn test_group_span_includes_delimiters()
 {
 	let (_, result) = expression(Span::new("(1 + 2)")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Group(group) =>
 		{
@@ -114,7 +114,7 @@ fn test_group_span_includes_delimiters()
 fn test_nested_group_spans()
 {
 	let (_, result) = expression(Span::new("((1+2))")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Group(outer) =>
 		{
@@ -143,7 +143,7 @@ fn test_nested_group_spans()
 fn test_standard_dice_span()
 {
 	let (_, result) = dice(Span::new("3D6")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::Standard(sd) =>
 		{
@@ -161,7 +161,7 @@ fn test_standard_dice_span()
 fn test_standard_dice_with_variable_operands_span()
 {
 	let (_, result) = dice(Span::new("{x}D{y}")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::Standard(sd) =>
 		{
@@ -179,7 +179,7 @@ fn test_standard_dice_with_variable_operands_span()
 fn test_standard_dice_with_group_count_span()
 {
 	let (_, result) = dice(Span::new("(1+2)D6")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::Standard(sd) =>
 		{
@@ -197,7 +197,7 @@ fn test_standard_dice_with_group_count_span()
 fn test_custom_dice_span()
 {
 	let (_, result) = dice(Span::new("2D[1,2,3]")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::Custom(cd) =>
 		{
@@ -215,7 +215,7 @@ fn test_custom_dice_span()
 fn test_custom_dice_with_negative_faces_span()
 {
 	let (_, result) = dice(Span::new("3D[-1,0,1]")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::Custom(cd) =>
 		{
@@ -233,7 +233,7 @@ fn test_custom_dice_with_negative_faces_span()
 fn test_drop_lowest_no_count_span()
 {
 	let (_, result) = dice(Span::new("3d6 drop lowest")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::DropLowest(drop) =>
 		{
@@ -258,7 +258,7 @@ fn test_drop_lowest_no_count_span()
 fn test_drop_lowest_with_count_span()
 {
 	let (_, result) = dice(Span::new("4D6 drop lowest 2")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::DropLowest(drop) =>
 		{
@@ -279,7 +279,7 @@ fn test_drop_lowest_with_count_span()
 fn test_drop_highest_no_count_span()
 {
 	let (_, result) = dice(Span::new("4D6 drop highest")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::DropHighest(drop) =>
 		{
@@ -297,7 +297,7 @@ fn test_drop_highest_no_count_span()
 fn test_drop_highest_with_count_span()
 {
 	let (_, result) = dice(Span::new("4D6 drop highest 1")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::DropHighest(drop) =>
 		{
@@ -319,7 +319,7 @@ fn test_stacked_drop_clauses_span()
 {
 	let (_, result) =
 		dice(Span::new("8D6 drop lowest 3 drop highest 1")).unwrap();
-	match result
+	match &result
 	{
 		DiceExpression::DropHighest(outer) =>
 		{
@@ -351,7 +351,7 @@ fn test_add_span_from_children()
 {
 	let (_, result) = expression(Span::new("1 + 22")).unwrap();
 	assert_eq!(result.span(), span(0, 6));
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
 		{
@@ -368,7 +368,7 @@ fn test_add_span_from_children()
 fn test_sub_span_from_children()
 {
 	let (_, result) = expression(Span::new("10 - 3")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Sub(sub)) =>
 		{
@@ -385,7 +385,7 @@ fn test_sub_span_from_children()
 fn test_mul_span_from_children()
 {
 	let (_, result) = expression(Span::new("2 * 3")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Mul(mul)) =>
 		{
@@ -402,7 +402,7 @@ fn test_mul_span_from_children()
 fn test_div_span_from_children()
 {
 	let (_, result) = expression(Span::new("10 / 2")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Div(div)) =>
 		{
@@ -419,7 +419,7 @@ fn test_div_span_from_children()
 fn test_mod_span_from_children()
 {
 	let (_, result) = expression(Span::new("10 % 3")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Mod(r#mod)) =>
 		{
@@ -436,7 +436,7 @@ fn test_mod_span_from_children()
 fn test_exp_span_from_children()
 {
 	let (_, result) = expression(Span::new("2 ^ 10")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Exp(exp)) =>
 		{
@@ -455,7 +455,7 @@ fn test_exp_span_from_children()
 fn test_exp_right_associative_span()
 {
 	let (_, result) = expression(Span::new("2^3^2")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Exp(outer)) =>
 		{
@@ -482,7 +482,7 @@ fn test_exp_right_associative_span()
 fn test_neg_of_variable_span()
 {
 	let (_, result) = expression(Span::new("-{x}")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Neg(neg)) =>
 		{
@@ -499,7 +499,7 @@ fn test_neg_of_variable_span()
 fn test_neg_of_group_span()
 {
 	let (_, result) = expression(Span::new("-(1+2)")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Neg(neg)) =>
 		{
@@ -517,7 +517,7 @@ fn test_neg_of_group_span()
 fn test_neg_of_negative_constant_span()
 {
 	let (_, result) = expression(Span::new("- -1")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Neg(neg)) =>
 		{
@@ -536,6 +536,23 @@ fn test_neg_of_negative_constant_span()
 	}
 }
 
+/// A negation of zero (`-` applied to `-0`) folds to a [`Constant`] zero, which
+/// spans the whole negation, from the leading `-` through the zero.
+#[test]
+fn test_neg_of_zero_span()
+{
+	let (_, result) = expression(Span::new("- -0")).unwrap();
+	match &result
+	{
+		Expression::Constant(c) =>
+		{
+			assert_eq!(c.value, 0);
+			assert_eq!(c.span, span(0, 4));
+		},
+		other => panic!("expected Constant, got {:?}", other)
+	}
+}
+
 /// A [`Neg`] of a dice expression (`-3D6`) takes its span from the leading `-`
 /// through the end of the dice, using the general negation path because
 /// [`negative_constant`] bails when followed by `d`/`D`.
@@ -543,7 +560,7 @@ fn test_neg_of_negative_constant_span()
 fn test_neg_of_dice_span()
 {
 	let (_, result) = expression(Span::new("-3D6")).unwrap();
-	match result
+	match &result
 	{
 		Expression::Arithmetic(ArithmeticExpression::Neg(neg)) =>
 		{
@@ -570,13 +587,13 @@ fn test_neg_of_dice_span()
 #[test]
 fn test_parameter_and_function_spans()
 {
-	let source = "x, y: 1";
+	let source = "{x}, {y}: 1";
 	let (_, result) = function(Span::new(source)).unwrap();
-	assert_eq!(result.span, span(0, 7));
+	assert_eq!(result.span, span(0, 11));
 	let parameters = result.parameters.as_ref().unwrap();
-	assert_eq!(parameters[0].span, span(0, 1));
-	assert_eq!(parameters[1].span, span(3, 4));
-	assert_eq!(result.body.span(), span(6, 7));
+	assert_eq!(parameters[0].span, span(1, 2));
+	assert_eq!(parameters[1].span, span(6, 7));
+	assert_eq!(result.body.span(), span(10, 11));
 }
 
 /// A [`Function`] with no parameters has its span anchored at the start of the
@@ -595,13 +612,13 @@ fn test_function_no_parameters_span()
 #[test]
 fn test_parameter_span_excludes_whitespace()
 {
-	let source = "  abc  ,  def  : 1";
+	let source = "  {abc}  ,  {def}  : 1";
 	let (_, result) = function(Span::new(source)).unwrap();
 	let parameters = result.parameters.as_ref().unwrap();
 	assert_eq!(parameters[0].name, "abc");
-	assert_eq!(parameters[0].span, span(2, 5));
+	assert_eq!(parameters[0].span, span(3, 6));
 	assert_eq!(parameters[1].name, "def");
-	assert_eq!(parameters[1].span, span(10, 13));
+	assert_eq!(parameters[1].span, span(13, 16));
 }
 
 /// [`Parser::parse`] strips leading whitespace before invoking [`function`], so
@@ -646,8 +663,8 @@ fn test_expression_span_dispatches_to_variant()
 	assert!(matches!(range_expr, Expression::Range(_)));
 
 	// Binding.
-	let binding_expr = expression(Span::new("x@(3D6)")).unwrap().1;
-	assert_eq!(binding_expr.span(), span(0, 7));
+	let binding_expr = expression(Span::new("{x}@(3D6)")).unwrap().1;
+	assert_eq!(binding_expr.span(), span(0, 9));
 	assert!(matches!(binding_expr, Expression::Binding(_)));
 
 	// Dice.
@@ -690,9 +707,9 @@ fn test_arithmetic_expression_span_dispatches_to_variant()
 {
 	fn unwrap_arith(expr: Expression<'_>) -> ArithmeticExpression<'_>
 	{
-		match expr
+		match &expr
 		{
-			Expression::Arithmetic(a) => a,
+			Expression::Arithmetic(a) => a.clone(),
 			other => panic!("expected Arithmetic, got {:?}", other)
 		}
 	}
@@ -732,12 +749,12 @@ fn test_arithmetic_expression_span_dispatches_to_variant()
 #[test]
 fn test_function_and_parameter_spanned_trait_dispatch()
 {
-	let ast = Parser::parse("a, b: 1").unwrap();
+	let ast = Parser::parse("{a}, {b}: 1").unwrap();
 	// Exercise the trait method, not the struct field.
-	assert_eq!(Spanned::span(&ast), span(0, 7));
+	assert_eq!(Spanned::span(&ast), span(0, 11));
 	let params = ast.parameters.as_ref().unwrap();
-	assert_eq!(Spanned::span(&params[0]), span(0, 1));
-	assert_eq!(Spanned::span(&params[1]), span(3, 4));
+	assert_eq!(Spanned::span(&params[0]), span(1, 2));
+	assert_eq!(Spanned::span(&params[1]), span(6, 7));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -750,7 +767,7 @@ fn test_function_and_parameter_spanned_trait_dispatch()
 #[test]
 fn test_untethered_zeroes_all_spans()
 {
-	let ast = Parser::parse("a, b: {a}D6 drop lowest 1 + {b}").unwrap();
+	let ast = Parser::parse("{a}, {b}: {a}D6 drop lowest 1 + {b}").unwrap();
 	assert_ne!(ast.span, SourceSpan::default());
 	let untethered = ast.untethered();
 
@@ -763,12 +780,12 @@ fn test_untethered_zeroes_all_spans()
 
 	// Walk the body: Add(DropLowest(Standard(Variable, Constant), Some(1)),
 	// Variable).
-	match untethered.body
+	match &untethered.body
 	{
 		Expression::Arithmetic(ArithmeticExpression::Add(add)) =>
 		{
 			assert_eq!(add.span, SourceSpan::default());
-			match *add.left
+			match &*add.left
 			{
 				Expression::Dice(DiceExpression::DropLowest(drop)) =>
 				{
@@ -776,7 +793,7 @@ fn test_untethered_zeroes_all_spans()
 					let drop_count =
 						drop.drop.as_ref().expect("explicit drop count");
 					assert_eq!(drop_count.span(), SourceSpan::default());
-					match *drop.dice
+					match &*drop.dice
 					{
 						DiceExpression::Standard(sd) =>
 						{
@@ -792,7 +809,7 @@ fn test_untethered_zeroes_all_spans()
 				},
 				other => panic!("expected DropLowest, got {:?}", other)
 			}
-			match *add.right
+			match &*add.right
 			{
 				Expression::Variable(v) =>
 				{
@@ -824,7 +841,7 @@ fn test_untethered_custom_dice_preserves_faces()
 {
 	let ast = Parser::parse("2D[-1,0,1]").unwrap();
 	let untethered = ast.untethered();
-	match untethered.body
+	match &untethered.body
 	{
 		Expression::Dice(DiceExpression::Custom(cd)) =>
 		{
@@ -843,7 +860,7 @@ fn test_untethered_drop_highest_no_count()
 {
 	let ast = Parser::parse("4D6 drop highest").unwrap();
 	let untethered = ast.untethered();
-	match untethered.body
+	match &untethered.body
 	{
 		Expression::Dice(DiceExpression::DropHighest(drop)) =>
 		{
@@ -875,7 +892,7 @@ fn test_untethered_matches_hand_built_equivalent()
 		parameters: None,
 		body: Expression::Arithmetic(ArithmeticExpression::Add(Add {
 			left: Box::new(Expression::Variable(Variable {
-				name: "x",
+				name: "x".into(),
 				span: SourceSpan::default()
 			})),
 			right: Box::new(Expression::Constant(Constant {
@@ -893,21 +910,21 @@ fn test_untethered_matches_hand_built_equivalent()
 //                          Local-binding spans.                              //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A [`Binding`] parsed from `x@(3D6)` has a full span covering the bound name
-/// through the closing `)`, and a [`Binding::name_span`] covering just the
+/// A [`Binding`] parsed from `{x}@(3D6)` has a full span covering the bound
+/// name through the closing `)`, and a [`Binding::name_span`] covering just the
 /// identifier.
 #[test]
 fn test_binding_span_covers_name_through_close_paren()
 {
-	let (_, expr) = expression(Span::new("x@(3D6)")).unwrap();
-	match expr
+	let (_, expr) = expression(Span::new("{x}@(3D6)")).unwrap();
+	match &expr
 	{
 		Expression::Binding(b) =>
 		{
 			assert_eq!(b.name, "x");
-			assert_eq!(b.name_span, span(0, 1));
-			assert_eq!(b.span, span(0, 7));
-			assert_eq!(b.expression.span(), span(3, 6));
+			assert_eq!(b.name_span, span(1, 2));
+			assert_eq!(b.span, span(0, 9));
+			assert_eq!(b.expression.span(), span(5, 8));
 		},
 		other => panic!("expected Binding, got {:?}", other)
 	}
@@ -918,14 +935,14 @@ fn test_binding_span_covers_name_through_close_paren()
 #[test]
 fn test_binding_multiword_name_span()
 {
-	let (_, expr) = expression(Span::new("a new id@(1D4)")).unwrap();
-	match expr
+	let (_, expr) = expression(Span::new("{a new id}@(1D4)")).unwrap();
+	match &expr
 	{
 		Expression::Binding(b) =>
 		{
 			assert_eq!(b.name, "a new id");
-			assert_eq!(b.name_span, span(0, 8));
-			assert_eq!(b.span, span(0, 14));
+			assert_eq!(b.name_span, span(1, 9));
+			assert_eq!(b.span, span(0, 16));
 		},
 		other => panic!("expected Binding, got {:?}", other)
 	}
@@ -937,33 +954,33 @@ fn test_binding_multiword_name_span()
 #[test]
 fn test_binding_allows_whitespace_around_at_sign()
 {
-	let (_, expr) = expression(Span::new("x @ ( 3 + 2 )")).unwrap();
-	match expr
+	let (_, expr) = expression(Span::new("{x} @ ( 3 + 2 )")).unwrap();
+	match &expr
 	{
 		Expression::Binding(b) =>
 		{
 			assert_eq!(b.name, "x");
-			assert_eq!(b.name_span, span(0, 1));
-			assert_eq!(b.span, span(0, 13));
+			assert_eq!(b.name_span, span(1, 2));
+			assert_eq!(b.span, span(0, 15));
 		},
 		other => panic!("expected Binding, got {:?}", other)
 	}
 }
 
-/// Nested bindings — `a@(b@(1D4) + {b})` — preserve the full and name spans
+/// Nested bindings — `{a}@({b}@(1D4) + {b})` — preserve the full and name spans
 /// of both the outer and inner [`Binding`]s.
 #[test]
 fn test_nested_binding_spans()
 {
-	let source = "a@(b@(1D4) + {b})";
+	let source = "{a}@({b}@(1D4) + {b})";
 	let (_, expr) = expression(Span::new(source)).unwrap();
-	match expr
+	match &expr
 	{
 		Expression::Binding(outer) =>
 		{
 			assert_eq!(outer.name, "a");
-			assert_eq!(outer.name_span, span(0, 1));
-			assert_eq!(outer.span, span(0, 17));
+			assert_eq!(outer.name_span, span(1, 2));
+			assert_eq!(outer.span, span(0, 21));
 			// The bound expression is an `Add`; its left operand is the
 			// inner binding.
 			match outer.expression.as_ref()
@@ -975,8 +992,8 @@ fn test_nested_binding_spans()
 						Expression::Binding(inner) =>
 						{
 							assert_eq!(inner.name, "b");
-							assert_eq!(inner.name_span, span(3, 4));
-							assert_eq!(inner.span, span(3, 10));
+							assert_eq!(inner.name_span, span(6, 7));
+							assert_eq!(inner.span, span(5, 14));
 						},
 						other =>
 						{
@@ -996,7 +1013,7 @@ fn test_nested_binding_spans()
 #[test]
 fn test_untethered_binding_zeroes_all_spans()
 {
-	let ast = Parser::parse("x@(3D6) + {x}").unwrap();
+	let ast = Parser::parse("{x}@(3D6) + {x}").unwrap();
 	let untethered = ast.untethered();
 	match &untethered.body
 	{

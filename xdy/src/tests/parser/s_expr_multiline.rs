@@ -63,9 +63,9 @@ fn test_function_body_wraps_under_tight_soft_limit()
 fn test_function_parameters_wrap_each_on_own_line()
 {
 	assert_multiline(
-		"alpha, beta, gamma: 42",
+		"{alpha}, {beta}, {gamma}: 42",
 		15,
-		"(function\n\t[\n\t\talpha\n\t\tbeta\n\t\tgamma\n\t] 42)"
+		"(function\n\t[\n\t\t{alpha}\n\t\t{beta}\n\t\t{gamma}\n\t] 42)"
 	);
 }
 
@@ -83,7 +83,7 @@ fn test_ternary_form_wraps_each_operand()
 	assert_multiline("1 + 2", 13, "(function []\n\t(add\n\t\t1\n\t\t2))");
 }
 
-/// At `soft_limit` 14, the body `(neg abcd)` wraps to indent 1 and its single
+/// At `soft_limit` 14, the body `(neg {ab})` wraps to indent 1 and its single
 /// operand wraps again to indent 2. This pins down the wrap branch of
 /// [`<(A, B)>::write_s_expr`](crate::s_expr::SExpressible) at the boundary
 /// where `size + indent` straddles the remaining space — a mutant that replaces
@@ -94,7 +94,7 @@ fn test_ternary_form_wraps_each_operand()
 #[test]
 fn test_unary_form_wraps_operand()
 {
-	assert_multiline("-{abcd}", 14, "(function []\n\t(neg\n\t\tabcd))");
+	assert_multiline("-{ab}", 14, "(function []\n\t(neg\n\t\t{ab}))");
 }
 
 /// Recursive wrapping must push the indentation one tab deeper at each level. A
@@ -221,9 +221,273 @@ fn test_multiline_lossless_roundtrip_under_tight_limits()
 fn test_function_with_no_parameters_reserves_two_for_empty_brackets()
 {
 	// At soft_limit 12 with an empty-params function, the body `(range 0 5)`
-	// must wrap because 12 - 9 - 2 = 1 < 11. A mutation that drops the
-	// empty-params size to 0 or 1 would change the remaining-space bookkeeping
-	// and flip the wrap decision in observable ways; this test anchors the
-	// expected layout.
+	// must wrap because 12 - 9 - 1 - 2 = 0 < 1 + 11 + 1. A mutation that drops
+	// the empty-params size to 0 or 1 would change the remaining-space
+	// bookkeeping and flip the wrap decision in observable ways; this test
+	// anchors the expected layout.
 	assert_multiline("[0:5]", 12, "(function []\n\t(range\n\t\t0\n\t\t5))");
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                           Soft-limit boundaries.                           //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Render `source` with the given `soft_limit` and assert that the result is
+/// exactly `expected`, and that no line of it exceeds the soft limit. Tabs are
+/// four columns wide.
+fn assert_within_limit(source: &str, soft_limit: usize, expected: &str)
+{
+	let ast = Parser::parse(source)
+		.unwrap_or_else(|e| panic!("parse failed for {:?}: {}", source, e));
+	let opts = SExpressibleOptions::new(0, 4, soft_limit);
+	let actual = ast.to_s_expr(opts);
+	assert_eq!(
+		actual, expected,
+		"layout mismatch for {:?} at soft_limit {}",
+		source, soft_limit
+	);
+	for line in actual.lines()
+	{
+		assert!(
+			line_width(line, 4) <= soft_limit,
+			"line exceeds soft_limit {} for {:?}: {:?}",
+			soft_limit,
+			source,
+			line
+		);
+	}
+}
+
+/// Measure a line of S-expression output, counting each leading tab as
+/// `tab_width` columns and every other character as one.
+///
+/// # Parameters
+/// - `line`: The line, without its line terminator.
+/// - `tab_width`: The number of columns per tab.
+///
+/// # Returns
+/// The width of the line, in columns.
+fn line_width(line: &str, tab_width: usize) -> usize
+{
+	let text = line.trim_start_matches('\t');
+	tab_width * (line.len() - text.len()) + text.chars().count()
+}
+
+/// A function fits on one line when its whole width does: here, exactly 23
+/// columns.
+#[test]
+fn test_function_fits_exactly_at_soft_limit()
+{
+	assert_within_limit("1 + 2", 23, "(function [] (add 1 2))");
+}
+
+/// A function that is one column too wide wraps its body. The function must
+/// count the spaces before its parameters and its body, and its closing
+/// parenthesis, which once let it overrun the soft limit by three columns.
+#[test]
+fn test_function_wraps_one_column_past_soft_limit()
+{
+	assert_within_limit("1 + 2", 22, "(function []\n\t(add 1 2))");
+}
+
+/// When the parameters wrap onto their own line, the body may follow them there
+/// only if it fits in what remains of that line: here, exactly 24 columns.
+#[test]
+fn test_body_fits_exactly_after_wrapped_parameters()
+{
+	assert_within_limit(
+		"{alpha}, {beta}: 42",
+		24,
+		"(function\n\t[{alpha} {beta}] 42)"
+	);
+}
+
+/// When the parameters wrap onto their own line and the body does not fit after
+/// them, the body wraps too. The function once budgeted the body a whole fresh
+/// line, ignoring the parameters already on it.
+#[test]
+fn test_body_wraps_after_wrapped_parameters()
+{
+	assert_within_limit(
+		"{alpha}, {beta}: 420",
+		24,
+		"(function\n\t[{alpha} {beta}]\n\t420)"
+	);
+}
+
+/// When the parameters split across lines, the body may follow the closing
+/// bracket only if it fits in what remains of that line: here, exactly 17
+/// columns.
+#[test]
+fn test_body_fits_exactly_after_split_parameters()
+{
+	assert_within_limit(
+		"{alpha}, {beta}, {gamma}: -{ab}",
+		17,
+		"(function\n\t[\n\t\t{alpha}\n\t\t{beta}\n\t\t{gamma}\n\t] (neg {ab}))"
+	);
+}
+
+/// When the parameters split across lines and the body does not fit after the
+/// closing bracket, the body wraps.
+#[test]
+fn test_body_wraps_after_split_parameters()
+{
+	assert_within_limit(
+		"{alpha}, {beta}, {gamma}: -{abc}",
+		17,
+		"(function\n\t[\n\t\t{alpha}\n\t\t{beta}\n\t\t{gamma}\n\t]\n\t(neg {abc}))"
+	);
+}
+
+/// A parameter list reserves room for the closing parentheses of enclosing
+/// forms, as the keyword forms do, so a list that exactly fills its line
+/// splits.
+#[test]
+fn test_parameter_list_reserves_enclosing_parentheses()
+{
+	assert_within_limit(
+		"{alpha}, {beta}, {gam}: 1",
+		26,
+		"(function\n\t[\n\t\t{alpha}\n\t\t{beta}\n\t\t{gam}\n\t] 1)"
+	);
+}
+
+/// A binding fits on one line when its whole width does, including its closing
+/// parenthesis and those of enclosing forms: here, exactly 20 columns.
+#[test]
+fn test_binding_fits_exactly_at_soft_limit()
+{
+	assert_within_limit("{x}@(1)", 20, "(function []\n\t(binding {x} 1))");
+}
+
+/// A binding that is one column too wide wraps its name and expression. The
+/// binding once omitted its closing parenthesis from its budget.
+#[test]
+fn test_binding_wraps_one_column_past_soft_limit()
+{
+	assert_within_limit(
+		"{x}@(1)",
+		19,
+		"(function []\n\t(binding\n\t\t{x}\n\t\t1))"
+	);
+}
+
+/// A face list fits on one line when its whole width does, including the
+/// closing parentheses of enclosing forms: here, exactly 17 columns.
+#[test]
+fn test_face_list_fits_exactly_at_soft_limit()
+{
+	assert_within_limit(
+		"1d[1, 2, 3]",
+		17,
+		"(function []\n\t(custom-dice\n\t\t1\n\t\t[1 2 3]))"
+	);
+}
+
+/// A face list that is one column too wide splits. The list once ignored the
+/// closing parentheses of enclosing forms.
+#[test]
+fn test_face_list_wraps_one_column_past_soft_limit()
+{
+	assert_within_limit(
+		"1d[1, 2, 3]",
+		16,
+		"(function []\n\t(custom-dice\n\t\t1\n\t\t[\n\t\t\t1\n\t\t\t2\n\t\t\t3\n\t\t]))"
+	);
+}
+
+/// When a unary form wraps its operand onto a new line, the operand lays out
+/// its own subexpressions from that line's indentation. Here the `add` fits
+/// exactly at indent 2, with the closing parentheses of `neg` and `function`.
+#[test]
+fn test_wrapped_unary_operand_fits_exactly_at_soft_limit()
+{
+	assert_within_limit(
+		"-(1 + 2)",
+		19,
+		"(function []\n\t(neg\n\t\t(add 1 2)))"
+	);
+}
+
+/// When a unary form wraps its operand onto a new line and the operand is one
+/// column too wide, the operand wraps its own subexpressions one level deeper
+/// still. The unary form once passed its own indentation to the operand, so
+/// the operand's subexpressions landed at the operand's level, and its budget
+/// omitted the unary form's closing parenthesis.
+#[test]
+fn test_wrapped_unary_operand_wraps_one_level_deeper()
+{
+	assert_within_limit(
+		"-(1 + 2)",
+		18,
+		"(function []\n\t(neg\n\t\t(add\n\t\t\t1\n\t\t\t2)))"
+	);
+}
+
+/// No line of output exceeds the soft limit unless it is a single token that
+/// cannot be split: an atom, a keyword, or a bracket, perhaps with closing
+/// parentheses. Checked for every case in `test_parse.txt`, at every soft limit
+/// from 0 to 100, with groups both transparent and opaque. Spans are off, since
+/// a span prefix and its atom cannot be split either, but contain a space.
+#[test]
+fn test_lines_exceed_soft_limit_only_when_unsplittable()
+{
+	use crate::support::read_compilation_test_cases;
+
+	let cases = read_compilation_test_cases(include_str!(
+		"../../../tests/test_parse.txt"
+	));
+	for with_groups in [false, true]
+	{
+		for soft_limit in 0..=100
+		{
+			let opts = SExpressibleOptions::new(0, 4, soft_limit)
+				.with_groups(with_groups);
+			for (source, _) in &cases
+			{
+				let ast = Parser::parse(source).unwrap();
+				let rendered = ast.to_s_expr(opts);
+				for line in rendered.lines()
+				{
+					assert!(
+						line_width(line, 4) <= soft_limit
+							|| is_single_token(line),
+						"line exceeds soft_limit {} (with_groups {}) for \
+						 {:?}: {:?}\nrendered:\n{}",
+						soft_limit,
+						with_groups,
+						source,
+						line,
+						rendered
+					);
+				}
+			}
+		}
+	}
+}
+
+/// Answer whether a line of S-expression output holds a single token, i.e.,
+/// has no space outside of an identifier once its indentation is removed.
+///
+/// # Parameters
+/// - `line`: The line, without its line terminator.
+///
+/// # Returns
+/// `true` if the line holds a single token, `false` otherwise.
+fn is_single_token(line: &str) -> bool
+{
+	let mut braced = false;
+	for c in line.trim_start_matches('\t').chars()
+	{
+		match c
+		{
+			'{' => braced = true,
+			'}' => braced = false,
+			' ' if !braced => return false,
+			_ =>
+			{}
+		}
+	}
+	true
 }

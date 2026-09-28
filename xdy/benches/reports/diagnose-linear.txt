@@ -1,0 +1,195 @@
+    Finished `bench` profile [optimized] target(s) in 0.10s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (/Users/todd/Projects/xdy/target/release/deps/xdy-60573617598183ec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 457 filtered out; finished in 0.00s
+
+     Running benches/benchmarks.rs (/Users/todd/Projects/xdy/target/release/deps/benchmarks-6255ffd2edf14a12)
+Benchmarking failing diagnose/unclosed groups/10
+Benchmarking failing diagnose/unclosed groups/10: Warming up for 3.0000 s
+Benchmarking failing diagnose/unclosed groups/10: Collecting 100 samples in estimated 1.0006 s (64k iterations)
+Benchmarking failing diagnose/unclosed groups/10: Analyzing
+failing diagnose/unclosed groups/10
+                        time:   [16.015 µs 16.183 µs 16.357 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high mild
+Benchmarking failing diagnose/unclosed groups/100
+Benchmarking failing diagnose/unclosed groups/100: Warming up for 3.0000 s
+Benchmarking failing diagnose/unclosed groups/100: Collecting 100 samples in estimated 1.0051 s (7200 iterations)
+Benchmarking failing diagnose/unclosed groups/100: Analyzing
+failing diagnose/unclosed groups/100
+                        time:   [139.48 µs 140.01 µs 140.66 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+Benchmarking failing diagnose/unclosed groups/1000
+Benchmarking failing diagnose/unclosed groups/1000: Warming up for 3.0000 s
+Benchmarking failing diagnose/unclosed groups/1000: Collecting 100 samples in estimated 1.0603 s (800 iterations)
+Benchmarking failing diagnose/unclosed groups/1000: Analyzing
+failing diagnose/unclosed groups/1000
+                        time:   [1.3156 ms 1.3184 ms 1.3213 ms]
+Benchmarking failing diagnose/unclosed groups/10000
+Benchmarking failing diagnose/unclosed groups/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 1.5s, or reduce sample count to 60.
+Benchmarking failing diagnose/unclosed groups/10000: Collecting 100 samples in estimated 1.4837 s (100 iterations)
+Benchmarking failing diagnose/unclosed groups/10000: Analyzing
+failing diagnose/unclosed groups/10000
+                        time:   [14.991 ms 15.098 ms 15.225 ms]
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) high mild
+  6 (6.00%) high severe
+Benchmarking failing diagnose/unclosed groups/100000
+Benchmarking failing diagnose/unclosed groups/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 16.0s, or reduce sample count to 10.
+Benchmarking failing diagnose/unclosed groups/100000: Collecting 100 samples in estimated 16.035 s (100 iterations)
+Benchmarking failing diagnose/unclosed groups/100000: Analyzing
+failing diagnose/unclosed groups/100000
+                        time:   [164.25 ms 165.22 ms 166.21 ms]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking failing diagnose/bare identifiers/10
+Benchmarking failing diagnose/bare identifiers/10: Warming up for 3.0000 s
+Benchmarking failing diagnose/bare identifiers/10: Collecting 100 samples in estimated 1.0030 s (31k iterations)
+Benchmarking failing diagnose/bare identifiers/10: Analyzing
+failing diagnose/bare identifiers/10
+                        time:   [32.465 µs 32.575 µs 32.705 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  5 (5.00%) high mild
+  2 (2.00%) high severe
+Benchmarking failing diagnose/bare identifiers/100
+Benchmarking failing diagnose/bare identifiers/100: Warming up for 3.0000 s
+Benchmarking failing diagnose/bare identifiers/100: Collecting 100 samples in estimated 1.0257 s (3100 iterations)
+Benchmarking failing diagnose/bare identifiers/100: Analyzing
+failing diagnose/bare identifiers/100
+                        time:   [322.82 µs 323.58 µs 324.36 µs]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking failing diagnose/bare identifiers/1000
+Benchmarking failing diagnose/bare identifiers/1000: Warming up for 3.0000 s
+Benchmarking failing diagnose/bare identifiers/1000: Collecting 100 samples in estimated 1.3141 s (400 iterations)
+Benchmarking failing diagnose/bare identifiers/1000: Analyzing
+failing diagnose/bare identifiers/1000
+                        time:   [3.2421 ms 3.2481 ms 3.2542 ms]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking failing diagnose/bare identifiers/10000
+Benchmarking failing diagnose/bare identifiers/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 3.3s, or reduce sample count to 30.
+Benchmarking failing diagnose/bare identifiers/10000: Collecting 100 samples in estimated 3.2914 s (100 iterations)
+Benchmarking failing diagnose/bare identifiers/10000: Analyzing
+failing diagnose/bare identifiers/10000
+                        time:   [32.702 ms 32.924 ms 33.290 ms]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking failing diagnose/bare identifiers/100000
+Benchmarking failing diagnose/bare identifiers/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 33.9s, or reduce sample count to 10.
+Benchmarking failing diagnose/bare identifiers/100000: Collecting 100 samples in estimated 33.945 s (100 iterations)
+Benchmarking failing diagnose/bare identifiers/100000: Analyzing
+failing diagnose/bare identifiers/100000
+                        time:   [340.54 ms 341.71 ms 343.00 ms]
+Found 12 outliers among 100 measurements (12.00%)
+  10 (10.00%) high mild
+  2 (2.00%) high severe
+Benchmarking failing diagnose/leading closers/10
+Benchmarking failing diagnose/leading closers/10: Warming up for 3.0000 s
+Benchmarking failing diagnose/leading closers/10: Collecting 100 samples in estimated 1.0012 s (34k iterations)
+Benchmarking failing diagnose/leading closers/10: Analyzing
+failing diagnose/leading closers/10
+                        time:   [30.201 µs 30.441 µs 30.701 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking failing diagnose/leading closers/100
+Benchmarking failing diagnose/leading closers/100: Warming up for 3.0000 s
+Benchmarking failing diagnose/leading closers/100: Collecting 100 samples in estimated 1.0065 s (3600 iterations)
+Benchmarking failing diagnose/leading closers/100: Analyzing
+failing diagnose/leading closers/100
+                        time:   [281.43 µs 282.77 µs 284.20 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking failing diagnose/leading closers/1000
+Benchmarking failing diagnose/leading closers/1000: Warming up for 3.0000 s
+Benchmarking failing diagnose/leading closers/1000: Collecting 100 samples in estimated 1.1446 s (400 iterations)
+Benchmarking failing diagnose/leading closers/1000: Analyzing
+failing diagnose/leading closers/1000
+                        time:   [2.8052 ms 2.8237 ms 2.8458 ms]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) high mild
+  5 (5.00%) high severe
+Benchmarking failing diagnose/leading closers/10000
+Benchmarking failing diagnose/leading closers/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 2.8s, or reduce sample count to 30.
+Benchmarking failing diagnose/leading closers/10000: Collecting 100 samples in estimated 2.8296 s (100 iterations)
+Benchmarking failing diagnose/leading closers/10000: Analyzing
+failing diagnose/leading closers/10000
+                        time:   [28.392 ms 28.522 ms 28.672 ms]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+Benchmarking failing diagnose/leading closers/100000
+Benchmarking failing diagnose/leading closers/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 28.8s, or reduce sample count to 10.
+Benchmarking failing diagnose/leading closers/100000: Collecting 100 samples in estimated 28.787 s (100 iterations)
+Benchmarking failing diagnose/leading closers/100000: Analyzing
+failing diagnose/leading closers/100000
+                        time:   [287.42 ms 288.28 ms 289.26 ms]
+Found 13 outliers among 100 measurements (13.00%)
+  11 (11.00%) high mild
+  2 (2.00%) high severe
+Benchmarking failing diagnose/missing operands/10
+Benchmarking failing diagnose/missing operands/10: Warming up for 3.0000 s
+Benchmarking failing diagnose/missing operands/10: Collecting 100 samples in estimated 1.0022 s (29k iterations)
+Benchmarking failing diagnose/missing operands/10: Analyzing
+failing diagnose/missing operands/10
+                        time:   [34.016 µs 34.150 µs 34.317 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking failing diagnose/missing operands/100
+Benchmarking failing diagnose/missing operands/100: Warming up for 3.0000 s
+Benchmarking failing diagnose/missing operands/100: Collecting 100 samples in estimated 1.0206 s (3200 iterations)
+Benchmarking failing diagnose/missing operands/100: Analyzing
+failing diagnose/missing operands/100
+                        time:   [318.79 µs 319.91 µs 321.19 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking failing diagnose/missing operands/1000
+Benchmarking failing diagnose/missing operands/1000: Warming up for 3.0000 s
+Benchmarking failing diagnose/missing operands/1000: Collecting 100 samples in estimated 1.2921 s (400 iterations)
+Benchmarking failing diagnose/missing operands/1000: Analyzing
+failing diagnose/missing operands/1000
+                        time:   [3.1870 ms 3.1970 ms 3.2080 ms]
+Found 8 outliers among 100 measurements (8.00%)
+  6 (6.00%) high mild
+  2 (2.00%) high severe
+Benchmarking failing diagnose/missing operands/10000
+Benchmarking failing diagnose/missing operands/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 3.3s, or reduce sample count to 30.
+Benchmarking failing diagnose/missing operands/10000: Collecting 100 samples in estimated 3.2631 s (100 iterations)
+Benchmarking failing diagnose/missing operands/10000: Analyzing
+failing diagnose/missing operands/10000
+                        time:   [33.123 ms 33.214 ms 33.317 ms]
+Found 10 outliers among 100 measurements (10.00%)
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+Benchmarking failing diagnose/missing operands/100000
+Benchmarking failing diagnose/missing operands/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 1.0s. You may wish to increase target time to 33.2s, or reduce sample count to 10.
+Benchmarking failing diagnose/missing operands/100000: Collecting 100 samples in estimated 33.186 s (100 iterations)
+Benchmarking failing diagnose/missing operands/100000: Analyzing
+failing diagnose/missing operands/100000
+                        time:   [331.48 ms 332.29 ms 333.14 ms]
+

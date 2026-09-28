@@ -163,7 +163,7 @@ Function() r#0 ⚅#0
 fn test_assemble_single_parameter()
 {
 	let text = "\
-Function(x@0) r#1 ⚅#0
+Function({x}@0) r#1 ⚅#0
 \textern[]
 \tbody:
 \t\treturn @0
@@ -180,7 +180,7 @@ fn test_assemble_single_extern()
 {
 	let text = "\
 Function() r#1 ⚅#0
-\textern[y@0]
+\textern[{y}@0]
 \tbody:
 \t\treturn @0
 ";
@@ -197,8 +197,8 @@ Function() r#1 ⚅#0
 fn test_assemble_unicode_and_whitespace_names()
 {
 	let text = "\
-Function(an argument@0, qualified.access@1, kebab-case@2) r#4 ⚅#0
-\textern[выражение в кости@3]
+Function({an argument}@0, {qualified.access}@1, {kebab-case}@2) r#4 ⚅#0
+\textern[{выражение в кости}@3]
 \tbody:
 \t\t@3 <- @0 + @3
 \t\treturn @3
@@ -216,7 +216,29 @@ Function(an argument@0, qualified.access@1, kebab-case@2) r#4 ⚅#0
 	assert_eq!(function.register_count, 4);
 }
 
-/// Cover every binary arithmetic sigil.
+/// Assemble parameter and extern names that contain the delimiters of the print
+/// format, `@`, `,`, `)`, and `]`. The braces delimit each name, so every name
+/// survives the round trip exactly, and [`Function`]'s [`Display`] reproduces
+/// the text.
+#[test]
+fn test_assemble_names_containing_delimiters()
+{
+	let text = "\
+Function({a@b}@0, {x, y}@1, {f(x)}@2) r#4 ⚅#0
+\textern[{v]w}@3]
+\tbody:
+\t\treturn @3
+";
+	let function = Assembler::assemble(text).unwrap();
+	assert_eq!(
+		function.parameters,
+		vec!["a@b".to_string(), "x, y".to_string(), "f(x)".to_string()]
+	);
+	assert_eq!(function.externals, vec!["v]w".to_string()]);
+	assert_eq!(function.to_string(), text);
+}
+
+/// Cover every binary arithmetic sigil and keyword.
 #[test]
 fn test_assemble_binary_arithmetic()
 {
@@ -234,7 +256,8 @@ fn test_assemble_binary_arithmetic()
 		("*", Instruction::mul),
 		("/", Instruction::div),
 		("%", Instruction::r#mod),
-		("^", Instruction::exp)
+		("^", Instruction::exp),
+		("max", Instruction::max)
 	]
 	{
 		let text = format!(
@@ -261,12 +284,36 @@ Function() r#1 ⚅#0
 	}
 }
 
+/// Assemble a maximum of a negative immediate and a register, which only the
+/// optimizer emits, and ensure that it prints as it assembled.
+#[test]
+fn test_assemble_max()
+{
+	let text = "\
+Function({x}@0) r#2 ⚅#0
+\textern[]
+\tbody:
+\t\t@1 <- -5 max @0
+\t\treturn @1
+";
+	let function = Assembler::assemble(text).unwrap();
+	assert_eq!(
+		function.instructions[0],
+		Instruction::max(
+			RegisterIndex(1),
+			Immediate(-5).into(),
+			RegisterIndex(0).into()
+		)
+	);
+	assert_eq!(function.to_string().trim(), text.trim());
+}
+
 /// Unary negation, with both an immediate and a register operand.
 #[test]
 fn test_assemble_unary_negation()
 {
 	let text = "\
-Function(x@0) r#2 ⚅#0
+Function({x}@0) r#2 ⚅#0
 \textern[]
 \tbody:
 \t\t@1 <- -@0
@@ -321,7 +368,7 @@ Function() r#1 ⚅#1
 	);
 
 	let text = "\
-Function(a@0, b@1) r#3 ⚅#1
+Function({a}@0, {b}@1) r#3 ⚅#1
 \textern[]
 \tbody:
 \t\t⚅0 <- roll range @0:@1
@@ -481,7 +528,7 @@ Function() r#1 ⚅#0
 fn test_assemble_permissive_whitespace()
 {
 	let text = "\
-Function(x@0,   y@1) r#2 ⚅#0
+Function({x}@0,   {y}@1) r#2 ⚅#0
     extern[]
   body:
           @0 <- @0  +  @1
@@ -584,6 +631,76 @@ fn test_reject_missing_rolling_record_count_prefix()
 		assert_rejects("Function() r#0 0\n\textern[]\n\tbody:\n\t\treturn 0\n"),
 		AssemblyError::Syntax { .. }
 	));
+}
+
+/// A parameter or extern name must be delimited by braces; a bare name yields
+/// [`AssemblyError::Syntax`].
+#[test]
+fn test_reject_bare_name()
+{
+	assert!(matches!(
+		assert_rejects(
+			"Function(x@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+		),
+		AssemblyError::Syntax { .. }
+	));
+	assert!(matches!(
+		assert_rejects(
+			"Function() r#1 ⚅#0\n\textern[x@0]\n\tbody:\n\t\treturn @0\n"
+		),
+		AssemblyError::Syntax { .. }
+	));
+}
+
+/// A name must not be empty; `{}` yields [`AssemblyError::Syntax`].
+#[test]
+fn test_reject_empty_name()
+{
+	assert!(matches!(
+		assert_rejects(
+			"Function({}@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+		),
+		AssemblyError::Syntax { .. }
+	));
+}
+
+/// A name must be a canonical identifier of the source language: no space may
+/// begin or end it, it may contain no whitespace but single spaces, and it may
+/// not contain a character that no identifier may contain. Each such name
+/// yields [`AssemblyError::Syntax`].
+#[test]
+fn test_reject_invalid_name()
+{
+	for name in [
+		"{ x}",
+		"{x }",
+		"{ }",
+		"{a  b}",
+		"{a\tb}",
+		"{a\u{200B}b}",
+		"{a\u{A0}b}"
+	]
+	{
+		for text in [
+			format!(
+				"Function({}@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n",
+				name
+			),
+			format!(
+				"Function() r#1 ⚅#0\n\textern[{}@0]\n\tbody:\n\t\treturn @0\n",
+				name
+			)
+		]
+		{
+			let e = assert_rejects(&text);
+			assert!(
+				matches!(e, AssemblyError::Syntax { .. }),
+				"expected Syntax for {:?}, got: {:?}",
+				name,
+				e
+			);
+		}
+	}
 }
 
 /// The `extern[...]` line is mandatory even when the extern list is empty.
@@ -752,7 +869,7 @@ fn test_reject_rolling_record_gap()
 fn test_reject_non_contiguous_parameter_indices()
 {
 	let e = assert_rejects(
-		"Function(x@0, y@2) r#2 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- @0 + @1\n\t\treturn @0\n"
+		"Function({x}@0, {y}@2) r#2 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- @0 + @1\n\t\treturn @0\n"
 	);
 	let AssemblyError::NonContiguousParameter {
 		name,
@@ -779,7 +896,7 @@ fn test_reject_non_contiguous_parameter_indices()
 fn test_reject_non_contiguous_extern_indices()
 {
 	let e = assert_rejects(
-		"Function(x@0) r#3 ⚅#0\n\textern[a@1, b@5]\n\tbody:\n\t\t@2 <- @1 + @0\n\t\treturn @2\n"
+		"Function({x}@0) r#3 ⚅#0\n\textern[{a}@1, {b}@5]\n\tbody:\n\t\t@2 <- @1 + @0\n\t\treturn @2\n"
 	);
 	let AssemblyError::NonContiguousExternal {
 		name,
@@ -806,7 +923,7 @@ fn test_reject_non_contiguous_extern_indices()
 fn test_reject_parameter_index_disagrees_with_position()
 {
 	let e = assert_rejects(
-		"Function(x@1) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+		"Function({x}@1) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
 	);
 	let AssemblyError::NonContiguousParameter {
 		name,
@@ -907,7 +1024,7 @@ fn test_reject_trailing_garbage()
 fn test_reject_declared_args_exceed_register_count()
 {
 	let e = assert_rejects(
-		"Function(x@0, y@1) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+		"Function({x}@0, {y}@1) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
 	);
 	let AssemblyError::InsufficientRegisterCount {
 		register_count,
@@ -1186,14 +1303,13 @@ fn test_assemble_integer_saturation()
 	);
 }
 
-/// A register name consisting solely of Unicode whitespace (a non-breaking
-/// space here) survives the bare-word scan — which excludes only ASCII
-/// horizontal whitespace and delimiters — but trims to empty, and is rejected.
+/// A register name consisting solely of Unicode whitespace other than a space
+/// (a non-breaking space here) is not an identifier, and is rejected.
 #[test]
 fn test_reject_blank_named_register()
 {
 	let e = assert_rejects(
-		"Function(\u{A0}@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
+		"Function({\u{A0}}@0) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
 	);
 	assert!(
 		matches!(e, AssemblyError::Syntax { .. }),

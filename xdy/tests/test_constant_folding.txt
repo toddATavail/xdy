@@ -243,9 +243,9 @@ Function() r#0 ⚅#0
 	body:
 		return 7
 
-x: 1 + 4 + {x} + 4 + 9
+{x}: 1 + 4 + {x} + 4 + 9
 =
-Function(x@0) r#4 ⚅#0
+Function({x}@0) r#4 ⚅#0
 	extern[]
 	body:
 		@1 <- 5 + @0
@@ -256,7 +256,7 @@ Function(x@0) r#4 ⚅#0
 1 + 4 + {x} + 4 + 9
 =
 Function() r#4 ⚅#0
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		@1 <- 5 + @0
 		@2 <- @1 + 4
@@ -452,7 +452,7 @@ Function() r#0 ⚅#0
 {x}D(3 + 3)
 =
 Function() r#2 ⚅#1
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		⚅0 <- roll standard dice @0D6
 		@1 <- sum rolling record ⚅0
@@ -461,21 +461,21 @@ Function() r#2 ⚅#1
 {x}D0
 =
 Function() r#1 ⚅#0
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		return 0
 
 {x}D(-1)
 =
 Function() r#1 ⚅#0
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		return 0
 
 {x}D1
 =
 Function() r#2 ⚅#1
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		⚅0 <- roll standard dice @0D1
 		@1 <- sum rolling record ⚅0
@@ -484,14 +484,14 @@ Function() r#2 ⚅#1
 0D{x}
 =
 Function() r#1 ⚅#0
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		return 0
 
 (-1)D{x}
 =
 Function() r#1 ⚅#0
-	extern[x@0]
+	extern[{x}@0]
 	body:
 		return 0
 

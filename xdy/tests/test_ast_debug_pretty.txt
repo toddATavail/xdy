@@ -1,0 +1,680 @@
+42
+=
+Function {
+    parameters: None,
+    body: Constant(
+        Constant {
+            value: 42,
+            span: SourceSpan {
+                start: 0,
+                end: 2,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 2,
+    },
+}
+
+{x}, {y}: {x}D{y} + -3
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "x",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+            Parameter {
+                name: "y",
+                span: SourceSpan {
+                    start: 6,
+                    end: 7,
+                },
+            },
+        ],
+    ),
+    body: Arithmetic(
+        Add(
+            Add {
+                left: Dice(
+                    Standard(
+                        StandardDice {
+                            count: Variable(
+                                Variable {
+                                    name: "x",
+                                    span: SourceSpan {
+                                        start: 10,
+                                        end: 13,
+                                    },
+                                },
+                            ),
+                            faces: Variable(
+                                Variable {
+                                    name: "y",
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 17,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 10,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+                right: Constant(
+                    Constant {
+                        value: -3,
+                        span: SourceSpan {
+                            start: 20,
+                            end: 22,
+                        },
+                    },
+                ),
+                span: SourceSpan {
+                    start: 10,
+                    end: 22,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 22,
+    },
+}
+
+(1 + 2) * -(3) / 4 % 5 ^ 6 - {z}
+=
+Function {
+    parameters: None,
+    body: Arithmetic(
+        Sub(
+            Sub {
+                left: Arithmetic(
+                    Mod(
+                        Mod {
+                            left: Arithmetic(
+                                Div(
+                                    Div {
+                                        left: Arithmetic(
+                                            Mul(
+                                                Mul {
+                                                    left: Group(
+                                                        Group {
+                                                            expression: Arithmetic(
+                                                                Add(
+                                                                    Add {
+                                                                        left: Constant(
+                                                                            Constant {
+                                                                                value: 1,
+                                                                                span: SourceSpan {
+                                                                                    start: 1,
+                                                                                    end: 2,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        right: Constant(
+                                                                            Constant {
+                                                                                value: 2,
+                                                                                span: SourceSpan {
+                                                                                    start: 5,
+                                                                                    end: 6,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        span: SourceSpan {
+                                                                            start: 1,
+                                                                            end: 6,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            span: SourceSpan {
+                                                                start: 0,
+                                                                end: 7,
+                                                            },
+                                                        },
+                                                    ),
+                                                    right: Arithmetic(
+                                                        Neg(
+                                                            Neg {
+                                                                operand: Group(
+                                                                    Group {
+                                                                        expression: Constant(
+                                                                            Constant {
+                                                                                value: 3,
+                                                                                span: SourceSpan {
+                                                                                    start: 12,
+                                                                                    end: 13,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        span: SourceSpan {
+                                                                            start: 11,
+                                                                            end: 14,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                span: SourceSpan {
+                                                                    start: 10,
+                                                                    end: 14,
+                                                                },
+                                                            },
+                                                        ),
+                                                    ),
+                                                    span: SourceSpan {
+                                                        start: 0,
+                                                        end: 14,
+                                                    },
+                                                },
+                                            ),
+                                        ),
+                                        right: Constant(
+                                            Constant {
+                                                value: 4,
+                                                span: SourceSpan {
+                                                    start: 17,
+                                                    end: 18,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 18,
+                                        },
+                                    },
+                                ),
+                            ),
+                            right: Arithmetic(
+                                Exp(
+                                    Exp {
+                                        left: Constant(
+                                            Constant {
+                                                value: 5,
+                                                span: SourceSpan {
+                                                    start: 21,
+                                                    end: 22,
+                                                },
+                                            },
+                                        ),
+                                        right: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 25,
+                                                    end: 26,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 21,
+                                            end: 26,
+                                        },
+                                    },
+                                ),
+                            ),
+                            span: SourceSpan {
+                                start: 0,
+                                end: 26,
+                            },
+                        },
+                    ),
+                ),
+                right: Variable(
+                    Variable {
+                        name: "z",
+                        span: SourceSpan {
+                            start: 29,
+                            end: 32,
+                        },
+                    },
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 32,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 32,
+    },
+}
+
+[1:6] + 3D[-1, 0, 1]
+=
+Function {
+    parameters: None,
+    body: Arithmetic(
+        Add(
+            Add {
+                left: Range(
+                    Range {
+                        start: Constant(
+                            Constant {
+                                value: 1,
+                                span: SourceSpan {
+                                    start: 1,
+                                    end: 2,
+                                },
+                            },
+                        ),
+                        end: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 3,
+                                    end: 4,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 5,
+                        },
+                    },
+                ),
+                right: Dice(
+                    Custom(
+                        CustomDice {
+                            count: Constant(
+                                Constant {
+                                    value: 3,
+                                    span: SourceSpan {
+                                        start: 8,
+                                        end: 9,
+                                    },
+                                },
+                            ),
+                            faces: [
+                                -1,
+                                0,
+                                1,
+                            ],
+                            span: SourceSpan {
+                                start: 8,
+                                end: 20,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 20,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 20,
+    },
+}
+
+4D6 drop lowest drop highest 1
+=
+Function {
+    parameters: None,
+    body: Dice(
+        DropHighest(
+            DropHighest {
+                dice: DropLowest(
+                    DropLowest {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 4,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 6,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        drop: None,
+                        span: SourceSpan {
+                            start: 0,
+                            end: 15,
+                        },
+                    },
+                ),
+                drop: Some(
+                    Constant(
+                        Constant {
+                            value: 1,
+                            span: SourceSpan {
+                                start: 29,
+                                end: 30,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 30,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 30,
+    },
+}
+
+{a}@(2D6) + {a}D8
+=
+Function {
+    parameters: None,
+    body: Arithmetic(
+        Add(
+            Add {
+                left: Binding(
+                    Binding {
+                        name: "a",
+                        name_span: SourceSpan {
+                            start: 1,
+                            end: 2,
+                        },
+                        expression: Dice(
+                            Standard(
+                                StandardDice {
+                                    count: Constant(
+                                        Constant {
+                                            value: 2,
+                                            span: SourceSpan {
+                                                start: 5,
+                                                end: 6,
+                                            },
+                                        },
+                                    ),
+                                    faces: Constant(
+                                        Constant {
+                                            value: 6,
+                                            span: SourceSpan {
+                                                start: 7,
+                                                end: 8,
+                                            },
+                                        },
+                                    ),
+                                    span: SourceSpan {
+                                        start: 5,
+                                        end: 8,
+                                    },
+                                },
+                            ),
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 9,
+                        },
+                    },
+                ),
+                right: Dice(
+                    Standard(
+                        StandardDice {
+                            count: Variable(
+                                Variable {
+                                    name: "a",
+                                    span: SourceSpan {
+                                        start: 12,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 8,
+                                    span: SourceSpan {
+                                        start: 16,
+                                        end: 17,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 12,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 17,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 17,
+    },
+}
+
+8D8 drop lowest (2) drop highest {a}@(1)
+=
+Function {
+    parameters: None,
+    body: Dice(
+        DropHighest(
+            DropHighest {
+                dice: DropLowest(
+                    DropLowest {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 8,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 8,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        drop: Some(
+                            Group(
+                                Group {
+                                    expression: Constant(
+                                        Constant {
+                                            value: 2,
+                                            span: SourceSpan {
+                                                start: 17,
+                                                end: 18,
+                                            },
+                                        },
+                                    ),
+                                    span: SourceSpan {
+                                        start: 16,
+                                        end: 19,
+                                    },
+                                },
+                            ),
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 19,
+                        },
+                    },
+                ),
+                drop: Some(
+                    Binding(
+                        Binding {
+                            name: "a",
+                            name_span: SourceSpan {
+                                start: 34,
+                                end: 35,
+                            },
+                            expression: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 38,
+                                        end: 39,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 33,
+                                end: 40,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 40,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 40,
+    },
+}
+
+{x}: [{x}:2D6] ^ -1D[5]
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "x",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+        ],
+    ),
+    body: Arithmetic(
+        Exp(
+            Exp {
+                left: Range(
+                    Range {
+                        start: Variable(
+                            Variable {
+                                name: "x",
+                                span: SourceSpan {
+                                    start: 6,
+                                    end: 9,
+                                },
+                            },
+                        ),
+                        end: Dice(
+                            Standard(
+                                StandardDice {
+                                    count: Constant(
+                                        Constant {
+                                            value: 2,
+                                            span: SourceSpan {
+                                                start: 10,
+                                                end: 11,
+                                            },
+                                        },
+                                    ),
+                                    faces: Constant(
+                                        Constant {
+                                            value: 6,
+                                            span: SourceSpan {
+                                                start: 12,
+                                                end: 13,
+                                            },
+                                        },
+                                    ),
+                                    span: SourceSpan {
+                                        start: 10,
+                                        end: 13,
+                                    },
+                                },
+                            ),
+                        ),
+                        span: SourceSpan {
+                            start: 5,
+                            end: 14,
+                        },
+                    },
+                ),
+                right: Arithmetic(
+                    Neg(
+                        Neg {
+                            operand: Dice(
+                                Custom(
+                                    CustomDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 18,
+                                                    end: 19,
+                                                },
+                                            },
+                                        ),
+                                        faces: [
+                                            5,
+                                        ],
+                                        span: SourceSpan {
+                                            start: 18,
+                                            end: 23,
+                                        },
+                                    },
+                                ),
+                            ),
+                            span: SourceSpan {
+                                start: 17,
+                                end: 23,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 5,
+                    end: 23,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 23,
+    },
+}

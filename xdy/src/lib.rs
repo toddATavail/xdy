@@ -60,9 +60,10 @@
 //! * Grouping: `(1 + 2) * 3`, `1 + (2 * 3D4)`, `(3 * 2)D5`, `4D(5 - 2)`, …
 //! * Drop lowest: `1D6 drop lowest 1`, `2D8 drop lowest 2`, …
 //! * Drop highest: `1D6 drop highest 1`, `2D8 drop highest 2`, …
-//! * Formal parameters: `x: 1D6 + {x}`, `y: 1D6 + {y}`, `x, y: {x}D{y}`, …
+//! * Formal parameters: `{x}: 1D6 + {x}`, `{y}: 1D6 + {y}`, `{x}, {y}:
+//!   {x}D{y}`, …
 //! * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
-//! * Dynamic expressions: `3D(2D6)`, `x: ({x}D3)D8`, …
+//! * Dynamic expressions: `3D(2D6)`, `{x}: ({x}D3)D8`, …
 //!
 //! Environmental variables permit background state to be associated with an
 //! evaluator, while formal parameters permit dynamic state to be passed into
@@ -97,7 +98,7 @@
 //! use xdy::evaluate;
 //! use rand::rng;
 //!
-//! let result = evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
+//! let result = evaluate("{x}: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 //!
 //! assert!(3 <= result.result && result.result <= 18);
 //! assert!(result.records.len() == 1);
@@ -173,7 +174,7 @@
 //! use xdy::{compile, Evaluator};
 //! use rand::rng;
 //!
-//! let function = compile("x: 1D6 + {x}")?;
+//! let function = compile("{x}: 1D6 + {x}")?;
 //! let mut evaluator = Evaluator::new(function);
 //! let results = (0..10)
 //!    .flat_map(|x| evaluator.evaluate(vec![x], &mut rng()))
@@ -231,7 +232,7 @@
 //! ```rust
 //! use xdy::{compile, Evaluator};
 //!
-//! let function = compile("x: {x}D6 + {y}")?;
+//! let function = compile("{x}: {x}D6 + {y}")?;
 //! let evaluator = Evaluator::new(function);
 //!
 //! // Roll between 1 and 20 dice, and add a `y` known to be 3.
@@ -248,16 +249,89 @@
 //! # Ok::<(), xdy::EvaluationError>(())
 //! ```
 //!
+//! ### Dice budgets
+//!
+//! Evaluation costs time and memory in proportion to the dice it rolls, and an
+//! expression like `{x}D6` rolls as many dice as `x` says, which may be over
+//! two billion. When the expression or its bindings are untrusted, evaluate
+//! within a dice budget. A roll that would exceed what remains of the budget is
+//! refused before it rolls anything, and a successful evaluation reports the
+//! dice it rolled, so one budget can be carried across several evaluations:
+//!
+//! ```rust
+//! use rand::rng;
+//! use xdy::{compile, EvaluationError, Evaluator};
+//!
+//! let mut evaluator = Evaluator::new(compile("{x}: {x}D6")?);
+//!
+//! let evaluation = evaluator.evaluate_metered([3], &mut rng(), 10)?;
+//! assert_eq!(evaluation.dice, 3);
+//!
+//! let error = evaluator.evaluate_metered([i32::MAX], &mut rng(), 10);
+//! assert_eq!(
+//!     error,
+//!     Err(EvaluationError::DiceBudgetExhausted {
+//!         requested: i32::MAX as u64,
+//!         remaining: 10,
+//!         consumed: 0
+//!     })
+//! );
+//! # Ok::<(), EvaluationError>(())
+//! ```
+//!
+//! Bounds analysis reports the worst case, so a caller can compare it against a
+//! budget without evaluating anything:
+//!
+//! ```rust
+//! use xdy::{compile, Evaluator};
+//!
+//! let evaluator = Evaluator::new(compile("{x}: ({x}D4)D6")?);
+//! let bounds = evaluator.bounds_over([Some((1, 3).into())], [])?;
+//! assert_eq!(bounds.dice, 15);
+//! # Ok::<(), xdy::EvaluationError>(())
+//! ```
+//!
+//! Computing a probability distribution enumerates every outcome of every range
+//! and die along every path through the expression, which costs far more than
+//! rolling it: the distribution of `{x}D6` has `6^x` paths. Build it within a
+//! budget of branches, where a range charges its width and a die its number of
+//! faces, once for each path that reaches it. A range or die that would exceed
+//! what remains of the budget is refused before any of its outcomes is
+//! enumerated, and whether a build fits its budget never depends on the number
+//! of threads that build it:
+//!
+//! ```rust
+//! use xdy::{EvaluationError, Evaluator, HistogramBuilder, compile, serial};
+//!
+//! let function = compile("{x}: {x}D6")?;
+//! let builder = serial::HistogramBuilder::new(Evaluator::new(function));
+//!
+//! // 6 branches for the first die, then 6 for the second die on each of those
+//! // 6 paths.
+//! let histogram = builder.build_metered([2], 42)?;
+//! assert_eq!(histogram.total(), 36);
+//!
+//! let error = builder.build_metered([i32::MAX], 1_000);
+//! assert!(matches!(
+//!     error,
+//!     Err(EvaluationError::HistogramBudgetExhausted { .. })
+//! ));
+//! # Ok::<(), EvaluationError>(())
+//! ```
+//!
 //! ## Diagnostics and validation
 //!
 //! The [`compile`] and [`evaluate`] happy path returns typed
 //! [`CompilationError`] and [`EvaluationError`] values; for editor-style
 //! feedback — rich error reports, suggested fixes, caret-precise source spans —
 //! use the [`diagnostics::diagnose`] entry point instead. It runs the full sad
-//! path: a fix-and-retry loop over parser errors, followed by a semantic
-//! [`Validator`] pass over the parsed AST. The validator currently catches
-//! duplicate formal parameter names; further checks will land as language
-//! features are added.
+//! path: a single recovering parse that diagnoses and repairs each parser
+//! error in turn, or, if the source parses cleanly, a semantic [`Validator`]
+//! pass over the parsed AST. The validator catches duplicate formal parameter
+//! names, and enforces the invariants of local bindings: no binding may collide
+//! with a formal parameter, bind a name that another binding binds, or follow a
+//! reference to its name. Further checks will land as language features are
+//! added.
 //!
 //! Every AST node carries a [`SourceSpan`] referencing its byte range in the
 //! original input. Semantic errors and diagnostics propagate these spans
@@ -273,25 +347,27 @@
 //! `y = 2`, and `z = 2`:
 //!
 //! ```text
-//! x, y, z: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
+//! {x}, {y}, {z}: {x}D[-1, 0, 1, 3, 5] drop lowest {y} drop highest {z}
 //! ```
 //!
 //! This dice expression involves argument binding, custom dice, and dropping
 //! values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the
 //! `2` lowest results, and drop the `2` highest results, leaving only `1` die.
-//! On a 2023 MacBook Pro, `xDy` compiled and optimized this expression with
-//! mean time `22.664 µs` and evaluated it with mean time `216.89 ns`.
+//! On a 2026 MacBook Pro, `xDy` compiled and optimized this expression with
+//! mean time `5.304 µs` and evaluated it with mean time `115.92 ns`.
 //! Furthermore, the serial probability distribution calculation took mean time
-//! `394.85 µs` and the parallel calculation took mean time `291.46 µs`.
+//! `1038.18 µs` and the parallel calculation took mean time `702.56 µs`.
 //!
 //! `xDy` provides a six-pass optimizer that rewrites IR into more efficient
 //! forms. The optimizer folds constant expressions, performs strength-reducing
 //! operations, eliminates common subexpressions, eliminates dead code, and
-//! coalesces registers. The optimizer can also reorder commutative operations
-//! and operands to improve opportunities for constant folding and strength
-//! reduction. The optimizer runs all passes repeatedly, in predefined order,
-//! until a fixed point is reached. The optimizer is designed to be fast and
-//! effective, but it can be disabled if desired.
+//! coalesces registers. The optimizer also puts the operands of commutative
+//! operations in canonical order and merges chained constants, to improve
+//! opportunities for constant folding and strength reduction. Every pass is
+//! exact: an optimized function answers exactly what the unoptimized one does,
+//! even where arithmetic saturates. The optimizer runs all passes repeatedly,
+//! in predefined order, until a fixed point is reached. The optimizer is
+//! designed to be fast and effective, but it can be disabled if desired.
 //!
 //! ## Safety
 //!
@@ -299,12 +375,15 @@
 //! are `i32` and all arithmetic operations saturate on overflow or underflow.
 //! Neither the compiler nor evaluator should panic or cause undefined behavior,
 //! even for invalid dice expressions and inputs, though client misuse of vector
-//! results can lead to panics. `unsafe` code is confined to the parser, where
-//! [`nom_locate::LocatedSpan::new_from_raw_offset`] reconstructs a span after
-//! trimming trailing whitespace from an identifier. The reconstruction is sound
-//! because every offset, line, and slice fed to it is derived from a span that
-//! `nom` has already validated against the same source text, so no invariant of
-//! `LocatedSpan` is violated. No foreign function interfaces are involved.
+//! results can lead to panics. `unsafe` code appears in one place. In the
+//! [abstract syntax tree](ast), the [`Drop`] implementation of
+//! [`DiceExpression`](ast::DiceExpression) dismantles stacked drop clauses
+//! (e.g., `4D6 drop lowest drop highest`) without recursion or allocation,
+//! moving values out of place and back with [`ptr::read`](std::ptr::read) and
+//! [`ptr::write`](std::ptr::write). This is sound because every value has
+//! exactly one owner throughout, and nothing can unwind while a value is out
+//! of place; the test suite checks it under Miri.
+//! No foreign function interfaces are involved.
 //!
 //! ## Cargo features
 //!
@@ -365,7 +444,8 @@ pub use validator::*;
 /// - `args`: The arguments to the function.
 /// - `environment`: The environment in which to evaluate the function, as a
 ///   vector of external variable bindings. The bindings are pairs of variable
-///   names and values. Missing bindings default to zero.
+///   names and values. Each name is [canonical](crate::parser::canonical_name),
+///   so `{a  b}` is bound as `"a b"`. Missing bindings default to zero.
 /// - `rng`: The pseudo-random number generator to use for range and dice rolls.
 ///
 /// # Returns
@@ -415,7 +495,8 @@ where
 /// - `args`: The arguments to the function.
 /// - `environment`: The environment in which to evaluate the function, as a
 ///   vector of external variable bindings. The bindings are pairs of variable
-///   names and values. Missing bindings default to zero.
+///   names and values. Each name is [canonical](crate::parser::canonical_name),
+///   so `{a  b}` is bound as `"a b"`. Missing bindings default to zero.
 /// - `rng`: The pseudo-random number generator to use for range and dice rolls.
 ///
 /// # Returns
@@ -456,7 +537,7 @@ where
 /// use rand::rng;
 ///
 /// let result =
-///     evaluate("x: {x}D6", vec![3], vec![], &mut rng()).unwrap();
+///     evaluate("{x}: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 /// assert!(3 <= result.result && result.result <= 18);
 /// assert!(result.records.len() == 1);
 /// assert!(result.records[0].results.len() == 3);

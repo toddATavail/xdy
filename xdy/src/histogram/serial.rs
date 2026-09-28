@@ -10,7 +10,7 @@ use std::{
 
 use crate::{EvaluationError, Evaluator, Function};
 
-use super::{CanBuildHistogram, CanIterate, EvaluationState, Histogram};
+use super::{CanBuildHistogram, CanIterate, EvaluationState, Histogram, Meter};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                            Histogram building.                             //
@@ -52,6 +52,21 @@ impl<'inst> super::HistogramBuilder<'inst, EvaluationStateIterator<'inst>>
 		}
 	}
 
+	fn build_metered(
+		&self,
+		args: impl IntoIterator<Item = i32>,
+		budget: u64
+	) -> Result<Histogram, EvaluationError<'static>>
+	{
+		let meter = Meter::new(budget);
+		let mut histogram = Histogram::default();
+		CanBuildHistogram::iter(self, args, meter.limited())?
+			.flat_map(|state| state.result)
+			.for_each(|outcome| increment(&mut histogram, outcome));
+		meter.verdict()?;
+		Ok(histogram)
+	}
+
 	fn build_while(
 		&self,
 		args: impl IntoIterator<Item = i32>,
@@ -73,7 +88,7 @@ impl<'inst> super::HistogramBuilder<'inst, EvaluationStateIterator<'inst>>
 		args: impl IntoIterator<Item = i32>
 	) -> Result<EvaluationStateIterator<'inst>, EvaluationError<'inst>>
 	{
-		CanBuildHistogram::iter(self, args)
+		CanBuildHistogram::iter(self, args, None)
 	}
 }
 
@@ -88,11 +103,13 @@ impl<'inst> CanBuildHistogram<'inst, EvaluationStateIterator<'inst>>
 
 	fn create_iterator(
 		&'inst self,
-		initial_state: EvaluationState<'inst>
+		initial_state: EvaluationState<'inst>,
+		meter: Option<&'inst Meter>
 	) -> EvaluationStateIterator<'inst>
 	{
 		EvaluationStateIterator {
-			states: RefCell::new([initial_state].into())
+			states: RefCell::new([initial_state].into()),
+			meter
 		}
 	}
 }
@@ -115,7 +132,11 @@ impl<'inst> CanBuildHistogram<'inst, EvaluationStateIterator<'inst>>
 pub struct EvaluationStateIterator<'inst>
 {
 	/// The remaining states to evaluate.
-	states: RefCell<VecDeque<EvaluationState<'inst>>>
+	states: RefCell<VecDeque<EvaluationState<'inst>>>,
+
+	/// The meter of the evaluation, if it is metered. Once the meter refuses a
+	/// charge, the iteration ends.
+	meter: Option<&'inst Meter>
 }
 
 impl<'inst> CanIterate<'inst> for EvaluationStateIterator<'inst>
@@ -140,6 +161,11 @@ impl<'inst> Iterator for EvaluationStateIterator<'inst>
 
 	fn next(&mut self) -> Option<Self::Item>
 	{
+		if self.meter.is_some_and(Meter::refused)
+		{
+			// The meter refused a charge, which ends the evaluation.
+			return None
+		}
 		match self.next_state()
 		{
 			Some(mut state) =>

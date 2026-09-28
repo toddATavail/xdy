@@ -6,9 +6,10 @@
 
 use pretty_assertions::assert_eq;
 
+use super::ast::{DEPTH, Nesting, nest_function};
 use crate::{
 	CompilationError, EvaluationError, Parser, SourceSpan, Validator, compile,
-	compile_unoptimized, evaluate
+	compile_unoptimized, evaluate, support::on_small_stack
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -27,7 +28,7 @@ fn validate_no_parameters()
 #[test]
 fn validate_single_parameter()
 {
-	let ast = Parser::parse("x: {x} + 1").unwrap();
+	let ast = Parser::parse("{x}: {x} + 1").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -35,7 +36,7 @@ fn validate_single_parameter()
 #[test]
 fn validate_multiple_distinct_parameters()
 {
-	let ast = Parser::parse("x, y, z: {x} + {y} + {z}").unwrap();
+	let ast = Parser::parse("{x}, {y}, {z}: {x} + {y} + {z}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -44,7 +45,7 @@ fn validate_multiple_distinct_parameters()
 #[test]
 fn validate_repeated_character_not_duplicate()
 {
-	let ast = Parser::parse("xx: {xx} + 1").unwrap();
+	let ast = Parser::parse("{xx}: {xx} + 1").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -56,13 +57,13 @@ fn validate_repeated_character_not_duplicate()
 #[test]
 fn validate_duplicate_single_char_parameter()
 {
-	let ast = Parser::parse("x, x: {x} + 1").unwrap();
+	let ast = Parser::parse("{x}, {x}: {x} + 1").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -72,13 +73,13 @@ fn validate_duplicate_single_char_parameter()
 #[test]
 fn validate_duplicate_multichar_parameter()
 {
-	let ast = Parser::parse("abc, abc: 1").unwrap();
+	let ast = Parser::parse("{abc}, {abc}: 1").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateParameter {
-			name: "abc",
-			first: SourceSpan { start: 0, end: 3 },
-			duplicate: SourceSpan { start: 5, end: 8 }
+			name: "abc".into(),
+			first: SourceSpan { start: 1, end: 4 },
+			duplicate: SourceSpan { start: 8, end: 11 }
 		})
 	);
 }
@@ -88,13 +89,13 @@ fn validate_duplicate_multichar_parameter()
 #[test]
 fn validate_duplicate_after_distinct_parameter()
 {
-	let ast = Parser::parse("a, b, a: {a} + {b}").unwrap();
+	let ast = Parser::parse("{a}, {b}, {a}: {a} + {b}").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateParameter {
-			name: "a",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 6, end: 7 }
+			name: "a".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 11, end: 12 }
 		})
 	);
 }
@@ -104,13 +105,13 @@ fn validate_duplicate_after_distinct_parameter()
 #[test]
 fn validate_duplicate_reports_first_only()
 {
-	let ast = Parser::parse("x, x, x: {x}").unwrap();
+	let ast = Parser::parse("{x}, {x}, {x}: {x}").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -121,13 +122,31 @@ fn validate_duplicate_reports_first_only()
 #[test]
 fn validate_duplicate_with_whitespace()
 {
-	let ast = Parser::parse("x,   x: {x}").unwrap();
+	let ast = Parser::parse("{x},   {x}: {x}").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 5, end: 6 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 8, end: 9 }
+		})
+	);
+}
+
+/// Validator compares parameter names canonically: whitespace within a name
+/// collapses to a single space, so `{a b}` and `{a\tb}` declare the same
+/// parameter, and the error reports the canonical name, with the spans of the
+/// names as written.
+#[test]
+fn validate_duplicate_canonical_parameter()
+{
+	let ast = Parser::parse("{a b}, {a\tb}: 1").unwrap();
+	assert_eq!(
+		Validator::validate(&ast),
+		Err(CompilationError::DuplicateParameter {
+			name: "a b".into(),
+			first: SourceSpan { start: 1, end: 4 },
+			duplicate: SourceSpan { start: 8, end: 11 }
 		})
 	);
 }
@@ -140,7 +159,7 @@ fn validate_duplicate_with_whitespace()
 #[test]
 fn validate_binding_single_use()
 {
-	let ast = Parser::parse("x@(3D6) + {x}").unwrap();
+	let ast = Parser::parse("{x}@(3D6) + {x}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -148,7 +167,7 @@ fn validate_binding_single_use()
 #[test]
 fn validate_binding_multiple_uses()
 {
-	let ast = Parser::parse("x@(3D6) + {x} + {x}").unwrap();
+	let ast = Parser::parse("{x}@(3D6) + {x} + {x}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -156,7 +175,7 @@ fn validate_binding_multiple_uses()
 #[test]
 fn validate_two_distinct_bindings()
 {
-	let ast = Parser::parse("a@(3D6) + b@(2D4) + {a} + {b}").unwrap();
+	let ast = Parser::parse("{a}@(3D6) + {b}@(2D4) + {a} + {b}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -165,19 +184,31 @@ fn validate_two_distinct_bindings()
 #[test]
 fn validate_binding_references_earlier_binding_in_rhs()
 {
-	let ast = Parser::parse("a@(b@(3D6) + {b}) + {a}").unwrap();
+	let ast = Parser::parse("{a}@({b}@(3D6) + {b}) + {a}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
+}
+
+/// Validator resolves a reference to a binding canonically, so a name broken
+/// over lines refers to the binding of the same name written on one line, and
+/// the compiler finds no external variable.
+#[test]
+fn validate_binding_referenced_canonically()
+{
+	let ast = Parser::parse("{a b}@(3D6) + {a\n   b} + {  a  b  }").unwrap();
+	assert_eq!(Validator::validate(&ast), Ok(()));
+	let function = compile_unoptimized("{a b}@(3D6) + {a\n   b}").unwrap();
+	assert!(function.externals.is_empty());
 }
 
 /// Validator accepts a binding in a dice-count, faces, or drop-count position.
 #[test]
 fn validate_binding_in_restricted_positions()
 {
-	let ast_count = Parser::parse("n@(2+3)D6 + {n}").unwrap();
+	let ast_count = Parser::parse("{n}@(2+3)D6 + {n}").unwrap();
 	assert_eq!(Validator::validate(&ast_count), Ok(()));
-	let ast_faces = Parser::parse("4Df@(6) + {f}").unwrap();
+	let ast_faces = Parser::parse("4D{f}@(6) + {f}").unwrap();
 	assert_eq!(Validator::validate(&ast_faces), Ok(()));
-	let ast_drop = Parser::parse("4D6 drop lowest k@(2) + {k}").unwrap();
+	let ast_drop = Parser::parse("4D6 drop lowest {k}@(2) + {k}").unwrap();
 	assert_eq!(Validator::validate(&ast_drop), Ok(()));
 }
 
@@ -190,13 +221,13 @@ fn validate_binding_in_restricted_positions()
 #[test]
 fn validate_binding_collides_with_parameter()
 {
-	let ast = Parser::parse("x: x@(3D6) + {x}").unwrap();
+	let ast = Parser::parse("{x}: {x}@(3D6) + {x}").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::BindingCollidesWithParameter {
-			name: "x",
-			parameter: SourceSpan { start: 0, end: 1 },
-			binding: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			parameter: SourceSpan { start: 1, end: 2 },
+			binding: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -206,15 +237,46 @@ fn validate_binding_collides_with_parameter()
 #[test]
 fn validate_duplicate_binding()
 {
-	let ast = Parser::parse("x@(3D6) + x@(1D4)").unwrap();
+	let ast = Parser::parse("{x}@(3D6) + {x}@(1D4)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateBinding {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 10, end: 11 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 13, end: 14 }
 		})
 	);
+}
+
+/// Binding a name within the bound expression of a binding of the same name is
+/// rejected, with the outer binding as `first` and the inner one as
+/// `duplicate`, whether or not the name is referenced afterward (xdy-9l6).
+#[test]
+fn validate_nested_duplicate_binding()
+{
+	for source in ["{x}@({x}@(1))", "{x}@({x}@(1)) + {x}"]
+	{
+		let ast = Parser::parse(source).unwrap();
+		assert_eq!(
+			Validator::validate(&ast),
+			Err(CompilationError::DuplicateBinding {
+				name: "x".into(),
+				first: SourceSpan { start: 1, end: 2 },
+				duplicate: SourceSpan { start: 6, end: 7 }
+			}),
+			"{}",
+			source
+		);
+	}
+}
+
+/// A binding nested within a binding of a different name is accepted, and so
+/// are references to either name after both bindings.
+#[test]
+fn validate_nested_distinct_bindings()
+{
+	let ast = Parser::parse("{x}@({y}@(1) + 1) + {x} + {y}").unwrap();
+	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
 /// Referring to a binding before its lexical declaration is rejected, with the
@@ -223,13 +285,13 @@ fn validate_duplicate_binding()
 #[test]
 fn validate_use_before_bind_simple()
 {
-	let ast = Parser::parse("{x} + x@(3D6)").unwrap();
+	let ast = Parser::parse("{x} + {x}@(3D6)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::UseBeforeBind {
-			name: "x",
+			name: "x".into(),
 			reference: SourceSpan { start: 0, end: 3 },
-			binding: SourceSpan { start: 6, end: 7 }
+			binding: SourceSpan { start: 7, end: 8 }
 		})
 	);
 }
@@ -241,13 +303,13 @@ fn validate_use_before_bind_simple()
 #[test]
 fn validate_self_reference_inside_binding()
 {
-	let ast = Parser::parse("x@(1 + {x})").unwrap();
+	let ast = Parser::parse("{x}@(1 + {x})").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::UseBeforeBind {
-			name: "x",
-			reference: SourceSpan { start: 7, end: 10 },
-			binding: SourceSpan { start: 0, end: 1 }
+			name: "x".into(),
+			reference: SourceSpan { start: 9, end: 12 },
+			binding: SourceSpan { start: 1, end: 2 }
 		})
 	);
 }
@@ -261,13 +323,13 @@ fn validate_self_reference_inside_binding()
 #[test]
 fn compile_unoptimized_propagates_duplicate_parameter()
 {
-	let result = compile_unoptimized("x, x: 1");
+	let result = compile_unoptimized("{x}, {x}: 1");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -277,13 +339,13 @@ fn compile_unoptimized_propagates_duplicate_parameter()
 #[test]
 fn compile_propagates_duplicate_parameter()
 {
-	let result = compile("x, x: 1");
+	let result = compile("{x}, {x}: 1");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -294,13 +356,13 @@ fn compile_propagates_duplicate_parameter()
 fn evaluate_propagates_duplicate_parameter()
 {
 	let mut rng = rand::rng();
-	let result = evaluate("x, x: 1", vec![0, 0], vec![], &mut rng);
+	let result = evaluate("{x}, {x}: 1", vec![0, 0], vec![], &mut rng);
 	assert_eq!(
 		result.err(),
 		Some(EvaluationError::DuplicateParameter {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -316,7 +378,7 @@ fn evaluate_propagates_duplicate_parameter()
 fn duplicate_parameter_display()
 {
 	let err = CompilationError::DuplicateParameter {
-		name: "x",
+		name: "x".into(),
 		first: SourceSpan { start: 0, end: 1 },
 		duplicate: SourceSpan { start: 3, end: 4 }
 	};
@@ -332,7 +394,7 @@ fn duplicate_parameter_display()
 fn duplicate_parameter_display_on_evaluation_error()
 {
 	let err = EvaluationError::DuplicateParameter {
-		name: "x",
+		name: "x".into(),
 		first: SourceSpan { start: 0, end: 1 },
 		duplicate: SourceSpan { start: 3, end: 4 }
 	};
@@ -351,171 +413,36 @@ fn duplicate_parameter_display_on_evaluation_error()
 #[test]
 fn validator_can_be_driven_through_the_trait()
 {
-	use crate::ast::ASTVisitor;
-	let ast = Parser::parse("x, x: 1").unwrap();
+	let ast = Parser::parse("{x}, {x}: 1").unwrap();
 	let mut validator = Validator::new();
-	let result = validator.visit_function(&ast);
+	let result = ast.accept(&mut validator);
 	assert!(matches!(
 		result,
-		Err(CompilationError::DuplicateParameter { name: "x", .. })
+		Err(CompilationError::DuplicateParameter { name, .. }) if name == "x"
 	));
 }
 
-/// Every non-[`visit_function`](crate::ast::ASTVisitor::visit_function) arm of
-/// the [`Validator`]'s [`ASTVisitor`] implementation is a no-op that returns
-/// `Ok(())`. This test walks an AST that touches every node type the visitor
-/// can encounter, driving each arm at least once, so that any future rewrite
-/// that silently turns a `Ok(())` arm into something else is caught.
+/// Every method of the [`Validator`]'s [`ASTVisitor`](crate::ast::ASTVisitor)
+/// implementation but [`enter_function`] is a no-op that returns `Ok(())`.
+/// This test walks an AST that touches every node type the visitor can
+/// encounter, driving each method at least once, so that any future rewrite
+/// that silently turns an `Ok(())` method into something else is caught.
+///
+/// [`enter_function`]: crate::ast::ASTVisitor::enter_function
 #[test]
 fn validator_visitor_arms_are_no_ops()
 {
-	use crate::ast::{
-		ASTVisitor, ArithmeticExpression, DiceExpression, Expression
-	};
-
 	// Build an AST that exercises every node type the visitor can encounter:
-	// Group, Constant, Variable, Range, StandardDice, CustomDice, DropLowest,
-	// DropHighest, Add, Sub, Mul, Div, Mod, Exp, and Neg. The enclosing
-	// function is semantically clean, so `visit_function` returns `Ok(())`.
+	// Group, Constant, Variable, Binding, Range, StandardDice, CustomDice,
+	// DropLowest, DropHighest, Add, Sub, Mul, Div, Mod, Exp, and Neg. The
+	// enclosing function is semantically clean, so the walk returns `Ok(())`.
 	let ast = Parser::parse(
-		"x: [1:{x}] + (1D6 - 1D[1,2,3]) * 2D6 drop lowest / \
-		 3D8 drop highest + -1 ^ 2 % 1"
+		"{x}: [1:{x}] + (1D6 - 1D[1,2,3]) * 2D6 drop lowest / \
+		 3D8 drop highest + -1 ^ 2 % {y}@(1)"
 	)
 	.unwrap();
 	let mut validator = Validator::new();
-
-	assert_eq!(validator.visit_function(&ast), Ok(()));
-
-	// Additionally drive every non-function arm directly by walking the AST.
-	// The walkers recurse into every child so that every reachable node is
-	// handed to its corresponding visitor method at least once.
-	fn drive_expression<'src>(
-		validator: &mut Validator,
-		expr: &'src Expression<'src>
-	)
-	{
-		match expr
-		{
-			Expression::Group(g) =>
-			{
-				assert_eq!(validator.visit_group(g), Ok(()));
-				drive_expression(validator, &g.expression);
-			},
-			Expression::Constant(c) =>
-			{
-				assert_eq!(validator.visit_constant(c), Ok(()));
-			},
-			Expression::Variable(v) =>
-			{
-				assert_eq!(validator.visit_variable(v), Ok(()));
-			},
-			Expression::Binding(b) =>
-			{
-				assert_eq!(validator.visit_binding(b), Ok(()));
-				drive_expression(validator, &b.expression);
-			},
-			Expression::Range(r) =>
-			{
-				assert_eq!(validator.visit_range(r), Ok(()));
-				drive_expression(validator, &r.start);
-				drive_expression(validator, &r.end);
-			},
-			Expression::Dice(d) => drive_dice(validator, d),
-			Expression::Arithmetic(a) => drive_arithmetic(validator, a)
-		}
-	}
-
-	fn drive_dice<'src>(
-		validator: &mut Validator,
-		dice: &'src DiceExpression<'src>
-	)
-	{
-		match dice
-		{
-			DiceExpression::Standard(d) =>
-			{
-				assert_eq!(validator.visit_standard_dice(d), Ok(()));
-				drive_expression(validator, &d.count);
-				drive_expression(validator, &d.faces);
-			},
-			DiceExpression::Custom(d) =>
-			{
-				assert_eq!(validator.visit_custom_dice(d), Ok(()));
-				drive_expression(validator, &d.count);
-			},
-			DiceExpression::DropLowest(d) =>
-			{
-				assert_eq!(validator.visit_drop_lowest(d), Ok(()));
-				drive_dice(validator, &d.dice);
-				if let Some(drop) = &d.drop
-				{
-					drive_expression(validator, drop);
-				}
-			},
-			DiceExpression::DropHighest(d) =>
-			{
-				assert_eq!(validator.visit_drop_highest(d), Ok(()));
-				drive_dice(validator, &d.dice);
-				if let Some(drop) = &d.drop
-				{
-					drive_expression(validator, drop);
-				}
-			}
-		}
-	}
-
-	fn drive_arithmetic<'src>(
-		validator: &mut Validator,
-		arith: &'src ArithmeticExpression<'src>
-	)
-	{
-		match arith
-		{
-			ArithmeticExpression::Add(a) =>
-			{
-				assert_eq!(validator.visit_add(a), Ok(()));
-				drive_expression(validator, &a.left);
-				drive_expression(validator, &a.right);
-			},
-			ArithmeticExpression::Sub(s) =>
-			{
-				assert_eq!(validator.visit_sub(s), Ok(()));
-				drive_expression(validator, &s.left);
-				drive_expression(validator, &s.right);
-			},
-			ArithmeticExpression::Mul(m) =>
-			{
-				assert_eq!(validator.visit_mul(m), Ok(()));
-				drive_expression(validator, &m.left);
-				drive_expression(validator, &m.right);
-			},
-			ArithmeticExpression::Div(d) =>
-			{
-				assert_eq!(validator.visit_div(d), Ok(()));
-				drive_expression(validator, &d.left);
-				drive_expression(validator, &d.right);
-			},
-			ArithmeticExpression::Mod(m) =>
-			{
-				assert_eq!(validator.visit_mod(m), Ok(()));
-				drive_expression(validator, &m.left);
-				drive_expression(validator, &m.right);
-			},
-			ArithmeticExpression::Exp(e) =>
-			{
-				assert_eq!(validator.visit_exp(e), Ok(()));
-				drive_expression(validator, &e.left);
-				drive_expression(validator, &e.right);
-			},
-			ArithmeticExpression::Neg(n) =>
-			{
-				assert_eq!(validator.visit_neg(n), Ok(()));
-				drive_expression(validator, &n.operand);
-			}
-		}
-	}
-
-	drive_expression(&mut validator, &ast.body);
+	assert_eq!(ast.accept(&mut validator), Ok(()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -527,13 +454,13 @@ fn validator_visitor_arms_are_no_ops()
 #[test]
 fn validate_duplicate_binding_multichar()
 {
-	let ast = Parser::parse("abc@(3D6) + abc@(1D4)").unwrap();
+	let ast = Parser::parse("{abc}@(3D6) + {abc}@(1D4)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateBinding {
-			name: "abc",
-			first: SourceSpan { start: 0, end: 3 },
-			duplicate: SourceSpan { start: 12, end: 15 }
+			name: "abc".into(),
+			first: SourceSpan { start: 1, end: 4 },
+			duplicate: SourceSpan { start: 15, end: 18 }
 		})
 	);
 }
@@ -543,13 +470,13 @@ fn validate_duplicate_binding_multichar()
 #[test]
 fn validate_duplicate_binding_reports_first_pair_only()
 {
-	let ast = Parser::parse("x@(1) + x@(2) + x@(3)").unwrap();
+	let ast = Parser::parse("{x}@(1) + {x}@(2) + {x}@(3)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::DuplicateBinding {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 8, end: 9 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 11, end: 12 }
 		})
 	);
 }
@@ -560,13 +487,13 @@ fn validate_duplicate_binding_reports_first_pair_only()
 #[test]
 fn validate_binding_collides_with_later_parameter()
 {
-	let ast = Parser::parse("a, b, x: x@(3D6) + {x}").unwrap();
+	let ast = Parser::parse("{a}, {b}, {x}: {x}@(3D6) + {x}").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::BindingCollidesWithParameter {
-			name: "x",
-			parameter: SourceSpan { start: 6, end: 7 },
-			binding: SourceSpan { start: 9, end: 10 }
+			name: "x".into(),
+			parameter: SourceSpan { start: 11, end: 12 },
+			binding: SourceSpan { start: 16, end: 17 }
 		})
 	);
 }
@@ -577,13 +504,13 @@ fn validate_binding_collides_with_later_parameter()
 #[test]
 fn validate_use_before_bind_in_dice_count()
 {
-	let ast = Parser::parse("{n}D6 + n@(3)").unwrap();
+	let ast = Parser::parse("{n}D6 + {n}@(3)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::UseBeforeBind {
-			name: "n",
+			name: "n".into(),
 			reference: SourceSpan { start: 0, end: 3 },
-			binding: SourceSpan { start: 8, end: 9 }
+			binding: SourceSpan { start: 9, end: 10 }
 		})
 	);
 }
@@ -595,13 +522,13 @@ fn validate_use_before_bind_in_dice_count()
 #[test]
 fn validate_use_before_bind_across_sibling_bindings()
 {
-	let ast = Parser::parse("x@({y}) + y@(1)").unwrap();
+	let ast = Parser::parse("{x}@({y}) + {y}@(1)").unwrap();
 	assert_eq!(
 		Validator::validate(&ast),
 		Err(CompilationError::UseBeforeBind {
-			name: "y",
-			reference: SourceSpan { start: 3, end: 6 },
-			binding: SourceSpan { start: 10, end: 11 }
+			name: "y".into(),
+			reference: SourceSpan { start: 5, end: 8 },
+			binding: SourceSpan { start: 13, end: 14 }
 		})
 	);
 }
@@ -612,7 +539,7 @@ fn validate_use_before_bind_across_sibling_bindings()
 #[test]
 fn validate_mixed_parameter_binding_external()
 {
-	let ast = Parser::parse("p: x@(1D6) + {p} + {x} + {env}").unwrap();
+	let ast = Parser::parse("{p}: {x}@(1D6) + {p} + {x} + {env}").unwrap();
 	assert_eq!(Validator::validate(&ast), Ok(()));
 }
 
@@ -626,13 +553,13 @@ fn validate_mixed_parameter_binding_external()
 #[test]
 fn compile_unoptimized_propagates_binding_collides_with_parameter()
 {
-	let result = compile_unoptimized("x: x@(3D6) + {x}");
+	let result = compile_unoptimized("{x}: {x}@(3D6) + {x}");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::BindingCollidesWithParameter {
-			name: "x",
-			parameter: SourceSpan { start: 0, end: 1 },
-			binding: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			parameter: SourceSpan { start: 1, end: 2 },
+			binding: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -643,13 +570,13 @@ fn compile_unoptimized_propagates_binding_collides_with_parameter()
 #[test]
 fn compile_propagates_binding_collides_with_parameter()
 {
-	let result = compile("x: x@(3D6) + {x}");
+	let result = compile("{x}: {x}@(3D6) + {x}");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::BindingCollidesWithParameter {
-			name: "x",
-			parameter: SourceSpan { start: 0, end: 1 },
-			binding: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			parameter: SourceSpan { start: 1, end: 2 },
+			binding: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -661,13 +588,13 @@ fn compile_propagates_binding_collides_with_parameter()
 fn evaluate_propagates_binding_collides_with_parameter()
 {
 	let mut rng = rand::rng();
-	let result = evaluate("x: x@(3D6) + {x}", vec![0], vec![], &mut rng);
+	let result = evaluate("{x}: {x}@(3D6) + {x}", vec![0], vec![], &mut rng);
 	assert_eq!(
 		result.err(),
 		Some(EvaluationError::BindingCollidesWithParameter {
-			name: "x",
-			parameter: SourceSpan { start: 0, end: 1 },
-			binding: SourceSpan { start: 3, end: 4 }
+			name: "x".into(),
+			parameter: SourceSpan { start: 1, end: 2 },
+			binding: SourceSpan { start: 6, end: 7 }
 		})
 	);
 }
@@ -677,13 +604,13 @@ fn evaluate_propagates_binding_collides_with_parameter()
 #[test]
 fn compile_unoptimized_propagates_duplicate_binding()
 {
-	let result = compile_unoptimized("x@(3D6) + x@(1D4)");
+	let result = compile_unoptimized("{x}@(3D6) + {x}@(1D4)");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::DuplicateBinding {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 10, end: 11 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 13, end: 14 }
 		})
 	);
 }
@@ -693,13 +620,13 @@ fn compile_unoptimized_propagates_duplicate_binding()
 #[test]
 fn compile_propagates_duplicate_binding()
 {
-	let result = compile("x@(3D6) + x@(1D4)");
+	let result = compile("{x}@(3D6) + {x}@(1D4)");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::DuplicateBinding {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 10, end: 11 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 13, end: 14 }
 		})
 	);
 }
@@ -711,13 +638,13 @@ fn compile_propagates_duplicate_binding()
 fn evaluate_propagates_duplicate_binding()
 {
 	let mut rng = rand::rng();
-	let result = evaluate("x@(3D6) + x@(1D4)", vec![], vec![], &mut rng);
+	let result = evaluate("{x}@(3D6) + {x}@(1D4)", vec![], vec![], &mut rng);
 	assert_eq!(
 		result.err(),
 		Some(EvaluationError::DuplicateBinding {
-			name: "x",
-			first: SourceSpan { start: 0, end: 1 },
-			duplicate: SourceSpan { start: 10, end: 11 }
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 13, end: 14 }
 		})
 	);
 }
@@ -727,13 +654,13 @@ fn evaluate_propagates_duplicate_binding()
 #[test]
 fn compile_unoptimized_propagates_use_before_bind()
 {
-	let result = compile_unoptimized("{x} + x@(3D6)");
+	let result = compile_unoptimized("{x} + {x}@(3D6)");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::UseBeforeBind {
-			name: "x",
+			name: "x".into(),
 			reference: SourceSpan { start: 0, end: 3 },
-			binding: SourceSpan { start: 6, end: 7 }
+			binding: SourceSpan { start: 7, end: 8 }
 		})
 	);
 }
@@ -743,13 +670,13 @@ fn compile_unoptimized_propagates_use_before_bind()
 #[test]
 fn compile_propagates_use_before_bind()
 {
-	let result = compile("{x} + x@(3D6)");
+	let result = compile("{x} + {x}@(3D6)");
 	assert_eq!(
 		result.err(),
 		Some(CompilationError::UseBeforeBind {
-			name: "x",
+			name: "x".into(),
 			reference: SourceSpan { start: 0, end: 3 },
-			binding: SourceSpan { start: 6, end: 7 }
+			binding: SourceSpan { start: 7, end: 8 }
 		})
 	);
 }
@@ -760,13 +687,13 @@ fn compile_propagates_use_before_bind()
 fn evaluate_propagates_use_before_bind()
 {
 	let mut rng = rand::rng();
-	let result = evaluate("{x} + x@(3D6)", vec![], vec![], &mut rng);
+	let result = evaluate("{x} + {x}@(3D6)", vec![], vec![], &mut rng);
 	assert_eq!(
 		result.err(),
 		Some(EvaluationError::UseBeforeBind {
-			name: "x",
+			name: "x".into(),
 			reference: SourceSpan { start: 0, end: 3 },
-			binding: SourceSpan { start: 6, end: 7 }
+			binding: SourceSpan { start: 7, end: 8 }
 		})
 	);
 }
@@ -783,7 +710,7 @@ fn evaluate_propagates_use_before_bind()
 fn binding_collides_with_parameter_display()
 {
 	let err = CompilationError::BindingCollidesWithParameter {
-		name: "x",
+		name: "x".into(),
 		parameter: SourceSpan { start: 0, end: 1 },
 		binding: SourceSpan { start: 3, end: 4 }
 	};
@@ -800,7 +727,7 @@ fn binding_collides_with_parameter_display()
 fn binding_collides_with_parameter_display_on_evaluation_error()
 {
 	let err = EvaluationError::BindingCollidesWithParameter {
-		name: "x",
+		name: "x".into(),
 		parameter: SourceSpan { start: 0, end: 1 },
 		binding: SourceSpan { start: 3, end: 4 }
 	};
@@ -817,7 +744,7 @@ fn binding_collides_with_parameter_display_on_evaluation_error()
 fn duplicate_binding_display()
 {
 	let err = CompilationError::DuplicateBinding {
-		name: "x",
+		name: "x".into(),
 		first: SourceSpan { start: 0, end: 1 },
 		duplicate: SourceSpan { start: 10, end: 11 }
 	};
@@ -834,7 +761,7 @@ fn duplicate_binding_display()
 fn duplicate_binding_display_on_evaluation_error()
 {
 	let err = EvaluationError::DuplicateBinding {
-		name: "x",
+		name: "x".into(),
 		first: SourceSpan { start: 0, end: 1 },
 		duplicate: SourceSpan { start: 10, end: 11 }
 	};
@@ -851,7 +778,7 @@ fn duplicate_binding_display_on_evaluation_error()
 fn use_before_bind_display()
 {
 	let err = CompilationError::UseBeforeBind {
-		name: "x",
+		name: "x".into(),
 		reference: SourceSpan { start: 0, end: 3 },
 		binding: SourceSpan { start: 6, end: 7 }
 	};
@@ -867,7 +794,7 @@ fn use_before_bind_display()
 fn use_before_bind_display_on_evaluation_error()
 {
 	let err = EvaluationError::UseBeforeBind {
-		name: "x",
+		name: "x".into(),
 		reference: SourceSpan { start: 0, end: 3 },
 		binding: SourceSpan { start: 6, end: 7 }
 	};
@@ -875,4 +802,40 @@ fn use_before_bind_display_on_evaluation_error()
 		format!("{}", err),
 		"reference to 'x' at 0..3 precedes its binding at 6..7"
 	);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                               Deep nesting.                                //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Ensure that the validator survives a deep chain of every nesting construct
+/// on a small stack. The chains that nest bindings named `a` inside one another
+/// are rejected as duplicate bindings.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_validate_deep()
+{
+	on_small_stack(|| {
+		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
+		{
+			let result = Validator::validate(&nest_function(nesting, DEPTH));
+			if nesting.binds()
+			{
+				assert!(
+					matches!(
+						&result,
+						Err(CompilationError::DuplicateBinding { name, .. })
+							if name == "a"
+					),
+					"{:?}: {:?}",
+					nesting,
+					result
+				);
+			}
+			else
+			{
+				assert_eq!(result, Ok(()), "{:?}", nesting);
+			}
+		}
+	});
 }

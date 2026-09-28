@@ -9,7 +9,7 @@
 //! ```text
 //! function       ::= parameters? expression
 //! parameters     ::= parameter (',' parameter)* ':'
-//! parameter      ::= IDENTIFIER
+//! parameter      ::= '{' IDENTIFIER '}'
 //! expression     ::= add_sub
 //! add_sub        ::= mul_div_mod (('+' | '-') mul_div_mod)*
 //! mul_div_mod    ::= unary (('*' | '/' | '%') unary)*
@@ -18,7 +18,7 @@
 //! primary        ::= range | dice | group | variable | binding | CONSTANT
 //! group          ::= '(' expression ')'
 //! variable       ::= '{' IDENTIFIER '}'
-//! binding        ::= IDENTIFIER '@' '(' expression ')'
+//! binding        ::= '{' IDENTIFIER '}' '@' '(' expression ')'
 //! range          ::= '[' expression ':' expression ']'
 //! dice           ::= base_dice drop_clause*
 //! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
@@ -29,37 +29,64 @@
 //! drop_expression::= CONSTANT | variable | binding | group
 //! CONSTANT       ::= '-'? DIGIT+
 //! D_OPERATOR     ::= 'd' | 'D'
-//! IDENTIFIER     ::= IDENTIFIER_START IDENTIFIER_CONTINUE*
-//! IDENTIFIER_START    ::= ALPHA | '_' | '$' | '#' | '\''
-//! IDENTIFIER_CONTINUE ::= IDENTIFIER_START | NUMERIC | '-' | '.' | '|'
-//!                       | '?' | '!' | '~' | INLINE_WHITESPACE
-//! ALPHA          ::= any Unicode alphabetic code point (char::is_alphabetic)
-//! NUMERIC        ::= any Unicode numeric code point (char::is_numeric)
-//! INLINE_WHITESPACE   ::= any Unicode whitespace code point
-//!                       (char::is_whitespace) other than '\n' or '\r'
+//! IDENTIFIER     ::= NAME_CHAR (NAME_CHAR | WHITESPACE+ NAME_CHAR)*
+//! NAME_CHAR      ::= any code point except '{', '}', whitespace, or an
+//!                    invisible character (is_identifier_char)
+//! WHITESPACE     ::= any whitespace (char::is_whitespace), e.g., ' ', '\t',
+//!                    '\n', or U+00A0
 //! ```
 //!
-//! `ALPHA` together with `NUMERIC` is exactly [`char::is_alphanumeric`]. The
-//! `$`, `#`, and `'` start characters and the `|`, `?`, `!`, and `~`
-//! continuation characters admit environmental variables used as selector
-//! expressions. The identifier character set is defined once, by
-//! [`is_identifier_start`] and [`is_identifier_continue`], which both the
-//! parser and the [diagnostics](crate::diagnostics) share.
+//! Every name is braced, whether it names a parameter, a variable, or a
+//! binding, so no name can run into the text around it. A lone braced name
+//! without a `:` after it begins the expression, as a variable or a binding,
+//! rather than declaring a parameter.
+//!
+//! An identifier may contain any visible character but a brace, e.g.,
+//! `{weapon: 2/3}` or `{$env|weapon}`, and whitespace of any kind, so a long
+//! name may be broken over lines. But a name is never distinguished by its
+//! whitespace: the whitespace inside the braces, around the identifier, is not
+//! part of it, and every run of whitespace within it collapses to a single
+//! space, so `{ a b }`, `{a  b}`, and `{a`, a line feed, and `   b}` all name
+//! `a b`. The identifier character set is defined once, by
+//! [`is_identifier_char`], which the parser, the [S-expression](crate::s_expr)
+//! reader, and the assembler share, and a name is canonicalized once, by
+//! [`canonical_name`]. The S-expression reader and the assembler accept only
+//! [canonical](is_canonical_name) names, as their writers emit. The
+//! [diagnostics](crate::diagnostics) also look for names that lack their
+//! braces, but by a narrower character set that stops at operators and
+//! delimiters.
 //!
 //! The following railroad diagram is generated from the EBNF grammar above:
 #![doc = include_str!("../doc/xdy.svg")]
 //! Parsing is based on the [`nom`] library, which provides a combinator-based
 //! approach to parsing.
+//!
+//! The grammar is recursive, but the parser is not. The combinators for the
+//! recursive productions, from [`function`] down to [`group`] and [`binding`],
+//! share a private engine that performs recursive descent with an explicit
+//! stack on the heap, so parsing consumes no more of the machine stack for
+//! deeply nested input than for shallow input. Parse time is linear in the
+//! length of the input.
 
 mod combinators;
+mod engine;
 mod errors;
 
 pub use combinators::*;
+pub(crate) use engine::{FailureSite, Recovery, Repair, Site};
+#[cfg(test)]
+pub(crate) use engine::{
+	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, PLACEHOLDER_OPERAND,
+	steps
+};
 pub use errors::*;
 
 use nom::{
-	Parser as _, character::complete::multispace0, combinator::all_consuming,
-	error::context, sequence::delimited
+	IResult, Parser as _,
+	character::complete::multispace0,
+	combinator::all_consuming,
+	error::{ContextError as _, ErrorKind, ParseError as _, context},
+	sequence::delimited
 };
 
 use crate::ast::Function;
@@ -105,5 +132,65 @@ impl Parser
 			nom::Err::Incomplete(_) => unreachable!()
 		})
 		.map(|(_, f)| f)
+	}
+
+	/// Parse a function definition, discarding leading whitespace, as
+	/// [`parse`](Parser::parse) does, but in _recovery mode_: wherever the
+	/// parse cannot continue, consult a [policy](Recovery), which may
+	/// [repair](Repair) the failure so that the parse continues as though the
+	/// source had been edited. The source is parsed only once, whatever the
+	/// number of repairs.
+	///
+	/// With a policy that repairs nothing, the result is exactly that of
+	/// [`parse`](Parser::parse).
+	///
+	/// # Type parameters
+	/// - `'src`: The lifetime of the source text.
+	/// - `R`: The type of the policy.
+	///
+	/// # Parameters
+	/// - `input`: The input text to parse.
+	/// - `policy`: The recovery policy.
+	///
+	/// # Returns
+	/// The parsed function definition, in which every repair appears as the
+	/// token that it supplied.
+	///
+	/// # Errors
+	/// * [`ParseError`] if the policy declined to repair a failure.
+	pub(crate) fn parse_recovering<'src, R: Recovery<'src>>(
+		input: &'src str,
+		policy: &mut R
+	) -> Result<Function<'src>, ParseError<'src>>
+	{
+		let input = Span::new(input);
+		let skipped: IResult<Span, Span, ParseError> = multispace0(input);
+		// `multispace0` accepts the empty string, so it cannot fail.
+		let input = skipped.map_or(input, |(rest, _)| rest);
+		let (rest, function) = match engine::run_recovering(input, policy)
+		{
+			Ok((rest, value)) => (rest, value.into_function()),
+			Err(nom::Err::Error(e) | nom::Err::Failure(e)) =>
+			{
+				return Err(ParseError::add_context(input, FUNCTION_CONTEXT, e));
+			},
+			Err(nom::Err::Incomplete(_)) => unreachable!()
+		};
+		let skipped: IResult<Span, Span, ParseError> = multispace0(rest);
+		let rest = skipped.map_or(rest, |(rest, _)| rest);
+		if rest.fragment().is_empty()
+		{
+			return Ok(function);
+		}
+		// As `all_consuming`.
+		let site = FailureSite {
+			site: Site::TrailingInput,
+			error: ParseError::from_error_kind(rest, ErrorKind::Eof)
+		};
+		match policy.repair(&site)
+		{
+			Repair::Fix => Ok(function),
+			_ => Err(site.error)
+		}
 	}
 }

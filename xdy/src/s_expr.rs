@@ -5,10 +5,13 @@
 //! mechanism for representing both data and code in Lisp, `xDy` uses them only
 //! for testing and debugging.
 
+mod reader;
+mod writer;
+
 use std::{
+	borrow::Cow,
 	error::Error,
-	fmt::{self, Display, Formatter, Write},
-	ops::Deref
+	fmt::{self, Display, Formatter, Write}
 };
 
 use nom::{
@@ -25,7 +28,8 @@ use crate::{
 		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
 		Variable
 	},
-	span::{SourceSpan, Spanned}
+	parser::is_canonical_name,
+	span::SourceSpan
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -158,6 +162,77 @@ fn span_prefix_size(span: SourceSpan, options: SExpressibleOptions) -> usize
 fn decimal_digits(n: usize) -> usize
 {
 	if n == 0 { 1 } else { n.ilog10() as usize + 1 }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                              Layout support.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The layout of a keyword form: on the current line, or wrapped onto lines of
+/// its own.
+enum Layout
+{
+	/// The form fits on the current line.
+	Inline,
+
+	/// The form wraps each subexpression onto a new line, laid out with the
+	/// enclosed options, which are one level deeper.
+	Wrapped(SExpressibleOptions)
+}
+
+/// Decide the layout of a keyword form. The form fits on the current line if
+/// the remaining space covers its size plus the trailing parentheses of
+/// enclosing expressions, of which there are as many as the indentation level.
+///
+/// # Parameters
+/// - `remaining_space`: The remaining space on the current line.
+/// - `size`: The size of the form, excluding any span prefix already written.
+/// - `options`: The formatting options.
+///
+/// # Returns
+/// The layout.
+fn layout(
+	remaining_space: usize,
+	size: usize,
+	options: SExpressibleOptions
+) -> Layout
+{
+	if remaining_space >= size + options.indent
+	{
+		Layout::Inline
+	}
+	else
+	{
+		Layout::Wrapped(options.increase_indent())
+	}
+}
+
+/// Write a line break, followed by indentation to the specified level, one tab
+/// per level.
+///
+/// # Parameters
+/// - `f`: The write stream.
+/// - `indent`: The indentation level.
+///
+/// # Returns
+/// `Ok(())` on success.
+///
+/// # Errors
+/// If the formatting fails for any reason.
+fn write_newline(f: &mut dyn Write, indent: usize) -> fmt::Result
+{
+	/// A run of 64 tabs, written in chunks to keep deep indentation cheap.
+	const TABS: &str = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\
+		\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+	f.write_char('\n')?;
+	let mut remaining = indent;
+	while remaining > 0
+	{
+		let chunk = remaining.min(TABS.len());
+		f.write_str(&TABS[..chunk])?;
+		remaining -= chunk;
+	}
+	Ok(())
 }
 
 /// Options for customizing S-expression formatting.
@@ -355,9 +430,11 @@ impl SExpressible for &[Parameter<'_>]
 			// the target writer, ignoring any other formatting considerations.
 			write!(f, "[]")
 		}
-		else if remaining_space >= self.size_s_expr(options)
+		else if remaining_space >= self.size_s_expr(options) + options.indent
 		{
-			// Write the vector on a single line.
+			// Write the vector on a single line. We need enough space for
+			// ourselves plus the trailing parentheses of enclosing expressions,
+			// of which there are as many as the indentation level.
 			write!(f, "[")?;
 			for (i, item) in self.iter().enumerate()
 			{
@@ -366,7 +443,7 @@ impl SExpressible for &[Parameter<'_>]
 					write!(f, " ")?;
 				}
 				write_span_prefix(f, item.span, options)?;
-				write_ident(f, item.name)?;
+				write_ident(f, &item.name)?;
 			}
 			write!(f, "]")
 		}
@@ -378,11 +455,12 @@ impl SExpressible for &[Parameter<'_>]
 			{
 				// Note that we don't care how long the item is, because we
 				// can't split it across multiple lines anyway.
-				write!(f, "\n{}", "\t".repeat(options.indent + 1))?;
+				write_newline(f, options.indent + 1)?;
 				write_span_prefix(f, item.span, options)?;
-				write_ident(f, item.name)?;
+				write_ident(f, &item.name)?;
 			}
-			write!(f, "\n{}]", "\t".repeat(options.indent))
+			write_newline(f, options.indent)?;
+			write!(f, "]")
 		}
 	}
 
@@ -398,7 +476,7 @@ impl SExpressible for &[Parameter<'_>]
 		// that there are one fewer interposed spaces than items, so the
 		// constant term is 1 after accounting for brackets (not 2).
 		self.iter()
-			.map(|p| span_prefix_size(p.span, options) + ident_size(p.name))
+			.map(|p| span_prefix_size(p.span, options) + ident_size(&p.name))
 			.sum::<usize>()
 			+ self.len()
 			+ 1
@@ -420,9 +498,11 @@ impl SExpressible for &[i32]
 			// the target writer, ignoring any other formatting considerations.
 			write!(f, "[]")
 		}
-		else if remaining_space >= self.size_s_expr(options)
+		else if remaining_space >= self.size_s_expr(options) + options.indent
 		{
-			// Write the vector on a single line.
+			// Write the vector on a single line. We need enough space for
+			// ourselves plus the trailing parentheses of enclosing expressions,
+			// of which there are as many as the indentation level.
 			write!(f, "[")?;
 			for (i, item) in self.iter().enumerate()
 			{
@@ -443,9 +523,11 @@ impl SExpressible for &[i32]
 				// Note that we don't care how long the item's print
 				// representation is, because we can't split it across
 				// multiple lines anyway.
-				write!(f, "\n{}{}", "\t".repeat(options.indent + 1), item)?;
+				write_newline(f, options.indent + 1)?;
+				write!(f, "{}", item)?;
 			}
-			write!(f, "\n{}]", "\t".repeat(options.indent))
+			write_newline(f, options.indent)?;
+			write!(f, "]")
 		}
 	}
 
@@ -464,7 +546,11 @@ impl SExpressible for &[i32]
 			.map(|&x| {
 				// Count the number of characters required to represent the
 				// value, taking care to account correctly for negative numbers.
-				(x.abs() as f64).log10().floor() as usize
+				// Use the unsigned magnitude, since `abs` would overflow on
+				// `i32::MIN`. Zero has no logarithm, but takes one digit.
+				x.unsigned_abs()
+					.checked_ilog10()
+					.map_or(0, |log| log as usize)
 					+ if x < 0 { 1 } else { 0 }
 					+ 1
 			})
@@ -492,20 +578,24 @@ where
 		// We need enough space for ourselves plus the trailing parentheses of
 		// enclosing expressions, of which there are as many as the indentation
 		// level.
-		let space_needed = self.size_s_expr(options) + options.indent;
-		let remaining_space = if remaining_space >= space_needed
-		{
-			write!(f, " ")?;
-			// We know that the remainder fits, so answer an effectively
-			// infinite value.
-			usize::MAX
-		}
-		else
-		{
-			let options = options.increase_indent();
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			options.available_space()
-		};
+		let (remaining_space, options) =
+			match layout(remaining_space, self.size_s_expr(options), options)
+			{
+				Layout::Inline =>
+				{
+					write!(f, " ")?;
+					// We know that the remainder fits, so answer an effectively
+					// infinite value.
+					(usize::MAX, options)
+				},
+				Layout::Wrapped(options) =>
+				{
+					// The subexpression begins a new line, one level deeper,
+					// and lays out its own subexpressions from there.
+					write_newline(f, options.indent)?;
+					(options.available_space(), options)
+				}
+			};
 		sub.write_s_expr(f, remaining_space, options)?;
 		write!(f, ")")
 	}
@@ -538,25 +628,26 @@ where
 		// We need enough space for ourselves plus the trailing parentheses of
 		// enclosing expressions, of which there are as many as the indentation
 		// level.
-		let space_needed = self.size_s_expr(options) + options.indent;
-		if remaining_space >= space_needed
+		match layout(remaining_space, self.size_s_expr(options), options)
 		{
-			write!(f, " ")?;
-			// We know that the whole expression fits, so use an effectively
-			// infinite value for the remaining space of the subexpressions.
-			// This avoids recursing into the subexpressions again.
-			sub1.write_s_expr(f, usize::MAX, options)?;
-			write!(f, " ")?;
-			sub2.write_s_expr(f, usize::MAX, options)?;
+			Layout::Inline =>
+			{
+				write!(f, " ")?;
+				// We know that the whole expression fits, so use an effectively
+				// infinite value for the remaining space of the subexpressions.
+				// This avoids recursing into the subexpressions again.
+				sub1.write_s_expr(f, usize::MAX, options)?;
+				write!(f, " ")?;
+				sub2.write_s_expr(f, usize::MAX, options)?;
+			},
+			Layout::Wrapped(options) =>
+			{
+				write_newline(f, options.indent)?;
+				sub1.write_s_expr(f, options.available_space(), options)?;
+				write_newline(f, options.indent)?;
+				sub2.write_s_expr(f, options.available_space(), options)?;
+			}
 		}
-		else
-		{
-			let options = options.increase_indent();
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			sub1.write_s_expr(f, options.available_space(), options)?;
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			sub2.write_s_expr(f, options.available_space(), options)?;
-		};
 		write!(f, ")")
 	}
 
@@ -571,26 +662,12 @@ where
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                        Identifier quoting support.                         //
+//                            Identifier support.                             //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Answer whether the given identifier requires quoting in S-expression
-/// format. An identifier needs quoting if it contains whitespace or
-/// delimiter characters that would be ambiguous during parsing.
-///
-/// # Parameters
-/// - `ident`: The identifier to inspect.
-///
-/// # Returns
-/// `true` if `ident` must be surrounded by double quotes when written.
-fn needs_quoting(ident: &str) -> bool
-{
-	ident.contains(|c: char| {
-		c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"')
-	})
-}
-
-/// Write an identifier, quoting it with double quotes if necessary.
+/// Write an identifier, delimited by braces. The braces are unconditional, as
+/// in the source language, so no identifier can be mistaken for a keyword, a
+/// constant, or a delimiter.
 ///
 /// # Parameters
 /// - `f`: The write stream.
@@ -603,39 +680,25 @@ fn needs_quoting(ident: &str) -> bool
 /// If the formatting fails for any reason.
 fn write_ident(f: &mut dyn Write, ident: &str) -> fmt::Result
 {
-	if needs_quoting(ident)
-	{
-		write!(f, "\"{}\"", ident)
-	}
-	else
-	{
-		write!(f, "{}", ident)
-	}
+	write!(f, "{{{}}}", ident)
 }
 
-/// Answer the S-expression size of an identifier, accounting for quotes if
-/// necessary.
+/// Answer the S-expression size of an identifier, including its braces.
 ///
 /// # Parameters
 /// - `ident`: The identifier to size.
 ///
 /// # Returns
 /// The number of characters that [`write_ident`] would emit for `ident`.
-fn ident_size(ident: &str) -> usize
-{
-	if needs_quoting(ident)
-	{
-		ident.len() + 2
-	}
-	else
-	{
-		ident.len()
-	}
-}
+fn ident_size(ident: &str) -> usize { ident.len() + 2 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //                        Abstract syntax tree (AST).                         //
 ////////////////////////////////////////////////////////////////////////////////
+
+// Every compound form delegates to the iterative engine in [`writer`], which
+// states each form once, as a shape. Constants and variables are leaves, and
+// the engine writes them through the implementations here.
 
 impl SExpressible for Function<'_>
 {
@@ -646,57 +709,12 @@ impl SExpressible for Function<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		let keyword = "function";
-		write!(f, "({}", keyword)?;
-		// The remaining space discounts the open parenthesis and the keyword.
-		// Saturate at zero to tolerate ambitious soft limits without panicking
-		// — the remaining space drives a fits-or-wraps heuristic, not a hard
-		// budget.
-		let remaining_space = remaining_space.saturating_sub(9);
-		// We want to write the parameters on the same line as the keyword if
-		// at all possible.
-		let params = &self.parameters;
-		let space_needed = params.size_s_expr(options);
-		let remaining_space = if remaining_space >= space_needed
-		{
-			write!(f, " ")?;
-			params.write_s_expr(f, remaining_space, options)?;
-			remaining_space - space_needed
-		}
-		else
-		{
-			let options = options.increase_indent();
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			params.write_s_expr(f, options.available_space(), options)?;
-			options.available_space()
-		};
-		// Write out the body.
-		let body = &self.body;
-		let space_needed = body.size_s_expr(options);
-		if remaining_space >= space_needed
-		{
-			write!(f, " ")?;
-			body.write_s_expr(f, remaining_space, options)?;
-		}
-		else
-		{
-			let options = options.increase_indent();
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			body.write_s_expr(f, options.available_space(), options)?;
-		};
-		write!(f, ")")
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		// Account for two parentheses, the keyword, two spaces, and the size of
-		// the subexpressions.
-		span_prefix_size(self.span, options)
-			+ 12 + self.parameters.size_s_expr(options)
-			+ self.body.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -709,37 +727,12 @@ impl SExpressible for Group<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		if options.with_groups
-		{
-			// Opaque rendering: `(group <expr>)` so the group's span and
-			// structural identity survive the round-trip.
-			write_span_prefix(f, self.span, options)?;
-			let remaining_space = remaining_space
-				.saturating_sub(span_prefix_size(self.span, options));
-			("group", self.expression.deref()).write_s_expr(
-				f,
-				remaining_space,
-				options
-			)
-		}
-		else
-		{
-			// Transparent rendering: forward directly to the subexpression.
-			self.expression.write_s_expr(f, remaining_space, options)
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		if options.with_groups
-		{
-			span_prefix_size(self.span, options)
-				+ ("group", self.expression.deref()).size_s_expr(options)
-		}
-		else
-		{
-			self.expression.size_s_expr(options)
-		}
+		writer::size(self, options)
 	}
 }
 
@@ -785,15 +778,14 @@ impl SExpressible for Variable<'_>
 	) -> fmt::Result
 	{
 		// Variables cannot be split, so we just write the prefix (if any) and
-		// the variable, quoting it if it contains whitespace or delimiter
-		// characters.
+		// the variable.
 		write_span_prefix(f, self.span, options)?;
-		write_ident(f, self.name)
+		write_ident(f, &self.name)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options) + ident_size(self.name)
+		span_prefix_size(self.span, options) + ident_size(&self.name)
 	}
 }
 
@@ -806,21 +798,12 @@ impl SExpressible for Range<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("range", self.start.deref(), self.end.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("range", self.start.deref(), self.end.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -833,56 +816,12 @@ impl SExpressible for Binding<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		let keyword = "binding";
-		write!(f, "({}", keyword)?;
-		// Account for the open paren and the keyword already emitted.
-		let remaining_space = remaining_space.saturating_sub(1 + keyword.len());
-		// Compute the in-line widths of the bound name and the bound
-		// expression. If everything fits on the current line, emit the
-		// single-line form; otherwise indent and emit the name and the
-		// expression on their own lines, mirroring the tuple(A, B, C) behavior
-		// used elsewhere in this module.
-		let name_size =
-			span_prefix_size(self.name_span, options) + ident_size(self.name);
-		let body = self.expression.deref();
-		let body_size = body.size_s_expr(options);
-		// Two interposing spaces (after keyword, between name and body) and the
-		// closing parenthesis, plus the indentation required by enclosing
-		// expressions.
-		let space_needed = name_size + 1 + body_size + 1 + options.indent;
-		if remaining_space >= space_needed
-		{
-			write!(f, " ")?;
-			write_span_prefix(f, self.name_span, options)?;
-			write_ident(f, self.name)?;
-			write!(f, " ")?;
-			body.write_s_expr(f, usize::MAX, options)?;
-		}
-		else
-		{
-			let options = options.increase_indent();
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			write_span_prefix(f, self.name_span, options)?;
-			write_ident(f, self.name)?;
-			write!(f, "\n{}", "\t".repeat(options.indent))?;
-			body.write_s_expr(f, options.available_space(), options)?;
-		}
-		write!(f, ")")
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		// Two parentheses, the keyword `binding`, two interposing spaces, the
-		// optional span prefix before the name, the bound name (quoted if
-		// necessary), and the bound expression.
-		span_prefix_size(self.span, options)
-			+ 2 + "binding".len()
-			+ 2 + span_prefix_size(self.name_span, options)
-			+ ident_size(self.name)
-			+ self.expression.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -895,57 +834,12 @@ impl SExpressible for Expression<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		// Expressions are transparent in the S-expression representation, so we
-		// simply forward the call to the appropriate variant. Each variant
-		// emits its own span prefix (if any).
-		match self
-		{
-			Expression::Group(group) =>
-			{
-				group.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Constant(constant) =>
-			{
-				constant.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Variable(variable) =>
-			{
-				variable.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Binding(binding) =>
-			{
-				binding.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Range(range) =>
-			{
-				range.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Dice(dice) =>
-			{
-				dice.write_s_expr(f, remaining_space, options)
-			},
-			Expression::Arithmetic(arithmetic) =>
-			{
-				arithmetic.write_s_expr(f, remaining_space, options)
-			},
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		match self
-		{
-			Expression::Group(group) => group.size_s_expr(options),
-			Expression::Constant(constant) => constant.size_s_expr(options),
-			Expression::Variable(variable) => variable.size_s_expr(options),
-			Expression::Binding(binding) => binding.size_s_expr(options),
-			Expression::Range(range) => range.size_s_expr(options),
-			Expression::Dice(dice) => dice.size_s_expr(options),
-			Expression::Arithmetic(arithmetic) =>
-			{
-				arithmetic.size_s_expr(options)
-			},
-		}
+		writer::size(self, options)
 	}
 }
 
@@ -954,25 +848,16 @@ impl SExpressible for StandardDice<'_>
 	fn write_s_expr(
 		&self,
 		f: &mut dyn Write,
-		remaining_spaces: usize,
+		remaining_space: usize,
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_spaces = remaining_spaces
-			.saturating_sub(span_prefix_size(self.span, options));
-		("standard-dice", self.count.deref(), self.faces.deref()).write_s_expr(
-			f,
-			remaining_spaces,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("standard-dice", self.count.deref(), self.faces.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -981,25 +866,16 @@ impl SExpressible for CustomDice<'_>
 	fn write_s_expr(
 		&self,
 		f: &mut dyn Write,
-		remaining_spaces: usize,
+		remaining_space: usize,
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_spaces = remaining_spaces
-			.saturating_sub(span_prefix_size(self.span, options));
-		("custom-dice", self.count.deref(), self.faces.deref()).write_s_expr(
-			f,
-			remaining_spaces,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("custom-dice", self.count.deref(), self.faces.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1008,34 +884,16 @@ impl SExpressible for DropLowest<'_>
 	fn write_s_expr(
 		&self,
 		f: &mut dyn Write,
-		remaining_spaces: usize,
+		remaining_space: usize,
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_spaces = remaining_spaces
-			.saturating_sub(span_prefix_size(self.span, options));
-		match self.drop.as_ref()
-		{
-			Some(drop) => ("drop-lowest", self.dice.deref(), drop.deref())
-				.write_s_expr(f, remaining_spaces, options),
-			None => ("drop-lowest", self.dice.deref()).write_s_expr(
-				f,
-				remaining_spaces,
-				options
-			)
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ match self.drop.as_ref()
-			{
-				Some(drop) => ("drop-lowest", self.dice.deref(), drop.deref())
-					.size_s_expr(options),
-				None => ("drop-lowest", self.dice.deref()).size_s_expr(options)
-			}
+		writer::size(self, options)
 	}
 }
 
@@ -1044,34 +902,16 @@ impl SExpressible for DropHighest<'_>
 	fn write_s_expr(
 		&self,
 		f: &mut dyn Write,
-		remaining_spaces: usize,
+		remaining_space: usize,
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_spaces = remaining_spaces
-			.saturating_sub(span_prefix_size(self.span, options));
-		match self.drop.as_ref()
-		{
-			Some(drop) => ("drop-highest", self.dice.deref(), drop.deref())
-				.write_s_expr(f, remaining_spaces, options),
-			None => ("drop-highest", self.dice.deref()).write_s_expr(
-				f,
-				remaining_spaces,
-				options
-			)
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ match self.drop.as_ref()
-			{
-				Some(drop) => ("drop-highest", self.dice.deref(), drop.deref())
-					.size_s_expr(options),
-				None => ("drop-highest", self.dice.deref()).size_s_expr(options)
-			}
+		writer::size(self, options)
 	}
 }
 
@@ -1084,39 +924,12 @@ impl SExpressible for DiceExpression<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		// Dice expressions are transparent in the S-expression representation,
-		// so we can simply forward the call to the underlying variant. Each
-		// variant emits its own span prefix (if any).
-		match self
-		{
-			DiceExpression::Standard(dice) =>
-			{
-				dice.write_s_expr(f, remaining_space, options)
-			},
-			DiceExpression::Custom(dice) =>
-			{
-				dice.write_s_expr(f, remaining_space, options)
-			},
-			DiceExpression::DropLowest(drop) =>
-			{
-				drop.write_s_expr(f, remaining_space, options)
-			},
-			DiceExpression::DropHighest(drop) =>
-			{
-				drop.write_s_expr(f, remaining_space, options)
-			},
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		match self
-		{
-			DiceExpression::Standard(dice) => dice.size_s_expr(options),
-			DiceExpression::Custom(dice) => dice.size_s_expr(options),
-			DiceExpression::DropLowest(drop) => drop.size_s_expr(options),
-			DiceExpression::DropHighest(drop) => drop.size_s_expr(options)
-		}
+		writer::size(self, options)
 	}
 }
 
@@ -1129,21 +942,12 @@ impl SExpressible for Add<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("add", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("add", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1156,21 +960,12 @@ impl SExpressible for Sub<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("sub", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("sub", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1183,21 +978,12 @@ impl SExpressible for Mul<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("mul", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("mul", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1210,21 +996,12 @@ impl SExpressible for Div<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("div", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("div", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1237,21 +1014,12 @@ impl SExpressible for Mod<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("mod", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("mod", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1264,21 +1032,12 @@ impl SExpressible for Exp<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("exp", self.left.deref(), self.right.deref()).write_s_expr(
-			f,
-			remaining_space,
-			options
-		)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("exp", self.left.deref(), self.right.deref())
-				.size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1291,16 +1050,12 @@ impl SExpressible for Neg<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		write_span_prefix(f, self.span, options)?;
-		let remaining_space = remaining_space
-			.saturating_sub(span_prefix_size(self.span, options));
-		("neg", self.operand.deref()).write_s_expr(f, remaining_space, options)
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		span_prefix_size(self.span, options)
-			+ ("neg", self.operand.deref()).size_s_expr(options)
+		writer::size(self, options)
 	}
 }
 
@@ -1313,54 +1068,12 @@ impl SExpressible for ArithmeticExpression<'_>
 		options: SExpressibleOptions
 	) -> fmt::Result
 	{
-		// Arithmetic expressions are transparent in the S-expression
-		// representation, so we can simply forward the call to the underlying
-		// variant. Each variant emits its own span prefix (if any).
-		match self
-		{
-			ArithmeticExpression::Add(add) =>
-			{
-				add.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Sub(sub) =>
-			{
-				sub.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Mul(mul) =>
-			{
-				mul.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Div(div) =>
-			{
-				div.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Mod(r#mod) =>
-			{
-				r#mod.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Exp(exp) =>
-			{
-				exp.write_s_expr(f, remaining_space, options)
-			},
-			ArithmeticExpression::Neg(neg) =>
-			{
-				neg.write_s_expr(f, remaining_space, options)
-			},
-		}
+		writer::write(self, f, remaining_space, options)
 	}
 
 	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
 	{
-		match self
-		{
-			ArithmeticExpression::Add(add) => add.size_s_expr(options),
-			ArithmeticExpression::Sub(sub) => sub.size_s_expr(options),
-			ArithmeticExpression::Mul(mul) => mul.size_s_expr(options),
-			ArithmeticExpression::Div(div) => div.size_s_expr(options),
-			ArithmeticExpression::Mod(r#mod) => r#mod.size_s_expr(options),
-			ArithmeticExpression::Exp(exp) => exp.size_s_expr(options),
-			ArithmeticExpression::Neg(neg) => neg.size_s_expr(options)
-		}
+		writer::size(self, options)
 	}
 }
 
@@ -1371,9 +1084,9 @@ impl SExpressible for ArithmeticExpression<'_>
 /// Parse an S-expression string into a [`Function`].
 ///
 /// The S-expression format mirrors the output of [`SExpressible::to_s_expr`]:
-/// `(function [params...] body)`. Constants are bare integers, variables are
-/// bare identifiers, and compound expressions use keywords like `add`, `neg`,
-/// `standard-dice`, etc.
+/// `(function [params...] body)`. Constants are bare integers, names are
+/// identifiers delimited by braces (e.g., `{x}`), and compound expressions use
+/// keywords like `add`, `neg`, `standard-dice`, etc.
 ///
 /// Parenthesized [`Group`] nodes may be either transparent (the subexpression
 /// appears directly in the s-expression, matching the default writer output) or
@@ -1415,7 +1128,7 @@ impl SExpressible for ArithmeticExpression<'_>
 pub fn read_s_expr(input: &str) -> Result<Function<'_>, SExprError>
 {
 	let span = Span::new(input);
-	let (rest, function) = read_function(span).map_err(|e| match e
+	let (rest, function) = reader::read_function(span).map_err(|e| match e
 	{
 		nom::Err::Error(e) | nom::Err::Failure(e) => e,
 		nom::Err::Incomplete(_) => unreachable!()
@@ -1459,7 +1172,7 @@ impl SExprLocation
 	///
 	/// # Returns
 	/// The captured location.
-	fn of(span: Span<'_>) -> Self
+	pub(crate) fn of(span: Span<'_>) -> Self
 	{
 		Self {
 			offset: span.location_offset(),
@@ -1515,10 +1228,24 @@ pub enum SExprError
 		location: SExprLocation
 	},
 
-	/// A double-quoted identifier was opened but never terminated.
-	UnterminatedQuotedIdent
+	/// A braced identifier was opened but never closed.
+	UnterminatedIdent
 	{
-		/// The source position of the opening quote.
+		/// The source position of the opening brace.
+		location: SExprLocation
+	},
+
+	/// A braced identifier is not a
+	/// [canonical identifier](crate::parser::is_canonical_name): it is empty,
+	/// begins or ends with whitespace, contains whitespace other than single
+	/// spaces, or contains a character that
+	/// [`is_identifier_char`](crate::parser::is_identifier_char) excludes.
+	InvalidIdent
+	{
+		/// The offending identifier, as written, without its braces.
+		text: String,
+
+		/// The source position of the opening brace.
 		location: SExprLocation
 	},
 
@@ -1680,7 +1407,8 @@ impl SExprError
 			Self::Syntax { location, .. }
 			| Self::ExpectedChar { location, .. }
 			| Self::ExpectedWord { location }
-			| Self::UnterminatedQuotedIdent { location }
+			| Self::UnterminatedIdent { location }
+			| Self::InvalidIdent { location, .. }
 			| Self::InvalidInteger { location, .. }
 			| Self::InvalidByteOffset { location, .. }
 			| Self::UnrecognizedSpanShape { location, .. }
@@ -1725,9 +1453,13 @@ impl Display for SExprError
 				..
 			} => write!(f, "expected '{}', found '{}'", expected, c),
 			Self::ExpectedWord { .. } => write!(f, "expected a word"),
-			Self::UnterminatedQuotedIdent { .. } =>
+			Self::UnterminatedIdent { .. } =>
 			{
-				write!(f, "unterminated quoted identifier")
+				write!(f, "unterminated identifier")
+			},
+			Self::InvalidIdent { text, .. } =>
+			{
+				write!(f, "invalid identifier {:?}", text)
 			},
 			Self::InvalidInteger { text, reason, .. } =>
 			{
@@ -1818,10 +1550,10 @@ impl<'src> NomParseError<Span<'src>> for SExprError
 ////////////////////////////////////////////////////////////////////////////////
 
 /// The type of a span of text, as threaded through the `nom` combinators.
-type Span<'src> = LocatedSpan<&'src str>;
+pub(crate) type Span<'src> = LocatedSpan<&'src str>;
 
 /// The result type of every combinator in this module.
-type SExprResult<'src, T> = IResult<Span<'src>, T, SExprError>;
+pub(crate) type SExprResult<'src, T> = IResult<Span<'src>, T, SExprError>;
 
 /// Advance past any leading ASCII whitespace. Always succeeds; the returned
 /// span points at the first non-whitespace character (or at end of input).
@@ -1834,7 +1566,7 @@ type SExprResult<'src, T> = IResult<Span<'src>, T, SExprError>;
 ///
 /// # Errors
 /// Never fails.
-fn skip_ws(input: Span<'_>) -> SExprResult<'_, ()>
+pub(crate) fn skip_ws(input: Span<'_>) -> SExprResult<'_, ()>
 {
 	let (input, _) = take_while(|c: char| c.is_ascii_whitespace())(input)?;
 	Ok((input, ()))
@@ -1854,7 +1586,7 @@ fn skip_ws(input: Span<'_>) -> SExprResult<'_, ()>
 /// # Errors
 /// - [`SExprError::ExpectedChar`] if the next character does not match
 ///   `expected`, or if end of input is reached first.
-fn expect_char<'src>(
+pub(crate) fn expect_char<'src>(
 	expected: char
 ) -> impl FnMut(Span<'src>) -> SExprResult<'src, ()>
 {
@@ -1896,7 +1628,7 @@ fn expect_char<'src>(
 /// # Errors
 /// - [`SExprError::ExpectedWord`] if no word characters are available at the
 ///   current position.
-fn read_word(input: Span<'_>) -> SExprResult<'_, Span<'_>>
+pub(crate) fn read_word(input: Span<'_>) -> SExprResult<'_, Span<'_>>
 {
 	let (input, _) = skip_ws(input)?;
 	let mark = input;
@@ -1915,51 +1647,49 @@ fn read_word(input: Span<'_>) -> SExprResult<'_, Span<'_>>
 	}
 }
 
-/// Skip leading whitespace and consume an identifier: either a bare word or a
-/// double-quoted string. Quoted strings may contain whitespace and delimiter
-/// characters.
+/// Skip leading whitespace and consume an identifier, delimited by braces.
+/// The identifier runs from the opening brace to the first closing brace, so
+/// it may contain spaces and delimiter characters, but it must be
+/// [canonical](crate::parser::is_canonical_name), as the writer emits every
+/// name: the braces admit no whitespace around it, and it admits no whitespace
+/// within it but single spaces.
 ///
 /// # Parameters
 /// - `input`: The input text to read from.
 ///
 /// # Returns
 /// A pair of the remaining input and a slice of the original input covering the
-/// identifier, with surrounding quotes stripped when present.
+/// identifier, without its braces.
 ///
 /// # Errors
-/// - [`SExprError::UnterminatedQuotedIdent`] if a quoted identifier is opened
-///   but never closed.
-/// - [`SExprError::ExpectedWord`] if a bare word reader fails at the current
-///   position.
-fn read_ident(input: Span<'_>) -> SExprResult<'_, &str>
+/// - [`SExprError::ExpectedChar`] if the identifier does not begin with `{`.
+/// - [`SExprError::UnterminatedIdent`] if the identifier is opened but never
+///   closed.
+/// - [`SExprError::InvalidIdent`] if the braces do not enclose exactly a
+///   canonical identifier.
+pub(crate) fn read_ident(input: Span<'_>) -> SExprResult<'_, &str>
 {
 	let (input, _) = skip_ws(input)?;
-	match input.fragment().chars().next()
+	let mark = input;
+	let (after_brace, _) = expect_char('{')(input)?;
+	match after_brace.fragment().find('}')
 	{
-		Some('"') =>
+		Some(pos) =>
 		{
-			let mark = input;
-			let after_quote = input.take_from(1);
-			match after_quote.fragment().find('"')
+			let ident = *after_brace.take(pos).fragment();
+			if !is_canonical_name(ident)
 			{
-				Some(pos) =>
-				{
-					let ident = after_quote.take(pos);
-					let rest = after_quote.take_from(pos + 1);
-					Ok((rest, *ident.fragment()))
-				},
-				None => Err(nom::Err::Failure(
-					SExprError::UnterminatedQuotedIdent {
-						location: SExprLocation::of(mark)
-					}
-				))
+				return Err(nom::Err::Failure(SExprError::InvalidIdent {
+					text: ident.to_string(),
+					location: SExprLocation::of(mark)
+				}));
 			}
+			let rest = after_brace.take_from(pos + 1);
+			Ok((rest, ident))
 		},
-		_ =>
-		{
-			let (rest, word) = read_word(input)?;
-			Ok((rest, *word.fragment()))
-		}
+		None => Err(nom::Err::Failure(SExprError::UnterminatedIdent {
+			location: SExprLocation::of(mark)
+		}))
 	}
 }
 
@@ -1975,7 +1705,7 @@ fn read_ident(input: Span<'_>) -> SExprResult<'_, &str>
 /// - [`SExprError::ExpectedWord`] if no word is available.
 /// - [`SExprError::InvalidInteger`] if the word does not parse as an `i32`
 ///   (including overflow/underflow).
-fn read_integer(input: Span<'_>) -> SExprResult<'_, i32>
+pub(crate) fn read_integer(input: Span<'_>) -> SExprResult<'_, i32>
 {
 	let (rest, word) = read_word(input)?;
 	match word.fragment().parse::<i32>()
@@ -2036,7 +1766,7 @@ fn read_usize(input: Span<'_>) -> SExprResult<'_, usize>
 ///   malformed.
 /// - [`SExprError::ExpectedChar`] if the closing `]` is missing.
 /// - [`SExprError::InvertedSpan`] if the resulting span has `start > end`.
-fn read_span_prefix(input: Span<'_>) -> SExprResult<'_, SourceSpan>
+pub(crate) fn read_span_prefix(input: Span<'_>) -> SExprResult<'_, SourceSpan>
 {
 	let (input, _) = skip_ws(input)?;
 	match input.fragment().chars().next()
@@ -2106,7 +1836,7 @@ fn read_span_prefix(input: Span<'_>) -> SExprResult<'_, SourceSpan>
 /// # Errors
 /// - [`SExprError::ChildSpanEscapesParent`] if both operands are non-synthetic
 ///   and `child` escapes `parent` on either boundary.
-fn validate_containment(
+pub(crate) fn validate_containment(
 	parent: SourceSpan,
 	child: SourceSpan,
 	at: Span<'_>
@@ -2146,7 +1876,7 @@ fn validate_containment(
 /// # Errors
 /// - [`SExprError::SiblingSpanOutOfOrder`] if both operands are non-synthetic
 ///   and `next` overlaps or precedes `prev`.
-fn validate_sibling_order(
+pub(crate) fn validate_sibling_order(
 	prev: SourceSpan,
 	next: SourceSpan,
 	at: Span<'_>
@@ -2171,51 +1901,8 @@ fn validate_sibling_order(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                         Grammar-level combinators.                         //
+//                               List readers.                                //
 ////////////////////////////////////////////////////////////////////////////////
-
-/// Read the complete top-level form: an optional `^[start end]` span prefix
-/// followed by `(function params body)`. Trailing whitespace after the closing
-/// parenthesis is consumed; the caller is responsible for verifying that no
-/// input remains.
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-///
-/// # Returns
-/// A pair of the remaining input and the parsed [`Function`].
-///
-/// # Errors
-/// - [`SExprError`] if the input is not a well-formed `(function params body)`
-///   s-expression or if any span validation fails.
-fn read_function(input: Span<'_>) -> SExprResult<'_, Function<'_>>
-{
-	let (input, span) = read_span_prefix(input)?;
-	let (input, _) = expect_char('(')(input)?;
-	let (input, _) = skip_ws(input)?;
-	let kw_mark = input;
-	let (input, kw) = read_word(input)?;
-	let keyword = *kw.fragment();
-	if keyword != "function"
-	{
-		return Err(nom::Err::Failure(SExprError::ExpectedTopLevelFunction {
-			found: keyword.to_string(),
-			location: SExprLocation::of(kw_mark)
-		}))
-	}
-	let (input, (parameters, last_param_span)) = read_params(input, span)?;
-	let (input, body) = read_child(input, span, last_param_span)?;
-	let (input, _) = expect_char(')')(input)?;
-	let (input, _) = skip_ws(input)?;
-	Ok((
-		input,
-		Function {
-			parameters,
-			body,
-			span
-		}
-	))
-}
 
 /// Read a parameter list: `[` (span-prefix? ident)* `]`. Each parameter may be
 /// preceded by a `^[start end]` span-metadata prefix.
@@ -2234,7 +1921,7 @@ fn read_function(input: Span<'_>) -> SExprResult<'_, Function<'_>>
 /// - [`SExprError`] if the opening `[`, any identifier, or the closing `]` is
 ///   malformed, or if any parameter's span violates containment or
 ///   sibling-ordering constraints.
-fn read_params<'src>(
+pub(crate) fn read_params<'src>(
 	input: Span<'src>,
 	parent: SourceSpan
 ) -> SExprResult<'src, (Option<Vec<Parameter<'src>>>, SourceSpan)>
@@ -2261,7 +1948,10 @@ fn read_params<'src>(
 				validate_containment(parent, span, mark)?;
 				validate_sibling_order(prev_sibling, span, mark)?;
 				prev_sibling = span;
-				params.push(Parameter { name, span });
+				params.push(Parameter {
+					name: Cow::Borrowed(name),
+					span
+				});
 				cur = next;
 			}
 		}
@@ -2290,7 +1980,7 @@ fn read_params<'src>(
 /// - [`SExprError`] if the opening `[`, the closing `]`, or any integer is
 ///   malformed.
 /// - [`SExprError::FacelessCustomDice`] if the list contains no faces.
-fn read_faces(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
+pub(crate) fn read_faces(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
 {
 	let (input, _) = expect_char('[')(input)?;
 	let mut faces = Vec::new();
@@ -2322,367 +2012,5 @@ fn read_faces(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
 	else
 	{
 		Ok((cur, faces))
-	}
-}
-
-/// Read a subexpression and validate its span against the enclosing `parent`
-/// and the `prev_sibling` (if any).
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-/// - `parent`: The enclosing compound form's span, for containment validation.
-/// - `prev_sibling`: The span of the immediately preceding sibling, for
-///   sibling-order validation. Pass [`SourceSpan::default`] when no prior
-///   sibling exists; the check is a no-op in that case.
-///
-/// # Returns
-/// A pair of the remaining input and the parsed subexpression, whose span has
-/// been validated against `parent` and `prev_sibling`.
-///
-/// # Errors
-/// - [`SExprError`] if the subexpression fails to parse, or if its span
-///   violates the containment or sibling-ordering constraints.
-fn read_child<'src>(
-	input: Span<'src>,
-	parent: SourceSpan,
-	prev_sibling: SourceSpan
-) -> SExprResult<'src, Expression<'src>>
-{
-	let (input, _) = skip_ws(input)?;
-	let mark = input;
-	let (input, expr) = read_expr(input)?;
-	let child = expr.span();
-	validate_containment(parent, child, mark)?;
-	validate_sibling_order(prev_sibling, child, mark)?;
-	Ok((input, expr))
-}
-
-/// Read the dice-expression first argument of a `drop-lowest`/`drop-highest`
-/// form. Expects the child to parse to a [`DiceExpression`], not a general
-/// [`Expression`].
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-/// - `parent`: The enclosing drop-lowest/drop-highest form's span.
-/// - `prev_sibling`: The span of the immediately preceding sibling, or
-///   [`SourceSpan::default`] when no prior sibling exists.
-///
-/// # Returns
-/// A pair of the remaining input and the parsed dice expression.
-///
-/// # Errors
-/// - [`SExprError`] if the subexpression fails to parse, if its span violates
-///   containment or sibling-ordering constraints, or if it does not parse to a
-///   [`DiceExpression`].
-fn read_dice_child<'src>(
-	input: Span<'src>,
-	parent: SourceSpan,
-	prev_sibling: SourceSpan
-) -> SExprResult<'src, DiceExpression<'src>>
-{
-	let mark = input;
-	let (input, expr) = read_child(input, parent, prev_sibling)?;
-	match expr
-	{
-		Expression::Dice(d) => Ok((input, d)),
-		_ => Err(nom::Err::Failure(SExprError::ExpectedDiceExpression {
-			location: SExprLocation::of(mark)
-		}))
-	}
-}
-
-/// Read the optional drop-amount argument of a `drop-lowest` or
-/// `drop-highest` form. The drop amount is present iff another subexpression
-/// follows the dice expression before the closing parenthesis of the form.
-/// Its absence represents the parser-originated `drop: None` case (implicit
-/// single-die drop), so the format faithfully distinguishes `(drop-lowest d)`
-/// from `(drop-lowest d 1)`.
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-/// - `parent`: The enclosing drop-lowest/drop-highest form's span.
-/// - `prev_sibling`: The span of the dice expression that preceded this
-///   position.
-///
-/// # Returns
-/// A pair of the remaining input and `Some(expr)` if a drop-amount
-/// subexpression is present, or `None` if the form closes immediately after
-/// its dice expression.
-///
-/// # Errors
-/// - [`SExprError`] if a subexpression is present but malformed, or if its span
-///   violates containment or sibling-ordering constraints.
-fn read_optional_drop<'src>(
-	input: Span<'src>,
-	parent: SourceSpan,
-	prev_sibling: SourceSpan
-) -> SExprResult<'src, Option<Box<Expression<'src>>>>
-{
-	let (probe, _) = skip_ws(input)?;
-	if probe.fragment().starts_with(')')
-	{
-		return Ok((input, None))
-	}
-	let (input, drop) = read_child(input, parent, prev_sibling)?;
-	Ok((input, Some(Box::new(drop))))
-}
-
-/// Read two subexpressions — enclosed by `parent` — and combine them with the
-/// given constructor. Each child is validated for containment in `parent` and
-/// for sibling ordering.
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-/// - `parent`: The enclosing binary form's span.
-/// - `f`: The constructor that combines the two parsed subexpressions into a
-///   single [`Expression`].
-///
-/// # Returns
-/// A pair of the remaining input and the expression produced by `f`.
-///
-/// # Errors
-/// - [`SExprError`] if either subexpression fails to parse, or if either span
-///   violates containment or sibling-ordering constraints.
-fn read_binary<'src, F>(
-	input: Span<'src>,
-	parent: SourceSpan,
-	f: F
-) -> SExprResult<'src, Expression<'src>>
-where
-	F: FnOnce(Expression<'src>, Expression<'src>) -> Expression<'src>
-{
-	let (input, left) = read_child(input, parent, SourceSpan::default())?;
-	let left_span = left.span();
-	let (input, right) = read_child(input, parent, left_span)?;
-	Ok((input, f(left, right)))
-}
-
-/// Read an expression, optionally preceded by a `^[start end]` span prefix. The
-/// prefix, when present, populates the resulting node's span; when absent, the
-/// span defaults to [`SourceSpan::default`].
-///
-/// # Parameters
-/// - `input`: The input text to read from.
-///
-/// # Returns
-/// A pair of the remaining input and the parsed expression.
-///
-/// # Errors
-/// - [`SExprError`] if the expression is malformed, if any child's span
-///   violates containment or sibling-ordering constraints, or if an unexpected
-///   keyword or end of input is encountered.
-fn read_expr(input: Span<'_>) -> SExprResult<'_, Expression<'_>>
-{
-	let (input, span) = read_span_prefix(input)?;
-	let (input, _) = skip_ws(input)?;
-	match input.fragment().chars().next()
-	{
-		Some('(') =>
-		{
-			let input = input.take_from(1);
-			let (input, _) = skip_ws(input)?;
-			let kw_mark = input;
-			let (input, kw) = read_word(input)?;
-			let keyword = *kw.fragment();
-			let (input, expr) = match keyword
-			{
-				"add" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Add(Add {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"sub" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Sub(Sub {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"mul" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Mul(Mul {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"div" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Div(Div {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"mod" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Mod(Mod {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"exp" => read_binary(input, span, |l, r| {
-					Expression::Arithmetic(ArithmeticExpression::Exp(Exp {
-						left: Box::new(l),
-						right: Box::new(r),
-						span
-					}))
-				}),
-				"neg" =>
-				{
-					let (input, operand) =
-						read_child(input, span, SourceSpan::default())?;
-					Ok((
-						input,
-						Expression::Arithmetic(ArithmeticExpression::Neg(
-							Neg {
-								operand: Box::new(operand),
-								span
-							}
-						))
-					))
-				},
-				"group" =>
-				{
-					let (input, inner) =
-						read_child(input, span, SourceSpan::default())?;
-					Ok((
-						input,
-						Expression::Group(Group {
-							expression: Box::new(inner),
-							span
-						})
-					))
-				},
-				"standard-dice" =>
-				{
-					let (input, count) =
-						read_child(input, span, SourceSpan::default())?;
-					let count_span = count.span();
-					let (input, faces) = read_child(input, span, count_span)?;
-					Ok((
-						input,
-						Expression::Dice(DiceExpression::Standard(
-							StandardDice {
-								count: Box::new(count),
-								faces: Box::new(faces),
-								span
-							}
-						))
-					))
-				},
-				"custom-dice" =>
-				{
-					let (input, count) =
-						read_child(input, span, SourceSpan::default())?;
-					let (input, faces) = read_faces(input)?;
-					Ok((
-						input,
-						Expression::Dice(DiceExpression::Custom(CustomDice {
-							count: Box::new(count),
-							faces,
-							span
-						}))
-					))
-				},
-				"drop-lowest" =>
-				{
-					let (input, dice) =
-						read_dice_child(input, span, SourceSpan::default())?;
-					let dice_span = dice.span();
-					let (input, drop) =
-						read_optional_drop(input, span, dice_span)?;
-					Ok((
-						input,
-						Expression::Dice(DiceExpression::DropLowest(
-							DropLowest {
-								dice: Box::new(dice),
-								drop,
-								span
-							}
-						))
-					))
-				},
-				"drop-highest" =>
-				{
-					let (input, dice) =
-						read_dice_child(input, span, SourceSpan::default())?;
-					let dice_span = dice.span();
-					let (input, drop) =
-						read_optional_drop(input, span, dice_span)?;
-					Ok((
-						input,
-						Expression::Dice(DiceExpression::DropHighest(
-							DropHighest {
-								dice: Box::new(dice),
-								drop,
-								span
-							}
-						))
-					))
-				},
-				"range" =>
-				{
-					let (input, start) =
-						read_child(input, span, SourceSpan::default())?;
-					let start_span = start.span();
-					let (input, end) = read_child(input, span, start_span)?;
-					Ok((
-						input,
-						Expression::Range(Range {
-							start: Box::new(start),
-							end: Box::new(end),
-							span
-						})
-					))
-				},
-				"binding" =>
-				{
-					// The bound name is emitted as an ident with an optional
-					// span prefix (only when spans are serialized). Read the
-					// prefix explicitly so the [`Binding::name_span`] survives
-					// the lossless round-trip; fall back to the default span
-					// when no prefix is present.
-					let (input, name_span) = read_span_prefix(input)?;
-					let (input, name) = read_ident(input)?;
-					let (input, expression) =
-						read_child(input, span, name_span)?;
-					Ok((
-						input,
-						Expression::Binding(Binding {
-							name,
-							name_span,
-							expression: Box::new(expression),
-							span
-						})
-					))
-				},
-				"function" =>
-				{
-					Err(nom::Err::Failure(SExprError::NestedFunctionKeyword {
-						location: SExprLocation::of(kw_mark)
-					}))
-				},
-				_ => Err(nom::Err::Failure(SExprError::UnknownKeyword {
-					keyword: keyword.to_string(),
-					location: SExprLocation::of(kw_mark)
-				}))
-			}?;
-			let (input, _) = expect_char(')')(input)?;
-			Ok((input, expr))
-		},
-		Some(c) if c == '-' || c.is_ascii_digit() =>
-		{
-			let (input, value) = read_integer(input)?;
-			Ok((input, Expression::Constant(Constant { value, span })))
-		},
-		Some(_) =>
-		{
-			let (input, name) = read_ident(input)?;
-			Ok((input, Expression::Variable(Variable { name, span })))
-		},
-		None => Err(nom::Err::Failure(SExprError::ExpectedExpression {
-			location: SExprLocation::of(input)
-		}))
 	}
 }

@@ -8,14 +8,14 @@
 //!
 //! # Instruction set architecture
 //!
-//! The ISA has 14 instructions across four categories:
+//! The ISA has 15 instructions across five categories:
 //!
 //! | Category | Instructions | Destination | Sources |
 //! |----------|-------------|-------------|---------|
 //! | **Roll** | `RollRange`, `RollStandardDice`, `RollCustomDice` | `⚅N` | addressing modes |
 //! | **Drop** | `DropLowest`, `DropHighest` | `⚅N` | addressing mode |
 //! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
-//! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Neg` | `@N` | addressing modes |
+//! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Neg` | `@N` | addressing modes |
 //! | **Control** | `Return` | — | addressing mode |
 //!
 //! # Addressing modes
@@ -361,6 +361,32 @@ impl Display for Exp
 	}
 }
 
+/// Instruction: Compute the greater of two values. The optimizer uses it to
+/// clamp values that the language clamps implicitly, e.g., a negative count
+/// of dice, which rolls nothing, or a negative drop count, which drops
+/// nothing, without rolling any dice.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Max
+{
+	/// The destination register for the result.
+	pub dest: RegisterIndex,
+
+	/// The first operand.
+	pub op1: AddressingMode,
+
+	/// The second operand.
+	pub op2: AddressingMode
+}
+
+impl Display for Max
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(f, "{} <- {} max {}", self.dest, self.op1, self.op2)
+	}
+}
+
 /// Instruction: Compute the negation of a value, saturating on overflow.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -415,6 +441,7 @@ pub enum Instruction
 	Div(Div),
 	Mod(Mod),
 	Exp(Exp),
+	Max(Max),
 	Neg(Neg),
 	Return(Return)
 }
@@ -441,6 +468,7 @@ impl Instruction
 			Self::Div(inst) => Some(inst.dest.into()),
 			Self::Mod(inst) => Some(inst.dest.into()),
 			Self::Exp(inst) => Some(inst.dest.into()),
+			Self::Max(inst) => Some(inst.dest.into()),
 			Self::Neg(inst) => Some(inst.dest.into()),
 			Self::Return(_) => None
 		}
@@ -466,6 +494,7 @@ impl Instruction
 			Self::Div(inst) => vec![inst.op1, inst.op2],
 			Self::Mod(inst) => vec![inst.op1, inst.op2],
 			Self::Exp(inst) => vec![inst.op1, inst.op2],
+			Self::Max(inst) => vec![inst.op1, inst.op2],
 			Self::Neg(inst) => vec![inst.op],
 			Self::Return(inst) => vec![inst.src]
 		}
@@ -693,6 +722,25 @@ impl Instruction
 		Self::Exp(Exp { dest, op1, op2 })
 	}
 
+	/// Create an instruction to compute the greater of two values.
+	///
+	/// # Parameters
+	/// - `dest`: The destination register.
+	/// - `op1`: The first operand.
+	/// - `op2`: The second operand.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn max(
+		dest: RegisterIndex,
+		op1: AddressingMode,
+		op2: AddressingMode
+	) -> Self
+	{
+		Self::Max(Max { dest, op1, op2 })
+	}
+
 	/// Create an instruction to negate a value.
 	///
 	/// # Parameters
@@ -739,6 +787,7 @@ impl Display for Instruction
 			Self::Div(inst) => write!(f, "{}", inst),
 			Self::Mod(inst) => write!(f, "{}", inst),
 			Self::Exp(inst) => write!(f, "{}", inst),
+			Self::Max(inst) => write!(f, "{}", inst),
 			Self::Neg(inst) => write!(f, "{}", inst),
 			Self::Return(inst) => write!(f, "{}", inst)
 		}
@@ -803,6 +852,11 @@ impl From<Mod> for Instruction
 impl From<Exp> for Instruction
 {
 	fn from(inst: Exp) -> Self { Self::Exp(inst) }
+}
+
+impl From<Max> for Instruction
+{
+	fn from(inst: Max) -> Self { Self::Max(inst) }
 }
 
 impl From<Neg> for Instruction
@@ -978,6 +1032,20 @@ impl TryFrom<Instruction> for Exp
 		match inst
 		{
 			Instruction::Exp(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for Max
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::Max(inst) => Ok(inst),
 			_ => Err(())
 		}
 	}
@@ -1408,6 +1476,15 @@ pub trait InstructionVisitor<E>
 	/// An error if the visitor fails to visit the instruction.
 	fn visit_exp(&mut self, inst: &Exp) -> Result<(), E>;
 
+	/// Visit a maximum instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_max(&mut self, inst: &Max) -> Result<(), E>;
+
 	/// Visit a negation instruction.
 	///
 	/// # Parameters
@@ -1475,6 +1552,7 @@ where
 			Instruction::Div(inst) => visitor.visit_div(inst),
 			Instruction::Mod(inst) => visitor.visit_mod(inst),
 			Instruction::Exp(inst) => visitor.visit_exp(inst),
+			Instruction::Max(inst) => visitor.visit_max(inst),
 			Instruction::Neg(inst) => visitor.visit_neg(inst),
 			Instruction::Return(inst) => visitor.visit_return(inst)
 		}
@@ -1822,6 +1900,17 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 		Ok(())
 	}
 
+	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers.entry(inst.op1).or_default().insert(self.pc);
+		self.readers.entry(inst.op2).or_default().insert(self.pc);
+		Ok(())
+	}
+
 	fn visit_neg(&mut self, inst: &Neg) -> Result<(), ()>
 	{
 		self.writers
@@ -1855,7 +1944,7 @@ mod tests
 		ProgramCounter, RegisterIndex
 	};
 
-	/// Answer the function `x: 1 + {x} + 1 + {x} + 1 + {x}`, which is used by
+	/// Answer the function `{x}: 1 + {x} + 1 + {x} + 1 + {x}`, which is used by
 	/// the tests in this module.
 	///
 	/// # Returns
@@ -1864,7 +1953,7 @@ mod tests
 	{
 		// x: 1 + {x} + 1 + {x} + 1 + {x}
 		// =
-		// Function(x@0) r#6 ⚅#0   (pc)
+		// Function({x}@0) r#6 ⚅#0   (pc)
 		//   @1 <- 1 + @0         #0
 		//   @2 <- @1 + 1         #1
 		//   @3 <- @2 + @0        #2
