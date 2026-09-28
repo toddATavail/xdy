@@ -1836,7 +1836,8 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 								(end.max as i128)
 									.saturating_sub(start.min as i128)
 									.saturating_add(1)
-									.max(1) as u128
+									.max(1)
+									as u128
 							)
 							.max(1)
 						})

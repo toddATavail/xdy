@@ -223,7 +223,8 @@ impl<'a> Shape<'a>
 			} =>
 			{
 				span_prefix_size(span, options)
-					+ 4 + keyword.len()
+					+ 4
+					+ keyword.len()
 					+ match second
 					{
 						Part::Child(_) => 0,
@@ -240,8 +241,10 @@ impl<'a> Shape<'a>
 			} =>
 			{
 				span_prefix_size(span, options)
-					+ 2 + "binding".len()
-					+ 2 + span_prefix_size(name_span, options)
+					+ 2
+					+ "binding".len()
+					+ 2
+					+ span_prefix_size(name_span, options)
 					+ ident_size(name)
 			},
 			// Account for two parentheses, the keyword, two spaces, and the
@@ -251,7 +254,8 @@ impl<'a> Shape<'a>
 			} =>
 			{
 				span_prefix_size(span, options)
-					+ 12 + parameters.size_s_expr(options)
+					+ 12
+					+ parameters.size_s_expr(options)
 			},
 			Shape::Transparent(_) =>
 			{

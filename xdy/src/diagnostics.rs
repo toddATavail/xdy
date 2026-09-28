@@ -896,14 +896,15 @@ impl<'src> Doctor<'src>
 			.collect::<Vec<_>>();
 
 		// Check for specific patterns based on the failure and the source.
-		let expects_expression =
-			expectations.iter().any(|e| {
-				let s = e.as_ref();
-				s == "integer"
-					|| s == "dice expression"
-					|| s == "`(`" || s == "`{`"
-					|| s == "`[`" || s == "`-`"
-			});
+		let expects_expression = expectations.iter().any(|e| {
+			let s = e.as_ref();
+			s == "integer"
+				|| s == "dice expression"
+				|| s == "`(`"
+				|| s == "`{`"
+				|| s == "`[`"
+				|| s == "`-`"
+		});
 		let expects_delimiter =
 			expectations.iter().find_map(|e| match e.as_ref()
 			{
@@ -1259,7 +1260,8 @@ impl<'src> Doctor<'src>
 		let split_pos = name.char_indices().find(|&(i, c)| {
 			what == "variable"
 				&& (c == 'd' || c == 'D')
-				&& i > 0 && name[..i].starts_with(is_bare_word_start)
+				&& i > 0
+				&& name[..i].starts_with(is_bare_word_start)
 		});
 		let prefix =
 			split_pos.map(|(i, _)| name[..i].trim_end_matches(is_token_space));
