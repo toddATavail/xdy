@@ -43,9 +43,11 @@
 //! test](test_oracle_dies_with_its_parent) kills a test process mid-request,
 //! and expects the oracle to exit at once.
 
+#[cfg(unix)]
+use std::io::{BufRead as _, BufReader};
 use std::{
 	env, fs,
-	io::{BufRead as _, BufReader, Read, Write as _},
+	io::{Read, Write as _},
 	path::{Path, PathBuf},
 	process::{Child, ChildStdin, Command, Stdio},
 	thread,
@@ -513,13 +515,16 @@ fn test_oracle_distribution_corpus()
 
 /// The environment variable that marks the process that
 /// [`test_oracle_dies_with_its_parent`] kills.
+#[cfg(unix)]
 const DOOMED: &str = "XDY_ORACLE_DOOMED";
 
 /// The marker that precedes the process ID of the oracle whose parent
 /// [`test_oracle_dies_with_its_parent`] kills.
+#[cfg(unix)]
 const ORPHAN_MARKER: &str = "xdy-oracle-orphan:";
 
 /// How long the oracle may outlive its parent.
+#[cfg(unix)]
 const ORPHAN_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Ensure that an oracle dies with the test process that asked it, even if that
