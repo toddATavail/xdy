@@ -89,8 +89,9 @@ just oracle
 
 This builds and tests the Lean, then runs four ignored Rust tests against the
 oracle, so neither `just verify` nor `just stress` needs Lean. CI does the same
-on every push to `main` and every pull request against it. Set `XDY_ORACLE` to
-run an oracle built elsewhere.
+on every push to `main`, and every pull request against it, that changes the
+oracle or the code whose distributions it checks. Set `XDY_ORACLE` to run an
+oracle built elsewhere.
 
 The first runs every case of the Rust distribution corpus,
 [`xdy/tests/test_distributions.txt`](../xdy/tests/test_distributions.txt),

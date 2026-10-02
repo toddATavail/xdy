@@ -14,7 +14,8 @@
 //!
 //! The oracle tests need the Lean toolchain, so they are ignored by default;
 //! `just oracle` builds the oracle and runs them, as CI does on every push to
-//! `main` and every pull request against it. The [corpus
+//! `main`, and every pull request against it, that changes the oracle or the
+//! code whose distributions it checks. The [corpus
 //! test](test_oracle_distribution_corpus) runs every case of the distribution
 //! corpus through the oracle. Every case must agree with the oracle exactly, as
 //! probabilities, including those whose paths are not equally likely because

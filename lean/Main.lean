@@ -28,7 +28,13 @@ soon as standard input closes, if it has not answered by then.
 
 # Notes
 With `--lifeline`, the oracle exits explicitly once it answers, rather than
-returning, lest the runtime wait for the task that watches standard input.
+returning, lest the runtime wait for the task that watches standard input. It
+exits with `IO.Process.forceExit`, after flushing standard output and standard
+error itself, rather than with `IO.Process.exit`: the task that watches
+standard input blocks in a read that holds the lock of standard input, and
+glibc's `exit` locks every stream to flush it, so it would wait for the
+lifeline to close, and the parent, waiting for the oracle to exit, would never
+close it. The task exits likewise, since the main thread may still be running.
 -/
 def main (args : List String) : IO UInt32 := do
   let stdin ← IO.getStdin
@@ -40,8 +46,11 @@ def main (args : List String) : IO UInt32 := do
     let request ← stdin.getLine
     let _ ← IO.asTask (prio := .dedicated) do
       let _ ← stdin.readToEnd
-      (IO.Process.exit 2 : IO Unit)
-    IO.Process.exit (← answer request).toUInt8
+      (IO.Process.forceExit 2 : IO Unit)
+    let code ← answer request
+    (← IO.getStdout).flush
+    (← IO.getStderr).flush
+    IO.Process.forceExit code.toUInt8
   | _ =>
     IO.eprintln "usage: xdy-oracle [--lifeline]"
     pure 1

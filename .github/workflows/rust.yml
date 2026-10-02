@@ -33,25 +33,3 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
-
-  # The Lean oracle is the independent check of the distributions that the
-  # forward pass computes. Its tests are ignored by default, since they need the
-  # Lean toolchain; this job installs it, builds the oracle, and runs them, as
-  # `just oracle` does.
-  oracle:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install elan
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Build the Lean oracle
-        working-directory: lean
-        run: lake build
-      - name: Run the Lean tests
-        working-directory: lean
-        run: lake test
-      - name: Run the oracle tests
-        run: cargo test -p xdy --lib oracle -- --ignored --nocapture

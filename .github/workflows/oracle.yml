@@ -1,0 +1,66 @@
+name: Oracle
+
+# The Lean oracle is the independent check of the distributions that the
+# forward pass computes. Its tests are ignored by default, since they need the
+# Lean toolchain; this workflow installs it, builds the oracle, and runs them,
+# as `just oracle` does. It runs only when the oracle, or the code whose
+# distributions it checks, changes: the IR and its serialization, the compiler,
+# the optimizer, the evaluator, the assembler, the forward pass, the tests and
+# their corpus, or the dependencies.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lean/**"
+      - "xdy/src/distribution.rs"
+      - "xdy/src/distribution/**"
+      - "xdy/src/compiler.rs"
+      - "xdy/src/ir.rs"
+      - "xdy/src/evaluator.rs"
+      - "xdy/src/assembler.rs"
+      - "xdy/src/optimizer.rs"
+      - "xdy/src/optimizer/**"
+      - "xdy/src/tests/oracle.rs"
+      - "xdy/tests/test_distributions.txt"
+      - "xdy/proptest-regressions/tests/oracle.txt"
+      - "Cargo.lock"
+      - ".github/workflows/oracle.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lean/**"
+      - "xdy/src/distribution.rs"
+      - "xdy/src/distribution/**"
+      - "xdy/src/compiler.rs"
+      - "xdy/src/ir.rs"
+      - "xdy/src/evaluator.rs"
+      - "xdy/src/assembler.rs"
+      - "xdy/src/optimizer.rs"
+      - "xdy/src/optimizer/**"
+      - "xdy/src/tests/oracle.rs"
+      - "xdy/tests/test_distributions.txt"
+      - "xdy/proptest-regressions/tests/oracle.txt"
+      - "Cargo.lock"
+      - ".github/workflows/oracle.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build the Lean oracle
+        working-directory: lean
+        run: lake build
+      - name: Run the Lean tests
+        working-directory: lean
+        run: lake test
+      - name: Run the oracle tests
+        run: cargo test -p xdy --lib oracle -- --ignored --nocapture
