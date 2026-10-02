@@ -21,8 +21,9 @@ use std::fmt::{self, Formatter};
 
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
-	Div, DropHighest, DropLowest, Exp, Expression, Function, Group, Mod, Mul,
-	Neg, Parameter, Range, StandardDice, Sub, Variable
+	Div, DropHighest, DropLowest, Exp, Expression, Function, Group,
+	KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter, Range, StandardDice,
+	Sub, Variable
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -305,7 +306,12 @@ impl Render for DropLowest<'_>
 {
 	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
 	{
-		schedule_drop(stack, &self.dice, " drop lowest", self.drop.as_deref());
+		schedule_clause(
+			stack,
+			&self.dice,
+			" drop lowest",
+			self.drop.as_deref()
+		);
 	}
 }
 
@@ -313,39 +319,74 @@ impl Render for DropHighest<'_>
 {
 	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
 	{
-		schedule_drop(stack, &self.dice, " drop highest", self.drop.as_deref());
+		schedule_clause(
+			stack,
+			&self.dice,
+			" drop highest",
+			self.drop.as_deref()
+		);
 	}
 }
 
-/// Schedule the pieces of a drop clause.
+impl Render for KeepLowest<'_>
+{
+	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
+	{
+		schedule_clause(
+			stack,
+			&self.dice,
+			" keep lowest",
+			self.keep.as_deref()
+		);
+	}
+}
+
+impl Render for KeepHighest<'_>
+{
+	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
+	{
+		schedule_clause(
+			stack,
+			&self.dice,
+			" keep highest",
+			self.keep.as_deref()
+		);
+	}
+}
+
+/// Schedule the pieces of a drop or keep clause.
 ///
 /// # Parameters
 /// - `stack`: The pending pieces, the next of which is on top.
-/// - `dice`: The dice expression from which to drop.
+/// - `dice`: The dice expression from which to drop or keep.
 /// - `keywords`: The keywords of the clause, with a leading space.
-/// - `drop`: The number of dice to drop, if given.
-fn schedule_drop<'a>(
+/// - `count`: The number of dice to drop or keep, if given.
+fn schedule_clause<'a>(
 	stack: &mut Vec<Piece<'a>>,
 	dice: &'a DiceExpression<'a>,
 	keywords: &'static str,
-	drop: Option<&'a Expression<'a>>
+	count: Option<&'a Expression<'a>>
 )
 {
-	match drop
+	match count
 	{
-		// A drop expression never begins with `-`, so a negative constant,
+		// The count of a clause never begins with `-`, so a negative constant,
 		// which only a tree that was not parsed can hold here, renders grouped,
 		// lest it read back as a subtraction.
-		Some(drop @ Expression::Constant(Constant { value: ..0, .. })) =>
+		Some(count @ Expression::Constant(Constant { value: ..0, .. })) =>
 		{
 			schedule(
 				stack,
-				&[Piece::Text(" ("), Piece::Expression(drop), Piece::Text(")")]
+				&[
+					Piece::Text(" ("),
+					Piece::Expression(count),
+					Piece::Text(")")
+				]
 			);
 		},
-		Some(drop) =>
+		Some(count) =>
 		{
-			schedule(stack, &[Piece::Text(" "), Piece::Expression(drop)]);
+			schedule(stack, &[Piece::Text(" "), Piece::Expression(count)]);
 		},
 		None =>
 		{}
@@ -362,7 +403,9 @@ impl Render for DiceExpression<'_>
 			DiceExpression::Standard(dice) => dice.schedule(stack),
 			DiceExpression::Custom(dice) => dice.schedule(stack),
 			DiceExpression::DropLowest(clause) => clause.schedule(stack),
-			DiceExpression::DropHighest(clause) => clause.schedule(stack)
+			DiceExpression::DropHighest(clause) => clause.schedule(stack),
+			DiceExpression::KeepLowest(clause) => clause.schedule(stack),
+			DiceExpression::KeepHighest(clause) => clause.schedule(stack)
 		}
 	}
 }

@@ -220,7 +220,7 @@ impl Display for Variable<'_>
 ///   lexical order.
 /// - A binding expression evaluates to the bound value, so it can appear
 ///   anywhere a [variable reference](Variable) is legal — as a primary, a dice
-///   count, standard faces, or a drop count.
+///   count, standard faces, or the count of a drop or keep clause.
 ///
 /// Collision, rebinding, and use-before-bind errors are reported by the
 /// [`Validator`](crate::Validator).
@@ -439,6 +439,56 @@ impl Display for DropHighest<'_>
 	}
 }
 
+/// A keep-lowest expression, which keeps the lowest dice of those that the
+/// earlier clauses of its dice expression left kept, and drops the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeepLowest<'src>
+{
+	/// The dice expression.
+	pub dice: Box<DiceExpression<'src>>,
+
+	/// The number of dice to keep. Defaults to 1. A count of zero or less
+	/// keeps none.
+	pub keep: Option<Box<Expression<'src>>>,
+
+	/// The span of the keep-lowest expression, from the dice expression
+	/// through the keep count (or the `lowest` keyword if no count is given).
+	pub span: SourceSpan
+}
+
+impl Display for KeepLowest<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		display::render(self, f)
+	}
+}
+
+/// A keep-highest expression, which keeps the highest dice of those that the
+/// earlier clauses of its dice expression left kept, and drops the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeepHighest<'src>
+{
+	/// The dice expression.
+	pub dice: Box<DiceExpression<'src>>,
+
+	/// The number of dice to keep. Defaults to 1. A count of zero or less
+	/// keeps none.
+	pub keep: Option<Box<Expression<'src>>>,
+
+	/// The span of the keep-highest expression, from the dice expression
+	/// through the keep count (or the `highest` keyword if no count is given).
+	pub span: SourceSpan
+}
+
+impl Display for KeepHighest<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		display::render(self, f)
+	}
+}
+
 /// A dice expression.
 pub enum DiceExpression<'src>
 {
@@ -452,7 +502,13 @@ pub enum DiceExpression<'src>
 	DropLowest(DropLowest<'src>),
 
 	/// A drop-highest expression.
-	DropHighest(DropHighest<'src>)
+	DropHighest(DropHighest<'src>),
+
+	/// A keep-lowest expression.
+	KeepLowest(KeepLowest<'src>),
+
+	/// A keep-highest expression.
+	KeepHighest(KeepHighest<'src>)
 }
 
 impl<'src> DiceExpression<'src>
@@ -665,7 +721,8 @@ impl Display for Neg<'_>
 ///    source order, and produces the node's own output.
 /// 3. [`visit_expression`](Self::visit_expression), if the node fills a slot of
 ///    type [`Expression`], i.e., if it is not the [`DiceExpression`] beneath a
-///    [drop-lowest](DropLowest) or [drop-highest](DropHighest) expression. The
+///    [drop-lowest](DropLowest), [drop-highest](DropHighest),
+///    [keep-lowest](KeepLowest), or [keep-highest](KeepHighest) expression. The
 ///    hook receives the node's output and may replace it. By default, it
 ///    returns the output unchanged.
 ///
@@ -739,8 +796,8 @@ impl Display for Neg<'_>
 ///     Parser,
 ///     ast::{
 ///         ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-///         DropLowest, Exp, Function, Group, Mod, Mul, Neg, Range,
-///         StandardDice, Sub, Variable
+///         DropLowest, Exp, Function, Group, KeepHighest, KeepLowest, Mod,
+///         Mul, Neg, Range, StandardDice, Sub, Variable
 ///     }
 /// };
 ///
@@ -774,6 +831,12 @@ impl Display for Neg<'_>
 ///     fn visit_drop_highest(
 ///         &mut self, _: &'a DropHighest<'src>, dice: usize, drop: Option<usize>
 ///     ) -> Result<usize, Infallible> { Ok(dice + drop.unwrap_or(0)) }
+///     fn visit_keep_lowest(
+///         &mut self, _: &'a KeepLowest<'src>, dice: usize, keep: Option<usize>
+///     ) -> Result<usize, Infallible> { Ok(dice + keep.unwrap_or(0)) }
+///     fn visit_keep_highest(
+///         &mut self, _: &'a KeepHighest<'src>, dice: usize, keep: Option<usize>
+///     ) -> Result<usize, Infallible> { Ok(dice + keep.unwrap_or(0)) }
 ///     fn visit_add(&mut self, _: &'a Add<'src>, left: usize, right: usize)
 ///         -> Result<usize, Infallible> { Ok(left + right) }
 ///     fn visit_sub(&mut self, _: &'a Sub<'src>, left: usize, right: usize)
@@ -885,6 +948,26 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	fn enter_drop_highest(
 		&mut self,
 		_node: &'a DropHighest<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [keep-lowest](KeepLowest) expression, before its dice and keep
+	/// count.
+	fn enter_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [keep-highest](KeepHighest) expression, before its dice and
+	/// keep count.
+	fn enter_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -1050,6 +1133,34 @@ pub trait ASTVisitor<'a, 'src: 'a>
 		drop: Option<Self::Output>
 	) -> Result<Self::Output, Self::Error>;
 
+	/// Visit a [keep-lowest](KeepLowest) expression, after its dice and keep
+	/// count.
+	///
+	/// # Parameters
+	/// - `node`: The keep-lowest expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `keep`: The output of the keep count, if the expression has one.
+	fn visit_keep_lowest(
+		&mut self,
+		node: &'a KeepLowest<'src>,
+		dice: Self::Output,
+		keep: Option<Self::Output>
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit a [keep-highest](KeepHighest) expression, after its dice and keep
+	/// count.
+	///
+	/// # Parameters
+	/// - `node`: The keep-highest expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `keep`: The output of the keep count, if the expression has one.
+	fn visit_keep_highest(
+		&mut self,
+		node: &'a KeepHighest<'src>,
+		dice: Self::Output,
+		keep: Option<Self::Output>
+	) -> Result<Self::Output, Self::Error>;
+
 	/// Visit an [addition](Add) expression, after its operands.
 	///
 	/// # Parameters
@@ -1142,7 +1253,8 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	/// Finish an [expression](Expression) that fills a slot of type
 	/// [`Expression`], after the `visit_*` method of the node inside it.
 	/// Every node but the [`DiceExpression`] beneath a
-	/// [drop-lowest](DropLowest) or [drop-highest](DropHighest) expression
+	/// [drop-lowest](DropLowest), [drop-highest](DropHighest),
+	/// [keep-lowest](KeepLowest), or [keep-highest](KeepHighest) expression
 	/// fills such a slot, as does the root of a walk that starts at an
 	/// [`Expression`] or a [`Function`].
 	///
@@ -1405,6 +1517,34 @@ impl Spanned for DropHighest<'_>
 	}
 }
 
+impl Spanned for KeepLowest<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		KeepLowest {
+			dice: Box::new(self.dice.untethered()),
+			keep: self.keep.as_ref().map(|k| Box::new(k.untethered())),
+			span: SourceSpan::default()
+		}
+	}
+}
+
+impl Spanned for KeepHighest<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		KeepHighest {
+			dice: Box::new(self.dice.untethered()),
+			keep: self.keep.as_ref().map(|k| Box::new(k.untethered())),
+			span: SourceSpan::default()
+		}
+	}
+}
+
 impl Spanned for DiceExpression<'_>
 {
 	fn span(&self) -> SourceSpan
@@ -1414,7 +1554,9 @@ impl Spanned for DiceExpression<'_>
 			DiceExpression::Standard(d) => d.span(),
 			DiceExpression::Custom(d) => d.span(),
 			DiceExpression::DropLowest(d) => d.span(),
-			DiceExpression::DropHighest(d) => d.span()
+			DiceExpression::DropHighest(d) => d.span(),
+			DiceExpression::KeepLowest(d) => d.span(),
+			DiceExpression::KeepHighest(d) => d.span()
 		}
 	}
 

@@ -88,6 +88,50 @@ fn test_compile_folds_constants()
 //                               Deep nesting.                                //
 ////////////////////////////////////////////////////////////////////////////////
 
+/// Ensure that the compiler emits a keep instruction for each keep clause, in
+/// order with the drops, with a count of 1 when the clause gives none.
+#[test]
+fn test_compile_keep_clauses()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (keep-lowest (standard-dice 3 6)))",
+			"\
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅0 <- keep lowest 1 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (keep-highest (drop-lowest (standard-dice 4 6)) 2))",
+			"\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- keep highest 2 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [{n}] (drop-highest (keep-lowest (custom-dice 4 [1 3 5]) \
+			 {n})))",
+			"\
+\t\t⚅0 <- roll custom dice 4D[1, 3, 5]
+\t\t⚅0 <- keep lowest @0 from ⚅0
+\t\t⚅0 <- drop highest 1 from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+"
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let function = Compiler::compile(&ast).to_string();
+		assert_eq!(function.split_once("body:\n").unwrap().1, expected);
+	}
+}
+
 /// Ensure that the compiler survives a deep chain of every nesting construct
 /// on a small stack, and still discovers the external variable that follows
 /// the chain.

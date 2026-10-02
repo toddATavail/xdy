@@ -25,8 +25,8 @@ use std::{
 
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
-	Div, DropHighest, DropLowest, Exp, Expression, Group, Mod, Mul, Neg, Range,
-	StandardDice, Sub, Variable,
+	Div, DropHighest, DropLowest, Exp, Expression, Group, KeepHighest,
+	KeepLowest, Mod, Mul, Neg, Range, StandardDice, Sub, Variable,
 	traversal::{self, Node}
 };
 use crate::span::SourceSpan;
@@ -344,12 +344,30 @@ impl<'a, 'src> Cloner<'a, 'src>
 			{
 				self.tasks.push(Task::Expression(&custom.count))
 			},
-			DiceExpression::DropLowest(DropLowest { dice, drop, .. })
-			| DiceExpression::DropHighest(DropHighest { dice, drop, .. }) =>
+			DiceExpression::DropLowest(DropLowest {
+				dice,
+				drop: count,
+				..
+			})
+			| DiceExpression::DropHighest(DropHighest {
+				dice,
+				drop: count,
+				..
+			})
+			| DiceExpression::KeepLowest(KeepLowest {
+				dice,
+				keep: count,
+				..
+			})
+			| DiceExpression::KeepHighest(KeepHighest {
+				dice,
+				keep: count,
+				..
+			}) =>
 			{
-				if let Some(drop) = drop
+				if let Some(count) = count
 				{
-					self.tasks.push(Task::Expression(drop));
+					self.tasks.push(Task::Expression(count));
 				}
 				self.tasks.push(Task::Dice(dice));
 			}
@@ -515,6 +533,30 @@ impl<'a, 'src> Cloner<'a, 'src>
 					drop,
 					span: self.span(clause.span)
 				})
+			},
+			DiceExpression::KeepLowest(clause) =>
+			{
+				let keep = clause
+					.keep
+					.as_ref()
+					.map(|_| Box::new(self.pop_expression()));
+				DiceExpression::KeepLowest(KeepLowest {
+					dice: Box::new(self.pop_dice()),
+					keep,
+					span: self.span(clause.span)
+				})
+			},
+			DiceExpression::KeepHighest(clause) =>
+			{
+				let keep = clause
+					.keep
+					.as_ref()
+					.map(|_| Box::new(self.pop_expression()));
+				DiceExpression::KeepHighest(KeepHighest {
+					dice: Box::new(self.pop_dice()),
+					keep,
+					span: self.span(clause.span)
+				})
 			}
 		}
 	}
@@ -670,7 +712,8 @@ fn detach_children<'src>(
 }
 
 /// Detach the children of a dice expression, leaving it shallow: dropping it
-/// no longer drops any expression with children, or any stack of drop clauses.
+/// no longer drops any expression with children, or any stack of drop and keep
+/// clauses.
 ///
 /// # Parameters
 /// - `dice`: The dice expression.
@@ -688,12 +731,22 @@ fn detach_dice_children<'src>(
 			detach(&mut standard.faces, orphans);
 		},
 		DiceExpression::Custom(custom) => detach(&mut custom.count, orphans),
-		DiceExpression::DropLowest(DropLowest { dice, drop, .. })
-		| DiceExpression::DropHighest(DropHighest { dice, drop, .. }) =>
+		DiceExpression::DropLowest(DropLowest {
+			dice, drop: count, ..
+		})
+		| DiceExpression::DropHighest(DropHighest {
+			dice, drop: count, ..
+		})
+		| DiceExpression::KeepLowest(KeepLowest {
+			dice, keep: count, ..
+		})
+		| DiceExpression::KeepHighest(KeepHighest {
+			dice, keep: count, ..
+		}) =>
 		{
-			if let Some(drop) = drop.take()
+			if let Some(count) = count.take()
 			{
-				orphans.push(*drop);
+				orphans.push(*count);
 			}
 			match **dice
 			{
@@ -704,16 +757,18 @@ fn detach_dice_children<'src>(
 					detach_dice_children(dice, orphans)
 				},
 				DiceExpression::DropLowest(_)
-				| DiceExpression::DropHighest(_) => promote_leaf(dice, orphans)
+				| DiceExpression::DropHighest(_)
+				| DiceExpression::KeepLowest(_)
+				| DiceExpression::KeepHighest(_) => promote_leaf(dice, orphans)
 			}
 		}
 	}
 }
 
-/// Replace a stack of drop clauses with the leaf dice expression at its bottom,
-/// dropping the drop clauses between without recursion and without allocation.
-/// The drop expressions of the clauses, and the children of the leaf, join the
-/// orphans.
+/// Replace a stack of drop and keep clauses with the leaf dice expression at
+/// its bottom, dropping the clauses between without recursion and without
+/// allocation. The counts of the clauses, and the children of the leaf, join
+/// the orphans.
 ///
 /// ```mermaid
 /// flowchart LR
@@ -729,18 +784,18 @@ fn detach_dice_children<'src>(
 /// ```
 ///
 /// # Parameters
-/// - `slot`: The top of the stack of drop clauses, which the leaf replaces.
-/// - `orphans`: The detached expressions, to which to add the drop expressions
-///   and the children of the leaf.
+/// - `slot`: The top of the stack of clauses, which the leaf replaces.
+/// - `orphans`: The detached expressions, to which to add the counts of the
+///   clauses and the children of the leaf.
 ///
 /// # Safety
-/// Safe code cannot take a child out of a drop clause without supplying a
+/// Safe code cannot take a child out of a clause without supplying a
 /// replacement, which costs an allocation, since every [`DiceExpression`]
 /// owns a [`Box`]; nor destructure one, since [`DiceExpression`] implements
 /// [`Drop`]. So this function works in two phases:
 ///
-/// 1. The safe phase walks down the stack, detaching every drop expression and
-///    the children of the leaf, so that nothing left in the stack has a
+/// 1. The safe phase walks down the stack, detaching the count of every clause
+///    and the children of the leaf, so that nothing left in the stack has a
 ///    [`Drop`] that does any work.
 /// 2. The unsafe phase moves the top clause out of `slot` with [`ptr::read`],
 ///    leaving `slot` logically uninitialized. It then dismantles each clause in
@@ -760,18 +815,36 @@ fn promote_leaf<'src>(
 	orphans: &mut Vec<Expression<'src>>
 )
 {
-	// Phase 1: Detach every drop expression, and the children of the leaf.
+	// Phase 1: Detach the count of every clause, and the children of the leaf.
 	let mut cursor = &mut *slot;
 	loop
 	{
 		match cursor
 		{
-			DiceExpression::DropLowest(DropLowest { dice, drop, .. })
-			| DiceExpression::DropHighest(DropHighest { dice, drop, .. }) =>
+			DiceExpression::DropLowest(DropLowest {
+				dice,
+				drop: count,
+				..
+			})
+			| DiceExpression::DropHighest(DropHighest {
+				dice,
+				drop: count,
+				..
+			})
+			| DiceExpression::KeepLowest(KeepLowest {
+				dice,
+				keep: count,
+				..
+			})
+			| DiceExpression::KeepHighest(KeepHighest {
+				dice,
+				keep: count,
+				..
+			}) =>
 			{
-				if let Some(drop) = drop.take()
+				if let Some(count) = count.take()
 				{
-					orphans.push(*drop);
+					orphans.push(*count);
 				}
 				cursor = &mut **dice;
 			},
@@ -811,6 +884,26 @@ fn promote_leaf<'src>(
 				let DropHighest {
 					dice,
 					drop: _,
+					span: _
+				} = unsafe { ptr::read(payload) };
+				dice
+			},
+			DiceExpression::KeepLowest(payload) =>
+			{
+				// SAFETY: As above, since Phase 1 emptied `keep`.
+				let KeepLowest {
+					dice,
+					keep: _,
+					span: _
+				} = unsafe { ptr::read(payload) };
+				dice
+			},
+			DiceExpression::KeepHighest(payload) =>
+			{
+				// SAFETY: As above, since Phase 1 emptied `keep`.
+				let KeepHighest {
+					dice,
+					keep: _,
 					span: _
 				} = unsafe { ptr::read(payload) };
 				dice

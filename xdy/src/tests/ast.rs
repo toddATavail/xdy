@@ -77,6 +77,72 @@ fn test_debug_passes_flags_to_leaves()
 	);
 }
 
+/// Ensure that `{:?}` and `{:#?}` render each kind of drop and keep clause
+/// exactly as the derived format would: the variant wraps the clause, whose
+/// derived [`Debug`] names its own type and its count field, `drop` or `keep`.
+#[test]
+fn test_debug_clauses_match_derived()
+{
+	for s_expr in [
+		"(function [] (drop-lowest (standard-dice 4 6)))",
+		"(function [] (drop-highest (standard-dice 4 6) 2))",
+		"(function [] (keep-lowest (standard-dice 4 6)))",
+		"(function [] (keep-highest (drop-lowest (standard-dice 4 6)) 3))"
+	]
+	{
+		let body = crate::s_expr::read_s_expr(s_expr).unwrap().body;
+		let Expression::Dice(dice) = &body
+		else
+		{
+			unreachable!()
+		};
+		let (compact, pretty) = match dice
+		{
+			DiceExpression::DropLowest(clause) => (
+				format!("Dice(DropLowest({:?}))", clause),
+				format!("Dice(\n    DropLowest(\n{}", indent(clause))
+			),
+			DiceExpression::DropHighest(clause) => (
+				format!("Dice(DropHighest({:?}))", clause),
+				format!("Dice(\n    DropHighest(\n{}", indent(clause))
+			),
+			DiceExpression::KeepLowest(clause) => (
+				format!("Dice(KeepLowest({:?}))", clause),
+				format!("Dice(\n    KeepLowest(\n{}", indent(clause))
+			),
+			DiceExpression::KeepHighest(clause) => (
+				format!("Dice(KeepHighest({:?}))", clause),
+				format!("Dice(\n    KeepHighest(\n{}", indent(clause))
+			),
+			_ => unreachable!()
+		};
+		assert_eq!(format!("{:?}", body), compact, "{s_expr}");
+		assert_eq!(format!("{:#?}", body), pretty, "{s_expr}");
+	}
+}
+
+/// Answer the derived pretty [`Debug`] rendering of a clause, indented two
+/// levels, and followed by the closing of the two levels that enclose it, as
+/// it appears within the pretty rendering of its [`Expression`].
+///
+/// # Parameters
+/// - `clause`: The clause.
+///
+/// # Returns
+/// The rendering.
+fn indent(clause: &impl fmt::Debug) -> String
+{
+	let mut rendering = String::new();
+	for line in format!("{:#?}", clause).lines()
+	{
+		writeln!(rendering, "        {line}").unwrap();
+	}
+	// The derived format ends each field, including the last, with a comma.
+	rendering.pop();
+	rendering.push_str(",\n    ),\n)");
+	rendering
+}
+
 /// Ensure that `{:#?}` renders a deep negation chain exactly as the derived
 /// format would, as reconstructed independently by [`pretty_negations`].
 #[test]
@@ -145,6 +211,93 @@ fn test_equality_distinguishes()
 		let right_body = Parser::parse(right).unwrap().body;
 		assert!(left_body != right_body, "{} == {}", left, right);
 		assert!(left_body == left_body.clone(), "{}", left);
+	}
+}
+
+/// Ensure that a keep clause is distinct from the drop clause of the same
+/// shape, and from the keep clause of the other direction, in equality and in
+/// hashing, since both compare and hash by the names of their variants.
+#[test]
+fn test_keeps_are_distinct_from_drops()
+{
+	let forms = [
+		"(drop-lowest (standard-dice 4 6))",
+		"(drop-highest (standard-dice 4 6))",
+		"(keep-lowest (standard-dice 4 6))",
+		"(keep-highest (standard-dice 4 6))",
+		"(drop-lowest (standard-dice 4 6) 2)",
+		"(drop-highest (standard-dice 4 6) 2)",
+		"(keep-lowest (standard-dice 4 6) 2)",
+		"(keep-highest (standard-dice 4 6) 2)"
+	];
+	let sources = forms
+		.iter()
+		.map(|form| format!("(function [] {form})"))
+		.collect::<Vec<_>>();
+	let bodies = sources
+		.iter()
+		.map(|source| crate::s_expr::read_s_expr(source).unwrap().body)
+		.collect::<Vec<_>>();
+	for (i, left) in bodies.iter().enumerate()
+	{
+		for (j, right) in bodies.iter().enumerate()
+		{
+			assert_eq!(left == right, i == j, "{} vs {}", forms[i], forms[j]);
+			if i != j
+			{
+				assert!(
+					hash_of(left) != hash_of(right),
+					"{} and {} hash alike",
+					forms[i],
+					forms[j]
+				);
+			}
+		}
+	}
+}
+
+/// Ensure that keep clauses render as their source, chained with drops in
+/// either order, a negative constant count grouped as for drops, and that the
+/// S-expressions of their trees read back to the same trees.
+#[test]
+fn test_display_keep_clauses()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (keep-lowest (standard-dice 4 6)))",
+			"4D6 keep lowest"
+		),
+		(
+			"(function [] (keep-highest (custom-dice 3 [-1 0 1]) 2))",
+			"3D[-1, 0, 1] keep highest 2"
+		),
+		(
+			"(function [] (keep-highest (drop-lowest (standard-dice 4 6) 1) 2))",
+			"4D6 drop lowest 1 keep highest 2"
+		),
+		(
+			"(function [] (drop-highest (keep-lowest (standard-dice 4 6) 3)))",
+			"4D6 keep lowest 3 drop highest"
+		),
+		(
+			"(function [] (keep-lowest (keep-highest (standard-dice 5 10) 3) \
+			 -1))",
+			"5D10 keep highest 3 keep lowest (-1)"
+		),
+		(
+			"(function [{n}] (keep-highest (standard-dice {n} 6) (group (sub \
+			 {n} 1))))",
+			"{n}: {n}D6 keep highest ({n} - 1)"
+		)
+	]
+	{
+		let function = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(function.to_string(), expected);
+		assert_eq!(
+			function
+				.to_s_expr(SExpressibleOptions::default().with_groups(true)),
+			s_expr
+		);
 	}
 }
 
@@ -310,6 +463,23 @@ fn test_deep_drop_expression()
 #[ignore = "stress: run with just stress"]
 fn test_deep_drop_clauses() { exercise_on_small_stack(Nesting::DropClauses) }
 
+/// Ensure that a deep stack of drop and keep clauses, of every kind, survives
+/// every trait on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_mixed_clauses()
+{
+	let depth = Nesting::DropClauses.depth();
+	on_small_stack(|| {
+		exercise(|leaf| {
+			Expression::Dice(mixed_clauses(
+				standard_dice(constant(leaf)),
+				depth
+			))
+		})
+	});
+}
+
 /// Ensure that a deep interleaving of every nesting construct survives every
 /// trait on a small stack.
 #[test]
@@ -355,6 +525,53 @@ fn test_miri_standalone_drop_clauses()
 		_ => unreachable!()
 	}
 	drop(chain);
+}
+
+/// Ensure that every trait works on a chain of drop and keep clauses of every
+/// kind.
+#[test]
+fn test_miri_mixed_clauses()
+{
+	exercise(|leaf| {
+		Expression::Dice(mixed_clauses(standard_dice(constant(leaf)), 40))
+	})
+}
+
+/// Ensure that a standalone chain of drop and keep clauses drops, both as a
+/// [`DiceExpression`] and as a bare clause, whichever kind of clause tops it.
+#[test]
+fn test_miri_standalone_mixed_clauses()
+{
+	for depth in 37..=40
+	{
+		let chain = mixed_clauses(standard_dice(constant(1)), depth);
+		drop(chain.clone());
+		match &chain
+		{
+			DiceExpression::DropLowest(clause) => drop(clause.clone()),
+			DiceExpression::DropHighest(clause) => drop(clause.clone()),
+			DiceExpression::KeepLowest(clause) => drop(clause.clone()),
+			DiceExpression::KeepHighest(clause) => drop(clause.clone()),
+			_ => unreachable!()
+		}
+		drop(chain);
+	}
+}
+
+/// Ensure that a keep clause directly atop a leaf dice expression drops.
+#[test]
+fn test_miri_single_keep_clause()
+{
+	for s_expr in [
+		"(function [{x}] (keep-lowest (custom-dice {x} [1 2]) (standard-dice \
+		 2 6)))",
+		"(function [{x}] (keep-highest (standard-dice {x} 6)))"
+	]
+	{
+		let expression = crate::s_expr::read_s_expr(s_expr).unwrap().body;
+		drop(expression.clone());
+		drop(expression);
+	}
 }
 
 /// Ensure that a drop clause directly atop a leaf dice expression drops.
@@ -804,6 +1021,54 @@ fn drop_clauses(
 			DiceExpression::DropHighest(DropHighest {
 				dice: inner,
 				drop,
+				span
+			})
+		};
+	}
+	dice
+}
+
+/// Stack `depth` drop and keep clauses atop a dice expression, rotating
+/// through drop-lowest, keep-highest, drop-highest, and keep-lowest, with a
+/// count on every third clause.
+///
+/// # Parameters
+/// - `dice`: The dice expression at the bottom of the stack.
+/// - `depth`: The number of clauses.
+///
+/// # Returns
+/// The stack of clauses.
+fn mixed_clauses(
+	dice: DiceExpression<'static>,
+	depth: usize
+) -> DiceExpression<'static>
+{
+	let span = SourceSpan::SYNTHETIC;
+	let mut dice = dice;
+	for level in 0..depth
+	{
+		let count = (level % 3 == 0).then(|| Box::new(constant(1)));
+		let inner = Box::new(dice);
+		dice = match level % 4
+		{
+			0 => DiceExpression::DropLowest(DropLowest {
+				dice: inner,
+				drop: count,
+				span
+			}),
+			1 => DiceExpression::KeepHighest(KeepHighest {
+				dice: inner,
+				keep: count,
+				span
+			}),
+			2 => DiceExpression::DropHighest(DropHighest {
+				dice: inner,
+				drop: count,
+				span
+			}),
+			_ => DiceExpression::KeepLowest(KeepLowest {
+				dice: inner,
+				keep: count,
 				span
 			})
 		};

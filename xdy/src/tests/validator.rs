@@ -443,6 +443,38 @@ fn validator_visitor_accepts_every_node_type()
 	assert_eq!(ast.accept(&mut validator), Ok(()));
 }
 
+/// The [`Validator`] walks the dice and counts of keep clauses, in source
+/// order, as it does those of drop clauses: a binding may serve as the count of
+/// a keep, and a later reference sees it, but a reference in the count of a
+/// keep precedes a binding that follows the clause.
+#[test]
+fn validator_checks_keep_clauses()
+{
+	for s_expr in [
+		"(function [] (add (keep-highest (standard-dice 4 6) (binding {a} 2)) \
+		 {a}))",
+		"(function [] (keep-lowest (drop-highest (standard-dice (binding {a} \
+		 4) 6)) {a}))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(Validator::validate(&ast), Ok(()), "{s_expr}");
+	}
+	let ast = crate::s_expr::read_s_expr(
+		"(function [] (add (keep-highest (standard-dice 4 6) {a}) (binding {a} \
+		 2)))"
+	)
+	.unwrap();
+	assert!(
+		matches!(
+			Validator::validate(&ast),
+			Err(CompilationError::UseBeforeBind { name, .. }) if name == "a"
+		),
+		"{:?}",
+		Validator::validate(&ast)
+	);
+}
+
 /// Driving the [`Validator`] through the [`ASTVisitor`](crate::ast::ASTVisitor)
 /// trait performs every check, not just the check of the parameters.
 #[test]

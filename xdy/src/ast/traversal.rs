@@ -299,7 +299,7 @@ impl<'a, 'src> Events<'a, 'src>
 	/// - `dice`: The dice expression.
 	fn expand_dice(&mut self, dice: &'a DiceExpression<'src>)
 	{
-		let (variant, name, dice, drop, span) = match dice
+		let (variant, name, dice, count_field, count, span) = match dice
 		{
 			DiceExpression::Standard(standard) =>
 			{
@@ -335,6 +335,7 @@ impl<'a, 'src> Events<'a, 'src>
 				"DropLowest",
 				"DropLowest",
 				&clause.dice,
+				"drop",
 				&clause.drop,
 				clause.span
 			),
@@ -342,18 +343,35 @@ impl<'a, 'src> Events<'a, 'src>
 				"DropHighest",
 				"DropHighest",
 				&clause.dice,
+				"drop",
 				&clause.drop,
+				clause.span
+			),
+			DiceExpression::KeepLowest(clause) => (
+				"KeepLowest",
+				"KeepLowest",
+				&clause.dice,
+				"keep",
+				&clause.keep,
+				clause.span
+			),
+			DiceExpression::KeepHighest(clause) => (
+				"KeepHighest",
+				"KeepHighest",
+				&clause.dice,
+				"keep",
+				&clause.keep,
 				clause.span
 			)
 		};
 		// Schedule the parts in reverse, since each goes atop its successor.
 		self.schedule(&[field("span"), self::span(span), close(), close()]);
-		match drop
+		match count
 		{
 			None => self.schedule(&[Item::Event(Event::Unit("None"))]),
-			Some(drop) =>
+			Some(count) =>
 			{
-				self.schedule(&[tuple("Some"), expression_node(drop), close()])
+				self.schedule(&[tuple("Some"), expression_node(count), close()])
 			},
 		}
 		self.schedule(&[
@@ -361,7 +379,7 @@ impl<'a, 'src> Events<'a, 'src>
 			structure(name),
 			field("dice"),
 			dice_node(dice),
-			field("drop")
+			field(count_field)
 		]);
 	}
 }

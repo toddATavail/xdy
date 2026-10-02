@@ -748,6 +748,36 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 		Ok(record.into())
 	}
 
+	fn visit_keep_lowest(
+		&mut self,
+		_node: &'a ast::KeepLowest<'src>,
+		dice: AddressingMode,
+		keep: Option<AddressingMode>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = dice
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = keep.unwrap_or(Immediate(1).into());
+		self.emit(Instruction::keep_lowest(record, count));
+		Ok(record.into())
+	}
+
+	fn visit_keep_highest(
+		&mut self,
+		_node: &'a ast::KeepHighest<'src>,
+		dice: AddressingMode,
+		keep: Option<AddressingMode>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = dice
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let count = keep.unwrap_or(Immediate(1).into());
+		self.emit(Instruction::keep_highest(record, count));
+		Ok(record.into())
+	}
+
 	fn visit_add(
 		&mut self,
 		_node: &'a ast::Add<'src>,
@@ -834,8 +864,9 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 	{
 		// Every expression slot consumes an integer, so reduce an unsummed
 		// rolling record to its sum at once, before any sibling is compiled.
-		// Only the dice beneath a drop clause, which is not an expression slot,
-		// keeps its rolling record, for the drop to operate upon.
+		// Only the dice beneath a drop or keep clause, which is not an
+		// expression slot, keeps its rolling record, for the clause to operate
+		// upon.
 		match output
 		{
 			AddressingMode::RollingRecord(record) =>

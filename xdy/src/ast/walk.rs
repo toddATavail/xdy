@@ -128,7 +128,7 @@ impl<'a, 'src> Walk<'a, 'src>
 	/// - `dice`: The dice expression.
 	fn schedule_dice_children(&mut self, dice: &'a DiceExpression<'src>)
 	{
-		let (dice, drop) = match dice
+		let (dice, count) = match dice
 		{
 			DiceExpression::Standard(standard) =>
 			{
@@ -142,11 +142,13 @@ impl<'a, 'src> Walk<'a, 'src>
 				return
 			},
 			DiceExpression::DropLowest(clause) => (&clause.dice, &clause.drop),
-			DiceExpression::DropHighest(clause) => (&clause.dice, &clause.drop)
+			DiceExpression::DropHighest(clause) => (&clause.dice, &clause.drop),
+			DiceExpression::KeepLowest(clause) => (&clause.dice, &clause.keep),
+			DiceExpression::KeepHighest(clause) => (&clause.dice, &clause.keep)
 		};
-		if let Some(drop) = drop
+		if let Some(count) = count
 		{
-			self.expression(drop);
+			self.expression(count);
 		}
 		self.stack.push(Event::Enter(Node::Dice(dice)));
 	}
@@ -296,6 +298,11 @@ fn enter_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 		{
 			visitor.enter_drop_highest(clause)
 		},
+		DiceExpression::KeepLowest(clause) => visitor.enter_keep_lowest(clause),
+		DiceExpression::KeepHighest(clause) =>
+		{
+			visitor.enter_keep_highest(clause)
+		},
 	}
 }
 
@@ -431,6 +438,18 @@ fn leave_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 			let drop = clause.drop.as_ref().map(|_| pop(outputs));
 			let dice = pop(outputs);
 			visitor.visit_drop_highest(clause, dice, drop)
+		},
+		DiceExpression::KeepLowest(clause) =>
+		{
+			let keep = clause.keep.as_ref().map(|_| pop(outputs));
+			let dice = pop(outputs);
+			visitor.visit_keep_lowest(clause, dice, keep)
+		},
+		DiceExpression::KeepHighest(clause) =>
+		{
+			let keep = clause.keep.as_ref().map(|_| pop(outputs));
+			let dice = pop(outputs);
+			visitor.visit_keep_highest(clause, dice, keep)
 		}
 	}
 }

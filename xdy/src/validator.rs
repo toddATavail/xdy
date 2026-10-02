@@ -38,8 +38,8 @@ use crate::{
 	CompilationError, SourceSpan,
 	ast::{
 		self, ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-		DropLowest, Exp, Group, Mod, Mul, Neg, Range, StandardDice, Sub,
-		Variable
+		DropLowest, Exp, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Range,
+		StandardDice, Sub, Variable
 	}
 };
 
@@ -319,6 +319,26 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator<'a, 'src>
 		_node: &'a DropHighest<'src>,
 		_dice: (),
 		_drop: Option<()>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	fn visit_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>,
+		_dice: (),
+		_keep: Option<()>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	fn visit_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>,
+		_dice: (),
+		_keep: Option<()>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())

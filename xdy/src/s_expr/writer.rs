@@ -29,8 +29,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
-		Variable
+		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
+		Range, StandardDice, Sub, Variable
 	},
 	span::SourceSpan
 };
@@ -1015,7 +1015,7 @@ impl Shaped for DropLowest<'_>
 {
 	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
 	{
-		drop_clause(self.span, "drop-lowest", &self.dice, self.drop.as_deref())
+		clause(self.span, "drop-lowest", &self.dice, self.drop.as_deref())
 	}
 }
 
@@ -1023,7 +1023,23 @@ impl Shaped for DropHighest<'_>
 {
 	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
 	{
-		drop_clause(self.span, "drop-highest", &self.dice, self.drop.as_deref())
+		clause(self.span, "drop-highest", &self.dice, self.drop.as_deref())
+	}
+}
+
+impl Shaped for KeepLowest<'_>
+{
+	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
+	{
+		clause(self.span, "keep-lowest", &self.dice, self.keep.as_deref())
+	}
+}
+
+impl Shaped for KeepHighest<'_>
+{
+	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
+	{
+		clause(self.span, "keep-highest", &self.dice, self.keep.as_deref())
 	}
 }
 
@@ -1038,7 +1054,9 @@ impl Shaped for DiceExpression<'_>
 			DiceExpression::Standard(dice) => dice.shape(options),
 			DiceExpression::Custom(dice) => dice.shape(options),
 			DiceExpression::DropLowest(clause) => clause.shape(options),
-			DiceExpression::DropHighest(clause) => clause.shape(options)
+			DiceExpression::DropHighest(clause) => clause.shape(options),
+			DiceExpression::KeepLowest(clause) => clause.shape(options),
+			DiceExpression::KeepHighest(clause) => clause.shape(options)
 		}
 	}
 }
@@ -1166,31 +1184,31 @@ fn triple<'a>(
 	}
 }
 
-/// Answer the shape of a drop clause: a triple if it has a drop count, or a
+/// Answer the shape of a drop or keep clause: a triple if it has a count, or a
 /// pair if not.
 ///
 /// # Parameters
 /// - `span`: The span of the clause.
 /// - `keyword`: The keyword.
-/// - `dice`: The dice expression from which to drop.
-/// - `drop`: The number of dice to drop, if given.
+/// - `dice`: The dice expression from which to drop or keep.
+/// - `count`: The number of dice to drop or keep, if given.
 ///
 /// # Returns
 /// The shape.
-fn drop_clause<'a>(
+fn clause<'a>(
 	span: SourceSpan,
 	keyword: &'static str,
 	dice: &'a DiceExpression<'a>,
-	drop: Option<&'a Expression<'a>>
+	count: Option<&'a Expression<'a>>
 ) -> Shape<'a>
 {
-	match drop
+	match count
 	{
-		Some(drop) => Shape::Triple {
+		Some(count) => Shape::Triple {
 			span,
 			keyword,
 			first: Child::Dice(dice),
-			second: Part::Child(Child::Expression(drop))
+			second: Part::Child(Child::Expression(count))
 		},
 		None => pair(span, keyword, Child::Dice(dice))
 	}

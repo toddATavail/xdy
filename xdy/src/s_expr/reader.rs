@@ -43,8 +43,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
-		Variable
+		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
+		Range, StandardDice, Sub, Variable
 	},
 	span::{SourceSpan, Spanned}
 };
@@ -117,11 +117,12 @@ enum Form<'src>
 	/// the faces directly.
 	CustomDice,
 
-	/// `(drop-lowest dice drop?)` or `(drop-highest dice drop?)`.
-	Drop
+	/// `(drop-lowest dice count?)`, `(drop-highest dice count?)`,
+	/// `(keep-lowest dice count?)`, or `(keep-highest dice count?)`.
+	Clause
 	{
-		/// The direction of the drop.
-		direction: Direction,
+		/// The kind of the clause.
+		kind: ClauseKind,
 
 		/// The input immediately after the keyword, before any whitespace, to
 		/// which an [`ExpectedDiceExpression`] is attributed.
@@ -224,46 +225,70 @@ impl Operator
 	}
 }
 
-/// The direction of a drop form.
+/// The kind of a drop or keep form.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Direction
+enum ClauseKind
 {
 	/// `drop-lowest`.
-	Lowest,
+	DropLowest,
 
 	/// `drop-highest`.
-	Highest
+	DropHighest,
+
+	/// `keep-lowest`.
+	KeepLowest,
+
+	/// `keep-highest`.
+	KeepHighest
 }
 
-impl Direction
+impl ClauseKind
 {
-	/// Build a drop form in the receiver's direction.
+	/// Build a clause of the receiver's kind.
 	///
 	/// # Parameters
 	/// - `dice`: The dice expression.
-	/// - `drop`: The drop amount, if any.
+	/// - `count`: The number of dice to drop or keep, if any.
 	/// - `span`: The span of the form.
 	///
 	/// # Returns
-	/// The drop expression.
+	/// The clause.
 	fn apply<'src>(
 		self,
 		dice: DiceExpression<'src>,
-		drop: Option<Expression<'src>>,
+		count: Option<Expression<'src>>,
 		span: SourceSpan
 	) -> Expression<'src>
 	{
 		let dice = Box::new(dice);
-		let drop = drop.map(Box::new);
+		let count = count.map(Box::new);
 		Expression::Dice(match self
 		{
-			Direction::Lowest =>
+			ClauseKind::DropLowest => DiceExpression::DropLowest(DropLowest {
+				dice,
+				drop: count,
+				span
+			}),
+			ClauseKind::DropHighest =>
 			{
-				DiceExpression::DropLowest(DropLowest { dice, drop, span })
+				DiceExpression::DropHighest(DropHighest {
+					dice,
+					drop: count,
+					span
+				})
 			},
-			Direction::Highest =>
+			ClauseKind::KeepLowest => DiceExpression::KeepLowest(KeepLowest {
+				dice,
+				keep: count,
+				span
+			}),
+			ClauseKind::KeepHighest =>
 			{
-				DiceExpression::DropHighest(DropHighest { dice, drop, span })
+				DiceExpression::KeepHighest(KeepHighest {
+					dice,
+					keep: count,
+					span
+				})
 			},
 		})
 	}
@@ -459,6 +484,12 @@ fn open<'src>(
 		operator,
 		left: None
 	};
+	let after_keyword = input;
+	let clause = move |kind| Form::Clause {
+		kind,
+		after_keyword,
+		dice: None
+	};
 	let form = match *kw.fragment()
 	{
 		"add" => binary(Operator::Add),
@@ -471,16 +502,10 @@ fn open<'src>(
 		"group" => Form::Group,
 		"standard-dice" => Form::StandardDice { count: None },
 		"custom-dice" => Form::CustomDice,
-		"drop-lowest" => Form::Drop {
-			direction: Direction::Lowest,
-			after_keyword: input,
-			dice: None
-		},
-		"drop-highest" => Form::Drop {
-			direction: Direction::Highest,
-			after_keyword: input,
-			dice: None
-		},
+		"drop-lowest" => clause(ClauseKind::DropLowest),
+		"drop-highest" => clause(ClauseKind::DropHighest),
+		"keep-lowest" => clause(ClauseKind::KeepLowest),
+		"keep-highest" => clause(ClauseKind::KeepHighest),
 		"range" => Form::Range { start: None },
 		"binding" =>
 		{
@@ -535,8 +560,8 @@ fn open<'src>(
 ///   form's span.
 /// - [`SExprError::SiblingSpanOutOfOrder`] if the child's span overlaps or
 ///   precedes its previous sibling's span.
-/// - [`SExprError::ExpectedDiceExpression`] if the first child of a drop form
-///   is not a dice expression.
+/// - [`SExprError::ExpectedDiceExpression`] if the first child of a drop or
+///   keep form is not a dice expression.
 /// - [`SExprError`] if a faces list or the closing `)` is malformed.
 fn deliver<'src>(
 	frame: Frame<'src>,
@@ -627,8 +652,8 @@ fn deliver<'src>(
 				}))
 			)
 		},
-		Form::Drop {
-			direction,
+		Form::Clause {
+			kind,
 			after_keyword,
 			dice: None
 		} =>
@@ -642,22 +667,22 @@ fn deliver<'src>(
 					}
 				))
 			};
-			// The drop amount is present iff another subexpression follows
-			// the dice expression before the closing parenthesis. Its
-			// absence represents the parser-originated `drop: None` case
-			// (implicit single-die drop), so the format faithfully
-			// distinguishes `(drop-lowest d)` from `(drop-lowest d 1)`.
+			// The count is present iff another subexpression follows the
+			// dice expression before the closing parenthesis. Its absence
+			// represents the parser-originated `None` case (an implicit
+			// single die), so the format faithfully distinguishes
+			// `(drop-lowest d)` from `(drop-lowest d 1)`.
 			let (probe, _) = skip_ws(input)?;
 			if probe.fragment().starts_with(')')
 			{
-				close(input, direction.apply(dice, None, span))
+				close(input, kind.apply(dice, None, span))
 			}
 			else
 			{
 				Ok(await_child(
 					stack,
-					Form::Drop {
-						direction,
+					Form::Clause {
+						kind,
 						after_keyword,
 						dice: Some(dice)
 					},
@@ -667,11 +692,11 @@ fn deliver<'src>(
 				))
 			}
 		},
-		Form::Drop {
-			direction,
+		Form::Clause {
+			kind,
 			dice: Some(dice),
 			..
-		} => close(input, direction.apply(dice, Some(child), span)),
+		} => close(input, kind.apply(dice, Some(child), span)),
 		Form::Range { start: None } => Ok(await_child(
 			stack,
 			Form::Range { start: Some(child) },

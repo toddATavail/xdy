@@ -304,6 +304,23 @@ fn test_reader_rejects_non_dice_child_of_drop_highest()
 	);
 }
 
+/// The same type-check fires for `keep-lowest` and `keep-highest`, with the
+/// offset at the pre-whitespace cursor position.
+#[test]
+fn test_reader_rejects_non_dice_child_of_keep()
+{
+	assert_reader_error(
+		"(function [] (keep-lowest 5))",
+		"expected dice expression",
+		25
+	);
+	assert_reader_error(
+		"(function [] (keep-highest (add 1 2) 3))",
+		"expected dice expression",
+		26
+	);
+}
+
 /// A `^[start end]` span prefix with `start > end` is rejected. The error
 /// offset points at the `^` that introduced the bad span.
 #[test]

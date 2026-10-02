@@ -66,6 +66,42 @@ fn test_visitor_order()
 	);
 }
 
+/// Ensure that a walk enters and visits keep clauses as it does drop clauses,
+/// in order with them, the outer clause first and its count last, and does not
+/// finish the dice beneath a keep clause with
+/// [`visit_expression`](ASTVisitor::visit_expression).
+#[test]
+fn test_visitor_order_keeps()
+{
+	let ast = crate::s_expr::read_s_expr(
+		"(function [{x}] (add (keep-highest (drop-lowest (keep-lowest \
+		 (standard-dice 5 6) 3)) {x}) 1))"
+	)
+	.unwrap();
+	let mut tracer = Tracer::default();
+	let output = ast.accept(&mut tracer).unwrap();
+	assert_eq!(
+		output,
+		"fn <<<5>D<6> keep lowest <3> drop lowest keep highest <{x}>> + <1>>"
+	);
+	assert_eq!(
+		tracer.entered,
+		[
+			"function",
+			"add",
+			"keep_highest",
+			"drop_lowest",
+			"keep_lowest",
+			"standard_dice",
+			"constant",
+			"constant",
+			"constant",
+			"variable",
+			"constant"
+		]
+	);
+}
+
 /// Ensure that a walk from a [`DiceExpression`] or an
 /// [`ArithmeticExpression`] does not finish its root with
 /// [`visit_expression`](ASTVisitor::visit_expression), since neither fills a
@@ -211,32 +247,32 @@ impl Tracer
 		}
 	}
 
-	/// Record a `visit_*` call and render a drop clause.
+	/// Record a `visit_*` call and render a drop or keep clause.
 	///
 	/// # Parameters
 	/// - `call`: The name of the call.
-	/// - `keyword`: The keyword of the clause, e.g., `lowest`.
+	/// - `keywords`: The keywords of the clause, e.g., `drop lowest`.
 	/// - `dice`: The output of the dice.
-	/// - `drop`: The output of the drop count, if any.
+	/// - `count`: The output of the count, if any.
 	///
 	/// # Returns
 	/// The rendering.
 	///
 	/// # Errors
 	/// The name of the call, if it is the one at which to fail.
-	fn drop(
+	fn clause(
 		&mut self,
 		call: &'static str,
-		keyword: &str,
+		keywords: &str,
 		dice: String,
-		drop: Option<String>
+		count: Option<String>
 	) -> Result<String, &'static str>
 	{
 		self.call(call)?;
-		Ok(match drop
+		Ok(match count
 		{
-			Some(drop) => format!("{} drop {} {}", dice, keyword, drop),
-			None => format!("{} drop {}", dice, keyword)
+			Some(count) => format!("{} {} {}", dice, keywords, count),
+			None => format!("{} {}", dice, keywords)
 		})
 	}
 
@@ -343,6 +379,22 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	) -> Result<(), Self::Error>
 	{
 		self.enter("drop_highest", "enter drop_highest")
+	}
+
+	fn enter_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>
+	) -> Result<(), Self::Error>
+	{
+		self.enter("keep_lowest", "enter keep_lowest")
+	}
+
+	fn enter_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>
+	) -> Result<(), Self::Error>
+	{
+		self.enter("keep_highest", "enter keep_highest")
 	}
 
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), Self::Error>
@@ -467,7 +519,7 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 		drop: Option<String>
 	) -> Result<String, Self::Error>
 	{
-		self.drop("visit drop_lowest", "lowest", dice, drop)
+		self.clause("visit drop_lowest", "drop lowest", dice, drop)
 	}
 
 	fn visit_drop_highest(
@@ -477,7 +529,27 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 		drop: Option<String>
 	) -> Result<String, Self::Error>
 	{
-		self.drop("visit drop_highest", "highest", dice, drop)
+		self.clause("visit drop_highest", "drop highest", dice, drop)
+	}
+
+	fn visit_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>,
+		dice: String,
+		keep: Option<String>
+	) -> Result<String, Self::Error>
+	{
+		self.clause("visit keep_lowest", "keep lowest", dice, keep)
+	}
+
+	fn visit_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>,
+		dice: String,
+		keep: Option<String>
+	) -> Result<String, Self::Error>
+	{
+		self.clause("visit keep_highest", "keep highest", dice, keep)
 	}
 
 	fn visit_add(
@@ -666,6 +738,22 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 		self.enter()
 	}
 
+	fn enter_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>
+	) -> Result<(), ()>
+	{
+		self.enter()
+	}
+
+	fn enter_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>
+	) -> Result<(), ()>
+	{
+		self.enter()
+	}
+
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), ()>
 	{
 		self.enter()
@@ -786,6 +874,26 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 	) -> Result<usize, ()>
 	{
 		self.visit(&[dice, drop.unwrap_or(0)])
+	}
+
+	fn visit_keep_lowest(
+		&mut self,
+		_node: &'a KeepLowest<'src>,
+		dice: usize,
+		keep: Option<usize>
+	) -> Result<usize, ()>
+	{
+		self.visit(&[dice, keep.unwrap_or(0)])
+	}
+
+	fn visit_keep_highest(
+		&mut self,
+		_node: &'a KeepHighest<'src>,
+		dice: usize,
+		keep: Option<usize>
+	) -> Result<usize, ()>
+	{
+		self.visit(&[dice, keep.unwrap_or(0)])
 	}
 
 	fn visit_add(
