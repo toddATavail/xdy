@@ -1386,7 +1386,7 @@ checksum = "ca0d1bf6fdd806e43ae5198f82f527056d359def39e54e67a0f478ac09dac081"
 
 [[package]]
 name = "tree-sitter-xdy"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "cc",
  "tree-sitter",
@@ -1608,7 +1608,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xdy"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "aquamarine",
  "criterion",
