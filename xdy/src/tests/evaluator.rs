@@ -11,8 +11,7 @@ use pretty_assertions::assert_eq;
 use rand::{Rng as _, SeedableRng, rngs::StdRng};
 
 use crate::{
-	EvaluationError, Evaluator, HistogramBuilder as _, Passes,
-	RollingRecordKind,
+	Budget, EvaluationError, Evaluator, Passes, RollingRecordKind, Unobserved,
 	support::{
 		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
 	}
@@ -471,12 +470,72 @@ Function({x}@0) r#2 ⚅#0
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                              Unsummed rolls.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that a rolling record that is never summed, which neither the compiler
+/// nor the optimizer emits, still counts in the bounds: each of its
+/// outcomes is a distinct path, so it multiplies the count of outcomes, and its
+/// dice count toward the worst case, although it cannot affect the value. The
+/// distribution agrees, with a total of the count. Before, the optimizer left
+/// such a record behind wherever a drop kept its roll alive, and the evaluation
+/// corpus covered it thereby.
+#[test]
+fn test_unsummed_roll_counts()
+{
+	for (text, value, count, dice) in [
+		(
+			"\
+Function({x}@0) r#1 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 1D@0
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\treturn 0
+",
+			(0, 0),
+			2,
+			1
+		),
+		(
+			"\
+Function({x}@0) r#2 ⚅#2
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 1D6
+\t\t@1 <- sum rolling record ⚅0
+\t\t⚅1 <- roll standard dice 2D@0
+\t\t⚅1 <- drop highest 1 from ⚅1
+\t\treturn @1
+",
+			(1, 6),
+			24,
+			3
+		)
+	]
+	{
+		let evaluator =
+			Evaluator::new(crate::Assembler::assemble(text).unwrap());
+		let bounds = evaluator.bounds_over([Some(2.into())], []).unwrap();
+		assert_eq!((bounds.value.min, bounds.value.max), value, "{}", text);
+		assert_eq!(bounds.count, Some(count), "{}", text);
+		assert_eq!(bounds.dice, dice, "{}", text);
+		let distribution = evaluator
+			.plan_distribution([2])
+			.unwrap()
+			.build(Budget::UNLIMITED, &Unobserved)
+			.unwrap();
+		assert_eq!(distribution.total(), &count.into(), "{}", text);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                                Drop counts.                                //
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Test that a negative drop count drops nothing, and so restores nothing that
 /// an earlier drop clause dropped: the evaluator, the worst case of the dice,
-/// and the meter agree (`xdy-i0q.20`). Before, the evaluator clamped the drop
+/// and the meter agree. Before 0.13.0, the evaluator clamped the drop
 /// count after every clause, so a negative count restored a die that the
 /// bounds took to stay dropped, and the outer roll rolled a die more than the
 /// worst case.
@@ -484,9 +543,9 @@ Function({x}@0) r#2 ⚅#0
 fn test_negative_drop_count_drops_nothing()
 {
 	for source in [
-		"(1D1 drop lowest 2 drop lowest -1)D6",
-		"(1D1 drop highest 2 drop highest -1)D6",
-		"(1D1 drop lowest -1 drop lowest 2)D6"
+		"(1D1 drop lowest 2 drop lowest (-1))D6",
+		"(1D1 drop highest 2 drop highest (-1))D6",
+		"(1D1 drop lowest (-1) drop lowest 2)D6"
 	]
 	{
 		let mut evaluator = Evaluator::new(compile_valid(source));
@@ -510,12 +569,12 @@ fn test_drop_order_is_irrelevant()
 {
 	for (source, reversed) in [
 		(
-			"{x}: 3D6 drop lowest {x} drop lowest -1",
-			"{x}: 3D6 drop lowest -1 drop lowest {x}"
+			"{x}: 3D6 drop lowest {x} drop lowest (-1)",
+			"{x}: 3D6 drop lowest (-1) drop lowest {x}"
 		),
 		(
-			"{x}: 3D6 drop highest {x} drop highest -2",
-			"{x}: 3D6 drop highest -2 drop highest {x}"
+			"{x}: 3D6 drop highest {x} drop highest (-2)",
+			"{x}: 3D6 drop highest (-2) drop highest {x}"
 		)
 	]
 	{
@@ -551,10 +610,10 @@ fn test_drop_order_is_irrelevant()
 
 /// Test that the optimizer respects that a negative count of dice rolls
 /// nothing and a drop count of zero or less drops nothing, so that optimized
-/// and unoptimized functions have the same distribution (`xdy-i0q.20`). The
-/// test compares exact histograms rather than evaluations from the same seed,
-/// since the optimizer rolls no dice of one face, which an unoptimized function
-/// rolls, drawing from the pRNG. Before, strength reduction
+/// and unoptimized functions have the same distribution. The
+/// test compares exact distributions rather than evaluations from the same
+/// seed, since the optimizer rolls no dice of one face, which an unoptimized
+/// function rolls, drawing from the pRNG. Before, strength reduction
 /// replaced `{x}D1` with `{x}` and a single-face custom roll with a product,
 /// even for a negative count; rewrote a drop from such a value as a
 /// subtraction, which went negative or subtracted the drop count rather than
@@ -575,12 +634,12 @@ fn test_optimizer_respects_clamping()
 		"{x}: 1D1 drop lowest {x}",
 		"{x}: 1D6 drop highest {x}",
 		"{x}: 1D[2, 3, 4] drop lowest {x}",
-		"{x}: 3D1 drop lowest -1 + {x}",
-		"{x}: 3D6 drop lowest 2 drop lowest -1 + {x}",
-		"{x}: 3D6 drop lowest {x} drop lowest -1",
+		"{x}: 3D1 drop lowest (-1) + {x}",
+		"{x}: 3D6 drop lowest 2 drop lowest (-1) + {x}",
+		"{x}: 3D6 drop lowest {x} drop lowest (-1)",
 		"{x}: 3D6 drop lowest {x} drop lowest 1 drop lowest 1",
-		"{x}: 3D6 drop highest -2 drop highest {x} drop lowest 1",
-		"{x}: ({x}D1 drop lowest 2 drop lowest -1)D6"
+		"{x}: 3D6 drop highest (-2) drop highest {x} drop lowest 1",
+		"{x}: ({x}D1 drop lowest 2 drop lowest (-1))D6"
 	]
 	{
 		let function = crate::compile_unoptimized(source).unwrap();
@@ -589,14 +648,11 @@ fn test_optimizer_respects_clamping()
 		{
 			let [unoptimized, optimized] =
 				[&function, &optimized].map(|function| {
-					crate::serial::HistogramBuilder::new(Evaluator::new(
-						function.clone()
-					))
-					.build([x])
-					.unwrap()
-					.iter()
-					.map(|(outcome, count)| (*outcome, *count))
-					.collect::<std::collections::BTreeMap<_, _>>()
+					Evaluator::new(function.clone())
+						.plan_distribution([x])
+						.unwrap()
+						.build(Budget::UNLIMITED, &Unobserved)
+						.unwrap()
 				});
 			assert_eq!(optimized, unoptimized, "{} with {}", source, x);
 		}

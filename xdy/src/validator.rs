@@ -23,8 +23,9 @@
 //!   since binding, parameter, and environment-variable names share a single
 //!   flat namespace per function.
 //! - **Duplicate binding.** The same name may not be bound twice within a
-//!   function body. `{x}@(3D6) + {x}@(1D4)` is rejected as
-//!   [`DuplicateBinding`](CompilationError::DuplicateBinding).
+//!   function body, even when one binding is nested within the other's bound
+//!   expression. `{x}@(3D6) + {x}@(1D4)` and `{x}@({x}@(1))` are both rejected
+//!   as [`DuplicateBinding`](CompilationError::DuplicateBinding).
 //! - **Use before bind.** A [variable reference](ast::Variable) must lexically
 //!   follow the [binding](ast::Binding) that introduces its name, including any
 //!   reference inside the bound expression itself (self-reference). `{x} +
@@ -37,8 +38,8 @@ use crate::{
 	CompilationError, SourceSpan,
 	ast::{
 		self, ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-		DropLowest, Event, Exp, Expression, Group, Mod, Mul, Neg, Node, Range,
-		StandardDice, Sub, Variable, Walk
+		DropLowest, Exp, Group, Mod, Mul, Neg, Range, StandardDice, Sub,
+		Variable
 	}
 };
 
@@ -47,21 +48,69 @@ use crate::{
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A semantic-validation pass over an [abstract syntax tree](crate::ast)
-/// (AST). Use [`Validator::validate`] as the high-level entry point; the
-/// [`Validator`] type also implements [`ASTVisitor`] for
-/// callers who want to drive validation directly — e.g., to interleave it
-/// with other AST analyses.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Validator;
+/// (AST). Use [`Validator::validate`] as the entry point; it performs every
+/// semantic check.
+///
+/// The [`Validator`] performs its checks as an [`ASTVisitor`], in a single
+/// walk, so a caller that drives it through [`accept`](ast::Function::accept)
+/// gets the same validation as [`Validator::validate`]. The validator resets
+/// itself upon entering a [function](ast::Function), so it may validate many
+/// functions in turn.
+///
+/// # Type parameters
+/// - `'a`: The lifetime of the borrow of the AST. Names are borrowed from the
+///   AST during the walk.
+/// - `'src`: The lifetime of the source text from which the AST was parsed.
+///
+/// # Notes
+/// The walk reports the first error by kind, and only then by position: a
+/// [`DuplicateParameter`](CompilationError::DuplicateParameter), before the
+/// body is walked; then the first
+/// [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter)
+/// or [`DuplicateBinding`](CompilationError::DuplicateBinding) in pre-order;
+/// and then the first [`UseBeforeBind`](CompilationError::UseBeforeBind). A
+/// collision anywhere in the body outranks a use before bind that precedes it,
+/// so the walk records each reference that may prove to be a use before bind,
+/// and resolves them only upon [visiting](ASTVisitor::visit_function) the
+/// function, when every binding is known.
+#[derive(Clone, Debug, Default)]
+pub struct Validator<'a, 'src>
+{
+	/// The formal parameters of the function, mapped to the spans of their
+	/// declarations.
+	parameters: HashMap<&'a str, SourceSpan>,
 
-impl Validator
+	/// The [local bindings](Binding) entered so far, mapped to the spans of
+	/// their names. A binding enters this map before its bound expression, so
+	/// that a binding of the same name nested within the bound expression is
+	/// a duplicate of it.
+	bindings: HashMap<&'a str, SourceSpan>,
+
+	/// The names of the [local bindings](Binding) whose bound expressions are
+	/// complete. A reference to a name is a use before bind unless the name is
+	/// here, so a self-reference within a bound expression is one.
+	bound: HashSet<&'a str>,
+
+	/// The first reference to each name that was not yet [bound](Self::bound)
+	/// when the walk reached it, in the order reached. Each is a use before
+	/// bind if its name proves to be that of a [binding](Self::bindings);
+	/// otherwise it refers to a parameter or an external variable.
+	forward: Vec<&'a Variable<'src>>,
+
+	/// The names of the references in [`forward`](Self::forward). Only the
+	/// first reference to a name can be the first use before bind, so later
+	/// ones are not recorded.
+	referenced: HashSet<&'a str>
+}
+
+impl Validator<'_, '_>
 {
 	/// Construct a new [`Validator`].
 	///
 	/// # Returns
 	/// A fresh [`Validator`], ready to validate an AST.
 	#[inline]
-	pub const fn new() -> Self { Self }
+	pub fn new() -> Self { Self::default() }
 
 	/// Validate the semantic well-formedness of a parsed
 	/// [function](ast::Function). Runs between parsing and code generation.
@@ -79,186 +128,36 @@ impl Validator
 	/// `Ok(())` if the function passes all semantic checks.
 	///
 	/// # Errors
-	/// [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
-	/// function declares the same formal parameter name more than once.
+	/// * [`DuplicateParameter`](CompilationError::DuplicateParameter) if the
+	///   function declares the same formal parameter name more than once.
+	/// * [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter)
+	///   if a [local binding](ast::Binding) uses a name that is already
+	///   declared as a formal parameter.
+	/// * [`DuplicateBinding`](CompilationError::DuplicateBinding) if the same
+	///   name is bound more than once within the same function body, including
+	///   a binding nested within the bound expression of a binding of the same
+	///   name, e.g., `{x}@({x}@(1))`.
+	/// * [`UseBeforeBind`](CompilationError::UseBeforeBind) if a [variable
+	///   reference](ast::Variable) appears lexically before the
+	///   [binding](ast::Binding) that introduces its name, including a
+	///   reference within the binding's own bound expression, e.g.,
+	///   `{x}@({x})`.
+	///
+	/// The [`Validator`] describes which error is reported when there are
+	/// several.
 	pub fn validate<'src>(
 		ast: &ast::Function<'src>
 	) -> Result<(), CompilationError<'src>>
 	{
-		check_duplicate_parameters(ast)?;
-		let bindings = collect_bindings_and_check_collisions(ast)?;
-		check_use_before_bind(&ast.body, &bindings)
+		ast.accept(&mut Validator::new())
 	}
-}
-
-/// The [duplicate-parameter](CompilationError::DuplicateParameter) check,
-/// factored out so both [`Validator::validate`] and the [`ASTVisitor`]
-/// implementation share a single source of truth.
-///
-/// # Type parameters
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `ast`: The parsed function definition.
-///
-/// # Returns
-/// `Ok(())` if no parameter name is declared more than once.
-///
-/// # Errors
-/// [`DuplicateParameter`](CompilationError::DuplicateParameter) with the spans
-/// of the first and duplicate occurrences of the repeated name.
-fn check_duplicate_parameters<'src>(
-	ast: &ast::Function<'src>
-) -> Result<(), CompilationError<'src>>
-{
-	if let Some(ref parameters) = ast.parameters
-	{
-		let mut seen: HashMap<&str, SourceSpan> =
-			HashMap::with_capacity(parameters.len());
-		for param in parameters
-		{
-			if let Some(&first) = seen.get(&*param.name)
-			{
-				return Err(CompilationError::DuplicateParameter {
-					name: param.name.clone(),
-					first,
-					duplicate: param.span
-				});
-			}
-			seen.insert(&param.name, param.span);
-		}
-	}
-	Ok(())
-}
-
-/// Walk the AST collecting every [local binding](Binding) by name, and in the
-/// same pass reject duplicate bindings and bindings whose names collide with
-/// formal parameters. The returned map records the binding-site
-/// [`name_span`](Binding::name_span) for each binding, so the companion
-/// [use-before-bind check](check_use_before_bind) can cite the binding site
-/// when reporting an offending reference.
-///
-/// # Type parameters
-/// - `'a`: The lifetime of the borrow of the AST. Binding names are borrowed
-///   from the AST.
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `ast`: The parsed function definition.
-///
-/// # Returns
-/// A map from binding name to the [span](SourceSpan) of its binding site.
-///
-/// # Errors
-/// * [`BindingCollidesWithParameter`](CompilationError::BindingCollidesWithParameter)
-///   if a binding name matches a formal parameter name.
-/// * [`DuplicateBinding`](CompilationError::DuplicateBinding) if the same name
-///   appears as a binding more than once in the function body.
-fn collect_bindings_and_check_collisions<'a, 'src>(
-	ast: &'a ast::Function<'src>
-) -> Result<HashMap<&'a str, SourceSpan>, CompilationError<'src>>
-{
-	let parameter_spans = match ast.parameters
-	{
-		Some(ref parameters) => parameters
-			.iter()
-			.map(|p| (&*p.name, p.span))
-			.collect::<HashMap<_, _>>(),
-		None => HashMap::new()
-	};
-	let mut bindings: HashMap<&'a str, SourceSpan> = HashMap::new();
-	for event in Walk::new(Node::Expression(&ast.body))
-	{
-		if let Event::Enter(Node::Expression(Expression::Binding(b))) = event
-		{
-			if let Some(&parameter) = parameter_spans.get(&*b.name)
-			{
-				return Err(CompilationError::BindingCollidesWithParameter {
-					name: b.name.clone(),
-					parameter,
-					binding: b.name_span
-				});
-			}
-			if let Some(&first) = bindings.get(&*b.name)
-			{
-				return Err(CompilationError::DuplicateBinding {
-					name: b.name.clone(),
-					first,
-					duplicate: b.name_span
-				});
-			}
-			// Record the binding on entering it, before its bound
-			// expression, so that a binding of the same name nested
-			// within the bound expression is a duplicate of this one. A
-			// self-reference within the bound expression is a variable,
-			// not a binding, and surfaces as a use-before-bind instead.
-			bindings.insert(&b.name, b.name_span);
-		}
-	}
-	Ok(bindings)
-}
-
-/// Walk the body of a function in lexical order, rejecting any
-/// [variable reference](Variable) whose name is introduced by a
-/// [local binding](Binding) that has not yet been reached. Because every
-/// binding is visited _after_ its own bound expression, a self-reference inside
-/// the RHS surfaces here as [`UseBeforeBind`](CompilationError::UseBeforeBind)
-/// — the sole mechanism by which self-reference is rejected.
-///
-/// # Type parameters
-/// - `'a`: The lifetime of the borrow of the function body.
-/// - `'src`: The lifetime of the source text.
-///
-/// # Parameters
-/// - `body`: The function body to check.
-/// - `bindings`: The complete set of bindings in the body, keyed by name, with
-///   the binding-site [span](SourceSpan) used to cite the binding in errors.
-///
-/// # Errors
-/// [`UseBeforeBind`](CompilationError::UseBeforeBind) at the first offending
-/// reference encountered in a left-to-right, depth-first walk.
-fn check_use_before_bind<'a, 'src>(
-	body: &'a Expression<'src>,
-	bindings: &HashMap<&'a str, SourceSpan>
-) -> Result<(), CompilationError<'src>>
-{
-	// The names of the bindings reached so far. A reference to a name that
-	// appears in `bindings` but not yet here is a use-before-bind error. Names
-	// not in `bindings` at all are not local bindings, and flow through to the
-	// compiler as external variables or parameters.
-	let mut seen: HashSet<&'a str> = HashSet::new();
-	for event in Walk::new(Node::Expression(body))
-	{
-		match event
-		{
-			Event::Enter(Node::Expression(Expression::Variable(v))) =>
-			{
-				if let Some(&binding_span) = bindings.get(&*v.name)
-					&& !seen.contains(&*v.name)
-				{
-					return Err(CompilationError::UseBeforeBind {
-						name: v.name.clone(),
-						reference: v.span,
-						binding: binding_span
-					});
-				}
-			},
-			Event::Leave(Node::Expression(Expression::Binding(b))) =>
-			{
-				seen.insert(&b.name);
-			},
-			_ =>
-			{}
-		}
-	}
-	Ok(())
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //                         ASTVisitor for Validator.                          //
 ////////////////////////////////////////////////////////////////////////////////
 
-impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator
+impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator<'a, 'src>
 {
 	type Error = CompilationError<'src>;
 	type Output = ();
@@ -268,7 +167,48 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator
 		node: &'a ast::Function<'src>
 	) -> Result<(), Self::Error>
 	{
-		check_duplicate_parameters(node)
+		*self = Self::default();
+		if let Some(ref parameters) = node.parameters
+		{
+			for param in parameters
+			{
+				if let Some(&first) = self.parameters.get(&*param.name)
+				{
+					return Err(CompilationError::DuplicateParameter {
+						name: param.name.clone(),
+						first,
+						duplicate: param.span
+					});
+				}
+				self.parameters.insert(&param.name, param.span);
+			}
+		}
+		Ok(())
+	}
+
+	fn enter_binding(
+		&mut self,
+		node: &'a Binding<'src>
+	) -> Result<(), Self::Error>
+	{
+		if let Some(&parameter) = self.parameters.get(&*node.name)
+		{
+			return Err(CompilationError::BindingCollidesWithParameter {
+				name: node.name.clone(),
+				parameter,
+				binding: node.name_span
+			});
+		}
+		if let Some(&first) = self.bindings.get(&*node.name)
+		{
+			return Err(CompilationError::DuplicateBinding {
+				name: node.name.clone(),
+				first,
+				duplicate: node.name_span
+			});
+		}
+		self.bindings.insert(&node.name, node.name_span);
+		Ok(())
 	}
 
 	fn visit_function(
@@ -277,7 +217,24 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator
 		_body: ()
 	) -> Result<(), Self::Error>
 	{
-		Ok(())
+		// Every binding is now known, so the first recorded reference to the
+		// name of a binding is the first use before bind.
+		match self.forward.iter().find_map(|reference| {
+			self.bindings
+				.get(&*reference.name)
+				.map(|&binding| (reference, binding))
+		})
+		{
+			Some((reference, binding)) =>
+			{
+				Err(CompilationError::UseBeforeBind {
+					name: reference.name.clone(),
+					reference: reference.span,
+					binding
+				})
+			},
+			None => Ok(())
+		}
 	}
 
 	fn visit_group(
@@ -297,18 +254,24 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator
 
 	fn visit_variable(
 		&mut self,
-		_node: &'a Variable<'src>
+		node: &'a Variable<'src>
 	) -> Result<(), Self::Error>
 	{
+		if !self.bound.contains(&*node.name)
+			&& self.referenced.insert(&node.name)
+		{
+			self.forward.push(node);
+		}
 		Ok(())
 	}
 
 	fn visit_binding(
 		&mut self,
-		_node: &'a Binding<'src>,
+		node: &'a Binding<'src>,
 		_expression: ()
 	) -> Result<(), Self::Error>
 	{
+		self.bound.insert(&node.name);
 		Ok(())
 	}
 

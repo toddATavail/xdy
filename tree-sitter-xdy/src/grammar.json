@@ -72,8 +72,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "{"
+          "type": "SYMBOL",
+          "name": "_open_brace"
         },
         {
           "type": "FIELD",
@@ -84,8 +84,8 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "}"
+          "type": "SYMBOL",
+          "name": "_close_brace"
         }
       ]
     },
@@ -147,8 +147,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "{"
+          "type": "SYMBOL",
+          "name": "_open_brace"
         },
         {
           "type": "FIELD",
@@ -159,8 +159,8 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "}"
+          "type": "SYMBOL",
+          "name": "_close_brace"
         }
       ]
     },
@@ -168,8 +168,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "{"
+          "type": "SYMBOL",
+          "name": "_open_brace"
         },
         {
           "type": "FIELD",
@@ -180,8 +180,8 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "}"
+          "type": "SYMBOL",
+          "name": "_close_brace"
         },
         {
           "type": "STRING",
@@ -335,7 +335,7 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "constant"
+          "name": "integer"
         },
         {
           "type": "SYMBOL",
@@ -363,7 +363,7 @@
           "name": "face",
           "content": {
             "type": "SYMBOL",
-            "name": "_custom_face"
+            "name": "integer"
           }
         },
         {
@@ -380,7 +380,7 @@
                 "name": "face",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "_custom_face"
+                  "name": "integer"
                 }
               }
             ]
@@ -389,19 +389,6 @@
         {
           "type": "STRING",
           "value": "]"
-        }
-      ]
-    },
-    "_custom_face": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "constant"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "negative_constant"
         }
       ]
     },
@@ -507,10 +494,6 @@
           "name": "group"
         }
       ]
-    },
-    "negative_constant": {
-      "type": "PATTERN",
-      "value": "\\-\\d+"
     },
     "_arithmetic": {
       "type": "CHOICE",
@@ -744,9 +727,60 @@
       "type": "PATTERN",
       "value": "\\d+"
     },
+    "integer": {
+      "type": "PATTERN",
+      "value": "-?\\d+"
+    },
     "_d": {
       "type": "PATTERN",
       "value": "[dD]"
+    },
+    "_open_brace": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "PATTERN",
+            "value": "\\p{White_Space}*",
+            "flags": "u"
+          }
+        ]
+      }
+    },
+    "_close_brace": {
+      "type": "TOKEN",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "}"
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "PATTERN",
+                "value": "[\\u000B\\u000C\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]"
+              },
+              {
+                "type": "PATTERN",
+                "value": "\\p{White_Space}*",
+                "flags": "u"
+              },
+              {
+                "type": "STRING",
+                "value": "}"
+              }
+            ]
+          }
+        ]
+      }
     },
     "identifier": {
       "type": "PATTERN",
@@ -757,7 +791,7 @@
   "extras": [
     {
       "type": "PATTERN",
-      "value": "\\s"
+      "value": "[ \\t\\r\\n]"
     }
   ],
   "conflicts": [],

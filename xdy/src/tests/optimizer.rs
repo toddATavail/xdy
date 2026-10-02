@@ -235,7 +235,7 @@ fn test_optimize_max()
 }
 
 /// Test that register coalescing never lets a write that nothing reads clobber
-/// a register that is live across it (xdy-i0q.30).
+/// a register that is live across it.
 #[test]
 fn test_coalescing_keeps_dead_writes_apart()
 {
@@ -390,7 +390,7 @@ fn test_test_cases_are_exact()
 
 /// Test that strength reduction never changes a result: a value divided by
 /// itself is zero when the value is zero, and a double negation of
-/// [`i32::MIN`] is `-i32::MAX`, so neither reduces (xdy-i0q.26). The last
+/// [`i32::MIN`] is `-i32::MAX`, so neither reduces. The last
 /// source nests a double negation around another instruction, which once
 /// tripped an assertion.
 #[test]

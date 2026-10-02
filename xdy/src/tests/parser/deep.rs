@@ -1,8 +1,8 @@
 //! # Deep parser test cases
 //!
 //! Herein are the tests that hold the parser to its promise of constant stack
-//! depth and linear time. Every [nesting construct](Nesting) is parsed at a
-//! depth of [`DEPTH`] on a [small stack](on_small_stack), both as a valid
+//! depth and linear time. Every [nesting construct](Nesting) is parsed at its
+//! [depth](Nesting::depth) on a [small stack](on_small_stack), both as a valid
 //! source and as a source that fails at its innermost level. The default time
 //! budget of the small stack also bounds the parse time: the recursive parser
 //! took time exponential in the nesting of groups and bindings, so it would
@@ -24,7 +24,7 @@ use crate::{
 	Parser,
 	parser::{NomErrorKind, ParseError},
 	support::on_small_stack,
-	tests::ast::{DEPTH, LEAF, Nesting, nest_parsable}
+	tests::ast::{LEAF, Nesting, nest_parsable}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -117,10 +117,10 @@ fn test_parse_deep_drop_clauses() { parse_deep(Nesting::DropClauses) }
 #[ignore = "stress: run with just stress"]
 fn test_parse_deep_mixed() { parse_deep(Nesting::Mixed) }
 
-/// Parse a [`DEPTH`]-deep source on a small stack, and ensure that the result
-/// renders as the source. Then replace its innermost constant with a stray
-/// `@`, and ensure that parsing fails there without trouble: the error keeps
-/// at most one entry beyond those at its position; it renders, clones,
+/// Parse a [deep](Nesting::depth) source on a small stack, and ensure that the
+/// result renders as the source. Then replace its innermost constant with a
+/// stray `@`, and ensure that parsing fails there without trouble: the error
+/// keeps at most one entry beyond those at its position; it renders, clones,
 /// compares equal to its clone, and hashes alike; and its
 /// [`Synthetic`](NomErrorKind::Synthetic) errors nest no deeper than
 /// [`SYNTHETIC_NESTING_BOUND`]. Uses `assert!` rather than `assert_eq!` on
@@ -132,7 +132,7 @@ fn test_parse_deep_mixed() { parse_deep(Nesting::Mixed) }
 fn parse_deep(nesting: Nesting)
 {
 	on_small_stack(|| {
-		let source = nest_parsable(nesting, DEPTH, LEAF).to_string();
+		let source = nest_parsable(nesting, nesting.depth(), LEAF).to_string();
 		let function = Parser::parse(&source).expect("deep source failed");
 		assert!(function.parameters.is_none(), "{:?}", nesting);
 		assert!(

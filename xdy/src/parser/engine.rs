@@ -10,10 +10,12 @@
 //! [frame](Frame) that records what it will do with the outcome, and _calls_
 //! the subproduction. When the subproduction finishes, its outcome _returns_ to
 //! the frame on top of the stack. So the stack of frames grows with the nesting
-//! of the input, but the machine stack does not. The flat parts of the grammar,
-//! such as [constants](super::constant), [variables](super::variable),
-//! punctuation, and whitespace, are ordinary [`nom`] combinators, which the
-//! engine calls directly.
+//! of the input, but the machine stack does not. Each frame keeps only what is
+//! small, and the few that must keep something bulky keep it apart, as a
+//! [payload](Payload), so that a deep nesting takes as little memory as it
+//! can. The flat parts of the grammar, such as [constants](super::constant),
+//! [variables](super::variable), punctuation, and whitespace, are ordinary
+//! [`nom`] combinators, which the engine calls directly.
 //!
 //! The engine reproduces the behavior of the recursive combinators that it
 //! replaced, exactly: every value, remaining input, and error, though the
@@ -70,8 +72,8 @@ use super::{
 	RANGE_CONTEXT, RANGE_END_CONTEXT, RANGE_START_CONTEXT,
 	RIGHT_OPERAND_CONTEXT, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT,
 	braced_name, canonical_name, constant, custom_faces, d_operator,
-	identifier, is_token_space, name_space0, negative_constant, parameter,
-	parameters
+	identifier, integer, is_token_space, name_space0, negative_constant,
+	parameter, parameters
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -128,11 +130,15 @@ pub(crate) enum Goal
 	/// [`custom_dice`](super::custom_dice), producing [`Value::CustomDice`].
 	CustomDice,
 
-	/// [`dice_count`](super::dice_count),
-	/// [`standard_faces`](super::standard_faces), or
-	/// [`drop_expression`](super::drop_expression), which are identical,
-	/// producing [`Value::Expression`].
+	/// [`dice_count`](super::dice_count) or
+	/// [`drop_expression`](super::drop_expression), which are identical, and
+	/// whose constant is unsigned, producing [`Value::Expression`].
 	Atom,
+
+	/// [`standard_faces`](super::standard_faces), which is [`Goal::Atom`] but
+	/// with a signed [integer] in place of the constant, producing
+	/// [`Value::Expression`].
+	Faces,
 
 	/// [`drop_lowest`](super::drop_lowest), producing [`Value::Drop`].
 	DropLowest,
@@ -411,18 +417,25 @@ enum DropDirection
 /// began, which is the position of any context that the production attaches
 /// to its errors.
 ///
+/// The stack holds a frame for every production in progress, which is several
+/// for every level of the nesting of the input, so a frame keeps only what is
+/// small. Whatever is bulky, such as an operand already parsed, a frame that
+/// [carries](Frame::carries) it keeps in a [payload](Payload) on the
+/// [stack](Stack) instead, as documented alongside each variant.
+///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
 enum Frame<'src>
 {
-	/// [`Goal::Function`], awaiting the body.
+	/// [`Goal::Function`], awaiting the body. It carries the formal
+	/// [parameters](Payload::Parameters).
 	FunctionBody
 	{
 		/// The start of the function.
 		start: usize,
 
-		/// The formal parameters.
-		parameters: Option<Vec<Parameter<'src>>>,
+		/// Whether the function has formal parameters.
+		formal: bool,
 
 		/// The input of the body.
 		input: Span<'src>
@@ -431,14 +444,13 @@ enum Frame<'src>
 	/// [`Goal::AddSub`] or [`Goal::MulDivMod`], awaiting the first operand.
 	BinaryFirst(Level),
 
-	/// [`Goal::AddSub`] or [`Goal::MulDivMod`], awaiting a right operand.
+	/// [`Goal::AddSub`] or [`Goal::MulDivMod`], awaiting a right operand. It
+	/// carries the fold of the operands so far, as an
+	/// [expression](Payload::Expression).
 	BinaryRight
 	{
 		/// The level.
 		level: Level,
-
-		/// The fold of the operands so far.
-		left: Expression<'src>,
 
 		/// The operator before the awaited operand.
 		operator: char,
@@ -448,70 +460,55 @@ enum Frame<'src>
 	},
 
 	/// [`Goal::Unary`], awaiting the operand of a negation, its second
-	/// alternative.
-	UnaryNegation
-	{
-		/// The input of the unary expression.
-		input: Span<'src>,
+	/// alternative. It holds the input of the unary expression. The error of
+	/// the first alternative is [recomputed](negation_error) if the second
+	/// fails.
+	UnaryNegation(Span<'src>),
 
-		/// The error of the first alternative.
-		error: ParseError<'src>
-	},
-
-	/// [`Goal::Unary`], awaiting an exponentiation, its third alternative.
+	/// [`Goal::Unary`], awaiting an exponentiation, its third alternative. If
+	/// the negation failed after its `-`, it carries the merged
+	/// [errors](Payload::Error) of the first two alternatives. Otherwise, both
+	/// failed at the input, and their errors are [recomputed](unary_error) if
+	/// the third fails.
 	UnaryExponent
 	{
 		/// The input of the unary expression.
 		input: Span<'src>,
 
-		/// The merged errors of the first two alternatives.
-		error: ParseError<'src>
+		/// Whether the frame carries the merged errors.
+		merged: bool
 	},
 
 	/// [`Goal::Exponent`], awaiting the base.
 	ExponentBase,
 
-	/// [`Goal::Exponent`], awaiting the power.
-	ExponentPower
-	{
-		/// The base.
-		base: Expression<'src>,
-
-		/// The input of the power.
-		input: Span<'src>
-	},
+	/// [`Goal::Exponent`], awaiting the power. It holds the input of the power,
+	/// and carries the base, as an [expression](Payload::Expression).
+	ExponentPower(Span<'src>),
 
 	/// [`Goal::Primary`], awaiting a range, its first alternative.
 	PrimaryRange(Span<'src>),
 
-	/// [`Goal::Primary`], awaiting dice, its second alternative.
-	PrimaryDice
-	{
-		/// The input of the primary expression.
-		input: Span<'src>,
+	/// [`Goal::Primary`], awaiting dice, its second alternative. It holds the
+	/// input of the primary expression. The error of the first alternative is
+	/// [recomputed](range_error) if the second fails.
+	PrimaryDice(Span<'src>),
 
-		/// The error of the first alternative.
-		error: ParseError<'src>
-	},
+	/// [`Goal::Primary`], awaiting a group, its third alternative. It holds the
+	/// input of the primary expression, and carries the merged
+	/// [errors](Payload::Error) of the first two alternatives.
+	PrimaryGroup(Span<'src>),
 
-	/// [`Goal::Primary`], awaiting a group, its third alternative.
-	PrimaryGroup
-	{
-		/// The input of the primary expression.
-		input: Span<'src>,
-
-		/// The merged errors of the first two alternatives.
-		error: ParseError<'src>
-	},
-
-	/// [`Goal::Atom`], awaiting a group, its third alternative.
+	/// [`Goal::Atom`] or [`Goal::Faces`], awaiting a group, its third
+	/// alternative. The merged errors of the first two alternatives are
+	/// [recomputed](atom_error) if the third fails.
 	AtomGroup
 	{
 		/// The input of the atom.
 		input: Span<'src>,
 
-		/// The merged errors of the first two alternatives.
-		error: ParseError<'src>
+		/// Whether the goal is [`Goal::Faces`], whose literal is signed.
+		signed: bool
 	},
 
 	/// [`Goal::Group`], awaiting the grouped expression.
@@ -526,11 +523,9 @@ enum Frame<'src>
 
 	/// [`Goal::Binding`], or the variable alternative of [`Goal::Atom`] or
 	/// [`Goal::Primary`] continued as a binding, awaiting the bound expression.
+	/// It carries the [head](Payload::Head) of the binding.
 	BindingExpression
 	{
-		/// The head of the binding.
-		head: BindingHead<'src>,
-
 		/// The byte offset of the `(` of the binding, or of where a repair
 		/// supplied it.
 		paren: usize,
@@ -549,14 +544,12 @@ enum Frame<'src>
 		input: Span<'src>
 	},
 
-	/// [`Goal::Range`], awaiting the end of the range.
+	/// [`Goal::Range`], awaiting the end of the range. It carries the start of
+	/// the range, as an [expression](Payload::Expression).
 	RangeEnd
 	{
 		/// The start of the range expression.
 		start: usize,
-
-		/// The start of the range.
-		first: Expression<'src>,
 
 		/// The input of the end of the range.
 		input: Span<'src>
@@ -572,32 +565,25 @@ enum Frame<'src>
 		input: Span<'src>
 	},
 
-	/// [`Goal::Dice`] or [`Goal::PrimaryDice`], awaiting standard faces.
+	/// [`Goal::Dice`] or [`Goal::PrimaryDice`], awaiting standard faces. It
+	/// carries the dice count, as an [expression](Payload::Expression).
 	DiceFaces
 	{
 		/// The start of the dice expression.
 		start: usize,
-
-		/// The dice count.
-		count: Expression<'src>,
 
 		/// The input of the faces.
 		input: Span<'src>
 	},
 
 	/// [`Goal::Dice`] or [`Goal::PrimaryDice`], awaiting the drop expression
-	/// of a drop clause.
+	/// of a drop clause. It carries the dice expression that the clause
+	/// modifies, and the input after the direction, as a
+	/// [drop](Payload::Drop).
 	DiceDrop
 	{
-		/// The dice expression that the clause modifies.
-		dice: DiceExpression<'src>,
-
 		/// The direction of the clause.
 		direction: DropDirection,
-
-		/// The input after the direction, where the clause ends if it has no
-		/// drop expression.
-		rest: Span<'src>,
 
 		/// The input of the drop expression.
 		input: Span<'src>
@@ -606,34 +592,63 @@ enum Frame<'src>
 	/// [`Goal::StandardDice`], awaiting the dice count.
 	StandardCount(Span<'src>),
 
-	/// [`Goal::StandardDice`], awaiting the faces.
-	StandardFaces
-	{
-		/// The dice count.
-		count: Expression<'src>,
-
-		/// The input of the faces.
-		input: Span<'src>
-	},
+	/// [`Goal::StandardDice`], awaiting the faces. It holds the input of the
+	/// faces, and carries the dice count, as an
+	/// [expression](Payload::Expression).
+	StandardFaces(Span<'src>),
 
 	/// [`Goal::CustomDice`], awaiting the dice count.
 	CustomCount(Span<'src>),
 
 	/// [`Goal::DropLowest`] or [`Goal::DropHighest`], awaiting the drop
-	/// expression.
-	DropExpression
-	{
-		/// The input after the direction, where the clause ends if it has no
-		/// drop expression.
-		rest: Span<'src>,
+	/// expression. It holds the input of the drop expression, and carries the
+	/// input after the direction, where the clause ends if it has no drop
+	/// expression, as a [rest](Payload::Rest).
+	DropExpression(Span<'src>)
+}
 
-		/// The input of the drop expression.
-		input: Span<'src>
+// A frame is at most as large as a span and an offset, and a tag.
+const _: () = assert!(size_of::<Frame<'static>>() <= 48);
+
+impl Frame<'_>
+{
+	/// Answer whether the frame carries a [payload](Payload).
+	///
+	/// # Returns
+	/// `true` if the frame carries a payload, `false` otherwise.
+	fn carries(&self) -> bool
+	{
+		match self
+		{
+			Frame::FunctionBody { .. }
+			| Frame::BinaryRight { .. }
+			| Frame::ExponentPower(_)
+			| Frame::PrimaryGroup(_)
+			| Frame::BindingExpression { .. }
+			| Frame::RangeEnd { .. }
+			| Frame::DiceFaces { .. }
+			| Frame::DiceDrop { .. }
+			| Frame::StandardFaces(_)
+			| Frame::DropExpression(_) => true,
+			Frame::UnaryExponent { merged, .. } => *merged,
+			Frame::BinaryFirst(_)
+			| Frame::UnaryNegation(_)
+			| Frame::ExponentBase
+			| Frame::PrimaryRange(_)
+			| Frame::PrimaryDice(_)
+			| Frame::AtomGroup { .. }
+			| Frame::GroupExpression { .. }
+			| Frame::RangeStart { .. }
+			| Frame::DiceCount { .. }
+			| Frame::StandardCount(_)
+			| Frame::CustomCount(_) => false
+		}
 	}
 }
 
 /// The head of a [binding](Binding), everything before its bound expression,
-/// which [`Frame::BindingExpression`] keeps until the bound expression is done.
+/// which [`Frame::BindingExpression`] carries until the bound expression is
+/// done.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
@@ -652,6 +667,295 @@ struct BindingHead<'src>
 	/// The input of the atom or primary expression, if the binding is the
 	/// variable alternative of one, continued; see [`variable_or_binding`].
 	atom: Option<Span<'src>>
+}
+
+/// The bulky part of a suspended production, which the [frame](Frame) that
+/// [carries](Frame::carries) it keeps on the [stack](Stack) apart from itself.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text being parsed.
+enum Payload<'src>
+{
+	/// The formal parameters of [`Frame::FunctionBody`].
+	Parameters(Option<Vec<Parameter<'src>>>),
+
+	/// An expression already parsed: the fold of the operands of
+	/// [`Frame::BinaryRight`], the base of [`Frame::ExponentPower`], the start
+	/// of [`Frame::RangeEnd`], or the dice count of [`Frame::DiceFaces`] or
+	/// [`Frame::StandardFaces`].
+	Expression(Expression<'src>),
+
+	/// The merged errors of the alternatives before [`Frame::UnaryExponent`]
+	/// or [`Frame::PrimaryGroup`], which failed beyond their input, and so
+	/// cannot be recomputed from it.
+	Error(ParseError<'src>),
+
+	/// The head of the binding of [`Frame::BindingExpression`].
+	Head(BindingHead<'src>),
+
+	/// The dice expression that the clause of [`Frame::DiceDrop`] modifies,
+	/// and the input after the direction, where the clause ends if it has no
+	/// drop expression.
+	Drop
+	{
+		/// The dice expression.
+		dice: DiceExpression<'src>,
+
+		/// The input after the direction.
+		rest: Span<'src>
+	},
+
+	/// The input after the direction of [`Frame::DropExpression`], where the
+	/// clause ends if it has no drop expression.
+	Rest(Span<'src>)
+}
+
+impl<'src> Payload<'src>
+{
+	/// Answer the formal parameters.
+	///
+	/// # Returns
+	/// The formal parameters.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Parameters`].
+	fn into_parameters(self) -> Option<Vec<Parameter<'src>>>
+	{
+		match self
+		{
+			Payload::Parameters(parameters) => parameters,
+			_ => unreachable!("the payload is not the formal parameters")
+		}
+	}
+
+	/// Answer the expression.
+	///
+	/// # Returns
+	/// The expression.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Expression`].
+	fn into_expression(self) -> Expression<'src>
+	{
+		match self
+		{
+			Payload::Expression(expression) => expression,
+			_ => unreachable!("the payload is not an expression")
+		}
+	}
+
+	/// Answer the merged errors.
+	///
+	/// # Returns
+	/// The merged errors.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Error`].
+	fn into_error(self) -> ParseError<'src>
+	{
+		match self
+		{
+			Payload::Error(error) => error,
+			_ => unreachable!("the payload is not an error")
+		}
+	}
+
+	/// Answer the head of the binding.
+	///
+	/// # Returns
+	/// The head.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Head`].
+	fn into_head(self) -> BindingHead<'src>
+	{
+		match self
+		{
+			Payload::Head(head) => head,
+			_ => unreachable!("the payload is not the head of a binding")
+		}
+	}
+
+	/// Answer the dice expression and the input after the direction of a drop
+	/// clause.
+	///
+	/// # Returns
+	/// The dice expression and the input.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Drop`].
+	fn into_drop(self) -> (DiceExpression<'src>, Span<'src>)
+	{
+		match self
+		{
+			Payload::Drop { dice, rest } => (dice, rest),
+			_ => unreachable!("the payload is not a drop clause")
+		}
+	}
+
+	/// Answer the input after the direction of a drop expression.
+	///
+	/// # Returns
+	/// The input.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Rest`].
+	fn into_rest(self) -> Span<'src>
+	{
+		match self
+		{
+			Payload::Rest(rest) => rest,
+			_ => unreachable!("the payload is not the rest of a drop")
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                   Stack.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The stack of suspended productions: their [frames](Frame), and, apart from
+/// them, the [payloads](Payload) of the frames that [carry](Frame::carries)
+/// them, in the same order. The payloads are much larger than the frames, but
+/// few frames carry one: in a deep nesting of groups, none does. Neither stack
+/// allocates but to grow.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text being parsed.
+struct Stack<'src>
+{
+	/// The frames, from the bottom of the stack to the top.
+	frames: Vec<Frame<'src>>,
+
+	/// The payloads of the frames that carry them, in the same order.
+	payloads: Vec<Payload<'src>>
+}
+
+impl<'src> Stack<'src>
+{
+	/// Construct an empty stack.
+	///
+	/// # Returns
+	/// The stack.
+	fn new() -> Self
+	{
+		Self {
+			frames: Vec::new(),
+			payloads: Vec::new()
+		}
+	}
+
+	/// Answer the number of frames on the stack.
+	///
+	/// # Returns
+	/// The number of frames.
+	fn len(&self) -> usize { self.frames.len() }
+
+	/// Answer whether the stack is empty.
+	///
+	/// # Returns
+	/// `true` if the stack holds no frames, `false` otherwise.
+	fn is_empty(&self) -> bool { self.frames.is_empty() }
+
+	/// Answer the frame at the bottom of the stack.
+	///
+	/// # Returns
+	/// The frame, or `None` if the stack is empty.
+	fn first(&self) -> Option<&Frame<'src>> { self.frames.first() }
+
+	/// Push a frame that carries no payload.
+	///
+	/// # Parameters
+	/// - `frame`: The frame.
+	fn push(&mut self, frame: Frame<'src>)
+	{
+		debug_assert!(!frame.carries(), "the frame carries a payload");
+		self.frames.push(frame);
+	}
+
+	/// Push a frame that carries a payload, and its payload.
+	///
+	/// # Parameters
+	/// - `frame`: The frame.
+	/// - `payload`: The payload.
+	fn push_with(&mut self, frame: Frame<'src>, payload: Payload<'src>)
+	{
+		debug_assert!(frame.carries(), "the frame carries no payload");
+		self.frames.push(frame);
+		self.payloads.push(payload);
+	}
+
+	/// Pop the frame on top of the stack. If it [carries](Frame::carries) a
+	/// payload, then the caller must [pop](Self::pop_payload) that next,
+	/// before it uses the stack otherwise. Most frames carry none, so the
+	/// payload does not travel with the frame.
+	///
+	/// # Returns
+	/// The frame, or `None` if the stack is empty.
+	fn pop(&mut self) -> Option<Frame<'src>> { self.frames.pop() }
+
+	/// Pop the payload of the frame just [popped](Self::pop).
+	///
+	/// # Returns
+	/// The payload.
+	///
+	/// # Panics
+	/// If no frame on the stack carries a payload.
+	fn pop_payload(&mut self) -> Payload<'src>
+	{
+		self.payloads.pop().expect("the frame carries a payload")
+	}
+
+	/// Discard every frame above the specified number of them, and their
+	/// payloads.
+	///
+	/// # Parameters
+	/// - `len`: The number of frames to keep. If the stack holds no more than
+	///   this, then nothing happens.
+	fn truncate(&mut self, len: usize)
+	{
+		let Some(discarded) = self.frames.get(len..)
+		else
+		{
+			return;
+		};
+		let carried = discarded.iter().filter(|frame| frame.carries()).count();
+		self.frames.truncate(len);
+		self.payloads.truncate(self.payloads.len() - carried);
+	}
+
+	/// Discard every frame, and every payload.
+	fn clear(&mut self)
+	{
+		self.frames.clear();
+		self.payloads.clear();
+	}
+
+	/// Answer the frames, from the top of the stack to the bottom, each with
+	/// its payload, if it carries one.
+	///
+	/// # Returns
+	/// The frames and their payloads.
+	fn iter_rev(
+		&self
+	) -> impl Iterator<Item = (&Frame<'src>, Option<&Payload<'src>>)>
+	{
+		let mut end = self.payloads.len();
+		self.frames.iter().rev().map(move |frame| {
+			let payload = frame.carries().then(|| {
+				end -= 1;
+				&self.payloads[end]
+			});
+			(frame, payload)
+		})
+	}
+}
+
+impl<'src> std::ops::Index<usize> for Stack<'src>
+{
+	type Output = Frame<'src>;
+
+	fn index(&self, index: usize) -> &Self::Output { &self.frames[index] }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -725,6 +1029,36 @@ pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 /// identical to [`run`]; after it, the run continues exactly as [`run`] would
 /// from that point, without consulting the policy again.
 ///
+/// A failure is either an unrecoverable error, created at one of the
+/// [sites](Site) that the engine guards, or a recoverable error that no frame
+/// can catch, which fails the [goal](Site::Goal) in progress. The policy
+/// answers a [repair](Repair) of each. At a guarded site, the parse continues
+/// from the failure, as though the source had been edited. At a goal, the
+/// engine [overlays](Overlay) the token that the repair supplies at the
+/// failure, or discards the source that it [skips](Repair::Skip), and parses
+/// the goal of the nearest cutting frame again. Either way, a repair that
+/// makes a name the first formal parameter, or a skip at the start of the body
+/// of a function without formal parameters, parses the whole function again.
+/// The policy declines by answering [`Stop`](Repair::Stop), or a repair that
+/// the site does not admit; the engine also stops recovering if the parse
+/// fails again before it reads the token of the last repair.
+///
+/// ```mermaid
+/// flowchart TD
+///     S(["run_recovering(input, policy)"]) --> P["Parse as run would"]
+///     P -->|"the function parses"| D(["the function, with the<br/>token of every repair"])
+///     P -->|"a recoverable error that<br/>no frame can catch"| G{"policy.repair(Site::Goal)"}
+///     P -->|"an unrecoverable error<br/>at a guarded site"| U{"policy.repair(site)"}
+///     G -->|"Fix, Variable, or Skip"| A["Parse the goal of the<br/>nearest cutting frame again"]
+///     G -->|"a name becomes the first formal<br/>parameter, or a skip starts the<br/>body of a function without them"| F["Parse the function again"]
+///     U -->|"a name becomes the<br/>first formal parameter"| F
+///     U -->|"repaired"| C["Continue from the failure"]
+///     G -->|"declined"| X["Consult the policy no more"]
+///     U -->|"declined"| X
+///     A & F & C --> P
+///     X --> E(["the error of the failure"])
+/// ```
+///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
 /// - `R`: The type of the policy.
@@ -739,6 +1073,7 @@ pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the policy declined to repair a failure.
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub(super) fn run_recovering<'src, R: Recovery<'src>>(
 	input: Span<'src>,
 	policy: &mut R
@@ -747,7 +1082,8 @@ pub(super) fn run_recovering<'src, R: Recovery<'src>>(
 	drive(Goal::Function, input, &mut Recoverer::new(policy, input))
 }
 
-/// Drive the engine, as described by [`run`].
+/// Drive the engine, as described by [`run`] and, when recovering, by
+/// [`run_recovering`].
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
@@ -770,7 +1106,7 @@ fn drive<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Outcome<'src>
 {
-	let mut stack = Vec::new();
+	let mut stack = Stack::new();
 	let mut step = Step::Call(goal, input);
 	loop
 	{
@@ -832,7 +1168,7 @@ pub(crate) fn steps() -> usize { STEPS.with(std::cell::Cell::get) }
 fn start<'src, R: Recovery<'src>>(
 	goal: Goal,
 	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -889,7 +1225,8 @@ fn start<'src, R: Recovery<'src>>(
 		{
 			call(stack, Frame::CustomCount(input), Goal::Atom, input)
 		},
-		Goal::Atom => start_atom(input, stack, rec),
+		Goal::Atom => start_atom(input, false, stack, rec),
+		Goal::Faces => start_atom(input, true, stack, rec),
 		Goal::DropLowest => start_drop(input, "lowest", stack),
 		Goal::DropHighest => start_drop(input, "highest", stack)
 	}
@@ -898,9 +1235,10 @@ fn start<'src, R: Recovery<'src>>(
 /// Resume a suspended production with the outcome of its subproduction.
 ///
 /// # Parameters
-/// - `frame`: The suspended production.
+/// - `frame`: The suspended production, just [popped](Stack::pop).
 /// - `outcome`: The outcome of the subproduction.
-/// - `stack`: The stack of suspended productions.
+/// - `stack`: The stack of suspended productions, whose top payload is that of
+///   `frame`, if it [carries](Frame::carries) one.
 /// - `rec`: The recovery state.
 ///
 /// # Returns
@@ -908,17 +1246,17 @@ fn start<'src, R: Recovery<'src>>(
 fn resume<'src, R: Recovery<'src>>(
 	frame: Frame<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
 	match frame
 	{
-		Frame::FunctionBody {
-			start,
-			parameters,
-			input
-		} => resume_function_body(start, parameters, input, outcome),
+		Frame::FunctionBody { start, input, .. } =>
+		{
+			let parameters = stack.pop_payload().into_parameters();
+			resume_function_body(start, parameters, input, outcome)
+		},
 		Frame::BinaryFirst(level) => match outcome
 		{
 			Ok((rest, left)) =>
@@ -929,88 +1267,94 @@ fn resume<'src, R: Recovery<'src>>(
 		},
 		Frame::BinaryRight {
 			level,
-			left,
 			operator,
 			input
-		} => resume_binary_right(level, left, operator, input, outcome, stack),
-		Frame::UnaryNegation { input, error } =>
+		} =>
 		{
-			resume_unary_negation(input, error, outcome, stack)
+			let left = stack.pop_payload().into_expression();
+			resume_binary_right(level, left, operator, input, outcome, stack)
 		},
-		Frame::UnaryExponent { input, error } =>
+		Frame::UnaryNegation(input) =>
 		{
+			resume_unary_negation(input, outcome, stack)
+		},
+		Frame::UnaryExponent { input, merged } =>
+		{
+			let error = merged.then(|| stack.pop_payload().into_error());
 			resume_unary_exponent(input, error, outcome)
 		},
 		Frame::ExponentBase => resume_exponent_base(outcome, stack),
-		Frame::ExponentPower { base, input } =>
+		Frame::ExponentPower(input) =>
 		{
+			let base = stack.pop_payload().into_expression();
 			resume_exponent_power(base, input, outcome)
 		},
 		Frame::PrimaryRange(input) =>
 		{
 			resume_primary_range(input, outcome, stack)
 		},
-		Frame::PrimaryDice { input, error } =>
+		Frame::PrimaryDice(input) => resume_primary_dice(input, outcome, stack),
+		Frame::PrimaryGroup(input) =>
 		{
-			resume_primary_dice(input, error, outcome, stack)
-		},
-		Frame::PrimaryGroup { input, error } =>
-		{
+			let error = stack.pop_payload().into_error();
 			resume_primary_group(input, error, outcome, stack, rec)
 		},
-		Frame::AtomGroup { input, error } =>
+		Frame::AtomGroup { input, signed } =>
 		{
-			resume_atom_group(input, error, outcome)
+			resume_atom_group(input, signed, outcome)
 		},
 		Frame::GroupExpression { start, input } =>
 		{
 			resume_group_expression(start, input, outcome, stack, rec)
 		},
-		Frame::BindingExpression { head, paren, input } =>
+		Frame::BindingExpression { paren, input } =>
 		{
+			let head = stack.pop_payload().into_head();
 			resume_binding_expression(head, paren, input, outcome, stack, rec)
 		},
 		Frame::RangeStart { start, input } =>
 		{
 			resume_range_start(start, input, outcome, stack, rec)
 		},
-		Frame::RangeEnd {
-			start,
-			first,
-			input
-		} => resume_range_end(start, first, input, outcome, stack, rec),
+		Frame::RangeEnd { start, input } =>
+		{
+			let first = stack.pop_payload().into_expression();
+			resume_range_end(start, first, input, outcome, stack, rec)
+		},
 		Frame::DiceCount { primary, input } =>
 		{
 			resume_dice_count(primary, input, outcome, stack, rec)
 		},
-		Frame::DiceFaces {
-			start,
-			count,
-			input
-		} => resume_dice_faces(start, count, input, outcome, stack, rec),
-		Frame::DiceDrop {
-			dice,
-			direction,
-			rest,
-			input
-		} => resume_dice_drop(dice, direction, rest, input, outcome, stack, rec),
+		Frame::DiceFaces { start, input } =>
+		{
+			let count = stack.pop_payload().into_expression();
+			resume_dice_faces(start, count, input, outcome, stack, rec)
+		},
+		Frame::DiceDrop { direction, input } =>
+		{
+			let (dice, rest) = stack.pop_payload().into_drop();
+			resume_dice_drop(dice, direction, rest, input, outcome, stack, rec)
+		},
 		Frame::StandardCount(input) =>
 		{
 			resume_standard_count(input, outcome, stack)
 		},
-		Frame::StandardFaces { count, input } =>
+		Frame::StandardFaces(input) =>
 		{
+			let count = stack.pop_payload().into_expression();
 			resume_standard_faces(count, input, outcome)
 		},
 		Frame::CustomCount(input) => resume_custom_count(input, outcome),
-		Frame::DropExpression { rest, input } =>
+		Frame::DropExpression(input) =>
 		{
+			let rest = stack.pop_payload().into_rest();
 			resume_drop_expression(rest, input, outcome)
-		},
+		}
 	}
 }
 
-/// Suspend a production and call a subproduction.
+/// Suspend a production that carries no [payload](Payload), and call a
+/// subproduction.
 ///
 /// # Parameters
 /// - `stack`: The stack of suspended productions.
@@ -1021,13 +1365,37 @@ fn resume<'src, R: Recovery<'src>>(
 /// # Returns
 /// The next step.
 fn call<'src>(
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	frame: Frame<'src>,
 	goal: Goal,
 	input: Span<'src>
 ) -> Step<'src>
 {
 	stack.push(frame);
+	Step::Call(goal, input)
+}
+
+/// Suspend a production that [carries](Frame::carries) a payload, and call a
+/// subproduction.
+///
+/// # Parameters
+/// - `stack`: The stack of suspended productions.
+/// - `frame`: The suspended production.
+/// - `payload`: The payload of the frame.
+/// - `goal`: The subproduction.
+/// - `input`: The input of the subproduction.
+///
+/// # Returns
+/// The next step.
+fn call_with<'src>(
+	stack: &mut Stack<'src>,
+	frame: Frame<'src>,
+	payload: Payload<'src>,
+	goal: Goal,
+	input: Span<'src>
+) -> Step<'src>
+{
+	stack.push_with(frame, payload);
 	Step::Call(goal, input)
 }
 
@@ -1126,6 +1494,117 @@ fn exhaust<'src>(input: Span<'src>, error: ParseError<'src>) -> Step<'src>
 	)))
 }
 
+/// Answer the error of an alternative that the engine has tried again, to
+/// recompute the error with which it first failed recoverably.
+///
+/// Nearly every alternative that fails is followed by one that succeeds, so the
+/// engine does not keep the errors of alternatives that fail at the input of
+/// their production, but recomputes them only when it must merge them, from
+/// the input that the frame keeps anyway: see [`negation_error`],
+/// [`unary_error`], [`range_error`], and [`atom_error`]. A frame that kept them
+/// would allocate them at every level of a deep nesting. The recomputed error
+/// is the original: each is that of a plain combinator, a function of the
+/// input alone, since a repair's [overlay](Overlay) only ever lets such an
+/// alternative succeed.
+///
+/// # Type parameters
+/// - `T`: The type of the value of the alternative.
+///
+/// # Parameters
+/// - `result`: The result of the alternative.
+///
+/// # Returns
+/// The error.
+///
+/// # Panics
+/// If the alternative did not fail recoverably, as it did before.
+fn recoverable<'src, T>(
+	result: IResult<Span<'src>, T, ParseError<'src>>
+) -> ParseError<'src>
+{
+	match result
+	{
+		Err(nom::Err::Error(e)) => e,
+		_ => unreachable!("the alternative failed recoverably before")
+	}
+}
+
+/// Recompute the error of the first alternative of [`Goal::Unary`], a negative
+/// constant, which failed at the specified input.
+///
+/// # Parameters
+/// - `input`: The input of the unary expression.
+///
+/// # Returns
+/// The error.
+///
+/// # Panics
+/// If the negative constant did not fail recoverably.
+fn negation_error(input: Span<'_>) -> ParseError<'_>
+{
+	recoverable(negative_constant(input))
+}
+
+/// Recompute the merged errors of the first two alternatives of
+/// [`Goal::Unary`], a negative constant and a negation, which both failed at
+/// the specified input, the negation at its `-`.
+///
+/// # Parameters
+/// - `input`: The input of the unary expression.
+///
+/// # Returns
+/// The merged errors.
+///
+/// # Panics
+/// If either alternative did not fail recoverably.
+fn unary_error(input: Span<'_>) -> ParseError<'_>
+{
+	let sign: IResult<Span, char, ParseError> = char('-')(input);
+	merge(negation_error(input), recoverable(sign))
+}
+
+/// Recompute the error of the first alternative of [`Goal::Primary`], a range,
+/// which failed at its `[`, the only place where it fails recoverably.
+///
+/// # Parameters
+/// - `input`: The input of the primary expression.
+///
+/// # Returns
+/// The error.
+///
+/// # Panics
+/// If the `[` did not fail recoverably.
+fn range_error(input: Span<'_>) -> ParseError<'_>
+{
+	let bracket: IResult<Span, char, ParseError> = char('[')(input);
+	ParseError::add_context(input, RANGE_CONTEXT, recoverable(bracket))
+}
+
+/// Recompute the merged errors of the first two alternatives of
+/// [`Goal::Atom`] or [`Goal::Faces`], a literal and a variable, which both
+/// failed at the specified input.
+///
+/// # Parameters
+/// - `input`: The input of the atom.
+/// - `signed`: Whether the goal is [`Goal::Faces`], whose literal is signed.
+///
+/// # Returns
+/// The merged errors.
+///
+/// # Panics
+/// If either alternative did not fail recoverably.
+fn atom_error(input: Span<'_>, signed: bool) -> ParseError<'_>
+{
+	merge(
+		recoverable(
+			context(CONSTANT_CONTEXT, literal(signed)).parse_complete(input)
+		),
+		recoverable(
+			context(VARIABLE_CONTEXT, braced_name).parse_complete(input)
+		)
+	)
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                Productions.                                //
 ////////////////////////////////////////////////////////////////////////////////
@@ -1145,7 +1624,7 @@ fn exhaust<'src>(input: Span<'src>, error: ParseError<'src>) -> Step<'src>
 /// The next step.
 fn start_function<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1162,13 +1641,14 @@ fn start_function<'src, R: Recovery<'src>>(
 		}
 	};
 	let input = skip_whitespace(rest);
-	call(
+	call_with(
 		stack,
 		Frame::FunctionBody {
 			start,
-			parameters,
+			formal: parameters.is_some(),
 			input
 		},
+		Payload::Parameters(parameters),
 		Goal::AddSub,
 		input
 	)
@@ -1227,7 +1707,7 @@ fn binary_continue<'src>(
 	level: Level,
 	left: Expression<'src>,
 	rest: Span<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	let operator: IResult<Span, char, ParseError> =
@@ -1237,14 +1717,14 @@ fn binary_continue<'src>(
 		Ok((after, operator)) =>
 		{
 			let input = skip_whitespace(after);
-			call(
+			call_with(
 				stack,
 				Frame::BinaryRight {
 					level,
-					left,
 					operator,
 					input
 				},
+				Payload::Expression(left),
 				level.operand(),
 				input
 			)
@@ -1274,7 +1754,7 @@ fn resume_binary_right<'src>(
 	operator: char,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	match outcome
@@ -1316,7 +1796,9 @@ fn resume_binary_right<'src>(
 
 /// Start [`Goal::Unary`]: `alt((negative_constant, negation,
 /// preceded(multispace0, exponent)))`, where `negation` is `preceded(
-/// char('-'), preceded(multispace0, unary))`.
+/// char('-'), preceded(multispace0, unary))`. The errors of the alternatives
+/// that fail here are discarded, and [recomputed](unary_error) only if the
+/// last alternative fails too.
 ///
 /// # Parameters
 /// - `input`: The input of the production.
@@ -1327,36 +1809,29 @@ fn resume_binary_right<'src>(
 /// The next step.
 fn start_unary<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let error = match parse_negative_constant(input, rec)
+	match parse_negative_constant(input, rec)
 	{
 		Ok((rest, constant)) =>
 		{
 			return succeed(rest, Value::Expression(constant))
 		},
-		Err(nom::Err::Error(e)) => e,
+		Err(nom::Err::Error(_)) =>
+		{},
 		Err(e) => return fail(e)
-	};
+	}
 	let sign: IResult<Span, char, ParseError> = char('-')(input);
 	match sign
 	{
 		Ok((after, _)) =>
 		{
 			let operand = skip_whitespace(after);
-			call(
-				stack,
-				Frame::UnaryNegation { input, error },
-				Goal::Unary,
-				operand
-			)
+			call(stack, Frame::UnaryNegation(input), Goal::Unary, operand)
 		},
-		Err(nom::Err::Error(e)) =>
-		{
-			unary_exponent(input, merge(error, e), stack)
-		},
+		Err(nom::Err::Error(_)) => unary_exponent(input, None, stack),
 		Err(e) => fail(e)
 	}
 }
@@ -1365,31 +1840,47 @@ fn start_unary<'src, R: Recovery<'src>>(
 ///
 /// # Parameters
 /// - `input`: The input of the unary expression.
-/// - `error`: The merged errors of the first two alternatives.
+/// - `error`: The merged errors of the first two alternatives, if the negation
+///   failed after its `-`, or `None` if both failed at the input.
 /// - `stack`: The stack of suspended productions.
 ///
 /// # Returns
 /// The next step.
 fn unary_exponent<'src>(
 	input: Span<'src>,
-	error: ParseError<'src>,
-	stack: &mut Vec<Frame<'src>>
+	error: Option<ParseError<'src>>,
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	let exponent = skip_whitespace(input);
-	call(
-		stack,
-		Frame::UnaryExponent { input, error },
-		Goal::Exponent,
-		exponent
-	)
+	match error
+	{
+		Some(error) => call_with(
+			stack,
+			Frame::UnaryExponent {
+				input,
+				merged: true
+			},
+			Payload::Error(error),
+			Goal::Exponent,
+			exponent
+		),
+		None => call(
+			stack,
+			Frame::UnaryExponent {
+				input,
+				merged: false
+			},
+			Goal::Exponent,
+			exponent
+		)
+	}
 }
 
 /// Resume [`Goal::Unary`] with the outcome of the operand of a negation.
 ///
 /// # Parameters
 /// - `input`: The input of the unary expression, which begins with the `-`.
-/// - `error`: The error of the first alternative.
 /// - `outcome`: The outcome of the operand.
 /// - `stack`: The stack of suspended productions.
 ///
@@ -1404,9 +1895,8 @@ fn unary_exponent<'src>(
 /// alone, so `-(0)` is still a negation.
 fn resume_unary_negation<'src>(
 	input: Span<'src>,
-	error: ParseError<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	match outcome
@@ -1436,7 +1926,8 @@ fn resume_unary_negation<'src>(
 		},
 		Err(nom::Err::Error(e)) =>
 		{
-			unary_exponent(input, merge(error, e), stack)
+			let error = merge(negation_error(input), e);
+			unary_exponent(input, Some(error), stack)
 		},
 		Err(e) => fail(e)
 	}
@@ -1447,21 +1938,26 @@ fn resume_unary_negation<'src>(
 ///
 /// # Parameters
 /// - `input`: The input of the unary expression.
-/// - `error`: The merged errors of the first two alternatives.
+/// - `error`: The merged errors of the first two alternatives, if the negation
+///   failed after its `-`, or `None` if both failed at the input.
 /// - `outcome`: The outcome of the exponentiation.
 ///
 /// # Returns
 /// The next step.
 fn resume_unary_exponent<'src>(
 	input: Span<'src>,
-	error: ParseError<'src>,
+	error: Option<ParseError<'src>>,
 	outcome: Outcome<'src>
 ) -> Step<'src>
 {
 	match outcome
 	{
 		Ok((rest, value)) => succeed(rest, value),
-		Err(nom::Err::Error(e)) => exhaust(input, merge(error, e)),
+		Err(nom::Err::Error(e)) =>
+		{
+			let error = error.unwrap_or_else(|| unary_error(input));
+			exhaust(input, merge(error, e))
+		},
 		Err(e) => fail(e)
 	}
 }
@@ -1483,7 +1979,7 @@ fn resume_unary_exponent<'src>(
 /// The next step.
 fn resume_exponent_base<'src>(
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	let (rest, base) = match outcome
@@ -1498,9 +1994,10 @@ fn resume_exponent_base<'src>(
 		Ok((after, _)) =>
 		{
 			let input = skip_whitespace(after);
-			call(
+			call_with(
 				stack,
-				Frame::ExponentPower { base, input },
+				Frame::ExponentPower(input),
+				Payload::Expression(base),
 				Goal::Unary,
 				input
 			)
@@ -1567,6 +2064,9 @@ fn resume_exponent_power<'src>(
 /// text in the same way. It also discarded the errors of the failed
 /// alternatives, so no error differs either.
 ///
+/// If the range fails, its error is discarded, and [recomputed](range_error)
+/// only if the dice fail too.
+///
 /// # Parameters
 /// - `input`: The input of the primary expression.
 /// - `outcome`: The outcome of the range.
@@ -1577,7 +2077,7 @@ fn resume_exponent_power<'src>(
 fn resume_primary_range<'src>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	match with_context_on_error(input, RANGE_CONTEXT, outcome)
@@ -1586,12 +2086,10 @@ fn resume_primary_range<'src>(
 			rest,
 			Value::Expression(Expression::Range(range.into_range()))
 		),
-		Err(nom::Err::Error(error)) => call(
-			stack,
-			Frame::PrimaryDice { input, error },
-			Goal::PrimaryDice,
-			input
-		),
+		Err(nom::Err::Error(_)) =>
+		{
+			call(stack, Frame::PrimaryDice(input), Goal::PrimaryDice, input)
+		},
 		Err(e) => fail(e)
 	}
 }
@@ -1600,7 +2098,6 @@ fn resume_primary_range<'src>(
 ///
 /// # Parameters
 /// - `input`: The input of the primary expression.
-/// - `error`: The error of the first alternative.
 /// - `outcome`: The outcome of the dice.
 /// - `stack`: The stack of suspended productions.
 ///
@@ -1608,9 +2105,8 @@ fn resume_primary_range<'src>(
 /// The next step.
 fn resume_primary_dice<'src>(
 	input: Span<'src>,
-	error: ParseError<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	match with_context_on_error(input, DICE_CONTEXT, outcome)
@@ -1621,12 +2117,10 @@ fn resume_primary_dice<'src>(
 		},
 		// The dice count, without a dice operator.
 		Ok((rest, count)) => succeed(rest, count),
-		Err(nom::Err::Error(e)) => call(
+		Err(nom::Err::Error(e)) => call_with(
 			stack,
-			Frame::PrimaryGroup {
-				input,
-				error: merge(error, e)
-			},
+			Frame::PrimaryGroup(input),
+			Payload::Error(merge(range_error(input), e)),
 			Goal::Group,
 			input
 		),
@@ -1653,7 +2147,7 @@ fn resume_primary_group<'src, R: Recovery<'src>>(
 	input: Span<'src>,
 	error: ParseError<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1680,7 +2174,7 @@ fn resume_primary_group<'src, R: Recovery<'src>>(
 		Err(nom::Err::Error(e)) => merge(error, e),
 		Err(e) => return fail(e)
 	};
-	match parse_constant(input, rec)
+	match parse_constant(input, false, rec)
 	{
 		Ok((rest, constant)) =>
 		{
@@ -1713,7 +2207,7 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 	rest: Span<'src>,
 	variable: Variable<'src>,
 	name_span: SourceSpan,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1742,10 +2236,14 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 /// context(VARIABLE_CONTEXT, variable), context(GROUP_CONTEXT, group)))`, where
 /// the variable [continues as a binding](variable_or_binding) if an `@` follows
 /// it. The original tried a binding as the third alternative, but a binding
-/// begins as a variable does, so it fails wherever the variable does.
+/// begins as a variable does, so it fails wherever the variable does. The
+/// errors of the alternatives that fail here are discarded, and
+/// [recomputed](atom_error) only if the group fails too. [`Goal::Faces`] is the
+/// same, but with a signed [`integer`] in place of the [`constant`].
 ///
 /// # Parameters
 /// - `input`: The input of the production.
+/// - `signed`: Whether the goal is [`Goal::Faces`], whose literal is signed.
 /// - `stack`: The stack of suspended productions.
 /// - `rec`: The recovery state.
 ///
@@ -1753,11 +2251,12 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 /// The next step.
 fn start_atom<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	signed: bool,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let error = match parse_constant(input, rec)
+	match parse_constant(input, signed, rec)
 	{
 		Ok((rest, constant)) =>
 		{
@@ -1766,21 +2265,19 @@ fn start_atom<'src, R: Recovery<'src>>(
 				Value::Expression(Expression::Constant(constant))
 			);
 		},
-		Err(nom::Err::Error(e)) => e,
+		Err(nom::Err::Error(_)) =>
+		{},
 		Err(e) => return fail(e)
-	};
+	}
 	match parse_variable(input, stack, rec)
 	{
 		Ok((rest, (variable, name_span))) =>
 		{
 			variable_or_binding(input, rest, variable, name_span, stack, rec)
 		},
-		Err(nom::Err::Error(e)) => call(
+		Err(nom::Err::Error(_)) => call(
 			stack,
-			Frame::AtomGroup {
-				input,
-				error: merge(error, e)
-			},
+			Frame::AtomGroup { input, signed },
 			Goal::Group,
 			input
 		),
@@ -1788,18 +2285,19 @@ fn start_atom<'src, R: Recovery<'src>>(
 	}
 }
 
-/// Resume [`Goal::Atom`] with the outcome of a group, its last alternative.
+/// Resume [`Goal::Atom`] or [`Goal::Faces`] with the outcome of a group, its
+/// last alternative.
 ///
 /// # Parameters
 /// - `input`: The input of the atom.
-/// - `error`: The merged errors of the first two alternatives.
+/// - `signed`: Whether the goal is [`Goal::Faces`], whose literal is signed.
 /// - `outcome`: The outcome of the group.
 ///
 /// # Returns
 /// The next step.
 fn resume_atom_group<'src>(
 	input: Span<'src>,
-	error: ParseError<'src>,
+	signed: bool,
 	outcome: Outcome<'src>
 ) -> Step<'src>
 {
@@ -1809,7 +2307,10 @@ fn resume_atom_group<'src>(
 			rest,
 			Value::Expression(Expression::Group(group.into_group()))
 		),
-		Err(nom::Err::Error(e)) => exhaust(input, merge(error, e)),
+		Err(nom::Err::Error(e)) =>
+		{
+			exhaust(input, merge(atom_error(input, signed), e))
+		},
 		Err(e) => fail(e)
 	}
 }
@@ -1824,10 +2325,7 @@ fn resume_atom_group<'src>(
 ///
 /// # Returns
 /// The next step.
-fn start_group<'src>(
-	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>
-) -> Step<'src>
+fn start_group<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 {
 	let start = input.location_offset();
 	let paren: IResult<Span, char, ParseError> = char('(')(input);
@@ -1862,7 +2360,7 @@ fn resume_group_expression<'src, R: Recovery<'src>>(
 	start: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1910,7 +2408,7 @@ fn resume_group_expression<'src, R: Recovery<'src>>(
 /// The next step.
 fn start_binding<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1955,7 +2453,7 @@ fn start_binding<'src, R: Recovery<'src>>(
 fn bind<'src, R: Recovery<'src>>(
 	head: BindingHead<'src>,
 	after_at: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -1975,9 +2473,10 @@ fn bind<'src, R: Recovery<'src>>(
 		}
 	};
 	let input = skip_whitespace(after);
-	call(
+	call_with(
 		stack,
-		Frame::BindingExpression { head, paren, input },
+		Frame::BindingExpression { paren, input },
+		Payload::Head(head),
 		Goal::AddSub,
 		input
 	)
@@ -2001,7 +2500,7 @@ fn resume_binding_expression<'src, R: Recovery<'src>>(
 	paren: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2061,10 +2560,7 @@ fn resume_binding_expression<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn start_range<'src>(
-	input: Span<'src>,
-	stack: &mut Vec<Frame<'src>>
-) -> Step<'src>
+fn start_range<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 {
 	let start = input.location_offset();
 	let bracket: IResult<Span, char, ParseError> = char('[')(input);
@@ -2099,7 +2595,7 @@ fn resume_range_start<'src, R: Recovery<'src>>(
 	start: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2123,13 +2619,10 @@ fn resume_range_start<'src, R: Recovery<'src>>(
 		}
 	};
 	let input = skip_whitespace(after);
-	call(
+	call_with(
 		stack,
-		Frame::RangeEnd {
-			start,
-			first,
-			input
-		},
+		Frame::RangeEnd { start, input },
+		Payload::Expression(first),
 		Goal::AddSub,
 		input
 	)
@@ -2152,7 +2645,7 @@ fn resume_range_end<'src, R: Recovery<'src>>(
 	first: Expression<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2212,7 +2705,7 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 	primary: bool,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2233,14 +2726,14 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 				rec.operator = Some(skip_whitespace(rest));
 			}
 			let faces = skip_whitespace(after);
-			call(
+			call_with(
 				stack,
 				Frame::DiceFaces {
 					start: input.location_offset(),
-					count,
 					input: faces
 				},
-				Goal::Atom,
+				Payload::Expression(count),
+				Goal::Faces,
 				faces
 			)
 		},
@@ -2268,7 +2761,7 @@ fn resume_dice_faces<'src, R: Recovery<'src>>(
 	count: Expression<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2318,14 +2811,11 @@ fn resume_dice_faces<'src, R: Recovery<'src>>(
 				Ok(overlay) =>
 				{
 					rec.overlay = Some(overlay);
-					call(
+					call_with(
 						stack,
-						Frame::DiceFaces {
-							start,
-							count,
-							input
-						},
-						Goal::Atom,
+						Frame::DiceFaces { start, input },
+						Payload::Expression(count),
+						Goal::Faces,
 						input
 					)
 				},
@@ -2382,7 +2872,7 @@ fn standard_dice<'src>(
 fn dice_continue<'src, R: Recovery<'src>>(
 	dice: DiceExpression<'src>,
 	rest: Span<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
@@ -2416,13 +2906,23 @@ fn dice_continue<'src, R: Recovery<'src>>(
 		}
 	};
 	let input = skip_whitespace(after_direction);
-	call(
-		stack,
-		Frame::DiceDrop {
+	if begins_with_minus(input)
+	{
+		return finish_drop_clause(
 			dice,
 			direction,
-			rest: after_direction,
-			input
+			after_direction,
+			None,
+			stack,
+			rec
+		);
+	}
+	call_with(
+		stack,
+		Frame::DiceDrop { direction, input },
+		Payload::Drop {
+			dice,
+			rest: after_direction
 		},
 		Goal::Atom,
 		input
@@ -2449,15 +2949,42 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 	rest: Span<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>,
+	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let (rest, drop) = match optional_drop(rest, input, outcome)
+	match optional_drop(rest, input, outcome)
 	{
-		Ok(parsed) => parsed,
-		Err(e) => return fail(e)
-	};
+		Ok((rest, drop)) =>
+		{
+			finish_drop_clause(dice, direction, rest, drop, stack, rec)
+		},
+		Err(e) => fail(e)
+	}
+}
+
+/// Finish a drop clause of [`Goal::Dice`] or [`Goal::PrimaryDice`], and look
+/// for another.
+///
+/// # Parameters
+/// - `dice`: The dice expression that the clause modifies.
+/// - `direction`: The direction of the clause.
+/// - `rest`: The input after the clause.
+/// - `drop`: The drop expression of the clause, if any.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn finish_drop_clause<'src, R: Recovery<'src>>(
+	dice: DiceExpression<'src>,
+	direction: DropDirection,
+	rest: Span<'src>,
+	drop: Option<Box<Expression<'src>>>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
 	let span = SourceSpan {
 		start: dice.span().start,
 		end: rest.location_offset()
@@ -2493,7 +3020,7 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 fn resume_standard_count<'src>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	let (rest, count) =
@@ -2509,10 +3036,11 @@ fn resume_standard_count<'src>(
 		Ok((after, _)) =>
 		{
 			let input = skip_whitespace(after);
-			call(
+			call_with(
 				stack,
-				Frame::StandardFaces { count, input },
-				Goal::Atom,
+				Frame::StandardFaces(input),
+				Payload::Expression(count),
+				Goal::Faces,
 				input
 			)
 		},
@@ -2621,7 +3149,7 @@ fn resume_custom_count<'src>(
 fn start_drop<'src>(
 	input: Span<'src>,
 	direction: &'static str,
-	stack: &mut Vec<Frame<'src>>
+	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
 	let keywords: IResult<Span, (Span, Span), ParseError> =
@@ -2633,9 +3161,14 @@ fn start_drop<'src>(
 		Ok((rest, _)) =>
 		{
 			let input = skip_whitespace(rest);
-			call(
+			if begins_with_minus(input)
+			{
+				return succeed(rest, Value::Drop(None));
+			}
+			call_with(
 				stack,
-				Frame::DropExpression { rest, input },
+				Frame::DropExpression(input),
+				Payload::Rest(rest),
 				Goal::Atom,
 				input
 			)
@@ -2994,15 +3527,15 @@ impl Role
 	{
 		match frame
 		{
-			Frame::UnaryNegation { .. }
+			Frame::UnaryNegation(_)
 			| Frame::PrimaryRange(_)
-			| Frame::PrimaryDice { .. }
-			| Frame::PrimaryGroup { .. }
+			| Frame::PrimaryDice(_)
+			| Frame::PrimaryGroup(_)
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
-			| Frame::DropExpression { .. } => Role::Catch,
+			| Frame::DropExpression(_) => Role::Catch,
 			Frame::BinaryRight { .. }
-			| Frame::ExponentPower { .. }
+			| Frame::ExponentPower(_)
 			| Frame::GroupExpression { .. }
 			| Frame::BindingExpression { .. }
 			| Frame::RangeStart { .. }
@@ -3014,7 +3547,7 @@ impl Role
 			| Frame::AtomGroup { .. }
 			| Frame::DiceCount { .. }
 			| Frame::StandardCount(_)
-			| Frame::StandardFaces { .. }
+			| Frame::StandardFaces(_)
 			| Frame::CustomCount(_) => Role::Pass
 		}
 	}
@@ -3023,8 +3556,8 @@ impl Role
 /// A token that a [repair](Repair) supplies at a position of the source, which
 /// the engine reads in place of the source text there. Only the leaves that
 /// would read the token, were it in the source, look for it. In the source,
-/// `-0` is a constant, so a constant also begins at a `-` just before the
-/// token.
+/// `-0` is a [negated constant](negative_constant), or faces that are an
+/// [`integer`], so either also begins at a `-` just before the token.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Overlay<'src>
 {
@@ -3163,7 +3696,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	/// - `input`: The input of the goal.
 	/// - `stack`: The stack of suspended productions.
 	#[inline(always)]
-	fn called(&mut self, goal: Goal, input: Span<'src>, stack: &[Frame<'src>])
+	fn called(&mut self, goal: Goal, input: Span<'src>, stack: &Stack<'src>)
 	{
 		if !self.recovering() || stack.is_empty()
 		{
@@ -3209,8 +3742,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	/// # Returns
 	/// `true` if the outcome is a certain failure, `false` otherwise.
 	#[inline(always)]
-	fn intercepts(&self, outcome: &Outcome<'src>, stack: &[Frame<'src>])
-	-> bool
+	fn intercepts(&self, outcome: &Outcome<'src>, stack: &Stack<'src>) -> bool
 	{
 		self.recovering()
 			&& matches!(outcome, Err(nom::Err::Error(_)))
@@ -3237,7 +3769,10 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	/// goal. A [variable](Repair::Variable) at the start of the body of a
 	/// function without formal parameters, followed by a `,` or `:`, is the
 	/// first formal parameter of the edited source, so the engine instead
-	/// parses the function again, from the variable.
+	/// parses the function again, from the variable. Formal parameters may
+	/// likewise follow source skipped at the start of the body of a function
+	/// without them, so the engine parses that function again too, after the
+	/// discarded source.
 	///
 	/// # Parameters
 	/// - `outcome`: The error of the goal.
@@ -3249,7 +3784,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	fn recover_goal(
 		&mut self,
 		outcome: Outcome<'src>,
-		stack: &mut Vec<Frame<'src>>
+		stack: &mut Stack<'src>
 	) -> Step<'src>
 	{
 		let Err(e) = &outcome
@@ -3307,9 +3842,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 				// Formal parameters may follow the discarded source at the
 				// start of a function without them, so parse the function
 				// again.
-				if let Frame::FunctionBody {
-					parameters: None, ..
-				} = stack[anchor]
+				if let Frame::FunctionBody { formal: false, .. } = stack[anchor]
 				{
 					return self.restart_function(input, stack);
 				}
@@ -3336,7 +3869,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	fn restart_function(
 		&mut self,
 		input: Span<'src>,
-		stack: &mut Vec<Frame<'src>>
+		stack: &mut Stack<'src>
 	) -> Step<'src>
 	{
 		stack.clear();
@@ -3366,7 +3899,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		&mut self,
 		site: Site,
 		e: nom::Err<ParseError<'src>>,
-		stack: &[Frame<'src>]
+		stack: &Stack<'src>
 	) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
 	{
 		if !self.recovering()
@@ -3392,7 +3925,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		&mut self,
 		site: Site,
 		e: nom::Err<ParseError<'src>>,
-		stack: &[Frame<'src>]
+		stack: &Stack<'src>
 	) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
 	{
 		self.consult_with(site, e, stack, |repair, input| {
@@ -3423,7 +3956,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		&mut self,
 		site: Site,
 		e: nom::Err<ParseError<'src>>,
-		stack: &[Frame<'src>],
+		stack: &Stack<'src>,
 		accept: impl FnOnce(Repair, Span<'src>) -> Option<T>
 	) -> Result<T, nom::Err<ParseError<'src>>>
 	{
@@ -3468,7 +4001,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		&mut self,
 		e: nom::Err<ParseError<'src>>,
 		input: Span<'src>,
-		stack: &[Frame<'src>]
+		stack: &Stack<'src>
 	) -> Result<Overlay<'src>, nom::Err<ParseError<'src>>>
 	{
 		if !self.recovering()
@@ -3613,20 +4146,22 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	}
 
 	/// Read the [overlaid](Overlay::Constant) constant as [`constant`] would,
-	/// if it begins at the specified input, or just after a `-` there; or read
-	/// the placeholder faces of a [reread](Overlay::Reread), if they begin at
-	/// the specified input.
+	/// if it begins at the specified input, or as [`integer`] would, if it
+	/// begins there or just after a `-` there; or read the placeholder faces of
+	/// a [reread](Overlay::Reread), if they begin at the specified input.
 	///
 	/// # Parameters
 	/// - `input`: The input.
+	/// - `signed`: Whether to read the constant as [`integer`] would.
 	///
 	/// # Returns
 	/// The input after the constant, and the constant, if the overlay begins
-	/// at `input` or just after a `-` there. After the faces of a reread, the
-	/// input is that at its dice operator.
+	/// at `input`, or just after a `-` there if `signed`. After the faces of a
+	/// reread, the input is that at its dice operator.
 	fn take_constant(
 		&mut self,
-		input: Span<'src>
+		input: Span<'src>,
+		signed: bool
 	) -> Option<(Span<'src>, Constant)>
 	{
 		let start = input.location_offset();
@@ -3637,7 +4172,9 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 				(input, at, value)
 			},
 			Overlay::Constant { at, value }
-				if at == start + 1 && input.fragment().starts_with('-') =>
+				if signed
+					&& at == start + 1
+					&& input.fragment().starts_with('-') =>
 			{
 				(input.take_from(1), at, -value)
 			},
@@ -3717,11 +4254,11 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 /// The leading entries of the error, i.e., those at its position.
 fn settle<'src>(
 	mut e: nom::Err<ParseError<'src>>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	root: Span<'src>
 ) -> ParseError<'src>
 {
-	for frame in stack.iter().rev()
+	for (frame, payload) in stack.iter_rev()
 	{
 		// A frame can only attach entries to an unrecoverable error, so once an
 		// entry is not at the position, no later entry is leading.
@@ -3730,7 +4267,7 @@ fn settle<'src>(
 		{
 			break;
 		}
-		e = unwind(frame, e);
+		e = unwind(frame, payload, e);
 	}
 	let mut error = match with_context(root, FUNCTION_CONTEXT, e)
 	{
@@ -3765,12 +4302,17 @@ fn leading(error: &ParseError<'_>) -> usize
 /// # Parameters
 /// - `frame`: The frame. If the error is recoverable, it must not
 ///   [catch](Role::Catch) it.
+/// - `payload`: The payload of the frame, if it [carries](Frame::carries) one.
 /// - `e`: The error.
 ///
 /// # Returns
 /// The error, as the frame's production would finish with it.
+///
+/// # Panics
+/// If the frame carries a payload of the wrong kind.
 fn unwind<'src>(
 	frame: &Frame<'src>,
+	payload: Option<&Payload<'src>>,
 	e: nom::Err<ParseError<'src>>
 ) -> nom::Err<ParseError<'src>>
 {
@@ -3785,34 +4327,36 @@ fn unwind<'src>(
 			with_context(*input, FUNCTION_BODY_CONTEXT, e)
 		},
 		Frame::BinaryFirst(_)
-		| Frame::UnaryNegation { .. }
+		| Frame::UnaryNegation(_)
 		| Frame::ExponentBase => e,
-		Frame::BinaryRight { input, .. }
-		| Frame::ExponentPower { input, .. } =>
+		Frame::BinaryRight { input, .. } | Frame::ExponentPower(input) =>
 		{
 			cut_error(with_context(*input, RIGHT_OPERAND_CONTEXT, e))
 		},
-		Frame::UnaryExponent { input, error } => match e
+		Frame::UnaryExponent { input, .. } => match e
 		{
-			nom::Err::Error(e) => exhausted(*input, merge(error.clone(), e)),
+			nom::Err::Error(e) =>
+			{
+				let error = match payload
+				{
+					Some(Payload::Error(error)) => error.clone(),
+					None => unary_error(*input),
+					Some(_) => unreachable!("the payload is not an error")
+				};
+				exhausted(*input, merge(error, e))
+			},
 			e => e
 		},
 		Frame::PrimaryRange(input) => with_context(*input, RANGE_CONTEXT, e),
-		Frame::PrimaryDice { input, .. } =>
-		{
-			with_context(*input, DICE_CONTEXT, e)
-		},
-		Frame::PrimaryGroup { input, .. } =>
-		{
-			with_context(*input, GROUP_CONTEXT, e)
-		},
-		Frame::AtomGroup { input, error } =>
+		Frame::PrimaryDice(input) => with_context(*input, DICE_CONTEXT, e),
+		Frame::PrimaryGroup(input) => with_context(*input, GROUP_CONTEXT, e),
+		Frame::AtomGroup { input, signed } =>
 		{
 			match with_context(*input, GROUP_CONTEXT, e)
 			{
 				nom::Err::Error(e) =>
 				{
-					exhausted(*input, merge(error.clone(), e))
+					exhausted(*input, merge(atom_error(*input, *signed), e))
 				},
 				e => e
 			}
@@ -3821,10 +4365,18 @@ fn unwind<'src>(
 		{
 			cut_error(with_context(*input, EXPRESSION_CONTEXT, e))
 		},
-		Frame::BindingExpression { head, input, .. } => within_binding(
-			head.atom,
-			cut_error(with_context(*input, BINDING_EXPRESSION_CONTEXT, e))
-		),
+		Frame::BindingExpression { input, .. } =>
+		{
+			let Some(Payload::Head(head)) = payload
+			else
+			{
+				unreachable!("the payload is not the head of a binding")
+			};
+			within_binding(
+				head.atom,
+				cut_error(with_context(*input, BINDING_EXPRESSION_CONTEXT, e))
+			)
+		},
 		Frame::RangeStart { input, .. } =>
 		{
 			cut_error(with_context(*input, RANGE_START_CONTEXT, e))
@@ -3836,11 +4388,11 @@ fn unwind<'src>(
 		Frame::DiceCount { input, .. }
 		| Frame::StandardCount(input)
 		| Frame::CustomCount(input) => with_context(*input, DICE_COUNT_CONTEXT, e),
-		Frame::DiceFaces { input, .. } | Frame::StandardFaces { input, .. } =>
+		Frame::DiceFaces { input, .. } | Frame::StandardFaces(input) =>
 		{
 			with_context(*input, STANDARD_FACES_CONTEXT, e)
 		},
-		Frame::DiceDrop { input, .. } | Frame::DropExpression { input, .. } =>
+		Frame::DiceDrop { input, .. } | Frame::DropExpression(input) =>
 		{
 			with_context(*input, DROP_EXPRESSION_CONTEXT, e)
 		},
@@ -3864,11 +4416,14 @@ fn exhausted<'src>(
 	nom::Err::Error(ParseError::append(input, ErrorKind::Alt, error))
 }
 
-/// Parse a constant, as `context(CONSTANT_CONTEXT, constant)`, but read an
+/// Parse a literal, as `context(CONSTANT_CONTEXT, constant)`, or as
+/// `context(CONSTANT_CONTEXT, integer)` if `signed`, but read an
 /// [overlaid](Overlay::Constant) constant.
 ///
 /// # Parameters
 /// - `input`: The input.
+/// - `signed`: Whether the literal is a signed [`integer`], rather than an
+///   unsigned [`constant`].
 /// - `rec`: The recovery state.
 ///
 /// # Returns
@@ -3879,15 +4434,32 @@ fn exhausted<'src>(
 #[inline(always)]
 fn parse_constant<'src, R: Recovery<'src>>(
 	input: Span<'src>,
+	signed: bool,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> IResult<Span<'src>, Constant, ParseError<'src>>
 {
 	if rec.recovering()
-		&& let Some(parsed) = rec.take_constant(input)
+		&& let Some(parsed) = rec.take_constant(input, signed)
 	{
 		return Ok(parsed);
 	}
-	context(CONSTANT_CONTEXT, constant).parse_complete(input)
+	context(CONSTANT_CONTEXT, literal(signed)).parse_complete(input)
+}
+
+/// Answer the parser of a literal: a signed [`integer`], as the faces of dice
+/// take, or an unsigned [`constant`], as everything else does.
+///
+/// # Parameters
+/// - `signed`: Whether the literal is signed.
+///
+/// # Returns
+/// The parser of the literal.
+#[inline(always)]
+fn literal<'src>(
+	signed: bool
+) -> fn(Span<'src>) -> IResult<Span<'src>, Constant, ParseError<'src>>
+{
+	if signed { integer } else { constant }
 }
 
 /// Parse a negative constant, as [`negative_constant`], but read an
@@ -3933,7 +4505,7 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 #[inline(always)]
 fn parse_variable<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> IResult<Span<'src>, (Variable<'src>, SourceSpan), ParseError<'src>>
 {
@@ -3983,7 +4555,7 @@ fn parse_variable<'src, R: Recovery<'src>>(
 /// * [`Err`](nom::Err) if the policy declined a repair.
 fn recover_variable<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> IResult<Span<'src>, (Variable<'src>, SourceSpan), ParseError<'src>>
 {
@@ -4098,7 +4670,7 @@ fn recover_variable<'src, R: Recovery<'src>>(
 /// * [`Err`](nom::Err) if the policy declined a repair.
 fn recover_custom_faces<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> IResult<Span<'src>, Vec<i32>, ParseError<'src>>
 {
@@ -4107,7 +4679,7 @@ fn recover_custom_faces<'src, R: Recovery<'src>>(
 	let face = || {
 		preceded(
 			multispace0,
-			context(CONSTANT_CONTEXT, map(constant, |c| c.value))
+			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
 		)
 	};
 	let (after, _) = char('[').parse_complete(input)?;
@@ -4169,7 +4741,7 @@ fn recover_custom_faces<'src, R: Recovery<'src>>(
 /// * [`Err`](nom::Err) if the policy declined a repair.
 fn recover_parameters<'src, R: Recovery<'src>>(
 	input: Span<'src>,
-	stack: &[Frame<'src>],
+	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> IResult<Span<'src>, Option<Vec<Parameter<'src>>>, ParseError<'src>>
 {
@@ -4313,6 +4885,26 @@ fn skip_whitespace(input: Span<'_>) -> Span<'_>
 	skipped.map_or(input, |(rest, _)| rest)
 }
 
+/// Answer whether the input begins with `-`. After a drop direction, this
+/// precludes a drop count, which never begins with `-`, so after a drop clause,
+/// a `-` is always subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) -
+/// 1`. A count of zero or less drops nothing, so reading `-1` as the count
+/// would quietly discard the clause, which is never what the author meant. A
+/// negative count must be grouped, as in `4D6 drop lowest (-1)`, or bound to a
+/// variable. The [constant] of a drop count is unsigned anyway, but the drop
+/// count is optional, so the clause ends before the `-`, rather than the engine
+/// trying, and perhaps [repairing](Repair), a drop count there.
+///
+/// # Parameters
+/// - `input`: The input, without leading whitespace.
+///
+/// # Returns
+/// `true` if the input begins with `-`, `false` otherwise.
+pub(super) fn begins_with_minus(input: Span<'_>) -> bool
+{
+	input.fragment().starts_with('-')
+}
+
 /// Answer whether a position is the start of the body of a function without
 /// formal parameters.
 ///
@@ -4328,7 +4920,7 @@ fn starts_body(frame: &Frame<'_>, at: usize) -> bool
 	matches!(
 		frame,
 		Frame::FunctionBody {
-			parameters: None,
+			formal: false,
 			input,
 			..
 		} if input.location_offset() == at

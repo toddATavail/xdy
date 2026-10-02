@@ -6,9 +6,11 @@
 //! block of instructions in static single assignment (SSA) form. The optimizer
 //! applies a series of transformations to the function, which may include:
 //!
-//! - Constant folding
 //! - Common subexpression elimination
+//! - Constant commuting
+//! - Constant folding
 //! - Strength reduction
+//! - Dead code elimination
 //! - Register coalescing
 //!
 //! The optimizer is implemented as a series of passes, each of which applies a
@@ -176,7 +178,9 @@ pub enum Pass
 	/// the result of another that applies one, e.g., `(x + 1) + 2` into
 	/// `x + 3`, wherever the merged instruction is exact despite saturation,
 	/// thereby creating new opportunities for constant folding and strength
-	/// reduction. Iterate until no further changes are made.
+	/// reduction. Only a single iteration is performed, but it merges whole
+	/// chains of such instructions, and the standard optimizer reapplies it
+	/// until its fixed point is reached.
 	ConstantCommuting = 0x02,
 
 	/// Fold expressions with constant operands into
@@ -185,15 +189,15 @@ pub enum Pass
 	ConstantFolding = 0x04,
 
 	/// Reduce the strength of expressions by replacing expensive operations
-	/// with cheaper ones. Only a single iteration is performed.
+	/// with cheaper ones. Iterate until no further changes are made.
 	StrengthReduction = 0x08,
 
 	/// Eliminate dead code by removing instructions whose results are never
 	/// used. Iterate until no further changes are made.
 	DeadCodeElimination = 0x10,
 
-	/// Coalesce registers by merging equivalent registers. This pass breaks SSA
-	/// form, so it is the final pass.
+	/// Coalesce registers by reusing registers whose live ranges do not
+	/// overlap. This pass breaks SSA form, so it is the final pass.
 	RegisterCoalescing = 0x80
 }
 

@@ -61,10 +61,12 @@ impl Display for SourceSpan
 /// value.
 ///
 /// Every AST node carries a span referencing the original source text, so
-/// compile-time diagnostics (andthe `xdy!` procedural macro) can report errors
-/// with caret-level precision. Span metadata participates in equality and
-/// hashing by default, so two parses of the same expression at different
-/// positions are *not* equal — this keeps the derived traits honest.
+/// compile-time diagnostics (and the planned `xdy!` procedural macro) can
+/// report errors with caret-level precision. Span metadata participates in
+/// equality and hashing, both in the derived implementations and in the
+/// hand-written ones of [`Expression`](crate::ast::Expression) and
+/// [`DiceExpression`](crate::ast::DiceExpression), so two parses of the same
+/// expression at different positions are *not* equal.
 ///
 /// When structural comparison without regard to position is desired — for
 /// instance, in tests that care about the shape of an AST but not the byte

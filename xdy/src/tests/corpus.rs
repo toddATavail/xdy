@@ -11,8 +11,8 @@ use std::{collections::BTreeSet, sync::OnceLock};
 
 use crate::{
 	support::{
-		read_compilation_test_cases, read_error_test_cases,
-		read_evaluation_test_cases, read_histogram_test_cases
+		read_compilation_test_cases, read_distribution_test_cases,
+		read_error_test_cases, read_evaluation_test_cases
 	},
 	tests::ast::{Nesting, nest}
 };
@@ -144,8 +144,8 @@ fn sources() -> BTreeSet<String>
 		.map(|case| case.0.to_owned())
 	);
 	sources.extend(
-		read_histogram_test_cases(include_str!(
-			"../../tests/test_histograms.txt"
+		read_distribution_test_cases(include_str!(
+			"../../tests/test_distributions.txt"
 		))
 		.into_iter()
 		.map(|case| case.0.to_owned())

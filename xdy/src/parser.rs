@@ -1,7 +1,7 @@
 //! # Parser
 //!
 //! Herein is the parser for the `xDy` language. [`Parser::parse`] is the main
-//! entry point, which discards leading whitespace before parsing a
+//! entry point, which discards leading and trailing whitespace around a
 //! [function](Function). The recognized grammar is as follows, in Extended
 //! Backus-Naur Form (EBNF), where non-terminals are in lowercase and terminals
 //! are in uppercase:
@@ -9,32 +9,53 @@
 //! ```text
 //! function       ::= parameters? expression
 //! parameters     ::= parameter (',' parameter)* ':'
-//! parameter      ::= '{' IDENTIFIER '}'
+//! parameter      ::= name
+//! name           ::= '{' WHITESPACE* IDENTIFIER WHITESPACE* '}'
 //! expression     ::= add_sub
 //! add_sub        ::= mul_div_mod (('+' | '-') mul_div_mod)*
-//! mul_div_mod    ::= unary (('*' | '/' | '%') unary)*
+//! mul_div_mod    ::= unary (('*' | '×' | '/' | '÷' | '%') unary)*
 //! unary          ::= '-' unary | exponent
 //! exponent       ::= primary ('^' unary)?
 //! primary        ::= range | dice | group | variable | binding | CONSTANT
 //! group          ::= '(' expression ')'
-//! variable       ::= '{' IDENTIFIER '}'
-//! binding        ::= '{' IDENTIFIER '}' '@' '(' expression ')'
+//! variable       ::= name
+//! binding        ::= name '@' '(' expression ')'
 //! range          ::= '[' expression ':' expression ']'
 //! dice           ::= base_dice drop_clause*
 //! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
 //! dice_count     ::= CONSTANT | variable | binding | group
-//! standard_faces ::= CONSTANT | variable | binding | group
-//! custom_faces   ::= '[' CONSTANT (',' CONSTANT)* ']'
+//! standard_faces ::= INTEGER | variable | binding | group
+//! custom_faces   ::= '[' INTEGER (',' INTEGER)* ']'
 //! drop_clause    ::= 'drop' ('lowest' | 'highest') drop_expression?
 //! drop_expression::= CONSTANT | variable | binding | group
-//! CONSTANT       ::= '-'? DIGIT+
+//! CONSTANT       ::= DIGIT+
+//! INTEGER        ::= '-'? DIGIT+
 //! D_OPERATOR     ::= 'd' | 'D'
 //! IDENTIFIER     ::= NAME_CHAR (NAME_CHAR | WHITESPACE+ NAME_CHAR)*
-//! NAME_CHAR      ::= any code point except '{', '}', whitespace, or an
-//!                    invisible character (is_identifier_char)
+//! NAME_CHAR      ::= any identifier character (is_identifier_char) except
+//!                    whitespace
 //! WHITESPACE     ::= any whitespace (char::is_whitespace), e.g., ' ', '\t',
 //!                    '\n', or U+00A0
 //! ```
+//!
+//! A `CONSTANT` is unsigned, so a minus before one is the unary operator:
+//! `-2 ^ 3` is `-(2 ^ 3)`, and `-3D6` is `-(3D6)`. The parser folds a negated
+//! literal into a single [constant](crate::ast::Constant), as in `-5`, to the
+//! same effect. Only the faces of dice take a signed `INTEGER`, as in `3D-6`
+//! and `1D[-1, 0, 1]`, where nothing but a face may follow. Each combinator
+//! accepts just what its rule does, so [`constant`], [`primary`],
+//! [`dice_count`], and [`dice`] reject `-3`, while [`integer`] and
+//! [`standard_faces`] accept it. In particular, a drop expression never begins
+//! with `-`, so after a drop clause, a `-` is subtraction: `4D6 drop lowest -1`
+//! is `(4D6 drop lowest) - 1`. A count of zero or less drops nothing, so no one
+//! means to write a negative count, but one may be grouped, as in `4D6 drop
+//! lowest (-1)`.
+//!
+//! Tokens may be separated by spaces, horizontal tabs, line feeds, and carriage
+//! returns, but by no other whitespace; the [doctor](crate::diagnostics)
+//! replaces stray whitespace between tokens, such as U+00A0 NO-BREAK SPACE,
+//! with a space. The keywords `drop`, `lowest`, and `highest` are lowercase,
+//! but the dice operator may be `d` or `D`.
 //!
 //! Every name is braced, whether it names a parameter, a variable, or a
 //! binding, so no name can run into the text around it. A lone braced name
@@ -103,10 +124,10 @@ pub struct Parser;
 
 impl Parser
 {
-	/// Parse a function definition, discarding leading whitespace. This is the
-	/// intended high-level entry point for the parser. The individual parser
-	/// combinators are available for low-level uses, but not recommended for
-	/// most clients.
+	/// Parse a function definition, discarding leading and trailing
+	/// whitespace. This is the intended high-level entry point for the parser.
+	/// The individual parser combinators are available for low-level uses,
+	/// but not recommended for most clients.
 	///
 	/// # Parameters
 	/// - `input`: The input text to parse.
@@ -115,7 +136,8 @@ impl Parser
 	/// The parsed function definition.
 	///
 	/// # Errors
-	/// * [`Err`](nom::Err) if the input could not be parsed.
+	/// * [`ParseError`] if the input could not be parsed, including if anything
+	///   but whitespace follows the function definition.
 	pub fn parse(input: &str) -> Result<Function<'_>, ParseError<'_>>
 	{
 		let input = Span::new(input);
@@ -134,12 +156,12 @@ impl Parser
 		.map(|(_, f)| f)
 	}
 
-	/// Parse a function definition, discarding leading whitespace, as
-	/// [`parse`](Parser::parse) does, but in _recovery mode_: wherever the
-	/// parse cannot continue, consult a [policy](Recovery), which may
-	/// [repair](Repair) the failure so that the parse continues as though the
-	/// source had been edited. The source is parsed only once, whatever the
-	/// number of repairs.
+	/// Parse a function definition, discarding leading and trailing
+	/// whitespace, as [`parse`](Parser::parse) does, but in _recovery mode_:
+	/// wherever the parse cannot continue, consult a [policy](Recovery),
+	/// which may [repair](Repair) the failure so that the parse continues
+	/// as though the source had been edited. The source is parsed only
+	/// once, whatever the number of repairs.
 	///
 	/// With a policy that repairs nothing, the result is exactly that of
 	/// [`parse`](Parser::parse).

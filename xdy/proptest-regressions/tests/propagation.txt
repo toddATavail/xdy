@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 79e4c39cbabb8a371948bd0b3ce306a6a34360ba461cb28ff69e7defbba66199 # shrinks to ("(-1 % 2 * [-1:0])D[0, -1]", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648])
+cc 9d1e059a0ea5c615c37e1ea9bff859d68fd72627fddccef1e5aec0e24ac3dad9 # shrinks to ("-(0 + -(4D[2147483646, 2147483647, 2147483647]))", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648])
+cc 21cc11aa96172b696cc22b0e73833e368eac940fd0dd1299b1535bccc80181d2 # shrinks to ("{x}, {hit points}: [((-([0:{hit points}] / 2D4))D0 drop lowest (0) drop lowest (0)):0]", [-2147483648, 2], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648], [false, true])
+cc b0f64e35a98afe40365dfa3a29a7ee8641c3f049cd83b159b5c395c24ba2948c # shrinks to ("[(({x}@(-(-2)))D[-2, 0]):0]", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648], [true])
+cc 6e5f1ca58c9576e0ef546ddaf9ef07549310f587fe0d75be15831b9147e68af3 # shrinks to ("{x}@(-1 - -1)", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648])
+cc 6eb83b72dd2930eff1bc5cec745a33f7ec279ca7cb4b22ab21a751a847acd8fc # shrinks to ("((0D0 * 0)D([0:0] + {Ω-(1)}@(0D0 - 2D[0, -1])))D((0D0 + [{Ω-(1)}:2] + 0)D0)", [-2147483648, -2147483648], [-2147483648, -2147483648, -2147483648, -2147483648, -2147483648])
+cc e010930f2a79f919418e2b9f9731080c3ec99a35be77167fc2021779739d8cc1 # shrinks to ("({Ω-(1)}D{x} + 0)D[1] drop lowest (([0:1] / {Ω-(1)}D5 + 0 + 4D{Ω-(1)} + 0))", [-2147483648, -2147483648], [19, -2147483648, -2147483648, -2147483648, 17])
+cc 79ddf3383a9d800a7dea494214df74a81dd7e8683734d3910e8e8dfa041a35c4 # shrinks to ("({x}D[2, 1, 4])D[2, -1]", [-2147483648, -2147483648], [3, -2147483648, -2147483648, -2147483648, -2147483648])

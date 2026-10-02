@@ -1,9 +1,9 @@
 //! # Common subexpression elimination
 //!
 //! Common subexpression elimination (CSE) is an optimization that eliminates
-//! redundant computations, based on the observation that an expression that
-//! has been previously computed previously can simply be reused. CSE requires
-//! the function to be in static single assignment (SSA) form.
+//! redundant computations, based on the observation that an expression that has
+//! been computed previously can simply be reused. CSE requires the function to
+//! be in static single assignment (SSA) form.
 
 use std::collections::{HashMap, hash_map::Entry};
 

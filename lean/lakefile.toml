@@ -1,0 +1,20 @@
+name = "xdy"
+version = "0.1.0"
+defaultTargets = ["Xdy", "xdy-oracle"]
+testDriver = "XdyTest"
+
+# Match the Rust quality bar: every warning fails the build, and every public
+# declaration must carry documentation.
+[leanOptions]
+warningAsError = true
+linter.missingDocs = true
+
+[[lean_lib]]
+name = "Xdy"
+
+[[lean_lib]]
+name = "XdyTest"
+
+[[lean_exe]]
+name = "xdy-oracle"
+root = "Main"

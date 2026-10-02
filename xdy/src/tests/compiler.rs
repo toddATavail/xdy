@@ -16,7 +16,7 @@ use std::{
 use pretty_assertions::{assert_eq, assert_ne};
 
 use super::{
-	ast::{DEPTH, Nesting, nest_function},
+	ast::{Nesting, nest_function},
 	recovery::SCALE
 };
 use crate::{
@@ -70,7 +70,7 @@ fn test_compile_optimizes_fully()
 }
 
 /// Test that [`compile`] folds constant arithmetic that
-/// [`compile_unoptimized`] leaves alone (xdy-l50).
+/// [`compile_unoptimized`] leaves alone.
 #[test]
 fn test_compile_folds_constants()
 {
@@ -98,17 +98,19 @@ fn test_compile_deep()
 	on_small_stack(|| {
 		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
-			let function = Compiler::compile(&nest_function(nesting, DEPTH));
+			let function =
+				Compiler::compile(&nest_function(nesting, nesting.depth()));
 			assert_eq!(function.externals, ["x"], "{:?}", nesting);
 		}
 	});
 }
 
-/// The depth of the chains of [`test_optimize_deep`]. Any recursion of the
-/// optimizer that grew with the depth would overflow the small stack long
-/// before this depth, yet the chains stay short enough to optimize promptly in
-/// a debug build; [`test_compile_is_linear`] bounds the time at depth.
-const OPTIMIZATION_DEPTH: usize = DEPTH / 10;
+/// The factor by which [`test_optimize_deep`] shortens the chain of each
+/// nesting from its [depth](Nesting::depth). Any recursion of the optimizer
+/// that grew with the depth would overflow the small stack long before the
+/// shortened depth, yet the chains stay short enough to optimize promptly in a
+/// debug build; [`test_compile_is_linear`] bounds the time at depth.
+const OPTIMIZATION_DIVISOR: usize = 10;
 
 /// The time budget of [`test_optimize_deep`], which optimizes a long function
 /// for every nesting construct in a debug build.
@@ -124,8 +126,8 @@ fn test_optimize_deep()
 	on_small_stack_within(OPTIMIZATION_TIMEOUT, || {
 		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
-			let function =
-				Compiler::compile(&nest_function(nesting, OPTIMIZATION_DEPTH));
+			let depth = nesting.depth() / OPTIMIZATION_DIVISOR;
+			let function = Compiler::compile(&nest_function(nesting, depth));
 			let function = optimize(function, Passes::all());
 			assert_eq!(function.externals, ["x"], "{:?}", nesting);
 		}
@@ -196,7 +198,7 @@ const FAMILIES: &[(&str, Member)] = &[
 /// Ensure that [`compile`], which optimizes fully, takes time linear in the
 /// depth of its input, for chains that fold away and chains that cannot. The
 /// optimizer's passes each once took time quadratic in the length of such a
-/// chain (xdy-i0q.31). Wall-clock time is noisy under a busy machine, so the
+/// chain. Wall-clock time is noisy under a busy machine, so the
 /// test is ignored by default; `just stress` runs it.
 #[test]
 #[ignore = "stress: run with just stress"]

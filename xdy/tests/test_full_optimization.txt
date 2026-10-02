@@ -2941,3 +2941,24 @@ Function() r#0 ⚅#0
 	extern[]
 	body:
 		return 14
+
+(0D0)D(1D{hit points}@({x}) drop lowest)
+=
+Function() r#1 ⚅#0
+	extern[{x}@0]
+	body:
+		return 0
+
+(0D0)D(3D{x} drop highest)
+=
+Function() r#1 ⚅#0
+	extern[{x}@0]
+	body:
+		return 0
+
+(0D0)D(10D{x} drop highest (1D4) drop lowest 2)
+=
+Function() r#1 ⚅#0
+	extern[{x}@0]
+	body:
+		return 0

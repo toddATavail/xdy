@@ -1,46 +1,37 @@
 # xDy: Tree-sitter
 
 This is the [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar
-for the xDy dice expression language. Most of the mainline documentation is in
-the [compiler](../xdy) crate, where the compiler, optimizer, evaluator, and
-application reside.
+for the xDy dice expression language, for editors and other tools that consume
+Tree-sitter grammars. The [`xdy`](../xdy) crate does not use it: its parser is
+built on [`nom`](https://crates.io/crates/nom), and is the reference for the
+language, which this grammar follows. Most of the mainline documentation is in
+that crate, where the parser, compiler, optimizer, and evaluator reside.
+
+The grammar produces syntax trees, but ships no queries yet, so it provides no
+syntax highlighting or code folding of its own.
 
 ## Building
 
-The Rust bindings are checked in, so you can build the [compiler](../xdy)
-without doing anything special. The relevant build instructions are
-[here](../xdy/README.md), and you can safely ignore the directions hereinafter
-unless you want to build bindings for a different language or modify the
-grammar.
+The generated parser (`src/parser.c`) is checked in, so the Rust bindings build
+without the `tree-sitter` command-line tool. The Rust bindings are the only
+bindings in this repository. You need the tool only to modify the grammar, or
+to generate bindings for another language yourself.
 
 ### Generating the parser
 
-To generate the parser, you need to have the `tree-sitter` command-line tool
-installed. There's a Rust version and a Node.js version, and you can find the
-pertinent installation instructions
-[here](https://tree-sitter.github.io/tree-sitter/creating-parsers).
-Once you have the tool installed, you can generate the parser using `npm`:
-
-```shell
-$ npm run build
-```
-
-Or using `tree-sitter` directly:
+To generate the parser, you need the `tree-sitter` command-line tool, which
+`cargo install tree-sitter-cli` installs; see
+[Creating parsers](https://tree-sitter.github.io/tree-sitter/creating-parsers)
+for other ways. Then, from this directory:
 
 ```shell
 $ tree-sitter generate
-$ tree-sitter build
 ```
 
 ## Testing
 
-After the parser has been generated, you can run the tests using `npm`:
-
-```shell
-$ npm test
-```
-
-Or you can run the grammar tests and the Rust integration test piecewise:
+Run the grammar's corpus tests, under `test/corpus`, and the Rust integration
+test:
 
 ```shell
 $ tree-sitter test

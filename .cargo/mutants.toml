@@ -23,8 +23,8 @@
 # `<`/`<=` trim check in `identifier`) were killed by collapsing dead guards
 # and removing a spurious branch rather than by blacklisting.
 #
-# The full per-mutant equivalence analyses live in the closed issue
-# `xdy-yis` in the project's beads database.
+# The full per-mutant equivalence analyses live in the project's issue
+# tracker.
 
 exclude_re = [
 	# analyze_error (xdy/src/diagnostics.rs):

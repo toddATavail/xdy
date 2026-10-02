@@ -331,9 +331,24 @@ fn schedule_drop<'a>(
 	drop: Option<&'a Expression<'a>>
 )
 {
-	if let Some(drop) = drop
+	match drop
 	{
-		schedule(stack, &[Piece::Text(" "), Piece::Expression(drop)]);
+		// A drop expression never begins with `-`, so a negative constant,
+		// which only a tree that was not parsed can hold here, renders grouped,
+		// lest it read back as a subtraction.
+		Some(drop @ Expression::Constant(Constant { value: ..0, .. })) =>
+		{
+			schedule(
+				stack,
+				&[Piece::Text(" ("), Piece::Expression(drop), Piece::Text(")")]
+			);
+		},
+		Some(drop) =>
+		{
+			schedule(stack, &[Piece::Text(" "), Piece::Expression(drop)]);
+		},
+		None =>
+		{}
 	}
 	schedule(stack, &[Piece::Dice(dice), Piece::Text(keywords)]);
 }

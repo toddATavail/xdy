@@ -8,12 +8,13 @@
 //! can be caught by round-trip tests over the corpus.
 //!
 //! The assembler targets the [`Evaluator`](crate::Evaluator) as its downstream
-//! consumer. Index-bounds and register-file contiguity are enforced so that the
-//! evaluator's unchecked vector indexing cannot panic on an assembled
-//! [`Function`]. Hand-authored IR that would survive the assembler but
-//! nonetheless trip the [`StandardOptimizer`](crate::StandardOptimizer) (which
-//! has internal invariants the compiler establishes — e.g., a trailing
-//! [`Return`](crate::Return) instruction, single-assignment forms in some
+//! consumer. Every assembled [`Function`] is
+//! [well formed](Function::validate), so the evaluator's unchecked vector
+//! indexing cannot panic on it, and it ends with its only
+//! [`Return`](crate::Return). Hand-authored IR that would survive the
+//! assembler but nonetheless trip the
+//! [`StandardOptimizer`](crate::StandardOptimizer) (which has internal
+//! invariants the compiler establishes — e.g., single-assignment forms in some
 //! passes) is out of scope.
 //!
 //! # Grammar
@@ -23,39 +24,51 @@
 //!
 //! ```text
 //! function          ::= header extern_line body_header instruction_line*
-//! header            ::= "Function(" parameters? ") r#" INDEX " ⚅#" INDEX EOL
+//! header            ::= "Function(" parameters? ")" "r#" INDEX "⚅#" INDEX EOL
 //! parameters        ::= named_reg ("," named_reg)*
 //! extern_line       ::= "extern[" externals? "]" EOL
 //! externals         ::= named_reg ("," named_reg)*
 //! named_reg         ::= "{" NAME "}" "@" INDEX
 //! body_header       ::= "body:" EOL
-//! instruction_line  ::= instruction EOL
+//! instruction_line  ::= instruction (EOL | EOF)
 //! instruction       ::= roll_range | roll_standard_dice | roll_custom_dice
 //!                     | drop_lowest | drop_highest | sum_rolling_record
-//!                     | binary_op | unary_neg | return_inst
-//! roll_range        ::= "⚅" INDEX "<-" "roll range" op ":" op
-//! roll_standard_dice::= "⚅" INDEX "<-" "roll standard dice" op "D" op
-//! roll_custom_dice  ::= "⚅" INDEX "<-" "roll custom dice" op "D[" INTEGER
-//!                         ("," INTEGER)* "]"
-//! drop_lowest       ::= "⚅" INDEX "<-" "drop lowest" op "from" "⚅" INDEX
-//! drop_highest      ::= "⚅" INDEX "<-" "drop highest" op "from" "⚅" INDEX
+//!                     | binary_op | unary_neg | return
+//! roll_range        ::= "⚅" INDEX "<-" "roll range" value_operand ":"
+//!                         value_operand
+//! roll_standard_dice::= "⚅" INDEX "<-" "roll standard dice" value_operand
+//!                         "D" value_operand
+//! roll_custom_dice  ::= "⚅" INDEX "<-" "roll custom dice" value_operand
+//!                         "D[" INTEGER ("," INTEGER)* "]"
+//! drop_lowest       ::= "⚅" INDEX "<-" "drop lowest" value_operand "from"
+//!                         "⚅" INDEX
+//! drop_highest      ::= "⚅" INDEX "<-" "drop highest" value_operand "from"
+//!                         "⚅" INDEX
 //! sum_rolling_record::= "@" INDEX "<-" "sum rolling record" "⚅" INDEX
-//! binary_op         ::= "@" INDEX "<-" op BINARY_OP op
-//! unary_neg         ::= "@" INDEX "<-" "-" op
-//! return_inst       ::= "return" op
-//! op                ::= INTEGER | "@" INDEX
-//! NAME              ::= any run of characters other than "{", "}", "\r",
-//!                         "\n"
+//! binary_op         ::= "@" INDEX "<-" value_operand BINARY_OP value_operand
+//! unary_neg         ::= "@" INDEX "<-" "-" value_operand
+//! return            ::= "return" value_operand
+//! value_operand     ::= INTEGER | "@" INDEX
+//! NAME              ::= WORD (SPACE WORD)*
+//! WORD              ::= NAME_CHAR+
+//! NAME_CHAR         ::= any identifier character (is_identifier_char) except
+//!                         whitespace
+//! SPACE             ::= " "
 //! INDEX             ::= DIGIT+
 //! INTEGER           ::= "-"? DIGIT+
 //! BINARY_OP         ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
 //! EOL               ::= "\n" | "\r\n"
+//! EOF               ::= the end of the input
 //! ```
 //!
 //! Whitespace (horizontal: space and tab) between tokens is permissive — any
 //! run of spaces and tabs is accepted wherever [`Function`]'s [`Display`] emits
-//! indentation or a separator. The structural tokens (`:`, `<-`, `D`, `r#`,
-//! `⚅#`, the digraph `[-`, and so on) are matched literally.
+//! indentation or a separator. Blank lines may precede the header and follow
+//! the last instruction, whose `EOL` is optional. The structural tokens (`:`,
+//! `<-`, `D`, `D[`, `r#`, `⚅#`, and so on) are matched literally. A `NAME` is
+//! a [canonical](crate::parser::is_canonical_name) name, as the compiler
+//! produces every name: its words are separated by single spaces, with none
+//! around them, so that it survives the round trip.
 //!
 //! Rolling records (`⚅N`) are syntactically restricted to the slots where the
 //! intermediate representation expects them: the destination of every
@@ -121,8 +134,8 @@ use nom::{
 use nom_locate::LocatedSpan;
 
 use crate::{
-	AddressingMode, Function, Immediate, Instruction, RegisterIndex,
-	RollingRecordIndex,
+	AddressingMode, Function, FunctionError, Immediate, Instruction,
+	RegisterIndex, RollingRecordIndex,
 	parser::{is_canonical_name, is_identifier_char}
 };
 
@@ -173,7 +186,7 @@ impl Assembler
 	/// assembled form would violate any of the safety invariants the assembler
 	/// enforces: contiguous numbering of the register and rolling record files,
 	/// agreement between header counts and body references, non-empty custom
-	/// dice face lists, and so on.
+	/// dice face lists, a single return that ends the function, and so on.
 	pub fn assemble(input: &str) -> Result<Function, AssemblyError>
 	{
 		let raw = Self::parse(input)?;
@@ -211,26 +224,21 @@ impl Assembler
 	}
 
 	/// Validate a [`Raw`] assemblage and convert it into a [`Function`]. The
-	/// validation enforces every invariant that the downstream
-	/// [`Evaluator`](crate::Evaluator) relies on to avoid panicking:
+	/// assembler first checks the invariants that only the text can break:
 	///
 	/// 1. Parameter indices are exactly `0..parameters.len()` in order.
 	/// 2. External-variable indices are exactly
 	///    `parameters.len()..parameters.len() + externals.len()` in order.
-	/// 3. Every register reference in the body satisfies `index <
-	///    register_count`, and every rolling record reference satisfies `index
-	///    < rolling_record_count`.
-	/// 4. The register file has no gaps: every index in `0..register_count`
-	///    appears at least once as a parameter slot, an extern slot, or a body
-	///    reference (destination or source).
-	/// 5. The rolling record file has no gaps: every index in
-	///    `0..rolling_record_count` appears at least once as a destination or
-	///    source.
-	/// 6. Every [`RollCustomDice`](crate::RollCustomDice) carries a non-empty
-	///    face list.
-	/// 7. Every [`DropLowest`](crate::DropLowest) and
+	/// 3. Every [`DropLowest`](crate::DropLowest) and
 	///    [`DropHighest`](crate::DropHighest) names the same rolling record as
 	///    its destination and its `from` clause.
+	///
+	/// Then it checks that the assembled [`Function`] is
+	/// [well formed](Function::validate), which enforces every invariant that
+	/// the downstream [`Evaluator`](crate::Evaluator) relies on: canonical and
+	/// distinct names, references within the declared counts, no gaps in the
+	/// register or rolling record files, custom dice with faces, and a single
+	/// [`Return`](crate::Return) that ends the function.
 	///
 	/// # Parameters
 	/// - `raw`: The unvalidated [`Raw`] assemblage.
@@ -273,178 +281,6 @@ impl Assembler
 				})
 			}
 		}
-		let declared_args = arity + raw.externals.len();
-		if declared_args > raw.register_count
-		{
-			return Err(AssemblyError::InsufficientRegisterCount {
-				register_count: raw.register_count,
-				required: declared_args,
-				location: raw.header_location
-			})
-		}
-		// Collect referenced register and rolling record indices; fault on any
-		// out-of-bounds index.
-		let mut register_seen = vec![false; raw.register_count];
-		register_seen
-			.iter_mut()
-			.take(declared_args)
-			.for_each(|slot| *slot = true);
-		let mut record_seen = vec![false; raw.rolling_record_count];
-		for raw_inst in &raw.instructions
-		{
-			let check_register = |idx: RegisterIndex,
-			                      seen: &mut [bool]|
-			 -> Result<(), AssemblyError> {
-				if idx.0 >= raw.register_count
-				{
-					return Err(AssemblyError::RegisterOutOfBounds {
-						index: idx.0,
-						register_count: raw.register_count,
-						location: raw_inst.location
-					})
-				}
-				seen[idx.0] = true;
-				Ok(())
-			};
-			let check_record = |idx: RollingRecordIndex,
-			                    seen: &mut [bool]|
-			 -> Result<(), AssemblyError> {
-				if idx.0 >= raw.rolling_record_count
-				{
-					return Err(AssemblyError::RollingRecordOutOfBounds {
-						index: idx.0,
-						rolling_record_count: raw.rolling_record_count,
-						location: raw_inst.location
-					})
-				}
-				seen[idx.0] = true;
-				Ok(())
-			};
-			let check_mode = |mode: AddressingMode,
-			                  regs: &mut [bool]|
-			 -> Result<(), AssemblyError> {
-				match mode
-				{
-					AddressingMode::Immediate(_) => Ok(()),
-					AddressingMode::Register(reg) =>
-					{
-						if reg.0 >= raw.register_count
-						{
-							return Err(AssemblyError::RegisterOutOfBounds {
-								index: reg.0,
-								register_count: raw.register_count,
-								location: raw_inst.location
-							})
-						}
-						regs[reg.0] = true;
-						Ok(())
-					},
-					AddressingMode::RollingRecord(_) =>
-					{
-						// The parser rejects rolling records in these
-						// slots grammatically, so this branch is
-						// defensive. A [`Raw`] produced by
-						// [`Self::parse`] cannot reach it; the variant
-						// exists purely to keep the validator total.
-						Err(AssemblyError::UnexpectedRollingRecordOperand {
-							location: raw_inst.location
-						})
-					}
-				}
-			};
-			match &raw_inst.instruction
-			{
-				Instruction::RollRange(inst) =>
-				{
-					check_record(inst.dest, &mut record_seen)?;
-					check_mode(inst.start, &mut register_seen)?;
-					check_mode(inst.end, &mut register_seen)?;
-				},
-				Instruction::RollStandardDice(inst) =>
-				{
-					check_record(inst.dest, &mut record_seen)?;
-					check_mode(inst.count, &mut register_seen)?;
-					check_mode(inst.faces, &mut register_seen)?;
-				},
-				Instruction::RollCustomDice(inst) =>
-				{
-					check_record(inst.dest, &mut record_seen)?;
-					check_mode(inst.count, &mut register_seen)?;
-					if inst.faces.is_empty()
-					{
-						return Err(AssemblyError::FacelessCustomDice {
-							location: raw_inst.location
-						})
-					}
-				},
-				Instruction::DropLowest(inst) =>
-				{
-					check_record(inst.dest, &mut record_seen)?;
-					check_mode(inst.count, &mut register_seen)?;
-				},
-				Instruction::DropHighest(inst) =>
-				{
-					check_record(inst.dest, &mut record_seen)?;
-					check_mode(inst.count, &mut register_seen)?;
-				},
-				Instruction::SumRollingRecord(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_record(inst.src, &mut record_seen)?;
-				},
-				Instruction::Add(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Sub(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Mul(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Div(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Mod(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Exp(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Max(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op1, &mut register_seen)?;
-					check_mode(inst.op2, &mut register_seen)?;
-				},
-				Instruction::Neg(inst) =>
-				{
-					check_register(inst.dest, &mut register_seen)?;
-					check_mode(inst.op, &mut register_seen)?;
-				},
-				Instruction::Return(inst) =>
-				{
-					check_mode(inst.src, &mut register_seen)?;
-				}
-			}
-		}
 		// Drop instructions must read back from their own destination. The
 		// parser accepts two independent rolling record indices; the
 		// validator confirms they agree.
@@ -476,25 +312,21 @@ impl Assembler
 				{}
 			}
 		}
-		// No gaps in the register file.
-		if let Some(gap) = register_seen.iter().position(|seen| !*seen)
-		{
-			return Err(AssemblyError::RegisterGap {
-				index: gap,
-				register_count: raw.register_count,
-				location: raw.header_location
-			})
-		}
-		// No gaps in the rolling record file.
-		if let Some(gap) = record_seen.iter().position(|seen| !*seen)
-		{
-			return Err(AssemblyError::RollingRecordGap {
-				index: gap,
-				rolling_record_count: raw.rolling_record_count,
-				location: raw.header_location
-			})
-		}
-		Ok(Function {
+		// Keep the source positions, which the function forgets, to locate
+		// any defect that it reports.
+		let named_locations = raw
+			.parameters
+			.iter()
+			.chain(&raw.externals)
+			.map(|named| named.location)
+			.collect::<Vec<_>>();
+		let instruction_locations = raw
+			.instructions
+			.iter()
+			.map(|r| r.location)
+			.collect::<Vec<_>>();
+		let header_location = raw.header_location;
+		let function = Function {
 			parameters: raw.parameters.into_iter().map(|n| n.name).collect(),
 			externals: raw.externals.into_iter().map(|n| n.name).collect(),
 			register_count: raw.register_count,
@@ -504,7 +336,23 @@ impl Assembler
 				.into_iter()
 				.map(|r| r.instruction)
 				.collect()
-		})
+		};
+		function.validate().map_err(|error| {
+			let location = match &error
+			{
+				FunctionError::NonCanonicalName { index, .. }
+				| FunctionError::DuplicateName { index, .. } => named_locations[*index],
+				FunctionError::MissingReturn => instruction_locations
+					.last()
+					.copied()
+					.unwrap_or(header_location),
+				_ => error
+					.instruction()
+					.map_or(header_location, |i| instruction_locations[i])
+			};
+			AssemblyError::Invalid { error, location }
+		})?;
+		Ok(function)
 	}
 }
 
@@ -518,10 +366,12 @@ impl Assembler
 /// carries an [`AssemblyLocation`] locating the offending token within the
 /// input.
 ///
-/// The assembler targets the [`Evaluator`](crate::Evaluator) as its downstream
-/// consumer, so most variants correspond to invariants that, if violated, would
-/// otherwise lead to evaluator panics: index out of bounds, gaps in the
-/// register or rolling record file, custom dice with no faces, and so on.
+/// Besides syntax, the variants cover the invariants that only the text can
+/// break, such as the numbering of the parameters, and wrap in
+/// [`Invalid`](Self::Invalid) whatever keeps the assembled [`Function`] from
+/// being [well formed](Function::validate): an index out of bounds, a gap in
+/// the register or rolling record file, custom dice with no faces, a return
+/// that does not end the function, and so on.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AssemblyError
 {
@@ -575,87 +425,6 @@ pub enum AssemblyError
 		location: AssemblyLocation
 	},
 
-	/// The header's declared register count is too small to accommodate the
-	/// parameter and extern slots.
-	InsufficientRegisterCount
-	{
-		/// The declared register count (`r#N`).
-		register_count: usize,
-
-		/// The number of registers required by the parameter and extern slots
-		/// (`parameters.len() + externals.len()`).
-		required: usize,
-
-		/// The source position of the header.
-		location: AssemblyLocation
-	},
-
-	/// A body reference to a register index exceeds the declared register
-	/// count.
-	RegisterOutOfBounds
-	{
-		/// The offending register index.
-		index: usize,
-
-		/// The declared register count.
-		register_count: usize,
-
-		/// The source position of the offending instruction.
-		location: AssemblyLocation
-	},
-
-	/// A body reference to a rolling record index exceeds the declared rolling
-	/// record count.
-	RollingRecordOutOfBounds
-	{
-		/// The offending rolling record index.
-		index: usize,
-
-		/// The declared rolling record count.
-		rolling_record_count: usize,
-
-		/// The source position of the offending instruction.
-		location: AssemblyLocation
-	},
-
-	/// A register declared by the header is never referenced by any parameter
-	/// slot, extern slot, or body instruction — a gap in the register file.
-	RegisterGap
-	{
-		/// The index of the unreferenced register.
-		index: usize,
-
-		/// The declared register count.
-		register_count: usize,
-
-		/// The source position of the header.
-		location: AssemblyLocation
-	},
-
-	/// A rolling record declared by the header is never referenced by any body
-	/// instruction — a gap in the rolling record file.
-	RollingRecordGap
-	{
-		/// The index of the unreferenced rolling record.
-		index: usize,
-
-		/// The declared rolling record count.
-		rolling_record_count: usize,
-
-		/// The source position of the header.
-		location: AssemblyLocation
-	},
-
-	/// A custom dice instruction has an empty face list. Although the primitive
-	/// `roll_custom_dice` defensively treats empty faces as `0` per die, the
-	/// source grammar forbids faceless dice and the assembler preserves that
-	/// contract.
-	FacelessCustomDice
-	{
-		/// The source position of the offending instruction.
-		location: AssemblyLocation
-	},
-
 	/// A drop instruction's destination disagrees with its `from ⚅N` source.
 	/// [`Function`]'s [`Display`] impl always emits the same rolling record on
 	/// both sides; the assembler enforces the invariant so hand-authored IR
@@ -676,14 +445,16 @@ pub enum AssemblyError
 		location: AssemblyLocation
 	},
 
-	/// The validator encountered an [`AddressingMode::RollingRecord`] in a slot
-	/// where the grammar prohibits it. This variant is defensive — the parser
-	/// cannot produce such a form — but keeps the validator total and the
-	/// assembler panic-free even under future refactoring that might relax the
-	/// grammar.
-	UnexpectedRollingRecordOperand
+	/// The assembled [`Function`] is not [well formed](Function::validate). The
+	/// grammar already forbids some of these defects, such as non-canonical
+	/// names and rolling record operands, but the rest are possible in text.
+	Invalid
 	{
-		/// The source position of the offending instruction.
+		/// The defect in the function.
+		error: FunctionError,
+
+		/// The source position of the offending instruction, name, or, for a
+		/// defect of the function as a whole, header.
 		location: AssemblyLocation
 	}
 }
@@ -701,14 +472,8 @@ impl AssemblyError
 			Self::Syntax { location, .. }
 			| Self::NonContiguousParameter { location, .. }
 			| Self::NonContiguousExternal { location, .. }
-			| Self::InsufficientRegisterCount { location, .. }
-			| Self::RegisterOutOfBounds { location, .. }
-			| Self::RollingRecordOutOfBounds { location, .. }
-			| Self::RegisterGap { location, .. }
-			| Self::RollingRecordGap { location, .. }
-			| Self::FacelessCustomDice { location }
 			| Self::DropSourceMismatch { location, .. }
-			| Self::UnexpectedRollingRecordOperand { location } => *location
+			| Self::Invalid { location, .. } => *location
 		}
 	}
 
@@ -772,61 +537,6 @@ impl Display for AssemblyError
 				 be contiguous, starting at @{})",
 				name, index, expected, arity
 			),
-			Self::InsufficientRegisterCount {
-				register_count,
-				required,
-				..
-			} => write!(
-				f,
-				"header declares r#{} registers but parameters and externs \
-				 together require at least @{}",
-				register_count,
-				required - 1
-			),
-			Self::RegisterOutOfBounds {
-				index,
-				register_count,
-				..
-			} => write!(
-				f,
-				"register @{} exceeds declared register count r#{}",
-				index, register_count
-			),
-			Self::RollingRecordOutOfBounds {
-				index,
-				rolling_record_count,
-				..
-			} => write!(
-				f,
-				"rolling record ⚅{} exceeds declared rolling record count \
-				 ⚅#{}",
-				index, rolling_record_count
-			),
-			Self::RegisterGap {
-				index,
-				register_count,
-				..
-			} => write!(
-				f,
-				"register @{} is declared by r#{} but is never referenced \
-				 (no gaps are permitted in the register file)",
-				index, register_count
-			),
-			Self::RollingRecordGap {
-				index,
-				rolling_record_count,
-				..
-			} => write!(
-				f,
-				"rolling record ⚅{} is declared by ⚅#{} but is never \
-				 referenced (no gaps are permitted in the rolling record \
-				 file)",
-				index, rolling_record_count
-			),
-			Self::FacelessCustomDice { .. } =>
-			{
-				write!(f, "custom dice must have at least one face")
-			},
 			Self::DropSourceMismatch {
 				kind,
 				destination,
@@ -838,15 +548,22 @@ impl Display for AssemblyError
 				 ⚅{}",
 				kind, destination, source
 			),
-			Self::UnexpectedRollingRecordOperand { .. } =>
-			{
-				write!(f, "rolling record operand is not permitted here")
-			}
+			Self::Invalid { error, .. } => error.describe(f)
 		}
 	}
 }
 
-impl Error for AssemblyError {}
+impl Error for AssemblyError
+{
+	fn source(&self) -> Option<&(dyn Error + 'static)>
+	{
+		match self
+		{
+			Self::Invalid { error, .. } => Some(error),
+			_ => None
+		}
+	}
+}
 
 /// Which drop-direction triggered an [`AssemblyError::DropSourceMismatch`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

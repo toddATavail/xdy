@@ -12,7 +12,7 @@
 
 <body_header> ::= "body:" <EOL>
 
-<instruction_line> ::= <instruction> <EOL>
+<instruction_line> ::= <instruction> (<EOL> | <EOF>)
 
 <instruction> ::= <roll_range>
               |  <roll_standard_dice>
@@ -44,9 +44,13 @@
 
 <value_operand> ::= <INTEGER> | "@" <INDEX>
 
-<NAME> ::= <NAME_CHAR>+
+<NAME> ::= <WORD> (<SPACE> <WORD>)*
 
-<NAME_CHAR> ::= "any code point except '{', '}', carriage return, or line feed"
+<WORD> ::= <NAME_CHAR>+
+
+<NAME_CHAR> ::= "any identifier character (is_identifier_char) except whitespace"
+
+<SPACE> ::= "a single U+0020 SPACE"
 
 <INDEX> ::= <DIGIT>+
 
@@ -57,3 +61,5 @@
 <BINARY_OP> ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
 
 <EOL> ::= "\n" | "\r\n"
+
+<EOF> ::= "the end of the input"

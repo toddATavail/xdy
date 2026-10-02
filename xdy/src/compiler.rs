@@ -19,9 +19,13 @@
 //! code generation.
 //!
 //! ```
-//! use xdy::{Compiler, Evaluator, Optimizer, Parser, Passes, StandardOptimizer};
+//! use xdy::{
+//!     Compiler, Evaluator, Optimizer, Parser, Passes, StandardOptimizer,
+//!     Validator
+//! };
 //!
 //! let ast = Parser::parse("2d6 + 3").unwrap();
+//! Validator::validate(&ast).unwrap();
 //! let function = Compiler::compile(&ast);
 //! let optimized = StandardOptimizer::new(Passes::all())
 //!     .optimize(function)
@@ -39,7 +43,7 @@ use std::{
 };
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
 	CanAllocate as _, Optimizer as _, Parser, Passes, SourceSpan,
@@ -49,7 +53,7 @@ use crate::{
 		AddressingMode, Immediate, Instruction, RegisterIndex,
 		RollingRecordIndex
 	},
-	parser::ParseError
+	parser::{ParseError, is_canonical_name}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,7 +108,7 @@ pub fn compile_unoptimized(
 ///     C --> V["Validator<br/><code>Validator::validate</code>"]
 ///     V --> D["Compiler<br/><code>Compiler::compile</code>"]
 ///     D --> E["IR<br/><code>Function</code>"]
-///     E --> F["Optimizer<br/><code>StandardOptimizer</code>"]
+///     E --> F["Optimizer<br/><code>StandardOptimizer</code><br/>every pass"]
 ///     F --> G["Optimized IR<br/><code>Function</code>"]
 ///     style A fill:#f9f,stroke:#333,color:#000
 ///     style G fill:#9f9,stroke:#333,color:#000
@@ -418,11 +422,15 @@ impl<'a> Compiler<'a>
 	/// Compile the specified AST into a [`Function`] in intermediate
 	/// representation (IR).
 	///
-	/// This is equivalent to calling [`compile_unoptimized()`] after parsing,
-	/// but gives the caller access to the AST between parsing and compilation.
+	/// Together with parsing and [validation](Validator::validate), this is
+	/// equivalent to calling [`compile_unoptimized()`], but gives the caller
+	/// access to the AST between parsing and compilation.
 	///
 	/// # Parameters
-	/// - `ast`: The parsed function definition.
+	/// - `ast`: The parsed function definition, which must already have been
+	///   [validated](Validator::validate). The compiler does not check it, so
+	///   the function that it answers for an AST that fails validation is
+	///   meaningless.
 	///
 	/// # Returns
 	/// The compiled function in intermediate representation.
@@ -430,9 +438,10 @@ impl<'a> Compiler<'a>
 	/// # Examples
 	///
 	/// ```
-	/// use xdy::{Compiler, Parser};
+	/// use xdy::{Compiler, Parser, Validator};
 	///
 	/// let ast = Parser::parse("2d6 + 3").unwrap();
+	/// Validator::validate(&ast).unwrap();
 	/// let function = Compiler::compile(&ast);
 	/// assert_eq!(function.arity(), 0);
 	/// ```
@@ -902,9 +911,10 @@ fn collect_binding_names<'a>(expr: &'a Expression<'_>) -> HashSet<&'a str>
 }
 
 /// A function in the intermediate representation. This is the output of the
-/// [compiler](Compiler).
+/// [compiler](Compiler). A function that the compiler makes is always
+/// [well formed](Function::validate).
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Function
 {
 	/// The parameters that the function takes.
@@ -931,6 +941,298 @@ impl Function
 	/// The number of parameters that the function requires.
 	#[inline]
 	pub fn arity(&self) -> usize { self.parameters.len() }
+
+	/// Check that the function is well formed, as the [compiler](Compiler)
+	/// always makes it, so that the [`Evaluator`](crate::Evaluator) never reads
+	/// outside its registers or rolling records and every analysis sees the one
+	/// answer it expects. The [assembler](crate::Assembler) and deserialization
+	/// check every function that they build; check here any function built by
+	/// hand.
+	///
+	/// A function is well formed if it satisfies each of the following, checked
+	/// in order:
+	///
+	/// 1. Every parameter and external variable has a
+	///    [canonical](crate::parser::is_canonical_name) name, and no two of
+	///    them share a name.
+	/// 2. The parameters and external variables, which occupy the first
+	///    registers, fit in `register_count` registers.
+	/// 3. Every register reference is less than `register_count`, and every
+	///    rolling record reference is less than `rolling_record_count`.
+	/// 4. Every [`RollCustomDice`](crate::RollCustomDice) has at least one
+	///    face.
+	/// 5. No operand is a rolling record: rolling records appear only as the
+	///    destinations of rolls and drops, the sources of drops, and the
+	///    sources of [sums](crate::SumRollingRecord).
+	/// 6. The last instruction is a [`Return`](crate::Return), and it is the
+	///    only one. Nothing may follow a return, since the answer of the
+	///    function is its one return.
+	/// 7. The register file has no gaps: every register holds a parameter or an
+	///    external variable, or some instruction mentions it.
+	/// 8. The rolling record file has no gaps: some instruction mentions every
+	///    rolling record.
+	///
+	/// # Errors
+	/// The first [`FunctionError`] found.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::{FunctionError, compile};
+	///
+	/// let mut function = compile("3D6")?;
+	/// assert_eq!(function.validate(), Ok(()));
+	/// function.instructions.pop();
+	/// assert_eq!(function.validate(), Err(FunctionError::MissingReturn));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	pub fn validate(&self) -> Result<(), FunctionError>
+	{
+		// Names are canonical and distinct.
+		let mut first_by_name = HashMap::new();
+		for (index, name) in
+			self.parameters.iter().chain(&self.externals).enumerate()
+		{
+			if !is_canonical_name(name)
+			{
+				return Err(FunctionError::NonCanonicalName {
+					name: name.clone(),
+					index
+				})
+			}
+			if let Some(&first) = first_by_name.get(name.as_str())
+			{
+				return Err(FunctionError::DuplicateName {
+					name: name.clone(),
+					first,
+					index
+				})
+			}
+			first_by_name.insert(name.as_str(), index);
+		}
+		// Parameters and externals occupy the first registers.
+		let declared_args = self.parameters.len() + self.externals.len();
+		if declared_args > self.register_count
+		{
+			return Err(FunctionError::InsufficientRegisterCount {
+				register_count: self.register_count,
+				required: declared_args
+			})
+		}
+		// Collect referenced register and rolling record indices; fault on any
+		// out-of-bounds index.
+		let mut register_seen = vec![false; self.register_count];
+		register_seen[..declared_args].fill(true);
+		let mut record_seen = vec![false; self.rolling_record_count];
+		for (instruction, inst) in self.instructions.iter().enumerate()
+		{
+			self.check_instruction(
+				inst,
+				instruction,
+				&mut register_seen,
+				&mut record_seen
+			)?;
+		}
+		// The function ends with its only return. Blame a return that anything
+		// follows before the absence of a return at the end, since the former
+		// pinpoints the defect.
+		if let Some(instruction) = self
+			.instructions
+			.iter()
+			.position(|inst| matches!(inst, Instruction::Return(_)))
+			&& instruction + 1 < self.instructions.len()
+		{
+			return Err(FunctionError::EarlyReturn { instruction })
+		}
+		if !matches!(self.instructions.last(), Some(Instruction::Return(_)))
+		{
+			return Err(FunctionError::MissingReturn)
+		}
+		// No gaps in the register file.
+		if let Some(gap) = register_seen.iter().position(|seen| !*seen)
+		{
+			return Err(FunctionError::RegisterGap {
+				index: gap,
+				register_count: self.register_count
+			})
+		}
+		// No gaps in the rolling record file.
+		if let Some(gap) = record_seen.iter().position(|seen| !*seen)
+		{
+			return Err(FunctionError::RollingRecordGap {
+				index: gap,
+				rolling_record_count: self.rolling_record_count
+			})
+		}
+		Ok(())
+	}
+
+	/// Check that one of the function's instructions mentions only registers
+	/// and rolling records that exist, rolls custom dice that have faces, and
+	/// reads no rolling record as an operand; and note every register and
+	/// rolling record that it mentions.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction.
+	/// - `instruction`: The index of the instruction within the function.
+	/// - `register_seen`: Whether each register has been mentioned, updated
+	///   with the registers that the instruction mentions.
+	/// - `record_seen`: Whether each rolling record has been mentioned, updated
+	///   with the rolling records that the instruction mentions.
+	///
+	/// # Errors
+	/// * [`RegisterOutOfBounds`](FunctionError::RegisterOutOfBounds) if the
+	///   instruction mentions a register that does not exist.
+	/// * [`RollingRecordOutOfBounds`](FunctionError::RollingRecordOutOfBounds)
+	///   if the instruction mentions a rolling record that does not exist.
+	/// * [`FacelessCustomDice`](FunctionError::FacelessCustomDice) if the
+	///   instruction rolls custom dice without faces.
+	/// * [`UnexpectedRollingRecordOperand`](FunctionError::UnexpectedRollingRecordOperand)
+	///   if an operand of the instruction is a rolling record.
+	fn check_instruction(
+		&self,
+		inst: &Instruction,
+		instruction: usize,
+		register_seen: &mut [bool],
+		record_seen: &mut [bool]
+	) -> Result<(), FunctionError>
+	{
+		let check_register = |idx: RegisterIndex,
+		                      seen: &mut [bool]|
+		 -> Result<(), FunctionError> {
+			if idx.0 >= self.register_count
+			{
+				return Err(FunctionError::RegisterOutOfBounds {
+					index: idx.0,
+					register_count: self.register_count,
+					instruction
+				})
+			}
+			seen[idx.0] = true;
+			Ok(())
+		};
+		let check_record = |idx: RollingRecordIndex,
+		                    seen: &mut [bool]|
+		 -> Result<(), FunctionError> {
+			if idx.0 >= self.rolling_record_count
+			{
+				return Err(FunctionError::RollingRecordOutOfBounds {
+					index: idx.0,
+					rolling_record_count: self.rolling_record_count,
+					instruction
+				})
+			}
+			seen[idx.0] = true;
+			Ok(())
+		};
+		let check_mode = |mode: AddressingMode,
+		                  seen: &mut [bool]|
+		 -> Result<(), FunctionError> {
+			match mode
+			{
+				AddressingMode::Immediate(_) => Ok(()),
+				AddressingMode::Register(reg) => check_register(reg, seen),
+				AddressingMode::RollingRecord(_) =>
+				{
+					Err(FunctionError::UnexpectedRollingRecordOperand {
+						instruction
+					})
+				},
+			}
+		};
+		match inst
+		{
+			Instruction::RollRange(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.start, register_seen)?;
+				check_mode(inst.end, register_seen)?;
+			},
+			Instruction::RollStandardDice(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+				check_mode(inst.faces, register_seen)?;
+			},
+			Instruction::RollCustomDice(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+				if inst.faces.is_empty()
+				{
+					return Err(FunctionError::FacelessCustomDice {
+						instruction
+					})
+				}
+			},
+			Instruction::DropLowest(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+			},
+			Instruction::DropHighest(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+			},
+			Instruction::SumRollingRecord(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_record(inst.src, record_seen)?;
+			},
+			Instruction::Add(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Sub(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Mul(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Div(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Mod(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Exp(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Max(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
+			Instruction::Neg(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op, register_seen)?;
+			},
+			Instruction::Return(inst) =>
+			{
+				check_mode(inst.src, register_seen)?;
+			}
+		}
+		Ok(())
+	}
 }
 
 impl Display for Function
@@ -967,5 +1269,334 @@ impl Display for Function
 			writeln!(f, "\t\t{}", instruction)?;
 		}
 		Ok(())
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                              Function errors.                              //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The reason that a [`Function`] is not [well formed](Function::validate).
+/// Each variant names the invariant that the function violates, and those about
+/// a single instruction name its index within the function.
+///
+/// Any of these would otherwise mislead the [`Evaluator`](crate::Evaluator) or
+/// the analyses built on it: an index out of bounds panics, a rolling record
+/// operand is unreachable, and an instruction after a return overwrites the
+/// answer that the analyses have already weighed.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FunctionError
+{
+	/// A parameter or external variable has a name that is not
+	/// [canonical](crate::parser::is_canonical_name), so the function's print
+	/// form would not [assemble](crate::Assembler) back.
+	NonCanonicalName
+	{
+		/// The offending name.
+		name: String,
+
+		/// The register of the parameter or external variable.
+		index: usize
+	},
+
+	/// Two parameters or external variables share a name.
+	DuplicateName
+	{
+		/// The shared name.
+		name: String,
+
+		/// The register of the first parameter or external variable with the
+		/// name.
+		first: usize,
+
+		/// The register of the later parameter or external variable with the
+		/// name.
+		index: usize
+	},
+
+	/// The declared register count is too small to hold the parameters and
+	/// external variables.
+	InsufficientRegisterCount
+	{
+		/// The declared register count.
+		register_count: usize,
+
+		/// The number of registers that the parameters and external variables
+		/// require (`parameters.len() + externals.len()`).
+		required: usize
+	},
+
+	/// An instruction mentions a register beyond the declared register count.
+	RegisterOutOfBounds
+	{
+		/// The offending register index.
+		index: usize,
+
+		/// The declared register count.
+		register_count: usize,
+
+		/// The index of the offending instruction.
+		instruction: usize
+	},
+
+	/// An instruction mentions a rolling record beyond the declared rolling
+	/// record count.
+	RollingRecordOutOfBounds
+	{
+		/// The offending rolling record index.
+		index: usize,
+
+		/// The declared rolling record count.
+		rolling_record_count: usize,
+
+		/// The index of the offending instruction.
+		instruction: usize
+	},
+
+	/// A custom dice instruction has an empty face list. Although the primitive
+	/// `roll_custom_dice` defensively treats empty faces as `0` per die, the
+	/// source grammar forbids faceless dice, and a function preserves that
+	/// contract.
+	FacelessCustomDice
+	{
+		/// The index of the offending instruction.
+		instruction: usize
+	},
+
+	/// An operand is an [`AddressingMode::RollingRecord`], which the
+	/// [`Evaluator`](crate::Evaluator) cannot read as a value. Rolling records
+	/// appear only as the destinations of rolls and drops, the sources of
+	/// drops, and the sources of [sums](crate::SumRollingRecord).
+	UnexpectedRollingRecordOperand
+	{
+		/// The index of the offending instruction.
+		instruction: usize
+	},
+
+	/// The function has no [`Return`](crate::Return), perhaps because it has
+	/// no instructions at all.
+	MissingReturn,
+
+	/// A [`Return`](crate::Return) is not the last instruction. The function
+	/// ends with its only return, so instructions that would overwrite its
+	/// answer follow this return, whether or not another return ends the
+	/// function. Only the first such return is reported.
+	EarlyReturn
+	{
+		/// The index of the offending return.
+		instruction: usize
+	},
+
+	/// A register within the declared register count holds no parameter or
+	/// external variable, and no instruction mentions it — a gap in the
+	/// register file.
+	RegisterGap
+	{
+		/// The index of the unmentioned register.
+		index: usize,
+
+		/// The declared register count.
+		register_count: usize
+	},
+
+	/// A rolling record within the declared rolling record count is mentioned
+	/// by no instruction — a gap in the rolling record file.
+	RollingRecordGap
+	{
+		/// The index of the unmentioned rolling record.
+		index: usize,
+
+		/// The declared rolling record count.
+		rolling_record_count: usize
+	}
+}
+
+impl FunctionError
+{
+	/// Answer the index of the offending instruction, if the error is about a
+	/// single instruction.
+	///
+	/// # Returns
+	/// The index of the offending instruction within the function, or `None`
+	/// if the error is about the function as a whole.
+	pub fn instruction(&self) -> Option<usize>
+	{
+		match self
+		{
+			Self::RegisterOutOfBounds { instruction, .. }
+			| Self::RollingRecordOutOfBounds { instruction, .. }
+			| Self::FacelessCustomDice { instruction }
+			| Self::UnexpectedRollingRecordOperand { instruction }
+			| Self::EarlyReturn { instruction } => Some(*instruction),
+			Self::NonCanonicalName { .. }
+			| Self::DuplicateName { .. }
+			| Self::InsufficientRegisterCount { .. }
+			| Self::MissingReturn
+			| Self::RegisterGap { .. }
+			| Self::RollingRecordGap { .. } => None
+		}
+	}
+
+	/// Describe the error, without the index of the offending instruction.
+	/// The [assembler](crate::Assembler) locates the instruction in the source
+	/// instead.
+	///
+	/// # Parameters
+	/// - `f`: The formatter.
+	///
+	/// # Errors
+	/// Any error of the formatter.
+	pub(crate) fn describe(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		match self
+		{
+			Self::NonCanonicalName { name, index } => write!(
+				f,
+				"variable @{} is named `{}`, which is not canonical",
+				index, name
+			),
+			Self::DuplicateName { name, first, index } => write!(
+				f,
+				"variables @{} and @{} are both named `{}` (names must be \
+				 distinct)",
+				first, index, name
+			),
+			Self::InsufficientRegisterCount {
+				register_count,
+				required
+			} => write!(
+				f,
+				"r#{} registers cannot hold the {} parameters and external \
+				 variables",
+				register_count, required
+			),
+			Self::RegisterOutOfBounds {
+				index,
+				register_count,
+				..
+			} => write!(
+				f,
+				"register @{} exceeds declared register count r#{}",
+				index, register_count
+			),
+			Self::RollingRecordOutOfBounds {
+				index,
+				rolling_record_count,
+				..
+			} => write!(
+				f,
+				"rolling record ⚅{} exceeds declared rolling record count \
+				 ⚅#{}",
+				index, rolling_record_count
+			),
+			Self::FacelessCustomDice { .. } =>
+			{
+				write!(f, "custom dice must have at least one face")
+			},
+			Self::UnexpectedRollingRecordOperand { .. } =>
+			{
+				write!(f, "rolling record operand is not permitted here")
+			},
+			Self::MissingReturn =>
+			{
+				write!(f, "the function has no return")
+			},
+			Self::EarlyReturn { .. } => write!(
+				f,
+				"return is not the last instruction (a function ends with \
+				 its only return)"
+			),
+			Self::RegisterGap {
+				index,
+				register_count,
+				..
+			} => write!(
+				f,
+				"register @{} is declared by r#{} but is never referenced \
+				 (no gaps are permitted in the register file)",
+				index, register_count
+			),
+			Self::RollingRecordGap {
+				index,
+				rolling_record_count,
+				..
+			} => write!(
+				f,
+				"rolling record ⚅{} is declared by ⚅#{} but is never \
+				 referenced (no gaps are permitted in the rolling record \
+				 file)",
+				index, rolling_record_count
+			)
+		}
+	}
+}
+
+impl Display for FunctionError
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		if let Some(instruction) = self.instruction()
+		{
+			write!(f, "instruction {}: ", instruction)?;
+		}
+		self.describe(f)
+	}
+}
+
+impl Error for FunctionError {}
+
+////////////////////////////////////////////////////////////////////////////////
+//                               Serialization.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// A [`Function`] as it deserializes, before it is
+/// [validated](Function::validate).
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UncheckedFunction
+{
+	/// The parameters that the function takes.
+	parameters: Vec<String>,
+
+	/// The external variables that the function uses.
+	externals: Vec<String>,
+
+	/// The number of registers the function uses.
+	register_count: usize,
+
+	/// The number of rolling records the function uses.
+	rolling_record_count: usize,
+
+	/// The instructions that make up the function.
+	instructions: Vec<Instruction>
+}
+
+/// Deserializes a function, refusing one that is not
+/// [well formed](Function::validate).
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Function
+{
+	fn deserialize<D: Deserializer<'de>>(
+		deserializer: D
+	) -> Result<Self, D::Error>
+	{
+		use serde::de::Error as _;
+		let UncheckedFunction {
+			parameters,
+			externals,
+			register_count,
+			rolling_record_count,
+			instructions
+		} = UncheckedFunction::deserialize(deserializer)?;
+		let function = Self {
+			parameters,
+			externals,
+			register_count,
+			rolling_record_count,
+			instructions
+		};
+		function.validate().map_err(D::Error::custom)?;
+		Ok(function)
 	}
 }

@@ -85,14 +85,6 @@ fn test_primary()
 				value: 42,
 				span: SourceSpan::default()
 			})
-		),
-		(
-			"-42",
-			"-42",
-			Expression::Constant(Constant {
-				value: -42,
-				span: SourceSpan::default()
-			})
 		)
 	]
 	{
@@ -124,7 +116,12 @@ fn test_primary()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", "+", "*", "/", "^", "3+4"]
+	// A primary expression never begins with `-`, since its constant is
+	// unsigned; a minus before one is the unary operator.
+	for input in [
+		"", " ", "+", "*", "/", "^", "3+4", "-42", "-0", "- 42", "-3D6",
+		"-3d[1,2]", "-2^2"
+	]
 	{
 		let span = Span::new(input);
 		let result = primary(span);

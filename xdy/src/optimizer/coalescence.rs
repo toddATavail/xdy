@@ -31,9 +31,9 @@ use crate::{
 /// wherein they are live.
 type LivenessMap = BTreeMap<RegisterIndex, RangeInclusive<ProgramCounter>>;
 
-/// A coloring, as a map from addressing modes to register indices. The map
-/// only contains entries for ordinary registers, not immediates or rolling
-/// records.
+/// A coloring, as a map from original registers to their colors, i.e., the
+/// registers that replace them. The map only contains entries for ordinary
+/// registers, not immediates or rolling records.
 type Coloring = BTreeMap<RegisterIndex, RegisterIndex>;
 
 /// A register coalescer merges registers to reduce the number of registers used

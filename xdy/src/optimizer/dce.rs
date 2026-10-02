@@ -1,9 +1,9 @@
 //! # Dead code elimination
 //!
 //! Dead code elimination is the process of removing code that does not
-//! contribute to the final output of a program. Dead code can only the result
-//! of previous optimizations. The dead code eliminator requires the function to
-//! be in static single assignment (SSA) form.
+//! contribute to the final output of a program. Dead code can only be the
+//! result of previous optimizations. The dead code eliminator requires the
+//! function to be in static single assignment (SSA) form.
 
 use std::collections::HashMap;
 
@@ -71,6 +71,7 @@ impl Optimizer<()> for DeadCodeEliminator
 			}
 			// Update the function to reflect the new instructions.
 			function.register_count = self.next_register.0;
+			function.rolling_record_count = self.next_rolling_record.0;
 			function.instructions = self.instructions.clone();
 			// Reset the optimizer state.
 			self.replacements.clear();
@@ -91,7 +92,7 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 {
 	fn visit_roll_range(&mut self, range: &RollRange) -> Result<(), ()>
 	{
-		if self.has_readers(*range)
+		if self.is_rolling_record_live(range.dest)
 		{
 			let dest = self.next_rolling_record();
 			self.replace(range.dest, dest);
@@ -109,7 +110,7 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 		roll: &RollStandardDice
 	) -> Result<(), ()>
 	{
-		if self.has_readers(*roll)
+		if self.is_rolling_record_live(roll.dest)
 		{
 			let dest = self.next_rolling_record();
 			self.replace(roll.dest, dest);
@@ -127,7 +128,7 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 		roll: &RollCustomDice
 	) -> Result<(), ()>
 	{
-		if self.has_readers(roll.clone())
+		if self.is_rolling_record_live(roll.dest)
 		{
 			let dest = self.next_rolling_record();
 			self.replace(roll.dest, dest);
@@ -142,7 +143,7 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 
 	fn visit_drop_lowest(&mut self, drop: &DropLowest) -> Result<(), ()>
 	{
-		if self.has_readers(*drop)
+		if self.is_rolling_record_live(drop.dest)
 		{
 			self.emit(DropLowest {
 				dest: self.replacement(drop.dest).try_into().unwrap(),
@@ -154,7 +155,7 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 
 	fn visit_drop_highest(&mut self, drop: &DropHighest) -> Result<(), ()>
 	{
-		if self.has_readers(*drop)
+		if self.is_rolling_record_live(drop.dest)
 		{
 			self.emit(DropHighest {
 				dest: self.replacement(drop.dest).try_into().unwrap(),
@@ -358,6 +359,33 @@ impl AnalyticalVisitor<'_>
 			.readers()
 			.get(&inst.into().destination().unwrap())
 			.map(|readers| !readers.is_empty())
+			.unwrap_or(false)
+	}
+
+	/// Determine whether the specified rolling record is live, i.e., whether
+	/// any instruction consumes it, rather than merely modifying it in place.
+	/// Drops both read and write the rolling record that they modify, so a
+	/// rolling record with no readers besides its own drops never contributes
+	/// to the result, and neither its roll nor its drops need to survive.
+	///
+	/// # Parameters
+	/// - `record`: The rolling record to check.
+	///
+	/// # Returns
+	/// `true` if the rolling record has a reader other than an instruction that
+	/// modifies it in place, `false` otherwise.
+	fn is_rolling_record_live(&self, record: RollingRecordIndex) -> bool
+	{
+		let record = AddressingMode::from(record);
+		let instructions = self.0.instructions();
+		self.0
+			.readers()
+			.get(&record)
+			.map(|readers| {
+				readers
+					.iter()
+					.any(|pc| instructions[pc.0].destination() != Some(record))
+			})
 			.unwrap_or(false)
 	}
 

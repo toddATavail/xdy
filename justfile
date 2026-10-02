@@ -24,17 +24,17 @@ test *args:
 
 # Run the stress tests, which are ignored by default: deep nesting, which needs
 # gigabytes of memory, and wall-clock linearity. Pass --release to stress the
-# release build.
+# release build. Skips the oracle tests, which need Lean; see `oracle`.
 stress *args:
-    cargo test --workspace {{args}} -- --ignored
+    cargo test --workspace {{args}} -- --ignored --skip oracle
 
 # Run doc-tests only.
 doc-test *args:
     cargo test --workspace --doc {{args}}
 
-# Run benchmarks.
+# Run benchmarks, which requires the `bench` feature.
 bench *args:
-    cargo bench -p xdy {{args}}
+    cargo bench -p xdy -F bench {{args}}
 
 # Full verification: fmt check, clippy, tests, doc links.
 verify:
@@ -42,6 +42,30 @@ verify:
     @just clippy
     @just test
     @just doc-check
+
+# Build the Lean oracle and run its tests, which are checked as they build.
+# Requires elan (https://github.com/leanprover/elan); not part of `verify`.
+[working-directory: 'lean']
+lean:
+    lake build
+    lake test
+
+# Build the Lean specification, which needs Mathlib, and run its tests. Fetches
+# Mathlib's prebuilt files first, several gigabytes the first time. Requires
+# elan (https://github.com/leanprover/elan); not part of `verify` or `lean`.
+[working-directory: 'lean/spec']
+spec:
+    lake exe cache get
+    lake build
+    lake test
+
+# Check the distribution corpus and random programs, some of them resummed,
+# against the Lean oracle, which it builds first, check that the oracle dies
+# with the test process, and write the corpus, corrected by the oracle, to
+# target/oracle/test_distributions.txt. Requires elan
+# (https://github.com/leanprover/elan); not part of `verify`.
+oracle *args: lean
+    cargo test -p xdy --lib {{args}} oracle -- --ignored --nocapture
 
 # Build documentation.
 doc *args:

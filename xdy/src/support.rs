@@ -92,6 +92,7 @@ pub fn compile_valid(source: &str) -> Function
 ///
 /// # Parameters
 /// - `function`: The function to optimize.
+/// - `passes`: The optimization passes to apply.
 ///
 /// # Returns
 /// The optimized function.
@@ -105,7 +106,8 @@ pub fn optimize(function: Function, passes: Passes) -> Function
 ////////////////////////////////////////////////////////////////////////////////
 
 /// An evaluation test case is a source code string, a set of arguments, a set
-/// of externs, and an expected output string.
+/// of externs, and the expected [display](crate::Bounds) of the bounds of the
+/// function over those arguments and externs.
 pub type EvaluationTestCase = (
 	&'static str,
 	Vec<i32>,
@@ -117,21 +119,30 @@ pub type EvaluationTestCase = (
 /// to conform to the following grammar:
 ///
 /// ```text
-/// file ::= cases? ;
-/// cases ::= case ("\n\n" case)* ;
-/// case ::= source "\n=\n" args? externs? expected ;
-/// source ::= [^\n] "\n" ;
-/// args ::= "args:" I32 ("," I32)* "\n" ;
-/// externs ::= "externs:" I32 ("," I32)* "\n" ;
-/// extern ::= name "="
-/// expected ::= min "," max "\n" ;
-/// min ::= I32 ;
-/// max ::= I32 ;
-/// I32 ::= /[0-9]+/ ;
+/// file ::= block ("\n\n" block)* "\n"? ;
+/// block ::= source ("\n=\n" case)+ ;
+/// source ::= /[^\n]+/ ;
+/// case ::= (setting "\n")* expected ;
+/// setting ::= args | externs ;
+/// args ::= "args:" I32 ("," I32)* ;
+/// externs ::= "externs:" extern ("," extern)* ;
+/// extern ::= name "=" I32 ;
+/// name ::= /[^=,\n]+/ ;
+/// expected ::= value ", count = " count ", dice = " U64 ;
+/// value ::= "value ∈ [" I32 ", " I32 "]" ;
+/// count ::= U128 | "None" ;
+/// I32 ::= /-?[0-9]+/ ;
+/// U64 ::= /[0-9]+/ ;
+/// U128 ::= /[0-9]+/ ;
 /// WS ::= /[ \t]*/ ;
 /// ```
 ///
-/// `WS` is permitted to occur between any two tokens.
+/// `WS` is permitted around each line, and around each `I32` and `name` of
+/// `args` and `externs`. A `name` is the canonical name of an external
+/// variable, without braces. An `I32` of `args` that overflows `i32` saturates
+/// at its bounds. `expected` is compared verbatim with the
+/// [display](crate::Bounds) of the bounds of the function over the arguments
+/// and externs. A later `args` or `externs` replaces an earlier one.
 ///
 /// # Parameters
 /// - `source`: The contents of a test case file.
@@ -202,41 +213,46 @@ pub fn read_evaluation_test_cases(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                             Histogram support.                             //
+//                           Distribution support.                            //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A histogram test case is a source code string, a set of arguments, a set of
-/// externs, and a histogram of expected outcomes as a vector of pairs of
-/// outcome and count.
-pub type HistogramTestCase = (
+/// A distribution test case is a source code string, a set of arguments, a set
+/// of externs, and the expected weights of its outcomes, as a vector of pairs
+/// of outcome and weight.
+pub type DistributionTestCase = (
 	&'static str,
 	Vec<i32>,
 	Vec<(&'static str, i32)>,
 	Vec<(i32, usize)>
 );
 
-/// Parse the histogram test cases from a test case file. The file is expected
-/// to conform to the following grammar:
+/// Parse the distribution test cases from a test case file. The file is
+/// expected to conform to the following grammar:
 ///
 /// ```text
-/// file ::= cases? ;
-/// cases ::= case ("\n\n" case)* ;
-/// case ::= source "\n=\n" args? externs? expected ;
-/// source ::= [^\n] "\n" ;
-/// args ::= "args:" I32 ("," I32)* "\n" ;
-/// externs ::= "externs:" I32 ("," I32)* "\n" ;
-/// extern ::= name "="
-/// expected ::= outcome_pair ("\n" outcome_pair)* "\n";
+/// file ::= block ("\n\n" block)* "\n"? ;
+/// block ::= source ("\n=\n" case)+ ;
+/// source ::= /[^\n]+/ ;
+/// case ::= line ("\n" line)* ;
+/// line ::= args | externs | outcome_pair ;
+/// args ::= "args:" I32 ("," I32)* ;
+/// externs ::= "externs:" extern ("," extern)* ;
+/// extern ::= name "=" I32 ;
+/// name ::= /[^=,\n]+/ ;
 /// outcome_pair ::= outcome ":" count ;
 /// outcome ::= I32 ;
 /// count ::= USIZE ;
-/// min ::= I32 ;
-/// max ::= I32 ;
-/// I32 ::= /[0-9]+/ ;
+/// I32 ::= /-?[0-9]+/ ;
+/// USIZE ::= /[0-9]+/ ;
 /// WS ::= /[ \t]*/ ;
 /// ```
 ///
-/// `WS` is permitted to occur between any two tokens.
+/// `WS` is permitted around each line, and around each token of `args`,
+/// `externs`, and `outcome_pair`. A `name` is the canonical name of an
+/// external variable, without braces. An `I32` of `args` that overflows `i32`
+/// saturates at its bounds. The lines may appear in any order; the
+/// `outcome_pair`s form the expected distribution, in order of appearance, and
+/// a later `args` or `externs` replaces an earlier one.
 ///
 /// # Parameters
 /// - `source`: The contents of a test case file.
@@ -246,8 +262,9 @@ pub type HistogramTestCase = (
 ///
 /// # Panics
 /// If the test case file is incorrectly formatted.
-pub fn read_histogram_test_cases(source: &'static str)
--> Vec<HistogramTestCase>
+pub fn read_distribution_test_cases(
+	source: &'static str
+) -> Vec<DistributionTestCase>
 {
 	let mut test_cases = Vec::new();
 	let blocks = source.split("\n\n");
@@ -826,7 +843,7 @@ where
 ///     participant P as Parent test
 ///     participant C as Child test binary
 ///     participant T as Small-stack thread
-///     P->>C: spawn(current_exe, --exact <test>, XDY_SMALL_STACK_CHILD)
+///     P->>C: spawn(current_exe, --exact #lt;test#gt;, XDY_SMALL_STACK_CHILD)
 ///     C->>T: spawn with SMALL_STACK_SIZE
 ///     T->>T: run the closure
 ///     alt the closure returns

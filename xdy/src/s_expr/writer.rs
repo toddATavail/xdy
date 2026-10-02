@@ -14,9 +14,9 @@
 //! post-order pass, then writes in pre-order, deciding at each form whether it
 //! fits on the current line. Both passes are linear in the size of the tree.
 //!
-//! A [`Group`] is transparent unless
+//! A [`Group`] is transparent, forwarding to its subexpression, unless
 //! [`with_groups`](SExpressibleOptions::with_groups) is set, in which case it
-//! forwards to its subexpression. The engine resolves such forwarding before it
+//! is an opaque `(group …)` form. The engine resolves such forwarding before it
 //! counts a form, so both passes agree on which forms exist.
 
 use std::fmt::{self, Write};

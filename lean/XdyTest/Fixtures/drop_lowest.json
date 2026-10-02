@@ -1,0 +1,1 @@
+{"parameters":[],"externals":[],"register_count":1,"rolling_record_count":1,"instructions":[{"RollStandardDice":{"dest":0,"count":{"Immediate":4},"faces":{"Immediate":6}}},{"DropLowest":{"dest":0,"count":{"Immediate":1}}},{"SumRollingRecord":{"dest":0,"src":0}},{"Return":{"src":{"Register":0}}}]}

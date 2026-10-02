@@ -9,7 +9,7 @@ keywords = ["dice", "rpg", "xdy", "parsing", "tree-sitter"]
 categories = { workspace = true }
 repository = { workspace = true }
 build = "bindings/rust/build.rs"
-include = ["bindings/rust/*", "grammar.js", "queries/*", "src/*"]
+include = ["bindings/rust/*", "grammar.js", "src/*"]
 
 [lib]
 path = "bindings/rust/lib.rs"

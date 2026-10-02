@@ -1,6 +1,6 @@
 # Iterative engine: before/after benchmark comparison
 
-Benchmarks of xDy before the iterative-parsing epic (xdy-i0q) and after it,
+Benchmarks of xDy before the work that made parsing iterative and after it,
 at the release of 0.13.0, measured by Criterion 0.8.2 with its default
 warm-up and 100 samples (the nesting and diagnose groups use flat sampling
 and a 1 s measurement time).
@@ -10,6 +10,11 @@ and a 1 s measurement time).
 - **Before**: commit `bbd568c` (xDy 0.12.0 plus the benchmarks), with the lockfile of `5c30edd`
 - **After**: the 0.13.0 release candidate; the optimization, nesting compile, and histogram groups at `92a87ea`, the others at `5552937`, which differs from it only in the optimizer and the histogram meter
 - **Runs**: separate worktrees and target directories, one after the other on an otherwise idle machine, on 2026-09-27 and 2026-09-28
+
+This is a snapshot of 0.13.0. In 0.14.0, a forward pass that builds exact
+distributions replaced the enumerating serial and parallel histogram builders
+measured here, so the serial and parallel histogram groups no longer exist;
+the benchmarks now estimate and build exact distributions instead.
 
 The raw medians are in `iterative-before.txt`, `iterative-before-parallel.txt`,
 `iterative-after.txt`, and `iterative-after-optimizer.txt`. Every case of the
@@ -55,7 +60,7 @@ followed by dice, and bindings parsed in time exponential in depth; the other
 families recursed once per level, and overflow the stack at depths beyond
 those benchmarked. After the epic, every family parses and compiles in time
 linear in depth. The compile group includes optimization after the epic, which
-compile() skipped before (xdy-l50).
+compile() skipped before.
 
 ### group
 
@@ -279,30 +284,28 @@ The cases that slowed by more than 10%, with the causes identified during the ep
 The regressions have four causes:
 
 - **Compilation now optimizes.** The nesting compile group times compile(),
-  which ran no optimizer passes before 0.13.0 (xdy-l50) and runs all of them
-  now, so its small cases pay for optimization that they skipped before. It
-  grows linearly with depth: the passes that grew quadratically with the
-  length of a chain were made linear before release (xdy-i0q.28 through
-  xdy-i0q.30), and test_compile_is_linear holds them to it.
-- **Exact reduction of drops.** Rolls of one face with drops, e.g.,
-  `{x}D1 drop lowest {y}`, take longer to optimize, because the optimizer now
-  clamps their counts with Max, which a negative count requires to stay exact
-  (xdy-i0q.20).
-- **The iterative parser's constant factor.** Small dice expressions and
-  drop clauses parse about 0.1 to 0.2 µs slower, and negation chains about a
-  third slower, in exchange for parsing any depth in linear time; the parse
-  group as a whole is a third faster.
-- **The iterative parallel histogram driver.** Mid-sized parallel histograms,
-  of a few hundred microseconds, run slower: the crew of workers that replaced
-  the recursive split recruits helpers gradually, which costs most where a
-  build is too large for one thread and too small to amortize the recruitment
-  (xdy-i0q.11 measured a geometric mean ratio of 1.06). Unmetered builds
-  charge the histogram meter nothing (xdy-i0q.27), and the interval at which
-  workers recruit helpers makes no difference.
+  which ran no optimizer passes before 0.13.0 and runs all of them now, so its
+  small cases pay for optimization that they skipped before. It grows linearly
+  with depth: the passes that grew quadratically with the length of a chain were
+  made linear before release, and test_compile_is_linear holds them to it.
+- **Exact reduction of drops.** Rolls of one face with drops, e.g., `{x}D1 drop
+  lowest {y}`, take longer to optimize, because the optimizer now clamps their
+  counts with Max, which a negative count requires to stay exact.
+- **The iterative parser's constant factor.** Small dice expressions and drop
+  clauses parse about 0.1 to 0.2 µs slower, and negation chains about a third
+  slower, in exchange for parsing any depth in linear time; the parse group as a
+  whole is a third faster.
+- **The iterative parallel histogram driver.** Mid-sized parallel histograms, of
+  a few hundred microseconds, run slower: the crew of workers that replaced the
+  recursive split recruits helpers gradually, which costs most where a build is
+  too large for one thread and too small to amortize the recruitment (an earlier
+  measurement found a geometric mean ratio of 1.06). Unmetered builds charge the
+  histogram meter nothing, and the interval at which workers recruit helpers
+  makes no difference.
 
-The last two are accepted costs of 0.13.0. xdy-ael will profile the parallel
-driver on mid-sized builds, and xdy-c7x the parser's constant factor on small
-expressions.
+The last two are accepted costs of 0.13.0. The parallel driver was removed in
+0.14.0, and the parser's constant factor on small expressions remains to be
+profiled.
 
 ## New in 0.13.0: failing diagnose
 
@@ -1447,4 +1450,3 @@ group has no before. After the epic, diagnosis is linear:
 | `case 80: ("{x}: {x} / -1", [2147483647], [])` | 60.12 µs | 59.42 µs | -1.2% |
 | `case 810: ("(1D3)D(1D3) + (1D3)D[-1, 0, 1]", [], [])` | 387.16 µs | 684.93 µs | +76.9% |
 | `case 90: ("{x}: {x} % 0", [2147483647], [])` | 65.74 µs | 59.30 µs | -9.8% |
-

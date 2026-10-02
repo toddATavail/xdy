@@ -302,3 +302,35 @@ Variable: control character in name is rejected
 {ab}
 
 ---
+
+==================
+Variable: whitespace of any kind just inside the braces
+==================
+
+{ a　} + { 
+ b  }
+
+---
+
+(function
+	(add
+		(variable (identifier))
+		(variable (identifier))))
+
+==================
+Variable: stray whitespace after a name is rejected
+:error
+==================
+
+{a} + 1
+
+---
+
+==================
+Stray whitespace between tokens is rejected
+:error
+==================
+
+1 + 2
+
+---

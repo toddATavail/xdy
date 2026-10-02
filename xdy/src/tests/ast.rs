@@ -148,6 +148,31 @@ fn test_equality_distinguishes()
 	}
 }
 
+/// Ensure that a negative constant drop count, which only a tree that was not
+/// parsed can hold, renders grouped, since a drop expression never begins with
+/// `-`, so that the rendering reads back as the same drop.
+#[test]
+fn test_display_groups_negative_drop_count()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (drop-lowest (standard-dice 4 6) -1))",
+			"4D6 drop lowest (-1)"
+		),
+		(
+			"(function [] (drop-highest (drop-lowest (standard-dice 4 6) 1) -2))",
+			"4D6 drop lowest 1 drop highest (-2)"
+		)
+	]
+	{
+		let function = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let source = function.to_string();
+		assert_eq!(source, expected);
+		let reparsed = Parser::parse(&source).unwrap();
+		assert_eq!(reparsed.to_s_expr(SExpressibleOptions::default()), s_expr);
+	}
+}
+
 /// Ensure that separately parsed but identical sources hash identically.
 #[test]
 fn test_hash_agrees_with_equality()
@@ -165,10 +190,20 @@ fn test_hash_agrees_with_equality()
 //                               Deep nesting.                                //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The depth of the deep-nesting tests. Some of them need gigabytes of memory
-/// at this depth, so every test that builds a source this deep is ignored by
-/// default; `just stress` runs them.
-pub(super) const DEPTH: usize = 1_000_000;
+/// The greatest depth of the deep-nesting tests. Each [nesting](Nesting) nests
+/// to its own [depth](Nesting::depth), at most this deep. Some of the tests
+/// need gigabytes of memory at this depth, so every test that builds a source
+/// this deep is ignored by default; `just stress` runs them.
+const DEPTH: usize = 1_000_000;
+
+/// The size, in bytes, of the [rendered](fmt::Display) source of a deep
+/// nesting, to which each [nesting](Nesting) scales its
+/// [depth](Nesting::depth): that of [`DEPTH`] additions, each of which renders
+/// as ` + 1`. The work of a deep test, whether it parses, diagnoses, reads, or
+/// walks, grows with the size of the source rather than with its depth alone,
+/// so a nesting whose levels render larger, such as `1D6 drop lowest (e)`,
+/// would otherwise do several times the work of the others.
+const SOURCE_BUDGET: usize = 4 * DEPTH;
 
 /// The value of the innermost constant of a deep source. Its rendering occurs
 /// nowhere else in the source, so that a test can find it and replace it.
@@ -425,6 +460,24 @@ impl Nesting
 	pub(super) const fn binds(self) -> bool
 	{
 		matches!(self, Nesting::Binding | Nesting::Mixed)
+	}
+
+	/// Answer the depth to which the deep-nesting tests nest this way: as many
+	/// levels as fit in [`SOURCE_BUDGET`], at most [`DEPTH`]. The size of a
+	/// level is measured from the [rendering](fmt::Display) of
+	/// [`nest_parsable`], over one period of [`ROTATION`](Self::ROTATION),
+	/// beyond the first, so that it averages the constructs of
+	/// [`Mixed`](Self::Mixed) and excludes the grouping of the innermost
+	/// levels.
+	///
+	/// # Returns
+	/// The depth.
+	pub(super) fn depth(self) -> usize
+	{
+		let period = Self::ROTATION.len();
+		let size = |depth| nest_parsable(self, depth, 1).to_string().len();
+		let bytes = size(2 * period) - size(period);
+		(SOURCE_BUDGET * period / bytes).min(DEPTH)
 	}
 }
 
@@ -789,14 +842,15 @@ fn standard_dice(count: Expression<'static>) -> DiceExpression<'static>
 	})
 }
 
-/// Build a pair of `DEPTH`-deep expressions on a small stack, and
+/// Build a pair of [deep](Nesting::depth) expressions on a small stack, and
 /// [exercise](exercise) every trait on them.
 ///
 /// # Parameters
 /// - `nesting`: The way to nest.
 fn exercise_on_small_stack(nesting: Nesting)
 {
-	on_small_stack(|| exercise(|leaf| nest(nesting, DEPTH, leaf)));
+	let depth = nesting.depth();
+	on_small_stack(|| exercise(|leaf| nest(nesting, depth, leaf)));
 }
 
 /// Exercise every trait on an expression: equality against a copy that

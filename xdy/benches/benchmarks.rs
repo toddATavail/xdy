@@ -1,6 +1,9 @@
 //! # Benchmarks
 //!
-//! Herein are benchmarks for the dice expression compiler.
+//! Herein are benchmarks for the dice expression pipeline: parsing,
+//! compilation and optimization, [`diagnose`], evaluation, bounds, and the
+//! estimation and building of distributions, including some whose weights
+//! need arbitrary precision.
 
 #[cfg(feature = "bench")]
 use std::time::Duration;
@@ -16,17 +19,13 @@ use rand::{SeedableRng, rngs::StdRng};
 
 #[cfg(feature = "bench")]
 use xdy::{
-	Evaluator, HistogramBuilder, Parser, Passes, compile,
+	Budget, Evaluator, Parser, Passes, Unobserved, compile,
 	diagnostics::diagnose,
-	serial,
 	support::{
 		compile_valid, optimize, read_compilation_test_cases,
-		read_evaluation_test_cases, read_histogram_test_cases
+		read_distribution_test_cases, read_evaluation_test_cases
 	}
 };
-
-#[cfg(all(feature = "bench", feature = "parallel-histogram"))]
-use xdy::parallel;
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Benchmarks.                                 //
@@ -303,37 +302,126 @@ fn bench_evaluate<M: Measurement>(g: &mut BenchmarkGroup<M>)
 	}
 }
 
-/// Benchmark the test cases for serial histogram building.
+/// The source code of the test cases for distributions.
+#[cfg(feature = "bench")]
+const DISTRIBUTION_TEST_CASES: &str =
+	include_str!("../tests/test_distributions.txt");
+
+/// Prepare the [test cases for distributions](DISTRIBUTION_TEST_CASES) for
+/// benchmarking.
+///
+/// # Returns
+/// The label, the fully optimized evaluator, bound to the external variables,
+/// and the arguments of each test case.
+#[cfg(feature = "bench")]
+fn distribution_test_cases() -> Vec<(String, Evaluator, Vec<i32>)>
+{
+	read_distribution_test_cases(DISTRIBUTION_TEST_CASES)
+		.into_iter()
+		.enumerate()
+		.map(|(index, (source, args, externs, _))| {
+			let key = (source, args.clone(), externs.clone());
+			let label = format!("case {}: {:?}", index, key);
+			let function = compile_valid(source);
+			let function = optimize(function, Passes::all());
+			let mut evaluator = Evaluator::new(function);
+			for (name, value) in externs.iter()
+			{
+				evaluator.bind(name, *value).unwrap();
+			}
+			(label, evaluator, args)
+		})
+		.collect()
+}
+
+/// Benchmark [planning](Evaluator::plan_distribution) the distribution of each
+/// of the [test cases](DISTRIBUTION_TEST_CASES), which estimates its cost.
 ///
 /// # Parameters
 /// - `g`: The benchmark group to which the benchmarks will be added.
-/// - `source`: The source code of the test cases.
 #[cfg(feature = "bench")]
-fn bench_histogram<'inst, I, T, B, M: Measurement>(
-	g: &mut BenchmarkGroup<M>,
-	source: &'static str,
-	builder: B
-) where
-	I: 'inst,
-	T: HistogramBuilder<'inst, I>,
-	B: Fn(Evaluator) -> T
+fn bench_estimate<M: Measurement>(g: &mut BenchmarkGroup<M>)
 {
-	for (index, (source, args, externs, _)) in
-		read_histogram_test_cases(source).iter().enumerate()
+	for (label, evaluator, args) in distribution_test_cases()
 	{
-		let key = (source, args.clone(), externs.clone());
-		let key = format!("{:?}", key);
-		let label = format!("case {}: {}", index, key);
-		let function = compile_valid(source);
-		let function = optimize(function, Passes::all());
-		let mut evaluator = Evaluator::new(function);
-		for (name, value) in externs.iter()
-		{
-			evaluator.bind(name, *value).unwrap();
-		}
-		let builder = builder(evaluator);
 		g.bench_function(&label, |b| {
-			b.iter(|| builder.build(args.iter().copied()).unwrap());
+			b.iter(|| {
+				evaluator.plan_distribution(args.iter().copied()).unwrap()
+			});
+		});
+	}
+}
+
+/// Benchmark [building](xdy::DistributionPlan::build) the distribution of each
+/// of the [test cases](DISTRIBUTION_TEST_CASES) from its plan, within the
+/// [unlimited budget](Budget::UNLIMITED).
+///
+/// # Parameters
+/// - `g`: The benchmark group to which the benchmarks will be added.
+#[cfg(feature = "bench")]
+fn bench_distribution<M: Measurement>(g: &mut BenchmarkGroup<M>)
+{
+	for (label, evaluator, args) in distribution_test_cases()
+	{
+		let plan = evaluator.plan_distribution(args.iter().copied()).unwrap();
+		g.bench_function(&label, |b| {
+			b.iter(|| plan.build(Budget::UNLIMITED, &Unobserved).unwrap());
+		});
+	}
+}
+
+/// Expressions whose distributions have weights beyond [`u128::MAX`], so that
+/// building them exercises the arbitrary-precision arithmetic of
+/// [`Weight`](xdy::Weight): large pools of dice, drops over them, random
+/// counts, whose mixtures scale their setups to large common denominators,
+/// and splits. The width of each total, in bits, is noted beside it.
+#[cfg(feature = "bench")]
+const BIG_WEIGHT_CASES: &[&str] = &[
+	// Convolution powers: 259, 517, 260, and 333 bits.
+	"100D6",
+	"200D6",
+	"60D20",
+	"50D100",
+	// Order statistics: 259 bits.
+	"100D6 drop lowest 10",
+	// Random counts, with and without drops: 266, 959, 440, and 565 bits.
+	"(1D100)D6",
+	"(2D20)D(3D6)",
+	"(3D6)D(3D6) drop lowest 3",
+	"(1D20)D(1D20) drop lowest 1",
+	// Sums of mixtures with different denominators: 818 bits.
+	"(3D6)D(1D20) + (2D10)D(1D12)",
+	// Splits: 281 and 174 bits.
+	"{x}@(5D20) + {x}D6",
+	"{x}@(1D6)D(1D20) + {x} * 2"
+];
+
+/// Benchmark [building](xdy::DistributionPlan::build) the distribution of each
+/// of the [big-weight cases](BIG_WEIGHT_CASES), within the
+/// [unlimited budget](Budget::UNLIMITED).
+///
+/// # Parameters
+/// - `g`: The benchmark group to which the benchmarks will be added.
+///
+/// # Panics
+/// If the total of any case fits in a [`u128`], since it would then measure
+/// only machine arithmetic.
+#[cfg(feature = "bench")]
+fn bench_big_weights<M: Measurement>(g: &mut BenchmarkGroup<M>)
+{
+	for (index, source) in BIG_WEIGHT_CASES.iter().enumerate()
+	{
+		let function = optimize(compile_valid(source), Passes::all());
+		let evaluator = Evaluator::new(function);
+		let plan = evaluator.plan_distribution([]).unwrap();
+		let distribution = plan.build(Budget::UNLIMITED, &Unobserved).unwrap();
+		assert!(
+			distribution.total().bits() > u128::BITS as u64,
+			"the total of {source} fits in a u128"
+		);
+		let label = format!("case {}: {}", index, source);
+		g.bench_function(&label, |b| {
+			b.iter(|| plan.build(Budget::UNLIMITED, &Unobserved).unwrap());
 		});
 	}
 }
@@ -356,9 +444,9 @@ fn main()
 	group.measurement_time(Duration::from_secs(1));
 	bench_parse(&mut group);
 	group.finish();
-	// The deepest family members of the exponential families take tens of
-	// milliseconds per iteration, so use flat sampling, which Criterion
-	// recommends for long-running benchmarks.
+	// The deepest members of the exponential families took tens of
+	// milliseconds per iteration in xDy 0.12.0, so use flat sampling, which
+	// Criterion recommends for long-running benchmarks.
 	let mut group = criterion.benchmark_group("nesting parse");
 	group.measurement_time(Duration::from_secs(1));
 	group.sampling_mode(SamplingMode::Flat);
@@ -379,20 +467,17 @@ fn main()
 	group.measurement_time(Duration::from_secs(1));
 	bench_evaluate(&mut group);
 	group.finish();
-	let histogram_test_cases = include_str!("../tests/test_histograms.txt");
-	let mut group = criterion.benchmark_group("serial histograms");
-	bench_histogram(&mut group, histogram_test_cases, |evaluator| {
-		serial::HistogramBuilder::new(evaluator)
-	});
+	let mut group = criterion.benchmark_group("estimates");
+	bench_estimate(&mut group);
 	group.finish();
-	#[cfg(feature = "parallel-histogram")]
-	{
-		let mut group = criterion.benchmark_group("parallel histograms");
-		bench_histogram(&mut group, histogram_test_cases, |evaluator| {
-			parallel::HistogramBuilder::new(evaluator)
-		});
-		group.finish();
-	}
+	let mut group = criterion.benchmark_group("distributions");
+	bench_distribution(&mut group);
+	group.finish();
+	// The largest cases take tens of milliseconds per iteration.
+	let mut group = criterion.benchmark_group("big weights");
+	group.sampling_mode(SamplingMode::Flat);
+	bench_big_weights(&mut group);
+	group.finish();
 
 	// Generate the final summary.
 	criterion.final_summary();

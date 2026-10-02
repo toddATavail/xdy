@@ -8,7 +8,7 @@
 
 use pretty_assertions::assert_eq;
 
-use super::ast::{DEPTH, Nesting, nest};
+use super::ast::{Nesting, nest};
 use crate::{Parser, ast::*, support::on_small_stack};
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -142,10 +142,11 @@ fn test_visitor_deep()
 	on_small_stack(|| {
 		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
-			let expression = nest(nesting, DEPTH, 1);
+			let depth = nesting.depth();
+			let expression = nest(nesting, depth, 1);
 			let mut counter = Counter::default();
 			let nodes = expression.accept(&mut counter).unwrap();
-			assert!(nodes > DEPTH, "{:?}", nesting);
+			assert!(nodes > depth, "{:?}", nesting);
 			assert_eq!(counter.entered, nodes, "{:?}", nesting);
 			assert_eq!(counter.visited, nodes, "{:?}", nesting);
 		}

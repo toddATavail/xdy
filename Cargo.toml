@@ -3,8 +3,8 @@ members = ["xdy", "tree-sitter-xdy"]
 resolver = "2"
 
 [workspace.package]
-description = "Complex RPG dice expression evaluator with histogram support."
-version = "0.13.0"
+description = "Complex RPG dice expression evaluator with probability distribution support."
+version = "0.14.0"
 edition = "2024"
 authors = ["Todd L Smith <todd@availlang.org>"]
 license = "BSD-3-Clause"
@@ -20,9 +20,11 @@ ebnsf = "0.1"
 nom = "8.0.0"
 nom-language = "0.1.0"
 nom_locate = "5.0.0"
+num-bigint = "0.5.1"
+num-traits = "0.2.19"
 pretty_assertions = "1.4.1"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 rand = "0.10"
-rayon = "1.12"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tree-sitter = "0.27.0"

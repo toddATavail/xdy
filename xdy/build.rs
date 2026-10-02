@@ -12,8 +12,8 @@
 //!   like markdown constructs.
 //!
 //! * Square brackets are escaped as XML character references (`&#x5B;`,
-//!   `&#x5D;`) so that TOML headers like `[metadata]` in railroad diagram text
-//!   nodes are not resolved as intra-doc links.
+//!   `&#x5D;`) so that bracketed terminals like `"D["`, `"extern["`, and `"["`
+//!   in railroad diagram text nodes are not resolved as intra-doc links.
 
 use std::fs;
 use std::path::Path;
@@ -215,7 +215,8 @@ fn inline_styles(svg: &str) -> String
 }
 
 /// Escape square brackets as XML character references so Rustdoc does not try
-/// to resolve TOML headers like `[metadata]` as intra-doc links.
+/// to resolve bracketed terminals like `"D["`, `"extern["`, and `"["` as
+/// intra-doc links.
 ///
 /// # Parameters
 ///

@@ -2,11 +2,12 @@
 //!
 //! Herein are the tests for the [validator](crate::validator) pass, which
 //! performs semantic analysis on a parsed [AST](crate::ast) before code
-//! generation. The current concrete check is **duplicate parameter names**.
+//! generation: duplicate parameters, bindings that collide with parameters or
+//! with each other, and uses before bind.
 
 use pretty_assertions::assert_eq;
 
-use super::ast::{DEPTH, Nesting, nest_function};
+use super::ast::{Nesting, nest_function};
 use crate::{
 	CompilationError, EvaluationError, Parser, SourceSpan, Validator, compile,
 	compile_unoptimized, evaluate, support::on_small_stack
@@ -250,7 +251,7 @@ fn validate_duplicate_binding()
 
 /// Binding a name within the bound expression of a binding of the same name is
 /// rejected, with the outer binding as `first` and the inner one as
-/// `duplicate`, whether or not the name is referenced afterward (xdy-9l6).
+/// `duplicate`, whether or not the name is referenced afterward.
 #[test]
 fn validate_nested_duplicate_binding()
 {
@@ -422,15 +423,12 @@ fn validator_can_be_driven_through_the_trait()
 	));
 }
 
-/// Every method of the [`Validator`]'s [`ASTVisitor`](crate::ast::ASTVisitor)
-/// implementation but [`enter_function`] is a no-op that returns `Ok(())`.
-/// This test walks an AST that touches every node type the visitor can
-/// encounter, driving each method at least once, so that any future rewrite
-/// that silently turns an `Ok(())` method into something else is caught.
-///
-/// [`enter_function`]: crate::ast::ASTVisitor::enter_function
+/// The [`Validator`]'s [`ASTVisitor`](crate::ast::ASTVisitor) implementation
+/// accepts a semantically clean function that touches every node type the
+/// visitor can encounter, driving each method at least once, so that any
+/// future rewrite that rejects a well-formed node is caught.
 #[test]
-fn validator_visitor_arms_are_no_ops()
+fn validator_visitor_accepts_every_node_type()
 {
 	// Build an AST that exercises every node type the visitor can encounter:
 	// Group, Constant, Variable, Binding, Range, StandardDice, CustomDice,
@@ -443,6 +441,35 @@ fn validator_visitor_arms_are_no_ops()
 	.unwrap();
 	let mut validator = Validator::new();
 	assert_eq!(ast.accept(&mut validator), Ok(()));
+}
+
+/// Driving the [`Validator`] through the [`ASTVisitor`](crate::ast::ASTVisitor)
+/// trait performs every check, not just the check of the parameters.
+#[test]
+fn validator_driven_through_the_trait_checks_bindings()
+{
+	let ast = Parser::parse("{x} + {x}@(3D6)").unwrap();
+	let mut validator = Validator::new();
+	assert_eq!(
+		ast.accept(&mut validator),
+		Err(CompilationError::UseBeforeBind {
+			name: "x".into(),
+			reference: SourceSpan { start: 0, end: 3 },
+			binding: SourceSpan { start: 7, end: 8 }
+		})
+	);
+}
+
+/// A [`Validator`] resets itself upon entering a function, so the bindings and
+/// references of one function do not leak into the validation of the next.
+#[test]
+fn validator_can_be_reused()
+{
+	let first = Parser::parse("{x}@(1) + {y}").unwrap();
+	let second = Parser::parse("{y}@(2) + {x}@(3) + {x}").unwrap();
+	let mut validator = Validator::new();
+	assert_eq!(first.accept(&mut validator), Ok(()));
+	assert_eq!(second.accept(&mut validator), Ok(()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -529,6 +556,48 @@ fn validate_use_before_bind_across_sibling_bindings()
 			name: "y".into(),
 			reference: SourceSpan { start: 5, end: 8 },
 			binding: SourceSpan { start: 13, end: 14 }
+		})
+	);
+}
+
+/// A collision outranks a use before bind, even one that precedes it: the
+/// self-reference within the first binding is reported only if the body binds
+/// no name twice.
+#[test]
+fn validate_collision_outranks_earlier_use_before_bind()
+{
+	let ast = Parser::parse("{x}@({x}) + {x}@(1)").unwrap();
+	assert_eq!(
+		Validator::validate(&ast),
+		Err(CompilationError::DuplicateBinding {
+			name: "x".into(),
+			first: SourceSpan { start: 1, end: 2 },
+			duplicate: SourceSpan { start: 13, end: 14 }
+		})
+	);
+	let ast = Parser::parse("{p}: {x} + {p}@(1) + {x}@(2)").unwrap();
+	assert_eq!(
+		Validator::validate(&ast),
+		Err(CompilationError::BindingCollidesWithParameter {
+			name: "p".into(),
+			parameter: SourceSpan { start: 1, end: 2 },
+			binding: SourceSpan { start: 12, end: 13 }
+		})
+	);
+}
+
+/// When several references precede their bindings, the first reference in
+/// source order is reported, even if its binding comes last.
+#[test]
+fn validate_use_before_bind_reports_first_reference()
+{
+	let ast = Parser::parse("{y} + {x} + {x}@(1) + {y}@(2)").unwrap();
+	assert_eq!(
+		Validator::validate(&ast),
+		Err(CompilationError::UseBeforeBind {
+			name: "y".into(),
+			reference: SourceSpan { start: 0, end: 3 },
+			binding: SourceSpan { start: 23, end: 24 }
 		})
 	);
 }
@@ -818,7 +887,8 @@ fn test_validate_deep()
 	on_small_stack(|| {
 		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
-			let result = Validator::validate(&nest_function(nesting, DEPTH));
+			let result =
+				Validator::validate(&nest_function(nesting, nesting.depth()));
 			if nesting.binds()
 			{
 				assert!(

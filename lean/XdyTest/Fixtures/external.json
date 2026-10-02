@@ -1,0 +1,1 @@
+{"parameters":[],"externals":["y"],"register_count":2,"rolling_record_count":1,"instructions":[{"RollRange":{"dest":0,"start":{"Immediate":1},"end":{"Immediate":6}}},{"SumRollingRecord":{"dest":1,"src":0}},{"Add":{"dest":0,"op1":{"Register":0},"op2":{"Register":1}}},{"Return":{"src":{"Register":0}}}]}

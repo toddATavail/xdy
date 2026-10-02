@@ -1,0 +1,1 @@
+{"parameters":["x"],"externals":[],"register_count":1,"rolling_record_count":1,"instructions":[{"RollCustomDice":{"dest":0,"count":{"Register":0},"faces":[1,3]}},{"SumRollingRecord":{"dest":0,"src":0}},{"Return":{"src":{"Register":0}}}]}

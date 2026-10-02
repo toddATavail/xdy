@@ -186,7 +186,7 @@ impl InstructionVisitor<()> for StrengthReducer
 		let mut contiguous = true;
 		for face in &faces[1..]
 		{
-			if *face == counter + 1
+			if counter.checked_add(1) == Some(*face)
 			{
 				counter = *face;
 			}
@@ -362,7 +362,7 @@ impl InstructionVisitor<()> for StrengthReducer
 					});
 					return Ok(())
 				}
-				// Otherwise, just copy the drop lowest instruction over.
+				// Otherwise, just copy the drop highest instruction over.
 				self.emit(DropHighest {
 					dest,
 					count: self.replacement(drop.count)
@@ -804,7 +804,7 @@ impl StrengthReducer
 	/// specified filter.
 	///
 	/// # Parameters
-	/// - `dest`: The target register.
+	/// - `filter`: The predicate that the drop instruction must satisfy.
 	///
 	/// # Returns
 	/// The program counter of the drop instruction, if found.

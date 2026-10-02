@@ -13,7 +13,7 @@ use std::{
 use pretty_assertions::assert_eq;
 
 use super::{
-	ast::{DEPTH, LEAF, Nesting, nest_function, nest_parsable},
+	ast::{LEAF, Nesting, nest_function, nest_parsable},
 	recovery::{FAMILIES, SCALE}
 };
 use crate::{
@@ -62,7 +62,7 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 /// A [suggestion](diagnostics::Suggestion), replayed as the complete source
 /// that results from applying it together with the first suggestions of all
 /// earlier diagnostics. This is how `test_parser_errors.txt` writes
-/// suggestions, as the doctor did before `xdy-i0q.14`.
+/// suggestions, as the doctor did before 0.13.0.
 #[derive(Debug)]
 pub(super) struct Replayed
 {
@@ -114,7 +114,7 @@ pub(super) fn replay(
 /// fixes, to a source. Insertions at the same position apply in the order
 /// given, the earlier fixes first, and before a replacement there.
 ///
-/// The doctor's fix-and-retry loop, before `xdy-i0q.14`, computed each fix
+/// The doctor's fix-and-retry loop, before 0.13.0, computed each fix
 /// against the source as corrected by the earlier fixes, so a fix may rewrite
 /// a region that an earlier fix edited, e.g., to remove trailing input that
 /// begins with a space that an earlier fix inserted. Mapped back to the
@@ -552,6 +552,35 @@ fn test_diagnose_duplicate_canonical_parameter()
 	assert!(Parser::parse(&corrected).is_ok());
 }
 
+/// Test that the doctor's rename of a duplicate parameter avoids every name in
+/// use, not just the parameters, so that the corrected source validates: `{y}`
+/// would collide with the local binding, and `{z}` would capture the reference
+/// to an external variable.
+#[test]
+fn test_diagnose_duplicate_parameter_avoids_bindings_and_externals()
+{
+	for (source, expected) in [
+		("{x}, {x}: {y}@(1)", "{x}, {z}: {y}@(1)"),
+		("{x}, {x}: {y}@(1) + {z}", "{x}, {a}: {y}@(1) + {z}")
+	]
+	{
+		let result = diagnostics::diagnose(source);
+		assert_eq!(result.diagnostics.len(), 1, "{}", source);
+		let diag = &result.diagnostics[0];
+		assert!(matches!(
+			diag.kind,
+			DiagnosticKind::DuplicateParameter { ref name } if name == "x"
+		));
+		let corrected = diag.suggestions[0].apply(source);
+		assert_eq!(corrected, expected);
+		assert!(
+			diagnostics::diagnose(&corrected).diagnostics.is_empty(),
+			"{}",
+			corrected
+		);
+	}
+}
+
 /// Test that the semantic validator is intentionally bypassed when the
 /// recovering parse had to repair the source to obtain a clean parse.
 /// Attaching semantic diagnostics (`DuplicateParameter`, etc.) to spans in a
@@ -645,7 +674,7 @@ fn test_diagnose_unexpected_token_stops_at_whitespace()
 
 /// Test that the doctor replaces each character of stray whitespace, i.e.,
 /// whitespace between tokens that may not separate them, with a space, wherever
-/// it lies, and shows it by its code point (`xdy-zl4.10`).
+/// it lies, and shows it by its code point.
 #[test]
 fn test_diagnose_stray_whitespace()
 {
@@ -696,8 +725,7 @@ fn test_diagnose_stray_whitespace()
 }
 
 /// Test that whitespace inside braces is not stray, since it belongs to the
-/// name, but whitespace after the break of an unclosed name is
-/// (`xdy-zl4.10`).
+/// name, but whitespace after the break of an unclosed name is.
 #[test]
 fn test_diagnose_stray_whitespace_outside_braces()
 {
@@ -722,7 +750,7 @@ fn test_diagnose_stray_whitespace_outside_braces()
 }
 
 /// Test that the doctor fixes stray whitespace before a bare parameter, and
-/// then the parameter, in source order (`xdy-zl4.10`).
+/// then the parameter, in source order.
 #[test]
 fn test_diagnose_stray_whitespace_before_bare_parameter()
 {
@@ -745,7 +773,7 @@ fn test_diagnose_stray_whitespace_before_bare_parameter()
 }
 
 /// Test that a fix that removes trailing input subsumes the stray whitespace
-/// within it (`xdy-zl4.10`).
+/// within it.
 #[test]
 fn test_diagnose_stray_whitespace_in_trailing_input()
 {
@@ -759,8 +787,7 @@ fn test_diagnose_stray_whitespace_in_trailing_input()
 }
 
 /// Test that a fix that braces a bare name leaves the stray whitespace after
-/// it to a fix of its own, and that the diagnostic shows the name without it
-/// (`xdy-zl4.9`, `xdy-zl4.10`).
+/// it to a fix of its own, and that the diagnostic shows the name without it.
 #[test]
 fn test_diagnose_bare_name_before_stray_whitespace()
 {
@@ -801,7 +828,7 @@ fn test_diagnose_bare_name_before_stray_whitespace()
 
 /// Test that a fix that breaks the name of an unclosed variable before an
 /// operator keeps the whitespace before the operator that may not separate
-/// tokens inside the braces (`xdy-zl4.9`).
+/// tokens inside the braces.
 #[test]
 fn test_diagnose_unclosed_name_braces_foreign_whitespace()
 {
@@ -870,7 +897,7 @@ fn test_collect_in_use_names_deep()
 	on_small_stack(|| {
 		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
-			let function = nest_function(nesting, DEPTH);
+			let function = nest_function(nesting, nesting.depth());
 			let names = diagnostics::collect_in_use_names(&function);
 			let expected = if nesting.binds()
 			{
@@ -983,12 +1010,12 @@ fn test_diagnose_deep_drop_clauses() { diagnose_deep(Nesting::DropClauses) }
 
 /// On a small stack, [diagnose](diagnostics::diagnose) a binding that collides
 /// with a parameter, a duplicate binding, and a use before binding, each
-/// followed by a [`DEPTH`]-deep nesting and then a reference to the external
-/// variable `x`. Ensure that each yields exactly its diagnostic, and that the
-/// diagnostic suggests renaming the binding `b` to `y`. The rename skips past
-/// the highest single-letter name in use, so it is `y` only if the walk that
-/// gathers the names in use crossed the whole nesting to find `x`; otherwise,
-/// it would be `c`.
+/// followed by a [deep](Nesting::depth) nesting and then a reference to the
+/// external variable `x`. Ensure that each yields exactly its diagnostic, and
+/// that the diagnostic suggests renaming the binding `b` to `y`. The rename
+/// skips past the highest single-letter name in use, so it is `y` only if the
+/// walk that gathers the names in use crossed the whole nesting to find `x`;
+/// otherwise, it would be `c`.
 ///
 /// # Parameters
 /// - `nesting`: The way to nest. It must not introduce bindings, since every
@@ -999,7 +1026,7 @@ fn diagnose_deep(nesting: Nesting)
 {
 	assert!(!nesting.binds(), "{:?} introduces bindings", nesting);
 	on_small_stack(|| {
-		let nest = nest_parsable(nesting, DEPTH, 1).to_string();
+		let nest = nest_parsable(nesting, nesting.depth(), 1).to_string();
 		let cases = [
 			(
 				format!("{{b}}: {{b}}@(1) + {} + {{x}}", nest),
@@ -1613,13 +1640,13 @@ fn census(result: &DiagnoseResult) -> Census
 	census
 }
 
-/// Predict the [census](Census) of the diagnosis of a [`DEPTH`]-deep source,
-/// broken as specified, from the diagnoses of shallow ones. Every nesting
-/// repeats with a period of [`Nesting::ROTATION`]'s length, so the number of
-/// diagnostics of each kind must be an affine function of the number of
-/// periods; the prediction extrapolates it from a base depth congruent to
-/// [`DEPTH`] and the depth one period deeper, and checks that two more periods
-/// continue the line.
+/// Predict the [census](Census) of the diagnosis of a [deep](Nesting::depth)
+/// source, broken as specified, from the diagnoses of shallow ones. Every
+/// nesting repeats with a period of [`Nesting::ROTATION`]'s length, so the
+/// number of diagnostics of each kind must be an affine function of the number
+/// of periods; the prediction extrapolates it from a base depth congruent to
+/// the deep one and the depth one period deeper, and checks that two more
+/// periods continue the line.
 ///
 /// # Parameters
 /// - `nesting`: The way to nest.
@@ -1629,8 +1656,9 @@ fn census(result: &DiagnoseResult) -> Census
 /// The predicted census, and whether the shallow sources were fixed.
 fn predict_census(nesting: Nesting, breakage: Breakage) -> (Census, bool)
 {
+	let depth = nesting.depth();
 	let period = Nesting::ROTATION.len();
-	let base = period + DEPTH % period;
+	let base = period + depth % period;
 	let results = [base, base + period, base + 2 * period, base + 3 * period]
 		.map(|depth| diagnostics::diagnose(&breakage.source(nesting, depth)));
 	let fixed = results[0].corrected_source.is_some();
@@ -1647,7 +1675,7 @@ fn predict_census(nesting: Nesting, breakage: Breakage) -> (Census, bool)
 		.iter()
 		.flat_map(|census| census.keys().copied())
 		.collect::<HashSet<_>>();
-	let periods = (DEPTH - base) / period;
+	let periods = (depth - base) / period;
 	let mut predicted = Census::new();
 	for kind in kinds
 	{
@@ -1672,7 +1700,7 @@ fn predict_census(nesting: Nesting, breakage: Breakage) -> (Census, bool)
 	(predicted, fixed)
 }
 
-/// On a small stack, [diagnose](diagnostics::diagnose) a [`DEPTH`]-deep
+/// On a small stack, [diagnose](diagnostics::diagnose) a [deep](Nesting::depth)
 /// source, broken at its innermost constant. Ensure that the diagnosis has the
 /// [census](Census) that [`predict_census`] extrapolates from shallow sources,
 /// so that no diagnostic is lost or duplicated at depth, and that the doctor
@@ -1688,7 +1716,7 @@ fn diagnose_deep_failing(nesting: Nesting, breakage: Breakage)
 {
 	on_small_stack(|| {
 		let (predicted, fixed) = predict_census(nesting, breakage);
-		let source = breakage.source(nesting, DEPTH);
+		let source = breakage.source(nesting, nesting.depth());
 		let result = diagnostics::diagnose(&source);
 		assert_eq!(census(&result), predicted, "{:?}, {:?}", nesting, breakage);
 		assert_eq!(

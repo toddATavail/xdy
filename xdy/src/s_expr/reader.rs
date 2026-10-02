@@ -18,12 +18,15 @@
 //! integers, and the parameter and faces lists — are the leaf readers of the
 //! parent module, which the engine calls directly.
 //!
-//! The engine reproduces the behavior of the recursive reader that it
-//! replaced, exactly: every value, remaining input, and error, down to its
-//! location. So a child is validated for containment within its parent, then
-//! for order among its siblings, and only then for the type that its position
-//! demands; and an [`ExpectedDiceExpression`] is located before the whitespace
-//! that precedes the offending child, not at the child itself.
+//! The engine preserves the behavior of the recursive reader that it replaced
+//! — its values, remaining input, and errors, down to their locations — except
+//! where 0.13 added checks: every name must be braced and
+//! [canonical](crate::parser::is_canonical_name), and the name span of a
+//! binding must lie within the binding's span. In particular, a child is
+//! validated for containment within its parent, then for order among its
+//! siblings, and only then for the type that its position demands; and an
+//! [`ExpectedDiceExpression`] is located before the whitespace that precedes
+//! the offending child, not at the child itself.
 //!
 //! [`ExpectedDiceExpression`]: SExprError::ExpectedDiceExpression
 
@@ -313,8 +316,7 @@ type Outcome<'src> = Result<Step<'src>, nom::Err<SExprError>>;
 ///
 /// ```mermaid
 /// flowchart TD
-///     S(["read_function(input)"]) --> P["read prefix, keyword, and
-///     parameters; push the function frame"]
+///     S(["read_function(input)"]) --> P["read prefix, keyword, and<br/>parameters; push the function frame"]
 ///     P --> R["Read(input)"]
 ///     R -->|"constant or variable"| D["Deliver(input, child)"]
 ///     R -->|"compound form: push a frame"| R

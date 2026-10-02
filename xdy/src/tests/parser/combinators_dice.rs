@@ -291,7 +291,12 @@ fn test_dice()
 		"(3d6)",
 		"drop lowest",
 		"3d6 drop",
-		"3d6 drop middle"
+		"3d6 drop middle",
+		// A dice count never begins with `-`.
+		"-3d6",
+		"- 3d6",
+		"-3d[1,2]",
+		"-3d6 drop lowest"
 	]
 	{
 		let span = Span::new(input);
@@ -335,6 +340,21 @@ fn test_standard_dice()
 				})),
 				faces: Box::new(Expression::Constant(Constant {
 					value: 20,
+					span: SourceSpan::default()
+				})),
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"3d-6",
+			"3D-6",
+			StandardDice {
+				count: Box::new(Expression::Constant(Constant {
+					value: 3,
+					span: SourceSpan::default()
+				})),
+				faces: Box::new(Expression::Constant(Constant {
+					value: -6,
 					span: SourceSpan::default()
 				})),
 				span: SourceSpan::default()
@@ -463,7 +483,20 @@ fn test_standard_dice()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", "d6", "3", "3d", "d", "3d[1,2,3]", "3+4d6", "(3d6)"]
+	// A dice count never begins with `-`.
+	for input in [
+		"",
+		" ",
+		"d6",
+		"3",
+		"3d",
+		"d",
+		"3d[1,2,3]",
+		"3+4d6",
+		"(3d6)",
+		"-3d6",
+		"- 3d6"
+	]
 	{
 		let span = Span::new(input);
 		let result = standard_dice(span);
@@ -644,7 +677,10 @@ fn test_custom_dice()
 		"3D[1,2,]",
 		"3D[a,b,c]",
 		"3D1,2,3",
-		"3D(1,2,3)"
+		"3D(1,2,3)",
+		// A dice count never begins with `-`.
+		"-3D[1,2,3]",
+		"- 3D[1,2,3]"
 	]
 	{
 		let span = Span::new(input);
@@ -729,7 +765,11 @@ fn test_dice_count()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", " 3", "d6", "2d6", "[1,2,3]", "2+3", "a"]
+	// A dice count never begins with `-`, since its constant is unsigned.
+	for input in [
+		"", " ", " 3", "d6", "2d6", "[1,2,3]", "2+3", "a", "-3", "-0", "- 3",
+		"-{count}"
+	]
 	{
 		let span = Span::new(input);
 		let result = dice_count(span);
@@ -760,6 +800,15 @@ fn test_standard_faces()
 			"20",
 			Expression::Constant(Constant {
 				value: 20,
+				span: SourceSpan::default()
+			})
+		),
+		// Unlike a dice count, standard faces may be a signed integer.
+		(
+			"-6",
+			"-6",
+			Expression::Constant(Constant {
+				value: -6,
 				span: SourceSpan::default()
 			})
 		),
@@ -821,7 +870,9 @@ fn test_standard_faces()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", " 3", "d6", "2d6", "[1,2,3]", "2+3", "a"]
+	for input in [
+		"", " ", " 3", "d6", "2d6", "[1,2,3]", "2+3", "a", "- 6", "--6"
+	]
 	{
 		let span = Span::new(input);
 		let result = standard_faces(span);
@@ -999,14 +1050,6 @@ fn test_drop_expression()
 			})
 		),
 		(
-			"-42",
-			"-42",
-			Expression::Constant(Constant {
-				value: -42,
-				span: SourceSpan::default()
-			})
-		),
-		(
 			"{var}",
 			"{var}",
 			Expression::Variable(Variable {
@@ -1064,7 +1107,11 @@ fn test_drop_expression()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", "d6", "2d6", "[1:10]", "2+3", "{var}+2"]
+	// A drop expression never begins with `-`, so a negative count must be
+	// grouped.
+	for input in [
+		"", " ", "d6", "2d6", "[1:10]", "2+3", "{var}+2", "-42", "- 42"
+	]
 	{
 		let span = Span::new(input);
 		let result = drop_expression(span);

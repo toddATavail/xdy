@@ -222,11 +222,6 @@ impl RollingRecord
 	/// # Parameters
 	/// - `count`: The number of results to drop.
 	///
-	/// # Panics
-	///
-	/// Panics if `count` the receiver is
-	/// [uninitialized](RollingRecordKind::Uninitialized).
-	///
 	/// # Examples
 	/// Roll `3D12` and drop the lowest result:
 	///
@@ -290,11 +285,6 @@ impl RollingRecord
 	///
 	/// # Parameters
 	/// - `count`: The number of results to drop.
-	///
-	/// # Panics
-	///
-	/// Panics if `count` the receiver is
-	/// [uninitialized](RollingRecordKind::Uninitialized).
 	///
 	/// # Examples
 	/// Roll `5D8` and drop the highest result:
@@ -404,10 +394,10 @@ impl RollingRecord
 			.collect()
 	}
 
-	/// Compute the sum of the results, dropping the lowest and highest results
-	/// as necessary. Clamp the drop counts to the range
-	/// `[0, self.results.len()]`. Saturate the sum on overflow. Consecutive
-	/// calls are idempotent.
+	/// Compute the sum of the [kept](Self::kept) results, i.e., excluding the
+	/// dropped lowest and highest results. If the lowest and highest drops
+	/// together cover every result, then nothing is kept and the sum is `0`.
+	/// Saturate the sum on overflow. Consecutive calls are idempotent.
 	///
 	/// # Returns
 	/// The sum of the results.

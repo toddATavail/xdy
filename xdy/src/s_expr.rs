@@ -48,7 +48,7 @@ pub trait SExpressible
 	/// - `options`: The formatting options.
 	///
 	/// # Returns
-	/// `true` if formatting split across multiple lines, `false` otherwise.
+	/// `Ok(())` on success.
 	///
 	/// # Errors
 	/// If the formatting fails for any reason.
@@ -1085,8 +1085,9 @@ impl SExpressible for ArithmeticExpression<'_>
 ///
 /// The S-expression format mirrors the output of [`SExpressible::to_s_expr`]:
 /// `(function [params...] body)`. Constants are bare integers, names are
-/// identifiers delimited by braces (e.g., `{x}`), and compound expressions use
-/// keywords like `add`, `neg`, `standard-dice`, etc.
+/// [canonical](crate::parser::is_canonical_name) identifiers delimited by
+/// braces (e.g., `{x}`), and compound expressions use keywords like `add`,
+/// `neg`, `standard-dice`, etc.
 ///
 /// Parenthesized [`Group`] nodes may be either transparent (the subexpression
 /// appears directly in the s-expression, matching the default writer output) or
@@ -1102,9 +1103,12 @@ impl SExpressible for ArithmeticExpression<'_>
 /// is recognized — unrecognized metadata shapes (e.g., `^{...}` or `^symbol`)
 /// are an explicit error.
 ///
-/// The reader validates span consistency: every non-synthetic span must be
-/// strictly contained within its enclosing parent's non-synthetic span, and
-/// siblings must appear in source order without overlap.
+/// The reader validates span consistency: every non-synthetic span must lie
+/// within its enclosing parent's non-synthetic span, though it may share
+/// either or both of its bounds, and siblings must appear in source order
+/// without overlap, though they may abut. The [name span](Binding::name_span)
+/// of a binding counts as a child of the binding, and as the sibling that
+/// precedes its bound expression.
 ///
 /// # Parameters
 /// - `input`: The S-expression string to parse.
@@ -1113,10 +1117,11 @@ impl SExpressible for ArithmeticExpression<'_>
 /// The parsed function.
 ///
 /// # Errors
-/// - [`SExprError`] if the input is not a valid S-expression, if a span is
-///   malformed (`start > end`), if a child's span escapes its parent, or if
-///   siblings overlap or appear out of source order. Each variant pinpoints a
-///   specific failure mode and carries an [`SExprLocation`].
+/// - [`SExprError`] if the input is not a valid S-expression, if a name is not
+///   canonical, if a span is malformed (`start > end`), if a child's span
+///   escapes its parent, or if siblings overlap or appear out of source order.
+///   Each variant pinpoints a specific failure mode and carries an
+///   [`SExprLocation`].
 ///
 /// # Examples
 /// ```

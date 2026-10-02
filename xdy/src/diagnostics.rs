@@ -33,7 +33,7 @@
 //! ┌───────────────────────────────────────────────────────────┐
 //! │ Parser::parse(source)                                     │
 //! │   ├─ success → Validator::validate(ast) → diagnostics     │
-//! │   └─ error   → Parser::parse_recovering(source, doctor)   │
+//! │   └─ error   → Parser::parse_recovering(blanked, doctor)  │
 //! │                  └─ each failure → diagnose → repair      │
 //! └───────────────────────────────────────────────────────────┘
 //! ```
@@ -66,7 +66,7 @@ use std::{
 
 use crate::{
 	CompilationError, Parser, Validator,
-	ast::{Event, Expression, Function, Node, Parameter, Walk},
+	ast::{Event, Expression, Function, Node, Walk},
 	parser::{
 		FailureSite, Recovery, Repair, Site, canonical_name,
 		is_bare_word_continue, is_bare_word_start, is_token_space,
@@ -109,7 +109,7 @@ pub enum DiagnosticKind
 	/// A closing delimiter has no matching open.
 	///
 	/// # Examples
-	/// `3D6)`, `x}`
+	/// `)3D6`, `]3D6`, `}3D6`
 	UnopenedDelimiter
 	{
 		/// The unmatched closing delimiter character.
@@ -173,7 +173,7 @@ pub enum DiagnosticKind
 	/// `{x},: 1`, `{x}, , {y}: 1`
 	MissingParameter,
 
-	/// A valid expression is followed by unparseable input.
+	/// A valid expression is followed by unparsable input.
 	///
 	/// # Examples
 	/// `3D6)`, `3D6 hello`
@@ -228,7 +228,8 @@ pub enum DiagnosticKind
 	/// first binding.
 	///
 	/// # Examples
-	/// `{x}@(3D6) + {x}@(1D4)`
+	/// `{x}@(3D6) + {x}@(1D4)`, `{x}@({x}@(1))` (a binding nested within the
+	/// bound expression of a binding of the same name)
 	DuplicateBinding
 	{
 		/// The rebound name.
@@ -491,9 +492,12 @@ pub struct Placeholder
 /// The result of diagnosing a source string.
 ///
 /// # Notes
-/// If all errors are fixable, `corrected_source` contains a parseable source
-/// string with all fixes applied. If any error is unfixable, `corrected_source`
-/// is `None`.
+/// If all syntactic errors are fixable, `corrected_source` contains a
+/// parseable source string with the first suggestion of each applied. If any
+/// syntactic error is unfixable, `corrected_source` is `None`. Semantic
+/// diagnostics arise only from a source that already parses, and their
+/// suggestions are never applied, so `corrected_source` is then the original
+/// source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnoseResult
 {
@@ -2627,8 +2631,10 @@ fn analyze_semantic_error<'src>(
 
 /// Build a
 /// [`BindingCollidesWithParameter`](DiagnosticKind::BindingCollidesWithParameter)
-/// diagnostic with a rename [`Suggestion`] whose corrected source is guaranteed
-/// to parse and validate cleanly.
+/// diagnostic with a rename [`Suggestion`] whose fresh name collides with no
+/// name in the function, so that the suggestion resolves this error without
+/// introducing another, though a source with several errors needs the fixes of
+/// all of them.
 ///
 /// The primary [`span`](Diagnostic::span) points at the binding-site name; a
 /// single [`RelatedLabel`] points at the colliding parameter declaration. The
@@ -2680,8 +2686,10 @@ fn make_binding_collides_with_parameter<'src>(
 }
 
 /// Build a [`DuplicateBinding`](DiagnosticKind::DuplicateBinding) diagnostic
-/// with a rename [`Suggestion`] whose corrected source is guaranteed to parse
-/// and validate cleanly.
+/// with a rename [`Suggestion`] whose fresh name collides with no name in the
+/// function, so that the suggestion resolves this error without introducing
+/// another, though a source with several errors needs the fixes of all of
+/// them.
 ///
 /// The primary [`span`](Diagnostic::span) points at the duplicate binding-site
 /// name; a single [`RelatedLabel`] points at the first binding. The suggestion
@@ -2732,8 +2740,10 @@ fn make_duplicate_binding<'src>(
 }
 
 /// Build a [`UseBeforeBind`](DiagnosticKind::UseBeforeBind) diagnostic with a
-/// rename [`Suggestion`] whose corrected source is guaranteed to parse and
-/// validate cleanly.
+/// rename [`Suggestion`] whose fresh name collides with no name in the
+/// function, so that the suggestion resolves this error without introducing
+/// another, though a source with several errors needs the fixes of all of
+/// them.
 ///
 /// The primary [`span`](Diagnostic::span) points at the offending reference; a
 /// single [`RelatedLabel`] points at the later binding site. The suggestion
@@ -2832,21 +2842,26 @@ pub(crate) fn collect_in_use_names<'a>(
 }
 
 /// Build a [`DuplicateParameter`](DiagnosticKind::DuplicateParameter)
-/// diagnostic with a rename suggestion whose corrected source is guaranteed to
-/// parse and validate cleanly.
+/// diagnostic with a rename suggestion whose fresh name collides with no name
+/// in the function, so that the suggestion resolves this error without
+/// introducing another, though a source with several errors needs the fixes of
+/// all of them.
 ///
 /// The primary [`span`](Diagnostic::span) points at the duplicate
 /// occurrence; a single [`RelatedLabel`] on [`related`](Diagnostic::related)
 /// points at the first occurrence. The suggestion splices a fresh name
-/// produced by [`suggest_rename`] into the duplicate span — references in the
-/// body are deliberately left alone because there is no safe way to pick
-/// which one of them (if any) was intended to refer to a different binding.
+/// produced by [`suggest_rename_with_pool`] into the duplicate span —
+/// references in the body are deliberately left alone because there is no safe
+/// way to pick which one of them (if any) was intended to refer to a different
+/// binding. The fresh name avoids every name in use, not just the parameters,
+/// so that it neither collides with a local binding, as `{y}` would in
+/// `{x}, {x}: {y}@(1)`, nor captures a reference to an external variable.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text from which `ast` was parsed.
 ///
 /// # Parameters
-/// - `ast`: The parsed function (used to enumerate in-use parameter names).
+/// - `ast`: The parsed function (used to enumerate the names in use).
 /// - `name`: The duplicated parameter name.
 /// - `first`: The span of the first occurrence of `name`.
 /// - `duplicate`: The span of the duplicate occurrence that triggered the
@@ -2861,8 +2876,8 @@ fn make_duplicate_parameter<'src>(
 	duplicate: SourceSpan
 ) -> Diagnostic
 {
-	let parameters = ast.parameters.as_deref().unwrap_or(&[]);
-	let fresh = suggest_rename(name, parameters);
+	let used = collect_in_use_names(ast);
+	let fresh = suggest_rename_with_pool(name, &used);
 	Diagnostic {
 		kind: DiagnosticKind::DuplicateParameter {
 			name: name.to_string()
@@ -2885,46 +2900,28 @@ fn make_duplicate_parameter<'src>(
 	}
 }
 
-/// Suggest a fresh parameter name that does not collide with any existing name
-/// in `parameters`.
+/// Suggest a fresh name that does not collide with any name in `used`, for
+/// the rename suggestions of duplicate parameters and of
+/// [local-binding](crate::ast::Binding) errors alike.
 ///
-/// When the duplicate is a single ASCII letter — the common case, given dice
+/// When the name is a single ASCII letter — the common case, given dice
 /// expressions tend to use terse names like `x`, `y`, `a`, `b` — the
 /// replacement is the first unused letter encountered by **bumping from the
-/// highest attested same-case single-letter parameter** and wrapping through
-/// the alphabet. So `x, x` becomes `x, y` (bump `x` → `y`), `a, b, b, c`
-/// becomes `a, b, d, c` (bump highest `c` → `d`), `a, x, x` becomes `a, x, y`
-/// (bump highest `x` → `y`), and `a, z, z` becomes `a, z, b` (bump `z` wraps
-/// past unused `a` which is taken, lands on `b`). Continuing from the user's
-/// apparent "trajectory" is usually more natural than filling the earliest
-/// alphabetic gap, which would produce `a, x, b` in the third example.
+/// highest attested same-case single-letter name** and wrapping through the
+/// alphabet. So `{x}, {x}` becomes `{x}, {y}` (bump `x` → `y`),
+/// `{a}, {b}, {b}, {c}` becomes `{a}, {b}, {d}, {c}` (bump highest `c` → `d`),
+/// `{a}, {x}, {x}` becomes `{a}, {x}, {y}` (bump highest `x` → `y`), and
+/// `{a}, {z}, {z}` becomes `{a}, {z}, {b}` (bump `z` wraps past `a`, which is
+/// taken, and lands on `b`). Continuing from the user's apparent "trajectory"
+/// is usually more natural than filling the earliest alphabetic gap, which
+/// would produce `{a}, {x}, {b}` in the third example.
 ///
-/// When the duplicate is a multi-character name, or all 26 letters in the
+/// When the name has more than one character, or all 26 letters in the
 /// matching case are already in use, the replacement falls through to a `newN`
 /// form (`new0`, `new1`, …), where `N` is the first non-negative integer for
 /// which the resulting name is unused. The `newN` loop likewise skips over
-/// names the user has already adopted, so `abc, new0, abc` becomes `abc, new0,
-/// new1` and `abc, new0, new1, abc` becomes `abc, new0, new1, new2`.
-///
-/// # Parameters
-/// - `duplicate`: The duplicated parameter name.
-/// - `parameters`: The function's parameter list, used to determine which names
-///   are already in use.
-///
-/// # Returns
-/// A fresh parameter name that does not appear in `parameters`.
-fn suggest_rename(duplicate: &str, parameters: &[Parameter<'_>]) -> String
-{
-	let used: HashSet<&str> = parameters.iter().map(|p| &*p.name).collect();
-	suggest_rename_with_pool(duplicate, &used)
-}
-
-/// Suggest a fresh name that does not collide with any name in `used`. Shares
-/// the core algorithm with [`suggest_rename`] so that the rename suggestions
-/// for [local-binding](crate::ast::Binding) errors use the same heuristics as
-/// the original duplicate-parameter flow: single-letter inputs bump forward
-/// through the same-case alphabet, wrapping past the highest attested letter
-/// in the pool, and everything else falls back to `newN`.
+/// names the user has already adopted, so `{abc}, {new0}, {abc}` becomes
+/// `{abc}, {new0}, {new1}`.
 ///
 /// # Parameters
 /// - `duplicate`: The name to rename.
@@ -3017,14 +3014,15 @@ fn suggest_rename_with_pool(duplicate: &str, used: &HashSet<&str>) -> String
 ///         V-->>D: semantic error, if any
 ///     else fails
 ///         P-->>D: error
-///         D->>P: parse_recovering(source, doctor)
+///         Note over D,R: blank the stray whitespace of the source to spaces
+///         D->>P: parse_recovering(text, doctor)
 ///         loop each failure
 ///             P->>R: repair(failure)
 ///             R->>R: diagnose, record the fix
 ///             R-->>P: repair, or stop if unfixable
 ///         end
 ///         P-->>D: recovered AST, or error
-///         D->>R: finish
+///         D->>R: finish(recovered)
 ///         R-->>D: diagnostics, corrected source
 ///     end
 /// ```

@@ -1,0 +1,27 @@
+name = "xdy-spec"
+version = "0.1.0"
+defaultTargets = ["XdySpec"]
+testDriver = "XdySpecTest"
+
+# Match the Rust quality bar, as the oracle does: every warning fails the build,
+# and every public declaration must carry documentation.
+[leanOptions]
+warningAsError = true
+linter.missingDocs = true
+
+# The oracle, whose validator and initial state the specification reuses. It
+# never requires Mathlib itself.
+[[require]]
+name = "xdy"
+path = ".."
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.34.1"
+
+[[lean_lib]]
+name = "XdySpec"
+
+[[lean_lib]]
+name = "XdySpecTest"

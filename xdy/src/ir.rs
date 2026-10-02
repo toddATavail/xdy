@@ -144,9 +144,9 @@ impl Display for RollCustomDice
 
 /// Instruction: Drop the lowest dice from a rolling record. This simply
 /// involves marking the lowest dice as dropped, so that they are not included
-/// in the sum computed by [SumRollingRecord]. A negative count will put back
-/// lowest dice that were previously dropped. The number of dice to drop is
-/// clamped to the number of dice in the record.
+/// in the sum computed by [SumRollingRecord]. A count of zero or less drops
+/// nothing. Drops accumulate, and the total is clamped to the number of dice
+/// in the record.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropLowest
@@ -172,9 +172,9 @@ impl Display for DropLowest
 
 /// Instruction: Drop the highest dice from a rolling record. This simply
 /// involves marking the highest dice as dropped, so that they are not included
-/// in the sum computed by [SumRollingRecord]. A negative count will put back
-/// highest dice that were previously dropped. The number of dice to drop is
-/// clamped to the number of dice in the record.
+/// in the sum computed by [SumRollingRecord]. A count of zero or less drops
+/// nothing. Drops accumulate, and the total is clamped to the number of dice
+/// in the record.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropHighest
@@ -429,20 +429,49 @@ impl Display for Return
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Instruction
 {
+	/// [Roll an inclusive range](RollRange).
 	RollRange(RollRange),
+
+	/// [Roll a set of standard dice](RollStandardDice).
 	RollStandardDice(RollStandardDice),
+
+	/// [Roll a set of custom dice](RollCustomDice).
 	RollCustomDice(RollCustomDice),
+
+	/// [Drop the lowest dice](DropLowest) from a rolling record.
 	DropLowest(DropLowest),
+
+	/// [Drop the highest dice](DropHighest) from a rolling record.
 	DropHighest(DropHighest),
+
+	/// [Sum a rolling record](SumRollingRecord).
 	SumRollingRecord(SumRollingRecord),
+
+	/// [Add] two values.
 	Add(Add),
+
+	/// [Subtract](Sub) one value from another.
 	Sub(Sub),
+
+	/// [Multiply](Mul) two values.
 	Mul(Mul),
+
+	/// [Divide](Div) one value by another.
 	Div(Div),
+
+	/// Compute the [remainder](Mod) of dividing one value by another.
 	Mod(Mod),
+
+	/// [Exponentiate](Exp) one value by another.
 	Exp(Exp),
+
+	/// Compute the [greater](Max) of two values.
 	Max(Max),
+
+	/// [Negate](Neg) a value.
 	Neg(Neg),
+
+	/// [Return] a value from the function.
 	Return(Return)
 }
 
@@ -543,7 +572,7 @@ impl Instruction
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
 	/// - `count`: The number of dice to roll.
-	/// - `faces`: The number of faces on each die.
+	/// - `faces`: The faces of each die.
 	///
 	/// # Returns
 	/// The instruction.
@@ -557,7 +586,7 @@ impl Instruction
 		Self::RollCustomDice(RollCustomDice { dest, count, faces })
 	}
 
-	/// Create an instruction to drop the lowest value from a rolling record.
+	/// Create an instruction to drop the lowest dice from a rolling record.
 	///
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
@@ -574,7 +603,7 @@ impl Instruction
 		Self::DropLowest(DropLowest { dest, count })
 	}
 
-	/// Create an instruction to drop the highest value from a rolling record.
+	/// Create an instruction to drop the highest dice from a rolling record.
 	///
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
@@ -1951,7 +1980,7 @@ mod tests
 	/// The function described above.
 	fn function() -> Function
 	{
-		// x: 1 + {x} + 1 + {x} + 1 + {x}
+		// {x}: 1 + {x} + 1 + {x} + 1 + {x}
 		// =
 		// Function({x}@0) r#6 ⚅#0   (pc)
 		//   @1 <- 1 + @0         #0

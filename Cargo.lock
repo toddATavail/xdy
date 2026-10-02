@@ -736,6 +736,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1367,7 +1386,7 @@ checksum = "ca0d1bf6fdd806e43ae5198f82f527056d359def39e54e67a0f478ac09dac081"
 
 [[package]]
 name = "tree-sitter-xdy"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "cc",
  "tree-sitter",
@@ -1589,7 +1608,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xdy"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "aquamarine",
  "criterion",
@@ -1597,11 +1616,13 @@ dependencies = [
  "nom",
  "nom-language",
  "nom_locate",
+ "num-bigint",
+ "num-traits",
  "pretty_assertions",
  "proptest",
  "rand 0.10.3",
- "rayon",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

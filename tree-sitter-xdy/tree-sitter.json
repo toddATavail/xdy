@@ -9,7 +9,7 @@
     }
   ],
   "metadata": {
-    "version": "0.1.0",
+    "version": "0.14.0",
     "license": "BSD-3-Clause",
     "description": "tree-sitter grammar for the xDy dice expression language.",
     "authors": [
@@ -23,11 +23,11 @@
     }
   },
   "bindings": {
-    "c": true,
-    "go": true,
-    "node": true,
-    "python": true,
+    "c": false,
+    "go": false,
+    "node": false,
+    "python": false,
     "rust": true,
-    "swift": true
+    "swift": false
   }
 }

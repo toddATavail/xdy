@@ -1,8 +1,8 @@
 //! # Atom combinator test cases
 //!
 //! Herein are the test cases for the atom-level combinators: [`constant`],
-//! [`d_operator`], [`identifier`], [`alpha`], and [`alphanumeric1`], and the
-//! identifier character set.
+//! [`integer`], [`d_operator`], [`identifier`], [`alpha`], and
+//! [`alphanumeric1`], and the identifier character set.
 
 use std::borrow::Cow;
 
@@ -20,6 +20,105 @@ use pretty_assertions::assert_eq;
 /// Ensure that [`constant`] behaves as expected.
 #[test]
 fn test_constant()
+{
+	// Happy paths.
+	for (input, expected_str, expected_ast) in [
+		(
+			"0",
+			"0",
+			Constant {
+				value: 0,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"42",
+			"42",
+			Constant {
+				value: 42,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"9999",
+			"9999",
+			Constant {
+				value: 9999,
+				span: SourceSpan::default()
+			}
+		),
+		(
+			"2147483647",
+			"2147483647",
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		), // i32::MAX
+		(
+			"2147483648",
+			"2147483647",
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		), // Saturates
+		(
+			"123456789123456789123456789123456789",
+			"2147483647",
+			Constant {
+				value: 2147483647,
+				span: SourceSpan::default()
+			}
+		) // massive overflow saturates
+	]
+	{
+		let span = Span::new(input);
+		match constant(span)
+		{
+			Ok((residue, result)) =>
+			{
+				assert!(
+					residue.is_empty(),
+					"Residue not empty for input: {}",
+					input
+				);
+				assert_eq!(
+					result.to_string(),
+					expected_str,
+					"Failed for input: {}",
+					input
+				);
+				assert_eq!(
+					result.untethered(),
+					expected_ast.untethered(),
+					"AST mismatch for input: {}",
+					input
+				);
+			},
+			Err(e) => panic!("Parsing failed for input: {}: {}", input, e)
+		}
+	}
+
+	// Invalid inputs.
+	// A constant is unsigned, so a minus before one is never part of it.
+	for input in [
+		"", " ", " 42", "a", "+42", "-42", "-0", "- 42", "--42", "a42", "42a"
+	]
+	{
+		let span = Span::new(input);
+		let result = constant(span);
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+}
+
+/// Ensure that [`integer`] behaves as expected.
+#[test]
+fn test_integer()
 {
 	// Happy paths.
 	for (input, expected_str, expected_ast) in [
@@ -106,7 +205,7 @@ fn test_constant()
 	]
 	{
 		let span = Span::new(input);
-		match constant(span)
+		match integer(span)
 		{
 			Ok((residue, result)) =>
 			{
@@ -133,10 +232,10 @@ fn test_constant()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", " 42", "a", "+42", "--42", "a42", "42a"]
+	for input in ["", " ", " 42", "a", "+42", "- 42", "--42", "a42", "42a"]
 	{
 		let span = Span::new(input);
-		let result = constant(span);
+		let result = integer(span);
 		assert!(
 			result.is_err() || !result.unwrap().0.fragment().is_empty(),
 			"Failed to reject invalid input: {}",

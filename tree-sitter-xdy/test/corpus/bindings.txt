@@ -11,7 +11,7 @@ Binding: simple
 		(identifier)
 		(standard_dice
 			(constant)
-			(constant))))
+			(integer))))
 
 ==================
 Binding: constant value
@@ -40,7 +40,7 @@ Binding: referenced after definition
 			(identifier)
 			(standard_dice
 				(constant)
-				(constant)))
+				(integer)))
 		(variable
 			(identifier))))
 
@@ -57,7 +57,7 @@ Binding: as dice count
 		(binding
 			(identifier)
 			(constant))
-		(constant)))
+		(integer)))
 
 ==================
 Binding: as standard faces
@@ -86,7 +86,7 @@ Binding: as drop expression
 	(drop_lowest
 		(standard_dice
 			(constant)
-			(constant))
+			(integer))
 		(binding
 			(identifier)
 			(constant))))
@@ -106,7 +106,7 @@ Binding: nested binding in bound expression
 			(binding
 				(identifier)
 				(constant))
-			(constant))))
+			(integer))))
 
 ==================
 Binding: multiple bindings with references
@@ -124,12 +124,12 @@ Binding: multiple bindings with references
 					(identifier)
 					(standard_dice
 						(constant)
-						(constant)))
+						(integer)))
 				(binding
 					(identifier)
 					(standard_dice
 						(constant)
-						(constant))))
+						(integer))))
 			(variable
 				(identifier)))
 		(variable
@@ -223,7 +223,7 @@ Binding: alongside a parameter
 				(identifier)
 				(standard_dice
 					(constant)
-					(constant)))
+					(integer)))
 			(variable
 				(identifier)))
 		(variable
@@ -259,3 +259,18 @@ Binding: empty bound expression is rejected
 {x}@()
 
 ---
+
+==================
+Binding: whitespace of any kind just inside the braces
+==================
+
+{ x }@(1) + {x}
+
+---
+
+(function
+	(add
+		(binding
+			(identifier)
+			(constant))
+		(variable (identifier))))

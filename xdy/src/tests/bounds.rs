@@ -20,8 +20,9 @@
 //!   operation may answer an inverted interval.
 
 use crate::{
-	EvaluationBounds, EvaluationError, Evaluator, exp, r#mod,
-	support::compile_valid
+	Assembler, EvaluationBounds, EvaluationError, Evaluator, Passes, exp,
+	r#mod,
+	support::{compile_valid, optimize}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -411,6 +412,58 @@ fn test_rem_bounds_end_to_end()
 	let evaluator = Evaluator::new(function);
 	let bounds = evaluator.bounds_over([], []).unwrap().value;
 	assert!(bounds.contains(3), "1D6 % (1D4 - 5): 3 ∉ [{}]", bounds);
+}
+
+/// Test that the strength reducer's rewrite of `x ^ 2` as `x * x` keeps the
+/// bounds of the square.
+///
+/// `[-3:3] ^ 2` squares a range that straddles zero, so its minimum is 0.
+/// Multiplying the intervals of the two operands as though they were
+/// independent answered a minimum of -9 after optimization.
+#[test]
+fn test_square_bounds_survive_optimization()
+{
+	let source = "[-3:3] ^ 2";
+	let unoptimized = compile_valid(source);
+	let optimized = optimize(unoptimized.clone(), Passes::all());
+	for function in [unoptimized, optimized]
+	{
+		let evaluator = Evaluator::new(function.clone());
+		let bounds = evaluator.bounds_over([], []).unwrap().value;
+		assert_eq!(
+			bounds,
+			(0, 9).into(),
+			"{}: expected [0, 9], got [{}]\n{}",
+			source,
+			bounds,
+			function
+		);
+	}
+}
+
+/// Test that a rolling record summed without being rolled, which the compiler
+/// never emits but the assembler admits, is bounded as the evaluator sums it:
+/// empty, so zero, whatever is dropped from it.
+///
+/// The bounds evaluator once panicked on such a record.
+#[test]
+fn test_unrolled_record_bounds()
+{
+	let function = Assembler::assemble(
+		"Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D3
+		@0 <- sum rolling record ⚅0
+		⚅1 <- drop lowest @0 from ⚅1
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 + @1
+		return @0"
+	)
+	.unwrap();
+	assert_eq!(function.validate(), Ok(()));
+	let bounds = Evaluator::new(function).bounds_over([], []).unwrap();
+	assert_eq!(bounds.value, (1, 3).into());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

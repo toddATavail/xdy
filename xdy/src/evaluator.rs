@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
-	CompilationError, Div, DropHighest, DropLowest, Exp, Function,
+	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
 	InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
 	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
 	SourceSpan, Sub, SumRollingRecord, add, div, exp, max, r#mod, mul, neg,
@@ -32,8 +32,8 @@ use crate::{
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A record of a roll of dice. The record includes the results of each die in
-/// a set of dice. [`RollStandardDice`] and [`RollCustomDice`] both populate a
-/// [`RollingRecord`] in the frame's rolling record set.
+/// a set of dice. [`RollRange`], [`RollStandardDice`], and [`RollCustomDice`]
+/// each populate a [`RollingRecord`] in the frame's rolling record set.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecord
@@ -187,7 +187,7 @@ where
 }
 
 /// A dice expression evaluator. The evaluator uses a client-supplied
-/// pseudo-random number to generate the results of dice rolls.
+/// pseudo-random number generator to generate the results of dice rolls.
 ///
 /// Underflows and overflows saturate to the minimum and maximum values of the
 /// `i32` type, and special arithmetic rules for division, remainder, and
@@ -216,17 +216,25 @@ where
 ///             RR1["⚅1: dice/range results"]
 ///         end
 ///         RES["Result Register"]
+///         DM["Dice Meter<br/>(remaining, consumed)"]
 ///     end
 ///     F["Function (IR)"] --> PC
 ///     RNG["pRNG"] --> RR
 ///     ARGS["Arguments"] --> RF
 ///     ENV["Environment"] --> RF
-///     VM --> OUT["Evaluation"]
+///     BUD["Dice Budget"] --> DM
+///     DM -->|"charges each roll<br/>before it rolls"| RR
+///     VM --> OUT["Evaluation<br/>(result, records, dice)"]
+///     VM -.->|"a roll would<br/>exceed the budget"| ERR["DiceBudgetExhausted"]
 ///     style VM fill:#e8f4fd,stroke:#333,color:#000
 ///     style RF fill:#d4edda,stroke:#333,color:#000
 ///     style RR fill:#fff3cd,stroke:#333,color:#000
 ///     style OUT fill:#9f9,stroke:#333,color:#000
+///     style ERR fill:#f99,stroke:#333,color:#000
 /// ```
+///
+/// [`evaluate`](Self::evaluate) is [metered](Self::evaluate_metered) with an
+/// unlimited budget.
 #[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -269,7 +277,8 @@ where
 }
 
 /// The result of a dice expression evaluation. The result includes the final
-/// value of the expression and the rolling records of the dice subexpressions.
+/// value of the expression, the rolling records of the dice subexpressions,
+/// and the number of dice rolled.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluation
@@ -841,9 +850,9 @@ impl RollingRecordKind<i32>
 /// variants report a failure of setup: of compilation, binding, or supplying
 /// arguments. Evaluation itself fails only when a
 /// [metered](Evaluator::evaluate_metered) evaluation exhausts its
-/// [dice budget](Self::DiceBudgetExhausted), or when a
-/// [metered](crate::HistogramBuilder::build_metered) histogram build exhausts
-/// its [budget](Self::HistogramBudgetExhausted).
+/// [dice budget](Self::DiceBudgetExhausted). A
+/// [distribution build](crate::DistributionPlan::build) reports its failures
+/// as a [`BuildError`](crate::BuildError) instead.
 ///
 /// # Type parameters
 /// - `'error`: The lifetime of the source text or external variable name that
@@ -960,26 +969,6 @@ pub enum EvaluationError<'error>
 
 		/// The number of dice already rolled when the roll was refused.
 		consumed: u64
-	},
-
-	/// A [metered](crate::HistogramBuilder::build_metered) histogram build
-	/// asked to enumerate more branches than its budget allows, and was
-	/// stopped before enumerating them. Like
-	/// [`DiceBudgetExhausted`](Self::DiceBudgetExhausted), this reports
-	/// exhaustion, not a defect. A range charges its width and a die its
-	/// number of faces, once for each path that reaches it.
-	HistogramBudgetExhausted
-	{
-		/// The number of branches requested by the refused range or die.
-		requested: u64,
-
-		/// The budget remaining when the range or die was refused, which is
-		/// less than `requested`.
-		remaining: u64,
-
-		/// The number of branches already enumerated when the range or die
-		/// was refused.
-		consumed: u64
 	}
 }
 
@@ -1070,19 +1059,6 @@ impl Display for EvaluationError<'_>
 					 remaining after {} rolled",
 					requested, remaining, consumed
 				)
-			},
-			EvaluationError::HistogramBudgetExhausted {
-				requested,
-				remaining,
-				consumed
-			} =>
-			{
-				write!(
-					f,
-					"histogram budget exhausted: {} branches exceed the {} \
-					 remaining after {} enumerated",
-					requested, remaining, consumed
-				)
 			}
 		}
 	}
@@ -1156,8 +1132,9 @@ impl Evaluator
 	/// `None` if the function contains dynamic range or roll expressions,
 	/// i.e., range or roll expressions whose count or faces are themselves
 	/// determined by range or roll expressions. In such cases, the outcome
-	/// count cannot be determined without generating a complete histogram of
-	/// the function, which is too expensive to do without a specific request.
+	/// count cannot be determined without generating the complete distribution
+	/// of the function, which is too expensive to do without a specific
+	/// request.
 	///
 	/// # Errors
 	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
@@ -1239,8 +1216,10 @@ impl Evaluator
 	///
 	/// The analysis is interval arithmetic, which is subject to the dependency
 	/// problem: two occurrences of the same binding are not recognized as one
-	/// value. So `{x}: {x} - {x}` over `x ∈ [-a, a]` answers `[-2a, 2a]` rather
-	/// than `[0, 0]`. Over-approximation is the safe direction — the bounds
+	/// value. So `{x}: {x} + -{x}` over `x ∈ [-a, a]` answers `[-2a, 2a]`
+	/// rather than `[0, 0]`. (The optimizer rewrites `{x} - {x}` to `0`, so
+	/// that spelling answers `[0, 0]`.) Over-approximation is the safe
+	/// direction — the bounds
 	/// always contain every reachable value — but they are not always tight.
 	///
 	/// # Examples
@@ -1288,7 +1267,7 @@ impl Evaluator
 /// dynamic range or roll expressions. Both are static analyses that do not
 /// require any random number generation.
 #[derive(Debug, Clone)]
-struct BoundsEvaluator<'eval>
+pub(crate) struct BoundsEvaluator<'eval>
 {
 	/// The function for which to calculate bounds.
 	function: &'eval Function,
@@ -1452,19 +1431,27 @@ pub struct Bounds
 	/// The minimum and maximum values of the function.
 	pub value: EvaluationBounds,
 
-	/// The number of outcomes, or `None` if the count could not be computed
-	/// efficiently because of dynamic range or dice expressions, i.e., when
-	/// the count or faces are themselves determined by a range or dice
-	/// expression.
+	/// The number of equally likely outcomes, counting every branch of every
+	/// range and roll, which is the [total](crate::Distribution::total) weight
+	/// of the exact distribution, not the number of [distinct
+	/// values](crate::Distribution::len); or `None` if the count could not be
+	/// computed efficiently because of dynamic range or dice expressions,
+	/// i.e., when the count or faces are themselves determined by a range
+	/// or dice expression, or if any binding supplied to
+	/// [`bounds_over`](Evaluator::bounds_over) is not a single value.
 	pub count: Option<u128>,
 
-	/// The greatest number of dice that the function may roll over the
-	/// bindings, where a range counts as one die, saturating at [`u64::MAX`].
-	/// This is the least [budget](Evaluator::evaluate_metered) that no
-	/// evaluation over the bindings can exhaust, so a caller can compare it
-	/// against a budget without evaluating anything. Unlike the outcome count,
-	/// it is available even for dynamic range and roll expressions, whose
-	/// counts are bounded like any other value.
+	/// An upper bound on the number of dice that the function may roll over
+	/// the bindings, where a range counts as one die, saturating at
+	/// [`u64::MAX`]. No evaluation over the bindings rolls more, so no
+	/// [metered](Evaluator::evaluate_metered) evaluation with at least this
+	/// budget can exhaust it, and a caller can compare it against a budget
+	/// without evaluating anything. Unlike the outcome count, it is available
+	/// even for dynamic range and roll expressions, whose counts are bounded
+	/// like any other value. The bound is computed by interval arithmetic, so,
+	/// like [`value`](Self::value), it may over-approximate, e.g.,
+	/// `({a}@(1D6) + -{a})D6` always rolls exactly one die, but its bound is
+	/// `6`.
 	pub dice: u64
 }
 
@@ -1507,7 +1494,7 @@ impl<'eval> BoundsEvaluator<'eval>
 	///
 	/// # Returns
 	/// The requested bounds evaluator.
-	fn new(function: &'eval Function) -> Self
+	pub(crate) fn new(function: &'eval Function) -> Self
 	{
 		Self {
 			function,
@@ -1558,6 +1545,47 @@ impl<'eval> BoundsEvaluator<'eval>
 		unsupplied: EvaluationBounds
 	) -> Result<Bounds, EvaluationError<'error>>
 	{
+		let degenerate = self.seed(args, externals, unsupplied)?;
+		for instruction in &self.function.instructions
+		{
+			self.step(instruction);
+		}
+		if !degenerate
+		{
+			// The outcome count is an exact count of the outcomes of one
+			// binding of the function. That is a meaningful answer only when
+			// the bindings pick out exactly one such function.
+			self.count = None;
+		}
+		Ok(self.into())
+	}
+
+	/// Seed the registers of the bindings with their intervals, so that the
+	/// evaluator may [step](Self::step) through the instructions.
+	///
+	/// # Parameters
+	/// - `args`: The intervals of the arguments, one per formal parameter, in
+	///   declaration order, where `None` denotes an unsupplied argument.
+	/// - `externals`: The intervals of the external variables, by index into
+	///   [`externals`](Function::externals). An index absent from the iterable
+	///   is unsupplied.
+	/// - `unsupplied`: The interval that bounds an unsupplied binding in either
+	///   channel.
+	///
+	/// # Returns
+	/// `true` if every binding is a single value, `false` otherwise.
+	///
+	/// # Errors
+	/// [`BadArity`](EvaluationError::BadArity) if the number of arguments
+	/// provided disagrees with the number of formal parameters in the function
+	/// signature.
+	pub(crate) fn seed<'error>(
+		&mut self,
+		args: impl IntoIterator<Item = Option<EvaluationBounds>>,
+		externals: impl IntoIterator<Item = (usize, EvaluationBounds)>,
+		unsupplied: EvaluationBounds
+	) -> Result<bool, EvaluationError<'error>>
+	{
 		// Check the argument count. `None` is an explicit admission of
 		// ignorance rather than an omission, so the list is as long as the
 		// arity no matter how little the caller knows.
@@ -1598,20 +1626,50 @@ impl<'eval> BoundsEvaluator<'eval>
 				*register = bounds;
 			}
 		}
-		for instruction in &self.function.instructions
-		{
-			instruction.visit(&mut self).unwrap();
-			self.pc.allocate();
-		}
-		if !degenerate
-		{
-			// The outcome count is an exact count of the outcomes of one
-			// binding of the function. That is a meaningful answer only when
-			// the bindings pick out exactly one such function.
-			self.count = None;
-		}
-		Ok(self.into())
+		Ok(degenerate)
 	}
+
+	/// Bound the effect of the specified instruction, the next one of the
+	/// function, on the registers and rolling records.
+	///
+	/// # Parameters
+	/// - `instruction`: The instruction.
+	pub(crate) fn step(&mut self, instruction: &Instruction)
+	{
+		instruction.visit(self).unwrap();
+		self.pc.allocate();
+	}
+
+	/// Narrow the interval of the specified register to its intersection with
+	/// the specified interval, as when the caller knows that the register's
+	/// value lies within it, so that the steps that follow bound only such
+	/// values.
+	///
+	/// # Parameters
+	/// - `reg`: The index of the register.
+	/// - `bounds`: The interval, which meets the register's.
+	pub(crate) fn narrow(
+		&mut self,
+		reg: RegisterIndex,
+		bounds: EvaluationBounds
+	)
+	{
+		let current = &mut self.registers[reg.0];
+		debug_assert!(
+			bounds.min <= current.max && current.min <= bounds.max,
+			"the intervals meet"
+		);
+		*current =
+			(current.min.max(bounds.min), current.max.min(bounds.max)).into();
+	}
+
+	/// Answer the bounds of the registers, as of the last
+	/// [step](Self::step).
+	///
+	/// # Returns
+	/// The bounds of each register, by index.
+	#[inline]
+	pub(crate) fn registers(&self) -> &[EvaluationBounds] { &self.registers }
 
 	/// Obtain the value associated with the specified operand. The operand may
 	/// be an immediate or a register, but must not be a rolling record.
@@ -1702,6 +1760,20 @@ impl<'eval> BoundsEvaluator<'eval>
 	{
 		&mut self.records[op.0]
 	}
+
+	/// Multiply the number of outcomes by the number of branches of a range or
+	/// roll, whether or not its rolling record is ever summed, since the total
+	/// weight of the exact [distribution](crate::Distribution) counts every
+	/// branch of every range and roll. Leaves an unknown number of outcomes
+	/// unknown.
+	///
+	/// # Parameters
+	/// - `branches`: The number of branches, at least `1`.
+	#[inline]
+	fn count_branches(&mut self, branches: u128)
+	{
+		self.count = self.count.map(|count| count.saturating_mul(branches));
+	}
 }
 
 impl InstructionVisitor<()> for BoundsEvaluator<'_>
@@ -1722,6 +1794,13 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			// roll, so disable counting for the remainder of the function.
 			self.count = None;
 		}
+		// A range has one branch per integer within it, or one branch, which
+		// answers 0, if it is empty.
+		let branches = (end.max as i128)
+			.saturating_sub(start.min as i128)
+			.saturating_add(1)
+			.max(1) as u128;
+		self.count_branches(branches);
 		Ok(())
 	}
 
@@ -1744,6 +1823,12 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			// roll, so disable counting for the remainder of the function.
 			self.count = None;
 		}
+		// Each die has one branch per face, or one branch, which answers 0, if
+		// it has no faces.
+		let branches = (faces.max.max(0) as u128)
+			.saturating_pow(count.max.max(0) as u32)
+			.max(1);
+		self.count_branches(branches);
 		Ok(())
 	}
 
@@ -1767,6 +1852,10 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			// counting for the remainder of the function.
 			self.count = None;
 		}
+		let branches = (inst.faces.len() as u128)
+			.saturating_pow(count.max.max(0) as u32)
+			.max(1);
+		self.count_branches(branches);
 		Ok(())
 	}
 
@@ -1796,96 +1885,61 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 	) -> Result<(), ()>
 	{
 		let record = self.record(inst.src);
-		let count = record.kind.count().unwrap();
+		// A record that was never rolled is empty, so it sums to zero, as the
+		// evaluator's does. Zero is fixed, not the result of a roll.
+		let Some(count) = record.kind.count()
+		else
+		{
+			self.set_register(inst.dest, 0);
+			self.set_sum(inst.dest, false);
+			return Ok(())
+		};
 		let count: EvaluationBounds =
 			(count.min.max(0), count.max.max(0)).into();
 		let lowest_dropped = record.lowest_dropped;
 		let highest_dropped = record.highest_dropped;
 		let kept =
 			(count - lowest_dropped - highest_dropped).clamp(0.into(), count);
-		let (sum, outcomes) = match record.kind
+		let sum = match record.kind
 		{
 			RollingRecordKind::Uninitialized => unreachable!(),
 			RollingRecordKind::Range { start, end } =>
 			{
 				match end.max < start.min
 				{
-					true =>
+					// Take care to normalize an empty range to 0.
+					true => 0.into(),
+					false => match start.max > end.min
 					{
-						// Take care to normalize an empty range to 0.
-						(0.into(), Some(1))
-					},
-					false => (
-						match start.max > end.min
+						false => kept * (start.min, end.max).into(),
+						true =>
 						{
-							false => kept * (start.min, end.max).into(),
-							true =>
-							{
-								// The upper bound of the start is less than
-								// the lower bound of the end, so there's an
-								// overlap. Overlap can lead to degenerate
-								// ranges, so make sure to include 0 in the
-								// bounds.
-								let range: EvaluationBounds =
-									(start.min, end.max).into();
-								kept * range.union(Some(0.into())).unwrap()
-							}
-						},
-						self.count.map(|c| {
-							c.saturating_mul(
-								(end.max as i128)
-									.saturating_sub(start.min as i128)
-									.saturating_add(1)
-									.max(1)
-									as u128
-							)
-							.max(1)
-						})
-					)
+							// The upper bound of the start is less than the
+							// lower bound of the end, so there's an overlap.
+							// Overlap can lead to degenerate ranges, so make
+							// sure to include 0 in the bounds.
+							let range: EvaluationBounds =
+								(start.min, end.max).into();
+							kept * range.union(Some(0.into())).unwrap()
+						}
+					}
 				}
 			},
-			RollingRecordKind::Standard {
-				count: dice_count,
-				faces
-			} =>
+			RollingRecordKind::Standard { faces, .. } =>
 			{
 				// Faces might be negative. Each standard die represents a range
 				// of faces in `[1, faces]`. Given both facts, clamp the minimum
 				// to `[0, 1]`.
-				(
-					kept * (faces.min.clamp(0, 1), faces.max.max(0)).into(),
-					self.count.map(|c| {
-						c.saturating_mul(
-							(faces.max.max(0) as u128)
-								.saturating_pow(dice_count.max.max(0) as u32)
-								.max(1)
-						)
-						.max(1)
-					})
-				)
+				kept * (faces.min.clamp(0, 1), faces.max.max(0)).into()
 			},
-			RollingRecordKind::Custom {
-				count: dice_count,
-				ref faces
-			} =>
+			RollingRecordKind::Custom { ref faces, .. } =>
 			{
 				// Oddly, this is simplest, since we can just grab the edges of
 				// the sorted faces.
-				(
-					kept * (faces[0], faces[faces.len() - 1]).into(),
-					self.count.map(|c| {
-						c.saturating_mul(
-							(faces.len() as u128)
-								.saturating_pow(dice_count.max.max(0) as u32)
-								.max(1)
-						)
-						.max(1)
-					})
-				)
+				kept * (faces[0], faces[faces.len() - 1]).into()
 			}
 		};
 		self.set_register(inst.dest, sum);
-		self.count = outcomes;
 		// Mark the register as having been produced by a sum operation. We have
 		// to give up counting if the operands of range or roll expressions are
 		// dynamic.
@@ -1915,7 +1969,19 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 	{
 		let op1 = self.value(inst.op1);
 		let op2 = self.value(inst.op2);
-		self.set_register(inst.dest, op1 * op2);
+		let product = match inst.op1
+		{
+			// When both operands are the same register, as the strength reducer
+			// makes them when it rewrites `x ^ 2` as `x * x`, the product is a
+			// square, which interval multiplication would widen across zero.
+			// Bound it as the square that it is.
+			AddressingMode::Register(_) if inst.op1 == inst.op2 =>
+			{
+				op1.exp(2.into())
+			},
+			_ => op1 * op2
+		};
+		self.set_register(inst.dest, product);
 		self.set_sum(inst.dest, self.sum(inst.op1) || self.sum(inst.op2));
 		Ok(())
 	}

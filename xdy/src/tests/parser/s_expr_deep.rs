@@ -2,14 +2,14 @@
 //!
 //! Herein are the tests that hold [`read_s_expr`] to its promise of constant
 //! stack depth and linear time. Every [nesting construct](Nesting) is parsed
-//! at a depth of [`DEPTH`], written as an S-expression with spans and groups
-//! on one line, and read back on a [small stack](on_small_stack), both as a
-//! valid S-expression and as one that fails at its innermost leaf. Functions
-//! with [very many](WIDTH) parameters and dice with very many faces are read
-//! back the same way. The default time budget of the small stack also bounds
-//! the read time, so a reader that took time quadratic in the depth or the
-//! width would not finish. The deep reads are ignored by default; `just stress`
-//! runs them.
+//! at its [depth](Nesting::depth), written as an S-expression with spans and
+//! groups on one line, and read back on a [small stack](on_small_stack), both
+//! as a valid S-expression and as one that fails at its innermost leaf.
+//! Functions with [very many](WIDTH) parameters and dice with very many faces
+//! are read back the same way. The default time budget of the small stack also
+//! bounds the read time, so a reader that took time quadratic in the depth or
+//! the width would not finish. The deep reads are ignored by default; `just
+//! stress` runs them.
 
 use crate::{
 	Parser,
@@ -19,7 +19,7 @@ use crate::{
 		read_s_expr
 	},
 	support::on_small_stack,
-	tests::ast::{DEPTH, Nesting, nest_parsable}
+	tests::ast::{Nesting, nest_parsable}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -121,9 +121,9 @@ const LEAF: i32 = 1_234_567_890;
 /// An integer that overflows [`i32`], and so cannot be read as a constant.
 const OVERFLOW: &str = "99999999999";
 
-/// Parse a [`DEPTH`]-deep source, and ensure that its S-expression reads back
-/// to it on a small stack. Then replace its innermost constant with an
-/// [integer that overflows](OVERFLOW), and ensure that reading fails there
+/// Parse a [deep](Nesting::depth) source, and ensure that its S-expression
+/// reads back to it on a small stack. Then replace its innermost constant with
+/// an [integer that overflows](OVERFLOW), and ensure that reading fails there
 /// with [`InvalidInteger`](SExprError::InvalidInteger).
 ///
 /// # Parameters
@@ -131,7 +131,7 @@ const OVERFLOW: &str = "99999999999";
 fn read_deep(nesting: Nesting)
 {
 	on_small_stack(|| {
-		let source = nest_parsable(nesting, DEPTH, LEAF).to_string();
+		let source = nest_parsable(nesting, nesting.depth(), LEAF).to_string();
 		let function = Parser::parse(&source).expect("deep source failed");
 		let s_expr = round_trip(&function);
 		drop(function);

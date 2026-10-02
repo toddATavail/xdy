@@ -4,6 +4,11 @@
 module.exports = grammar({
   name: "xdy",
 
+  // Tokens may be separated by spaces, horizontal tabs, line feeds, and
+  // carriage returns, but by no other whitespace, exactly as the reference nom
+  // parser separates them (see parser::combinators::is_token_space).
+  extras: ($) => [/[ \t\r\n]/],
+
   rules: {
     //////////////////////////// Grammatical rules. ////////////////////////////
 
@@ -24,7 +29,8 @@ module.exports = grammar({
       ),
 
     // A single formal parameter.
-    parameter: ($) => seq("{", field("identifier", $.identifier), "}"),
+    parameter: ($) =>
+      seq($._open_brace, field("identifier", $.identifier), $._close_brace),
 
     // A dice expression.
     _expression: ($) =>
@@ -43,15 +49,16 @@ module.exports = grammar({
 
     // A variable, representing a parameter, a local binding, or an external
     // variable.
-    variable: ($) => seq("{", field("identifier", $.identifier), "}"),
+    variable: ($) =>
+      seq($._open_brace, field("identifier", $.identifier), $._close_brace),
 
     // A local binding, naming the integer result of a subexpression so it can
     // be referenced as a variable at later lexical positions.
     binding: ($) =>
       seq(
-        "{",
+        $._open_brace,
         field("name", $.identifier),
-        "}",
+        $._close_brace,
         "@",
         "(",
         field("expression", $._expression),
@@ -82,31 +89,26 @@ module.exports = grammar({
       ),
 
     // A custom dice expression, i.e., the faces of the dice are arbitrary.
-    // Has higher precedence than `standard_dice` to resolve the single token
-    // lookahead ambiguity.
     custom_dice: ($) =>
       seq(field("count", $._dice_count), $._d, field("faces", $.custom_faces)),
 
     // An expression that represents the number of dice to roll.
     _dice_count: ($) => choice($.constant, $.variable, $.binding, $.group),
 
-    // An expression that represents the faces of a standard die.
-    _standard_faces: ($) => choice($.constant, $.variable, $.binding, $.group),
+    // An expression that represents the faces of a standard die, which may be
+    // a signed integer, as in `3D-6`.
+    _standard_faces: ($) => choice($.integer, $.variable, $.binding, $.group),
 
     // The faces of a custom die.
     custom_faces: ($) =>
       seq(
         "[",
-        field("face", $._custom_face),
-        repeat(seq(",", field("face", $._custom_face))),
+        field("face", $.integer),
+        repeat(seq(",", field("face", $.integer))),
         "]",
       ),
 
-    // A custom face of a custom die, which can be a constant or a negative
-    // constant.
-    _custom_face: ($) => choice($.constant, $.negative_constant),
-
-    // A dice expression that keeps the highest N-1 dice.
+    // A dice expression that drops its N lowest dice, or one if N is absent.
     drop_lowest: ($) =>
       prec.left(
         5,
@@ -118,7 +120,7 @@ module.exports = grammar({
         ),
       ),
 
-    // A dice expression that keeps the lowest N-1 dice.
+    // A dice expression that drops its N highest dice, or one if N is absent.
     drop_highest: ($) =>
       prec.left(
         5,
@@ -132,9 +134,6 @@ module.exports = grammar({
 
     // An expression that represents the number of dice to drop.
     _drop_expression: ($) => choice($.constant, $.variable, $.binding, $.group),
-
-    // A negative constant, for custom faces only.
-    negative_constant: ($) => /\-\d+/,
 
     // An arithmetic expression.
     _arithmetic: ($) => choice($.add, $.sub, $.mul, $.div, $.mod, $.exp, $.neg),
@@ -186,11 +185,37 @@ module.exports = grammar({
 
     ////////////////////////////// Lexical rules. //////////////////////////////
 
-    // A constant integer.
+    // An unsigned constant, CONSTANT in the reference nom parser's EBNF. A
+    // minus before one is negation, so `-3D6` is `-(3D6)`.
     constant: ($) => /\d+/,
+
+    // A signed integer, INTEGER in the reference nom parser's EBNF, for the
+    // faces of dice only, as in `3D-6` and `1D[-1, 0, 1]`.
+    integer: ($) => /-?\d+/,
 
     // The dice operator.
     _d: ($) => /[dD]/,
+
+    // The braces of a name, with any whitespace (White_Space, per
+    // char::is_whitespace) just inside them, which is not part of the name, as
+    // the reference nom parser allows (see parser::combinators::braced_name).
+    // Between tokens, only the extras may separate them. The extras already
+    // skip a space, tab, line feed, or carriage return before the closing
+    // brace, so its token begins with any other whitespace, lest it begin with
+    // an extra and claim the whitespace that follows a name.
+    _open_brace: ($) => token(seq("{", /\p{White_Space}*/u)),
+
+    _close_brace: ($) =>
+      token(
+        choice(
+          "}",
+          seq(
+            /[\u000B\u000C\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/,
+            /\p{White_Space}*/u,
+            "}",
+          ),
+        ),
+      ),
 
     // An identifier, the name of a parameter, a local binding, or an external
     // variable, always between braces. The character set is exact with the

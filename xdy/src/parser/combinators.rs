@@ -43,7 +43,7 @@ use crate::{
 use super::{
 	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CONSTANT_CONTEXT,
 	IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT, PARAMETER_CONTEXT, ParseError,
-	engine::{Goal, run}
+	engine::{Goal, begins_with_minus, run}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,7 +225,8 @@ pub fn mul_div_mod(input: Span) -> IResult<Span, Expression, ParseError>
 		.map(|(rest, value)| (rest, value.into_expression()))
 }
 
-/// Parse an exponentiation expression, without leading whitespace.
+/// Parse a unary negation or an [exponentiation](exponent) expression,
+/// without leading whitespace.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -316,7 +317,9 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 		.map(|(rest, value)| (rest, value.into_expression()))
 }
 
-/// Parse a primary expression, without leading whitespace.
+/// Parse a primary expression, without leading whitespace. A primary expression
+/// never begins with `-`, since its constant is unsigned; a minus before it is
+/// the [unary] operator.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -325,7 +328,7 @@ pub fn exponent(input: Span) -> IResult<Span, Expression, ParseError>
 /// The parsed expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn primary(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	run(Goal::Primary, input)
@@ -482,7 +485,8 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 	run(Goal::Range, input).map(|(rest, value)| (rest, value.into_range()))
 }
 
-/// Parse a dice expression, without leading whitespace.
+/// Parse a dice expression, without leading whitespace. A dice expression never
+/// begins with `-`, since its [dice count](dice_count) never does.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -491,13 +495,15 @@ pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 /// The parsed dice expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 {
 	run(Goal::Dice, input).map(|(rest, value)| (rest, value.into_dice()))
 }
 
-/// Parse a standard dice expression, without leading whitespace.
+/// Parse a standard dice expression, without leading whitespace. A standard
+/// dice expression never begins with `-`, since its [dice count](dice_count)
+/// never does.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -506,14 +512,16 @@ pub fn dice(input: Span) -> IResult<Span, DiceExpression, ParseError>
 /// The parsed standard dice expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 {
 	run(Goal::StandardDice, input)
 		.map(|(rest, value)| (rest, value.into_standard_dice()))
 }
 
-/// Parse a custom dice expression, without leading whitespace.
+/// Parse a custom dice expression, without leading whitespace. A custom dice
+/// expression never begins with `-`, since its [dice count](dice_count) never
+/// does.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -522,14 +530,17 @@ pub fn standard_dice(input: Span) -> IResult<Span, StandardDice, ParseError>
 /// The parsed custom dice expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, ParseError>
 {
 	run(Goal::CustomDice, input)
 		.map(|(rest, value)| (rest, value.into_custom_dice()))
 }
 
-/// Parse a dice count expression, without leading whitespace.
+/// Parse a dice count expression, without leading whitespace. A dice count
+/// never begins with `-`, since its [constant] is unsigned, so `-3D6` is
+/// `-(3D6)`. A negative count must be grouped, as in `(-3)D6`, or bound to a
+/// variable.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -538,13 +549,15 @@ pub fn custom_dice(input: Span) -> IResult<Span, CustomDice, ParseError>
 /// The parsed dice count expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn dice_count(input: Span) -> IResult<Span, Expression, ParseError>
 {
 	run(Goal::Atom, input).map(|(rest, value)| (rest, value.into_expression()))
 }
 
-/// Parse standard faces, without leading whitespace.
+/// Parse standard faces, without leading whitespace. Unlike a
+/// [dice count](dice_count), standard faces may be a signed [integer], as in
+/// `3D-6`, since nothing but the faces may follow the dice operator.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -556,7 +569,7 @@ pub fn dice_count(input: Span) -> IResult<Span, Expression, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn standard_faces(input: Span) -> IResult<Span, Expression, ParseError>
 {
-	run(Goal::Atom, input).map(|(rest, value)| (rest, value.into_expression()))
+	run(Goal::Faces, input).map(|(rest, value)| (rest, value.into_expression()))
 }
 
 /// Parse custom faces, without leading whitespace.
@@ -576,7 +589,7 @@ pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 		preceded(multispace0, char(',')),
 		preceded(
 			multispace0,
-			context(CONSTANT_CONTEXT, map(constant, |c| c.value))
+			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
 		)
 	))
 	.parse_complete(input)?;
@@ -588,13 +601,14 @@ pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 	Ok((input, faces))
 }
 
-/// Parse a drop-lowest expression, without leading whitespace.
+/// Parse a drop-lowest clause, `drop lowest` and an optional
+/// [drop expression](drop_expression), without leading whitespace.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed drop-lowest expression.
+/// The parsed drop expression, or `None` if the clause has none.
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
@@ -605,13 +619,14 @@ pub fn drop_lowest(
 	run(Goal::DropLowest, input).map(|(rest, value)| (rest, value.into_drop()))
 }
 
-/// Parse a drop-highest expression, without leading whitespace.
+/// Parse a drop-highest clause, `drop highest` and an optional
+/// [drop expression](drop_expression), without leading whitespace.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed drop-highest expression.
+/// The parsed drop expression, or `None` if the clause has none.
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
@@ -622,7 +637,8 @@ pub fn drop_highest(
 	run(Goal::DropHighest, input).map(|(rest, value)| (rest, value.into_drop()))
 }
 
-/// Parse a drop expression, without leading whitespace.
+/// Parse a drop expression, without leading whitespace. A drop expression
+/// never begins with `-`, so a negative count must be grouped, as in `(-1)`.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -631,23 +647,62 @@ pub fn drop_highest(
 /// The parsed drop expression.
 ///
 /// # Errors
-/// * [`Err`](nom::Err) if the input could not be parsed.
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
 pub fn drop_expression(input: Span) -> IResult<Span, Expression, ParseError>
 {
+	if begins_with_minus(input)
+	{
+		return Err(nom::Err::Error(ParseError::from_error_kind(
+			input,
+			ErrorKind::Digit
+		)));
+	}
 	run(Goal::Atom, input).map(|(rest, value)| (rest, value.into_expression()))
 }
 
-/// Parse a constant value, without leading whitespace.
+/// Parse an unsigned constant value, `DIGIT+`, without leading whitespace. A
+/// constant never begins with `-`; a minus before one is the [unary] operator,
+/// which folds a negated literal into a single [`Constant`]. Only the faces of
+/// dice take a signed [integer].
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed constant value.
+/// The parsed constant value, saturated at [`i32::MAX`].
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed, or begins with `-`.
+pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
+{
+	let (input, digits) = digit1.parse_complete(input)?;
+	// `digit1` only produces strings of digits, so parsing as `i32` can only
+	// fail with `PosOverflow`, which saturates at `i32::MAX`.
+	let value = digits.fragment().parse::<i32>().unwrap_or(i32::MAX);
+	let start = digits.location_offset();
+	let end = start + digits.fragment().len();
+	Ok((
+		input,
+		Constant {
+			value,
+			span: SourceSpan { start, end }
+		}
+	))
+}
+
+/// Parse a signed integer value, `'-'? DIGIT+`, without leading whitespace.
+/// Only the faces of dice are integers, as in `3D-6` and `1D[-1, 0, 1]`;
+/// everywhere else, a literal is an unsigned [constant].
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed integer value, saturated at [`i32::MIN`] and [`i32::MAX`].
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
+pub fn integer(input: Span) -> IResult<Span, Constant, ParseError>
 {
 	let (input, recognized) =
 		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
@@ -951,13 +1006,13 @@ pub(crate) fn unclosed_name_ends(name: &str) -> [Option<usize>; 2]
 //                              Utility parsers.                              //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Parse one or more alphabetic characters, without leading whitespace.
+/// Parse exactly one alphabetic character, without leading whitespace.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed alphabetic characters.
+/// The parsed alphabetic character.
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
@@ -981,7 +1036,7 @@ pub fn alphanumeric1(input: Span) -> IResult<Span, Span, ParseError>
 	take_while1(|c: char| c.is_alphanumeric())(input)
 }
 
-/// Parse an arbitary token. This is used only for error reporting.
+/// Parse an arbitrary token. This is used only for error reporting.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -990,7 +1045,7 @@ pub fn alphanumeric1(input: Span) -> IResult<Span, Span, ParseError>
 /// The parsed token, or `None` if the input is empty.
 pub fn token(input: Span) -> Option<Span>
 {
-	match alt((eof, recognize(constant), bare_word, recognize(anychar)))
+	match alt((eof, recognize(integer), bare_word, recognize(anychar)))
 		.parse_complete(input)
 		.unwrap()
 		.1

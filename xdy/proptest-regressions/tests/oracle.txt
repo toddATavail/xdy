@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9e5cab1eb34ca627d01f3028ebb46fe60b27cba493041e9a44762763e00cc275 # shrinks to ("[{1d6 drop lowest}D2:0 + 0]", [0, 0], [0, 0, 0, 1, 0])
+cc b79f23ea9b554086a3306a4d7e525f87b2432e6ac6fbd881bc431b5bbcb0f74c # shrinks to ("(0D0)D(1D{hit points}@({x}) drop lowest)", [0, 0], [2, 0, 0, 0, 0])

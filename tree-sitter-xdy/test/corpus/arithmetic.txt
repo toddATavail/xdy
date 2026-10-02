@@ -272,7 +272,7 @@ Dice Expressions: 3D6 + 0
 	(add
 		(standard_dice
 			(constant)
-			(constant))
+			(integer))
 		(constant)))
 
 ======================================
@@ -288,7 +288,7 @@ Dice Expressions: 5 + 3D6
 		(constant)
 		(standard_dice
 			(constant)
-			(constant))))
+			(integer))))
 
 ======================================
 Dice Expressions: 3D6 + 2D12
@@ -302,10 +302,10 @@ Dice Expressions: 3D6 + 2D12
 	(add
 		(standard_dice
 			(constant)
-			(constant))
+			(integer))
 		(standard_dice
 			(constant)
-			(constant))))
+			(integer))))
 
 ======================================
 Dice Expressions: 3 ^ 3D6 + -2D12
@@ -321,11 +321,11 @@ Dice Expressions: 3 ^ 3D6 + -2D12
 			(constant)
 			(standard_dice
 				(constant)
-				(constant)))
+				(integer)))
 		(neg
 			(standard_dice
 				(constant)
-				(constant)))))
+				(integer)))))
 
 ======================================
 Dice Expressions: (5 + {a})d({b})

@@ -32,8 +32,8 @@ Range: [1d3 + 5 : 8D4 - 5]
 (function
 	(range
 		(add
-			(standard_dice (constant) (constant))
+			(standard_dice (constant) (integer))
 			(constant))
 		(sub
 			(constant)
-			(standard_dice (constant) (constant)))))
+			(standard_dice (constant) (integer)))))

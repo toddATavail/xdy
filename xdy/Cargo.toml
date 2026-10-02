@@ -8,35 +8,37 @@ license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 repository = { workspace = true }
+readme = "../README.md"
+# The crate ships the project README, which crates.io shows, in place of the
+# crate README, which describes the internals and stays on GitHub.
+exclude = ["/README.md"]
 
 [dependencies]
 aquamarine = { workspace = true }
 nom = { workspace = true }
 nom-language = { workspace = true }
 nom_locate = { workspace = true }
+num-bigint = { workspace = true }
+num-traits = { workspace = true }
 rand = { workspace = true }
 
 [build-dependencies]
 ebnsf = { workspace = true }
-
-[dependencies.rayon]
-workspace = true
-optional = true
 
 [dependencies.serde]
 workspace = true
 optional = true
 
 [features]
-default = ["parallel-histogram", "serde"]
+default = ["serde"]
 bench = []
-parallel-histogram = ["dep:rayon"]
 serde = ["dep:serde"]
 
 [dev-dependencies]
 criterion = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "benchmarks"

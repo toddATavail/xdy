@@ -1,12 +1,13 @@
 //! # Abstract syntax tree (AST)
 //!
-//! The abstract syntax tree (AST) represents the structure of a semantically
-//! correct `xDy` program. The [parser](crate::Parser::parse) generates the AST
-//! from the source code, and due to the simple rules of the dice language, the
-//! AST is guaranteed to be semantically correct. The [compiler](crate::compile)
-//! walks the AST to generate `xDy`'s intermediate representation (IR), which
-//! may then be [optimized](crate::Optimizer::optimize) and
-//! [evaluated](crate::evaluate).
+//! The abstract syntax tree (AST) represents the structure of a syntactically
+//! well-formed `xDy` program. The [parser](crate::Parser::parse) generates the
+//! AST from the source code, but a well-formed AST is not necessarily
+//! semantically valid, e.g., `{x}, {x}: {x} + 1` parses but declares the same
+//! parameter twice. The [validator](crate::Validator::validate) performs the
+//! semantic checks. The [compiler](crate::compile) then walks the validated AST
+//! to generate `xDy`'s intermediate representation (IR), which may then be
+//! [optimized](crate::Optimizer::optimize) and [evaluated](crate::evaluate).
 //!
 //! Every AST node carries a [source span](SourceSpan) referencing the byte
 //! range of the original input from which it was parsed. The [`Spanned`] trait
@@ -58,8 +59,9 @@ use crate::span::{SourceSpan, Spanned};
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text from which this AST was parsed.
-///   Parameter names and variable identifiers are borrowed directly from the
-///   source.
+///   Parameter, variable, and binding names are borrowed directly from the
+///   source whenever the source spells them
+///   [canonically](crate::parser::canonical_name).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function<'src>
 {
@@ -233,16 +235,18 @@ pub struct Binding<'src>
 	/// The [canonical](crate::parser::canonical_name) bound name.
 	pub name: Cow<'src, str>,
 
-	/// The span of the bound name alone in the original source, excluding the
-	/// `@` operator and the parenthesized bound expression. The source text
-	/// that it covers is the name exactly as written, which may differ from
-	/// the canonical [`name`](Self::name) in its whitespace.
+	/// The span of the bound identifier alone in the original source,
+	/// excluding its surrounding braces, any whitespace just inside them,
+	/// the `@` operator, and the parenthesized bound expression. The
+	/// source text that it covers is the name exactly as written, which
+	/// may differ from the canonical [`name`](Self::name) in its
+	/// whitespace.
 	pub name_span: SourceSpan,
 
 	/// The bound expression.
 	pub expression: Box<Expression<'src>>,
 
-	/// The span of the entire binding, from the first character of `name`
+	/// The span of the entire binding, from the opening `{` of the bound name
 	/// through the closing `)` of the bound expression.
 	pub span: SourceSpan
 }
@@ -281,8 +285,9 @@ impl Display for Range<'_>
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text. Inherited from the enclosing
-///   [`Function`]; individual expression nodes borrow variable names from the
-///   source.
+///   [`Function`]; individual expression nodes borrow variable and binding
+///   names from the source whenever the source spells them
+///   [canonically](crate::parser::canonical_name).
 pub enum Expression<'src>
 {
 	/// A parenthesized expression.
@@ -701,8 +706,8 @@ impl Display for Neg<'_>
 /// - `Error`: The error type returned on failure.
 ///
 /// # Examples
-/// The driver calls the visitor in this order to walk `1 + 2`, which parses
-/// to an [`Add`] of two [`Constant`]s.
+/// The driver calls the visitor in this order to walk the expression `1 + 2`,
+/// an [`Add`] of two [`Constant`]s.
 ///
 /// ```mermaid
 /// sequenceDiagram

@@ -278,11 +278,7 @@
         "required": true,
         "types": [
           {
-            "type": "constant",
-            "named": true
-          },
-          {
-            "type": "negative_constant",
+            "type": "integer",
             "named": true
           }
         ]
@@ -1425,11 +1421,11 @@
             "named": true
           },
           {
-            "type": "constant",
+            "type": "group",
             "named": true
           },
           {
-            "type": "group",
+            "type": "integer",
             "named": true
           },
           {
@@ -1663,19 +1659,11 @@
     "named": true
   },
   {
-    "type": "lowest",
-    "named": false
-  },
-  {
-    "type": "negative_constant",
+    "type": "integer",
     "named": true
   },
   {
-    "type": "{",
-    "named": false
-  },
-  {
-    "type": "}",
+    "type": "lowest",
     "named": false
   }
 ]

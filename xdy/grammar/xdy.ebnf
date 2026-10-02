@@ -2,7 +2,9 @@
 
 <parameters> ::= <parameter> ("," <parameter>)* ":"
 
-<parameter> ::= "{" <IDENTIFIER> "}"
+<parameter> ::= <name>
+
+<name> ::= "{" <WHITESPACE>* <IDENTIFIER> <WHITESPACE>* "}"
 
 <expression> ::= <add_sub>
 
@@ -12,7 +14,7 @@
 
 <mul_div_mod> ::= <unary> <mul_div_mod_op>*
 
-<mul_div_mod_op> ::= "*" <unary> | "/" <unary> | "%" <unary>
+<mul_div_mod_op> ::= "*" <unary> | "×" <unary> | "/" <unary> | "÷" <unary> | "%" <unary>
 
 <unary> ::= "-" <unary> | <exponent>
 
@@ -24,9 +26,9 @@
 
 <group> ::= "(" <expression> ")"
 
-<variable> ::= "{" <IDENTIFIER> "}"
+<variable> ::= <name>
 
-<binding> ::= "{" <IDENTIFIER> "}" "@" "(" <expression> ")"
+<binding> ::= <name> "@" "(" <expression> ")"
 
 <range> ::= "[" <expression> ":" <expression> "]"
 
@@ -36,9 +38,9 @@
 
 <dice_count> ::= <CONSTANT> | <variable> | <binding> | <group>
 
-<standard_faces> ::= <CONSTANT> | <variable> | <binding> | <group>
+<standard_faces> ::= <INTEGER> | <variable> | <binding> | <group>
 
-<custom_faces> ::= "[" <CONSTANT> ("," <CONSTANT>)* "]"
+<custom_faces> ::= "[" <INTEGER> ("," <INTEGER>)* "]"
 
 <drop_clause> ::= "drop" "lowest" <drop_expression>? | "drop" "highest" <drop_expression>?
 
@@ -46,11 +48,13 @@
 
 <IDENTIFIER> ::= <NAME_CHAR> (<NAME_CHAR> | <WHITESPACE>+ <NAME_CHAR>)*
 
-<NAME_CHAR> ::= "any code point except '{', '}', whitespace, or an invisible character"
+<NAME_CHAR> ::= "any identifier character (is_identifier_char) except whitespace"
 
 <WHITESPACE> ::= "any whitespace, e.g., space, tab, line feed, or no-break space"
 
-<CONSTANT> ::= "-"? <DIGIT>+
+<CONSTANT> ::= <DIGIT>+
+
+<INTEGER> ::= "-"? <DIGIT>+
 
 <DIGIT> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 

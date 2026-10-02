@@ -23,7 +23,8 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	AddressingMode, Assembler, AssemblyError, AssemblyLocation, DropKind,
-	Function, Immediate, Instruction, RegisterIndex, RollingRecordIndex,
+	Function, FunctionError, Immediate, Instruction, RegisterIndex,
+	RollingRecordIndex,
 	support::{compile_valid, read_compilation_test_cases}
 };
 
@@ -598,6 +599,26 @@ fn assert_rejects(input: &str) -> AssemblyError
 	}
 }
 
+/// Assert that [`Assembler::assemble`] rejects `input` because the assembled
+/// [`Function`] is not [well formed](Function::validate), and return the
+/// resulting [`FunctionError`] for caller-side inspection of its variant and
+/// fields.
+///
+/// # Parameters
+/// - `input`: The malformed input.
+///
+/// # Returns
+/// The [`FunctionError`] that the rejection wraps.
+#[track_caller]
+fn assert_invalid(input: &str) -> FunctionError
+{
+	match assert_rejects(input)
+	{
+		AssemblyError::Invalid { error, .. } => error,
+		e => panic!("expected Invalid, got: {:?}", e)
+	}
+}
+
 /// The header must begin with the literal `Function(`. Any other prefix yields
 /// an [`AssemblyError::Syntax`].
 #[test]
@@ -758,7 +779,7 @@ fn test_reject_wrong_destination_kind()
 /// [`AddressingMode::RollingRecord`](crate::AddressingMode::RollingRecord) in a
 /// source slot reaches `unreachable!()`. The input is rejected as
 /// [`AssemblyError::Syntax`] rather than reaching the validator's
-/// [`AssemblyError::UnexpectedRollingRecordOperand`] branch, because the parser
+/// [`FunctionError::UnexpectedRollingRecordOperand`] branch, because the parser
 /// catches it first.
 #[test]
 fn test_reject_rolling_record_as_arithmetic_operand()
@@ -772,15 +793,15 @@ fn test_reject_rolling_record_as_arithmetic_operand()
 }
 
 /// A register reference whose index exceeds the header-declared register count
-/// yields [`AssemblyError::RegisterOutOfBounds`], with the offending index and
+/// yields [`FunctionError::RegisterOutOfBounds`], with the offending index and
 /// the declared count surfaced on the variant.
 #[test]
 fn test_reject_register_out_of_bounds()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function() r#1 ⚅#0\n\textern[]\n\tbody:\n\t\t@5 <- 1 + 2\n\t\treturn @5\n"
 	);
-	let AssemblyError::RegisterOutOfBounds {
+	let FunctionError::RegisterOutOfBounds {
 		index,
 		register_count,
 		..
@@ -794,15 +815,15 @@ fn test_reject_register_out_of_bounds()
 }
 
 /// A rolling record reference whose index exceeds the header-declared rolling
-/// record count yields [`AssemblyError::RollingRecordOutOfBounds`], with the
+/// record count yields [`FunctionError::RollingRecordOutOfBounds`], with the
 /// offending index and the declared count surfaced on the variant.
 #[test]
 fn test_reject_rolling_record_out_of_bounds()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅5 <- roll standard dice 3D6\n\t\t@0 <- sum rolling record ⚅5\n\t\treturn @0\n"
 	);
-	let AssemblyError::RollingRecordOutOfBounds {
+	let FunctionError::RollingRecordOutOfBounds {
 		index,
 		rolling_record_count,
 		..
@@ -816,15 +837,15 @@ fn test_reject_rolling_record_out_of_bounds()
 }
 
 /// A register declared by the header but never referenced in the body violates
-/// the no-gaps rule and yields [`AssemblyError::RegisterGap`]. This input
+/// the no-gaps rule and yields [`FunctionError::RegisterGap`]. This input
 /// declares `r#3` but references only `@0` and `@2`, leaving `@1` unreferenced.
 #[test]
 fn test_reject_register_gap()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function() r#3 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- 1 + 2\n\t\t@2 <- @0 + 3\n\t\treturn @2\n"
 	);
-	let AssemblyError::RegisterGap {
+	let FunctionError::RegisterGap {
 		index,
 		register_count,
 		..
@@ -838,16 +859,16 @@ fn test_reject_register_gap()
 }
 
 /// A rolling record declared by the header but never referenced in the body
-/// violates the no-gaps rule and yields [`AssemblyError::RollingRecordGap`].
+/// violates the no-gaps rule and yields [`FunctionError::RollingRecordGap`].
 /// This input declares `⚅#3` but references only `⚅0` and `⚅2`, leaving `⚅1`
 /// unreferenced.
 #[test]
 fn test_reject_rolling_record_gap()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function() r#1 ⚅#3\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅2 <- roll standard dice 3D6\n\t\t@0 <- sum rolling record ⚅2\n\t\treturn @0\n"
 	);
-	let AssemblyError::RollingRecordGap {
+	let FunctionError::RollingRecordGap {
 		index,
 		rolling_record_count,
 		..
@@ -942,7 +963,7 @@ fn test_reject_parameter_index_disagrees_with_position()
 
 /// Custom dice must carry at least one face. The parser rejects `D[]` via
 /// `separated_list1` before the validator's
-/// [`AssemblyError::FacelessCustomDice`] branch is reached, so the surfaced
+/// [`FunctionError::FacelessCustomDice`] branch is reached, so the surfaced
 /// variant is [`AssemblyError::Syntax`]. Both paths converge on the same safety
 /// invariant (no faceless custom dice reach the evaluator).
 #[test]
@@ -1016,17 +1037,17 @@ fn test_reject_trailing_garbage()
 
 /// When the header-declared register count cannot accommodate the parameter and
 /// extern slots, the assembler yields
-/// [`AssemblyError::InsufficientRegisterCount`] with the declared count and the
+/// [`FunctionError::InsufficientRegisterCount`] with the declared count and the
 /// required count (`parameters.len() + externals.len()`) surfaced on the
 /// variant. Here two parameters demand at least `r#2` but the header declares
 /// only `r#1`.
 #[test]
 fn test_reject_declared_args_exceed_register_count()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function({x}@0, {y}@1) r#1 ⚅#0\n\textern[]\n\tbody:\n\t\treturn @0\n"
 	);
-	let AssemblyError::InsufficientRegisterCount {
+	let FunctionError::InsufficientRegisterCount {
 		register_count,
 		required,
 		..
@@ -1037,6 +1058,111 @@ fn test_reject_declared_args_exceed_register_count()
 	};
 	assert_eq!(register_count, 1);
 	assert_eq!(required, 2);
+}
+
+/// A body without instructions has no return, so the assembler yields
+/// [`FunctionError::MissingReturn`], located at the header.
+#[test]
+fn test_reject_empty_body()
+{
+	let e = assert_rejects("Function() r#0 ⚅#0\n\textern[]\n\tbody:\n");
+	assert!(
+		matches!(
+			e,
+			AssemblyError::Invalid {
+				error: FunctionError::MissingReturn,
+				..
+			}
+		),
+		"expected MissingReturn, got: {:?}",
+		e
+	);
+	assert_eq!(e.location().line, 1);
+}
+
+/// A body without a return yields [`FunctionError::MissingReturn`], located at
+/// its last instruction.
+#[test]
+fn test_reject_missing_return()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- 1 + 2\n"
+	);
+	assert!(
+		matches!(
+			e,
+			AssemblyError::Invalid {
+				error: FunctionError::MissingReturn,
+				..
+			}
+		),
+		"expected MissingReturn, got: {:?}",
+		e
+	);
+	assert_eq!(e.location().line, 4);
+}
+
+/// A return that is not the last instruction yields
+/// [`FunctionError::EarlyReturn`], located at the early return, whether another
+/// return ends the function or not: the function must end with its only return.
+/// The [`Evaluator`](crate::Evaluator) would carry on past it, and a later
+/// instruction could overwrite its answer.
+#[test]
+fn test_reject_early_return()
+{
+	for input in [
+		"Function() r#1 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- 1 + 2\n\t\t\
+		 return @0\n\t\t@0 <- @0 + 3\n\t\treturn @0\n",
+		"Function() r#1 ⚅#0\n\textern[]\n\tbody:\n\t\t@0 <- 1 + 2\n\t\t\
+		 return @0\n\t\t@0 <- @0 + 3\n"
+	]
+	{
+		let e = assert_rejects(input);
+		let AssemblyError::Invalid {
+			error: FunctionError::EarlyReturn { instruction },
+			location
+		} = e
+		else
+		{
+			panic!("expected EarlyReturn, got: {:?}", e);
+		};
+		assert_eq!(instruction, 1, "{}", input);
+		assert_eq!(location.line, 5, "{}", input);
+	}
+}
+
+/// Two parameters or external variables that share a name yield
+/// [`FunctionError::DuplicateName`], located at the later of them, whether the
+/// earlier is a parameter or an external variable.
+#[test]
+fn test_reject_duplicate_name()
+{
+	for (input, line) in [
+		(
+			"Function({x}@0, {x}@1) r#2 ⚅#0\n\textern[]\n\tbody:\n\t\t\
+			 @0 <- @0 + @1\n\t\treturn @0\n",
+			1
+		),
+		(
+			"Function({x}@0) r#2 ⚅#0\n\textern[{x}@1]\n\tbody:\n\t\t\
+			 @0 <- @0 + @1\n\t\treturn @0\n",
+			2
+		)
+	]
+	{
+		let e = assert_rejects(input);
+		let AssemblyError::Invalid {
+			error: FunctionError::DuplicateName { name, first, index },
+			location
+		} = e
+		else
+		{
+			panic!("expected DuplicateName, got: {:?}", e);
+		};
+		assert_eq!(name, "x", "{}", input);
+		assert_eq!((first, index), (0, 1), "{}", input);
+		assert_eq!(location.line, line, "{}", input);
+	}
 }
 
 /// Location accessor surfaces a line number matching the offending instruction,
@@ -1053,7 +1179,13 @@ fn test_error_location_points_at_offending_line()
 		"expected line 4 (body instruction), got {}",
 		location.line
 	);
-	assert!(matches!(e, AssemblyError::RegisterOutOfBounds { .. }));
+	assert!(matches!(
+		e,
+		AssemblyError::Invalid {
+			error: FunctionError::RegisterOutOfBounds { .. },
+			..
+		}
+	));
 }
 
 /// The [`Display`](std::fmt::Display) impl renders a human-readable message
@@ -1120,10 +1252,11 @@ fn test_from_str_propagates_errors()
 }
 
 /// Exercise the [`Display`] rendering and [`AssemblyError::location`] accessor
-/// for every [`AssemblyError`] variant, including the defensive variants that
-/// the parser prevents [`Assembler::assemble`] from ever producing. Each error
-/// is constructed directly so its user-facing message and location are pinned
-/// against regression, and both [`DropKind`] arms are covered.
+/// for every [`AssemblyError`] variant. Each error is constructed directly so
+/// its user-facing message and location are pinned against regression, and
+/// both [`DropKind`] arms are covered. An [`AssemblyError::Invalid`] describes
+/// its [`FunctionError`] without the index of the offending instruction, which
+/// the location supersedes.
 #[test]
 fn test_assembly_error_display_and_location()
 {
@@ -1165,65 +1298,13 @@ fn test_assembly_error_display_and_location()
 			 @1)"
 		),
 		(
-			AssemblyError::InsufficientRegisterCount {
-				register_count: 1,
-				required: 3,
-				location: loc(4)
-			},
-			"assembly error at line 4, column 4 (byte 4): header declares r#1 \
-			 registers but parameters and externs together require at least @2"
-		),
-		(
-			AssemblyError::RegisterOutOfBounds {
-				index: 5,
-				register_count: 1,
-				location: loc(5)
-			},
-			"assembly error at line 5, column 5 (byte 5): register @5 exceeds \
-			 declared register count r#1"
-		),
-		(
-			AssemblyError::RollingRecordOutOfBounds {
-				index: 4,
-				rolling_record_count: 2,
-				location: loc(6)
-			},
-			"assembly error at line 6, column 6 (byte 6): rolling record ⚅4 \
-			 exceeds declared rolling record count ⚅#2"
-		),
-		(
-			AssemblyError::RegisterGap {
-				index: 2,
-				register_count: 4,
-				location: loc(7)
-			},
-			"assembly error at line 7, column 7 (byte 7): register @2 is \
-			 declared by r#4 but is never referenced (no gaps are permitted in \
-			 the register file)"
-		),
-		(
-			AssemblyError::RollingRecordGap {
-				index: 1,
-				rolling_record_count: 3,
-				location: loc(8)
-			},
-			"assembly error at line 8, column 8 (byte 8): rolling record ⚅1 is \
-			 declared by ⚅#3 but is never referenced (no gaps are permitted in \
-			 the rolling record file)"
-		),
-		(
-			AssemblyError::FacelessCustomDice { location: loc(9) },
-			"assembly error at line 9, column 9 (byte 9): custom dice must have \
-			 at least one face"
-		),
-		(
 			AssemblyError::DropSourceMismatch {
 				kind: DropKind::Lowest,
 				destination: 1,
 				source: 2,
-				location: loc(10)
+				location: loc(4)
 			},
-			"assembly error at line 10, column 10 (byte 10): drop lowest \
+			"assembly error at line 4, column 4 (byte 4): drop lowest \
 			 destination ⚅1 disagrees with its `from` source ⚅2"
 		),
 		(
@@ -1231,15 +1312,30 @@ fn test_assembly_error_display_and_location()
 				kind: DropKind::Highest,
 				destination: 3,
 				source: 4,
-				location: loc(11)
+				location: loc(5)
 			},
-			"assembly error at line 11, column 11 (byte 11): drop highest \
+			"assembly error at line 5, column 5 (byte 5): drop highest \
 			 destination ⚅3 disagrees with its `from` source ⚅4"
 		),
 		(
-			AssemblyError::UnexpectedRollingRecordOperand { location: loc(12) },
-			"assembly error at line 12, column 12 (byte 12): rolling record \
-			 operand is not permitted here"
+			AssemblyError::Invalid {
+				error: FunctionError::RegisterOutOfBounds {
+					index: 5,
+					register_count: 1,
+					instruction: 2
+				},
+				location: loc(6)
+			},
+			"assembly error at line 6, column 6 (byte 6): register @5 exceeds \
+			 declared register count r#1"
+		),
+		(
+			AssemblyError::Invalid {
+				error: FunctionError::MissingReturn,
+				location: loc(7)
+			},
+			"assembly error at line 7, column 7 (byte 7): the function has no \
+			 return"
 		),
 	];
 	for (err, expected) in cases
@@ -1255,17 +1351,34 @@ fn test_assembly_error_display_and_location()
 	}
 }
 
+/// An [`AssemblyError::Invalid`] answers its [`FunctionError`] as its
+/// [source](std::error::Error::source); the other variants have none.
+#[test]
+fn test_assembly_error_source()
+{
+	use std::error::Error as _;
+	let e = assert_rejects(
+		"Function() r#1 ⚅#0\n\textern[]\n\tbody:\n\t\t@5 <- 1 + 2\n\t\treturn @5\n"
+	);
+	let source = e.source().expect("Invalid has a source");
+	assert_eq!(
+		source.to_string(),
+		"instruction 0: register @5 exceeds declared register count r#1"
+	);
+	assert!(assert_rejects("not a function").source().is_none());
+}
+
 /// An out-of-bounds register in an *operand* slot (as opposed to the
 /// destination) is caught by the addressing-mode check, not the destination
 /// check, and surfaces the offending index and declared count.
 #[test]
 fn test_reject_operand_register_out_of_bounds()
 {
-	let e = assert_rejects(
+	let e = assert_invalid(
 		"Function() r#1 ⚅#0\n\textern[]\n\t\
 		 body:\n\t\t@0 <- @5 + 2\n\t\treturn @0\n"
 	);
-	let AssemblyError::RegisterOutOfBounds {
+	let FunctionError::RegisterOutOfBounds {
 		index,
 		register_count,
 		..

@@ -426,6 +426,24 @@ Function({x}@0) r#2 ⚅#1
 		@1 <- sum rolling record ⚅0
 		return @1
 
+{x}: {x}D[2147483646, 2147483647, 2147483647]
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice @0D[2147483646, 2147483647, 2147483647]
+		@1 <- sum rolling record ⚅0
+		return @1
+
+{x}: 1D[2147483646, 2147483647]
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 2147483646:2147483647
+		@1 <- sum rolling record ⚅0
+		return @1
+
 {x}: 10D1 drop lowest {x}
 =
 Function({x}@0) r#4 ⚅#0

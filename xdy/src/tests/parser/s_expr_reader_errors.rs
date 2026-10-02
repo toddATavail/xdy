@@ -434,8 +434,7 @@ fn test_reader_rejects_parameter_span_escaping_parent()
 }
 
 /// A binding's name whose span escapes the binding's span is rejected by the
-/// containment check, even when the bound expression is well placed
-/// (xdy-0ra).
+/// containment check, even when the bound expression is well placed.
 #[test]
 fn test_reader_rejects_binding_name_span_escaping_binding()
 {

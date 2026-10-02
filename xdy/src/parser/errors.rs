@@ -1,4 +1,4 @@
-//! Parse errors
+//! # Parse errors
 //!
 //! Herein is error handling support for the parser, including types and
 //! utilities that facilitate the creation of user-friendly error messages.
@@ -72,9 +72,9 @@ pub enum NomErrorKind<'src>
 {
 	/// The label provided by the [`context`](nom::error::context) combinator,
 	/// which is used to understand the context of the failed parse. Each label
-	/// encodes a comma-separated list of classifiers, e.g., "constant",
-	/// "variable", "identifier", etc., from denote the expectations of the
-	/// parser at the corresponding parse position.
+	/// is a single classifier, e.g., "constant", "variable", "identifier",
+	/// etc., that denotes an expectation of the parser at the corresponding
+	/// parse position.
 	Context(&'static str),
 
 	/// A synthetic error, produced by the [`alt`](nom::branch::alt) combinator

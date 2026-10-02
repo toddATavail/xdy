@@ -18,15 +18,15 @@
 //! that compiles must also [evaluate](Evaluator::evaluate_metered), over
 //! arguments and externals that include the extremes of [`i32`], within a
 //! [dice budget](EvaluationError::DiceBudgetExhausted), and so return promptly
-//! however many dice it asks for; and its histogram must
-//! [build](HistogramBuilder::build_metered) within a budget of branches, or be
-//! refused, and contain the result of every evaluation within budget.
+//! however many dice it asks for; and its distribution must
+//! [build](crate::DistributionPlan::build) within a budget of steps and cells,
+//! or be refused, and contain the result of every evaluation within budget.
 //!
 //! Optimization must never change a program's distribution: the exact
-//! [histograms](HistogramBuilder::build_metered) of every program that
+//! [distributions](crate::DistributionPlan::build) of every program that
 //! compiles, optimized and not, over the same arguments and externals, must
 //! agree outcome for outcome, as probabilities, whenever both fit a budget. A
-//! program that rolls no dice has a single outcome, so for it the histograms
+//! program that rolls no dice has a single outcome, so for it the distributions
 //! agree just when the results do, even at the extremes of [`i32`].
 //!
 //! Each property runs [apart](on_small_stack), whose time budget turns a hang
@@ -48,13 +48,13 @@ use proptest::{
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
-	EvaluationError, Evaluator, Function as IrFunction, HistogramBuilder,
-	Optimizer as _, Parser, Passes, StandardOptimizer,
+	Budget, BuildError, Distribution, EvaluationError, Evaluator,
+	Function as IrFunction, Optimizer as _, Parser, Passes, StandardOptimizer,
+	Unobserved,
 	ast::Function,
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
 	s_expr::{SExpressible, SExpressibleOptions, read_s_expr},
-	serial,
 	support::{SMALL_STACK_SIZE, on_small_stack},
 	tests::corpus::TOKENS
 };
@@ -112,13 +112,16 @@ fn test_evaluated_programs()
 	});
 }
 
-/// The budget of branches of each histogram built by
-/// [`check_optimization`]: small enough that both builds are prompt, and
-/// large enough for most random programs.
-const HISTOGRAM_BUDGET: u64 = 20_000;
+/// The budget of each distribution built by [`check_optimization`]: small
+/// enough that both builds are prompt, and large enough for most random
+/// programs.
+const DISTRIBUTION_BUDGET: Budget = Budget {
+	steps: 200_000,
+	cells: 100_000
+};
 
 /// Ensure that optimization never changes the distribution of any random
-/// [program](program) that compiles, over random bindings (xdy-i0q.21).
+/// [program](program) that compiles, over random bindings.
 #[test]
 fn test_optimized_programs()
 {
@@ -139,15 +142,11 @@ fn test_optimized_programs()
 }
 
 /// Run a property on [`CASES`] random inputs, recording failures under
-/// `proptest-regressions`. `proptest` runs on a [large
-/// stack](RUNNER_STACK_SIZE), and each case on a [small
-/// stack](SMALL_STACK_SIZE), so that a case that overflows the small stack
-/// aborts the process, as [`on_small_stack`] expects.
+/// `proptest-regressions`, in the file that parallels this one. See
+/// [`check_within`].
 ///
 /// # Parameters
-/// - `strategy`: The constructor of the strategy that generates the inputs,
-///   which runs on the large stack, since a recursive strategy cannot move
-///   between threads.
+/// - `strategy`: The constructor of the strategy that generates the inputs.
 /// - `property`: The property.
 ///
 /// # Panics
@@ -159,9 +158,38 @@ fn check<S>(
 	S: Strategy,
 	S::Value: Send
 {
+	check_within(CASES, file!(), strategy, property)
+}
+
+/// Run a property on random inputs, recording failures under
+/// `proptest-regressions`, in the file that parallels the specified source
+/// file. `proptest` runs on a [large stack](RUNNER_STACK_SIZE), and each case
+/// on a [small stack](SMALL_STACK_SIZE), so that a case that overflows the
+/// small stack aborts the process, as [`on_small_stack`] expects.
+///
+/// # Parameters
+/// - `cases`: The number of cases.
+/// - `source_file`: The source file of the property, as [`file!`] gives it,
+///   whose regressions file records its failures.
+/// - `strategy`: The constructor of the strategy that generates the inputs,
+///   which runs on the large stack, since a recursive strategy cannot move
+///   between threads.
+/// - `property`: The property.
+///
+/// # Panics
+/// If the property fails on any input.
+pub(super) fn check_within<S>(
+	cases: u32,
+	source_file: &'static str,
+	strategy: impl FnOnce() -> S + Send,
+	property: impl Fn(S::Value) -> Result<(), TestCaseError> + Sync
+) where
+	S: Strategy,
+	S::Value: Send
+{
 	let config = Config {
-		cases: CASES,
-		source_file: Some(file!()),
+		cases,
+		source_file: Some(source_file),
 		failure_persistence: Some(Box::new(
 			FileFailurePersistence::SourceParallel("proptest-regressions")
 		)),
@@ -305,16 +333,19 @@ fn check_source(source: &str) -> Result<(), TestCaseError>
 /// than the budget; it is refused only if its worst case,
 /// [`dice`](crate::Bounds::dice), exceeds the budget; it rolls no more dice
 /// than its worst case; and within its budget it agrees with unmetered
-/// evaluation from the same seed. Likewise, its histogram builds within the
-/// same budget, now of branches, or else is refused, and never charges more
-/// than the budget; its outcomes lie within the bounds of the value; and it
-/// contains the result of the evaluation, if both fit their budgets.
+/// evaluation from the same seed. Likewise, its distribution builds within the
+/// same budget, now of steps and of cells, or else is refused, and never
+/// charges more than the budget; it is refused only if its
+/// [estimate](crate::DistributionPlan::estimate) exceeds the budget; its
+/// outcomes lie within the bounds of the value; and it contains the result of
+/// the evaluation, if both fit their budgets.
 ///
 /// # Parameters
 /// - `source`: The source.
 /// - `args`: The arguments, of which the function takes as many as its arity.
 /// - `externals`: The values of the externals, by index into [`NAMES`].
-/// - `budget`: The dice budget, and the budget of branches of the histogram.
+/// - `budget`: The dice budget, and the budget of steps and of cells of the
+///   distribution.
 /// - `seed`: The seed of the pRNG.
 ///
 /// # Errors
@@ -387,16 +418,19 @@ fn check_evaluation(
 		},
 		Err(e) => prop_assert!(false, "evaluation failed: {}", e)
 	}
-	let builder = serial::HistogramBuilder::new(evaluator);
-	match builder.build_metered(args.iter().copied(), budget)
+	let plan = evaluator.plan_distribution(args.iter().copied()).unwrap();
+	let within = Budget {
+		steps: budget,
+		cells: budget
+	};
+	match plan.build(within, &Unobserved)
 	{
-		Ok(histogram) =>
+		Ok(distribution) =>
 		{
-			prop_assert!(histogram.total() > 0, "empty histogram");
-			for outcome in histogram.keys()
+			for (outcome, _) in &distribution
 			{
 				prop_assert!(
-					bounds.value.contains(*outcome),
+					bounds.value.contains(outcome),
 					"outcome {} out of bounds {}",
 					outcome,
 					bounds.value
@@ -405,38 +439,43 @@ fn check_evaluation(
 			if let Ok(evaluation) = &metered
 			{
 				prop_assert!(
-					histogram.get(evaluation.result) > 0,
-					"histogram lacks the evaluated result {}",
+					!distribution.get(evaluation.result).is_zero(),
+					"distribution lacks the evaluated result {}",
 					evaluation.result
 				);
 			}
 		},
-		Err(EvaluationError::HistogramBudgetExhausted {
+		Err(BuildError::BudgetExhausted {
+			estimate,
 			requested,
 			remaining,
-			consumed
+			consumed,
+			..
 		}) =>
 		{
-			prop_assert!(requested > remaining, "refused affordable branches");
+			prop_assert!(requested > remaining, "refused an affordable charge");
 			prop_assert_eq!(consumed.checked_add(remaining), Some(budget));
+			prop_assert!(
+				estimate.steps > budget || estimate.cells > budget,
+				"refused within the estimate"
+			);
 		},
-		Err(e) => prop_assert!(false, "histogram failed: {}", e)
+		Err(e) => prop_assert!(false, "distribution failed: {}", e)
 	}
 	Ok(())
 }
 
 /// Check that optimizing a source, if it compiles, never changes its
-/// distribution: its exact [histograms](HistogramBuilder::build_metered),
+/// distribution: its exact [distributions](crate::DistributionPlan::build),
 /// unoptimized and fully optimized, agree outcome for outcome, as
-/// probabilities, whenever both fit [`HISTOGRAM_BUDGET`]; and the
+/// probabilities, whenever both fit [`DISTRIBUTION_BUDGET`]; and the
 /// [bounds](Evaluator::bounds_over) of its optimized value lie within those
 /// of its unoptimized value. Optimization may
 /// change the number of paths to each outcome, e.g., by eliminating a roll
 /// whose result is never used, which multiplies the paths to every outcome
-/// alike, so the histograms are compared as probabilities rather than as
-/// counts. A roll that optimization changes the number of branches of may fit
-/// the budget one way and not the other, so a refusal of either build
-/// abstains.
+/// alike, so the distributions are compared as probabilities rather than as
+/// counts. Optimization changes the work of the build, which may fit the
+/// budget one way and not the other, so a refusal of either build abstains.
 ///
 /// # Parameters
 /// - `source`: The source.
@@ -494,32 +533,38 @@ fn check_optimization(
 		unoptimized,
 		optimized
 	);
-	let histogram = |evaluator| {
-		serial::HistogramBuilder::new(evaluator)
-			.build_metered(args.iter().copied(), HISTOGRAM_BUDGET)
+	let distribution = |evaluator: Evaluator| {
+		evaluator
+			.plan_distribution(args.iter().copied())
+			.unwrap()
+			.build(DISTRIBUTION_BUDGET, &Unobserved)
 	};
 	let (Ok(before), Ok(after)) = (
-		histogram(unoptimized_evaluator),
-		histogram(optimized_evaluator)
+		distribution(unoptimized_evaluator),
+		distribution(optimized_evaluator)
 	)
 	else
 	{
 		return Ok(())
 	};
-	let (total_before, total_after) =
-		(before.total() as u128, after.total() as u128);
+	let outcomes = |distribution: &Distribution| {
+		distribution
+			.iter()
+			.map(|(outcome, _)| outcome)
+			.collect::<Vec<_>>()
+	};
 	prop_assert_eq!(
-		before.outcomes(),
-		after.outcomes(),
+		outcomes(&before),
+		outcomes(&after),
 		"outcomes differ\nunoptimized:\n{}\noptimized:\n{}",
 		unoptimized,
 		optimized
 	);
-	for outcome in before.outcomes()
+	for outcome in outcomes(&before)
 	{
 		prop_assert_eq!(
-			before.get(outcome) as u128 * total_after,
-			after.get(outcome) as u128 * total_before,
+			before.probability(outcome),
+			after.probability(outcome),
 			"probability of {} differs\nunoptimized:\n{}\noptimized:\n{}",
 			outcome,
 			unoptimized,
@@ -538,7 +583,7 @@ fn check_optimization(
 /// externals, and may bind names that collide with either. The names draw on
 /// the whole identifier set, e.g., spaces, `:`, `/`, non-ASCII characters, and
 /// characters that would be syntax outside of braces.
-const NAMES: &[&str] =
+pub(super) const NAMES: &[&str] =
 	&["x", "hit points", "weapon: 2/3", "1d6 drop lowest", "Ω-(1)"];
 
 /// The runs of whitespace that may pad a name or stand for a space within it,
@@ -546,7 +591,7 @@ const NAMES: &[&str] =
 const WHITESPACE: &[&str] = &[" ", "  ", "\t", "\n", "\u{A0}"];
 
 /// The binary operators, including the alternate glyphs.
-const OPERATORS: &[&str] = &["+", "-", "*", "/", "%", "^", "×", "÷"];
+pub(super) const OPERATORS: &[&str] = &["+", "-", "*", "/", "%", "^", "×", "÷"];
 
 /// The greatest depth of the expressions in a program.
 const MAX_DEPTH: u32 = 8;
@@ -561,7 +606,20 @@ const TARGET_SIZE: u32 = 128;
 ///
 /// # Returns
 /// The strategy.
-fn program() -> impl Strategy<Value = String>
+fn program() -> impl Strategy<Value = String> { with_parameters(expression()) }
+
+/// Answer a strategy that generates functions, with or without parameters,
+/// whose bodies come from the specified strategy. The parameters are one or
+/// both of the first two [names](NAMES), in random [spellings](spelling).
+///
+/// # Parameters
+/// - `body`: The strategy for the bodies.
+///
+/// # Returns
+/// The strategy.
+pub(super) fn with_parameters(
+	body: impl Strategy<Value = String>
+) -> impl Strategy<Value = String>
 {
 	let parameters =
 		(subsequence(&NAMES[..2], 1..=2), [spelling(), spelling()]).prop_map(
@@ -574,7 +632,7 @@ fn program() -> impl Strategy<Value = String>
 					.join(", ")
 			}
 		);
-	(option::of(parameters), expression()).prop_map(|(parameters, body)| {
+	(option::of(parameters), body).prop_map(|(parameters, body)| {
 		match parameters
 		{
 			Some(parameters) => format!("{}: {}", parameters, body),
@@ -623,10 +681,19 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 			format!("[{}]", faces.join(", "))
 		})
 	];
-	let clause = (
-		select(&["lowest", "highest"][..]),
-		option::of(atom(inner.clone()))
-	)
+	// A drop expression never begins with `-`, so a negative constant must be
+	// grouped.
+	let drop = atom(inner.clone()).prop_map(|drop| {
+		if drop.starts_with('-')
+		{
+			format!("({})", drop)
+		}
+		else
+		{
+			drop
+		}
+	});
+	let clause = (select(&["lowest", "highest"][..]), option::of(drop))
 		.prop_map(|(direction, drop)| match drop
 		{
 			Some(drop) => format!(" drop {} {}", direction, drop),
@@ -680,7 +747,7 @@ fn constant() -> impl Strategy<Value = String>
 ///
 /// # Returns
 /// The strategy.
-fn variable() -> impl Strategy<Value = String>
+pub(super) fn variable() -> impl Strategy<Value = String>
 {
 	(select(NAMES), spelling())
 		.prop_map(|(name, spelling)| spelling.braced(name))
@@ -758,6 +825,27 @@ fn spelling() -> impl Strategy<Value = Spelling>
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                               Distributions.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Answer whether two distributions agree: they have the same outcomes, each
+/// with the same probability, though their totals may differ.
+///
+/// # Parameters
+/// - `a`: One distribution.
+/// - `b`: The other distribution.
+///
+/// # Returns
+/// `true` if the distributions agree, `false` otherwise.
+pub(super) fn agree(a: &Distribution, b: &Distribution) -> bool
+{
+	a.len() == b.len()
+		&& a.iter().zip(b).all(|((x, _), (y, _))| {
+			x == y && a.probability(x) == b.probability(y)
+		})
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                                 Bindings.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -766,7 +854,7 @@ fn spelling() -> impl Strategy<Value = Spelling>
 ///
 /// # Returns
 /// The strategy.
-fn binding() -> impl Strategy<Value = i32>
+pub(super) fn binding() -> impl Strategy<Value = i32>
 {
 	prop_oneof![
 		select(&[i32::MIN, -1, 0, 1, i32::MAX][..]),

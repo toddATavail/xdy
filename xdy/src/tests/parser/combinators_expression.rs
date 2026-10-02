@@ -535,7 +535,10 @@ fn test_exponent()
 	}
 
 	// Invalid inputs.
-	for input in ["", " ", "^", "2^", "^2", "2^^3", "2^3^"]
+	// An exponentiation never begins with `-`, since its base is a primary
+	// expression; a minus before one is the unary operator, so `-2^2` is
+	// `-(2^2)`.
+	for input in ["", " ", "^", "2^", "^2", "2^^3", "2^3^", "-2^2", "-2"]
 	{
 		let span = Span::new(input);
 		let result = exponent(span);

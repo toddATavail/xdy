@@ -379,7 +379,7 @@ fn test_skip()
 
 /// Ensure that a [retraction](Repair::Retract) continues the formal parameters
 /// as though the source lacked a comma that another comma or the `:` follows,
-/// and that it stops recovery elsewhere (xdy-jm8).
+/// and that it stops recovery elsewhere.
 #[test]
 fn test_retract()
 {
