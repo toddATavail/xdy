@@ -14,7 +14,9 @@ use crate::{
 	Sub, SumRollingRecord, ir::Instruction
 };
 
-use crate::{Optimizer, add, div, exp, max, r#mod, mul, neg, sub};
+use crate::{
+	Optimizer, add, div, exp, max, r#mod, mul, neg, primitives::keep_drops, sub
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                             Constant folding.                              //
@@ -191,37 +193,24 @@ impl InstructionVisitor<()> for ConstantFolder
 			return Ok(())
 		}
 		if let Some((count, faces)) = roll.const_ops()
+			// Scan forward for any drop or keep expressions that target the
+			// same rolling record, and apply them, in order, to the count of
+			// dice.
+			&& let Some(kept) = self.kept_dice(roll.dest, count)
 		{
-			// Scan forward for any drop expressions that target the same
-			// rolling record. If we are guaranteed to drop all the dice,
-			// then it doesn't matter how many faces the dice have.
-			let drops = self.find_drop_instructions(roll.dest);
-			let can_fold = drops
-				.map(|drop| self.resolved_count(drop))
-				.collect::<Vec<_>>();
-			if can_fold.iter().all(Option::is_some)
+			if kept == 0
 			{
-				// Identify the number of dice to drop, then reduce the
-				// count accordingly. A drop count of zero or less drops
-				// nothing.
-				let dropped = can_fold
-					.iter()
-					.map(|can_fold| can_fold.unwrap().max(0))
-					.fold(0, i32::saturating_add);
-				let count = (count.saturating_sub(dropped)).clamp(0, i32::MAX);
-				if count <= 0
-				{
-					// All dice are dropped, so the contribution is zero.
-					self.replace(roll.dest, Immediate(0));
-					return Ok(())
-				}
-				else if faces == 1
-				{
-					// The dice have only one face, so the result is the
-					// count itself.
-					self.replace(roll.dest, Immediate(count));
-					return Ok(())
-				}
+				// All dice are dropped, so the contribution is zero, however
+				// many faces the dice have.
+				self.replace(roll.dest, Immediate(0));
+				return Ok(())
+			}
+			else if faces == 1
+			{
+				// The dice have only one face, so the result is the count of
+				// dice kept.
+				self.replace(roll.dest, Immediate(kept));
+				return Ok(())
 			}
 		}
 		// The roll can't be folded, but we may still need to allocate a new
@@ -265,41 +254,25 @@ impl InstructionVisitor<()> for ConstantFolder
 			return Ok(())
 		}
 		if let Some(count) = roll.const_ops()
+			// Scan forward for any drop or keep expressions that target the
+			// same rolling record, and apply them, in order, to the count of
+			// dice.
+			&& let Some(kept) = self.kept_dice(roll.dest, count)
 		{
-			// Scan forward for any drop expressions that target the same
-			// rolling record. If we are guaranteed to drop all the dice,
-			// then it doesn't matter how many faces the dice have.
-			let drops = self.find_drop_instructions(roll.dest);
-			let can_fold = drops
-				.map(|drop| self.resolved_count(drop))
-				.collect::<Vec<_>>();
-			if can_fold.iter().all(Option::is_some)
+			if kept == 0
 			{
-				// Identify the number of dice to drop, then reduce the
-				// count accordingly. A drop count of zero or less drops
-				// nothing.
-				let dropped = can_fold
-					.iter()
-					.map(|can_fold| can_fold.unwrap().max(0))
-					.fold(0, i32::saturating_add);
-				let count = (count.saturating_sub(dropped)).clamp(0, i32::MAX);
-				if count <= 0
-				{
-					// All dice are dropped, so the contribution is zero.
-					self.replace(roll.dest, Immediate(0));
-					return Ok(())
-				}
-				if roll.distinct_faces() == 1
-				{
-					// There's only one distinct face, so multiply the
-					// count by the face value to get the result.
-					let face = roll.faces[0];
-					self.replace(
-						roll.dest,
-						Immediate(count.saturating_mul(face))
-					);
-					return Ok(())
-				}
+				// All dice are dropped, so the contribution is zero, whatever
+				// the faces of the dice.
+				self.replace(roll.dest, Immediate(0));
+				return Ok(())
+			}
+			if roll.distinct_faces() == 1
+			{
+				// There's only one distinct face, so multiply the count of
+				// dice kept by the face value to get the result.
+				let face = roll.faces[0];
+				self.replace(roll.dest, Immediate(kept.saturating_mul(face)));
+				return Ok(())
 			}
 		}
 		// The roll can't be folded, but we may still need to allocate a new
@@ -625,27 +598,53 @@ impl ConstantFolder
 			.map(move |&drop| &previous[drop])
 	}
 
-	/// Answer the count of the specified drop instruction, if it is constant,
-	/// whether in the instruction or by an earlier fold of this pass.
+	/// Answer how many of the specified number of dice of a roll remain kept
+	/// after every subsequent drop and keep that targets its rolling record.
+	/// These apply in order, since a keep counts from the dice still kept,
+	/// and so does not commute with drops or other keeps: a drop of `c` drops
+	/// `c` of the dice still kept, or none if `c` is zero or less, and a keep
+	/// of `c` drops [all but `c`](keep_drops) of them, or all of them if `c`
+	/// is zero or less.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record of the roll.
+	/// - `count`: The number of dice, which is positive.
+	///
+	/// # Returns
+	/// The number of dice kept, which is never negative, or `None` if the
+	/// count of some drop or keep is not constant.
+	fn kept_dice(&self, dest: RollingRecordIndex, count: i32) -> Option<i32>
+	{
+		self.find_drop_instructions(dest)
+			.try_fold(count, |kept, clause| {
+				let count = self.resolved_count(clause)?;
+				let dropped = match clause
+				{
+					Instruction::KeepLowest(_)
+					| Instruction::KeepHighest(_) => keep_drops(kept, 0, 0, count),
+					_ => count.clamp(0, kept)
+				};
+				Some(kept - dropped)
+			})
+	}
+
+	/// Answer the count of the specified drop or keep instruction, if it is
+	/// constant, whether in the instruction or by an earlier fold of this
+	/// pass.
 	///
 	/// # Parameters
 	/// - `drop`: A drop or keep instruction.
 	///
 	/// # Returns
-	/// The constant count, or `None` if the count is not constant or the
-	/// instruction is a keep.
+	/// The constant count, or `None` if the count is not constant.
 	fn resolved_count(&self, drop: &Instruction) -> Option<i32>
 	{
 		let count = match drop
 		{
 			Instruction::DropLowest(drop) => drop.count,
 			Instruction::DropHighest(drop) => drop.count,
-			// A keep counts from the dice still kept, so no total of drop
-			// counts accounts for it. Decline to fold a roll that keeps.
-			Instruction::KeepLowest(_) | Instruction::KeepHighest(_) =>
-			{
-				return None
-			},
+			Instruction::KeepLowest(keep) => keep.count,
+			Instruction::KeepHighest(keep) => keep.count,
 			_ => return None
 		};
 		match self.replacement(count)

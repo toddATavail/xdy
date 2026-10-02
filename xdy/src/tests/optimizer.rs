@@ -308,6 +308,111 @@ fn test_keeps_are_not_folded_as_drops()
 	}
 }
 
+/// Test that constant folding applies the drops and keeps of a roll, in order,
+/// to its count of dice, when every count is constant, and folds the roll if
+/// they keep none of its dice or its dice show only one face. A keep counts
+/// from the dice still kept, so `4D1 drop lowest 1 keep highest 2` keeps 2
+/// dice, but `4D1 keep highest 2 drop lowest 1` keeps 1. A roll that keeps
+/// some of its dice, which show several faces, does not fold, nor does a roll
+/// with a keep whose count is not constant.
+#[test]
+fn test_folding_applies_keeps_in_order()
+{
+	let body = |roll: &str, clauses: &[&str]| {
+		let clauses = clauses
+			.iter()
+			.map(|clause| format!("\t\t⚅0 <- {clause} from ⚅0\n"))
+			.collect::<String>();
+		format!(
+			"\t\t⚅0 <- roll {roll}\n{clauses}\t\t@0 <- sum rolling record \
+			 ⚅0\n\t\treturn @0\n"
+		)
+	};
+	for (roll, clauses, expected) in [
+		("standard dice 4D1", &["keep highest 2"][..], Some(2)),
+		(
+			"standard dice 4D1",
+			&["drop lowest 1", "keep highest 2"],
+			Some(2)
+		),
+		(
+			"standard dice 4D1",
+			&["keep highest 2", "drop lowest 1"],
+			Some(1)
+		),
+		("standard dice 3D1", &["keep lowest 7"], Some(3)),
+		(
+			"custom dice 5D[2, 2]",
+			&["drop lowest 1", "keep highest 2", "drop lowest 1"],
+			Some(2)
+		),
+		(
+			"custom dice 4D[-3, -3]",
+			&["keep lowest 3", "keep highest 2"],
+			Some(-6)
+		),
+		("standard dice 4D6", &["keep lowest 0"], Some(0)),
+		("standard dice 4D6", &["keep highest -1"], Some(0)),
+		(
+			"standard dice 4D6",
+			&["keep highest 2", "drop lowest 2"],
+			Some(0)
+		),
+		(
+			"custom dice 4D[1, 5]",
+			&["drop lowest 1", "keep highest 5", "drop highest 3"],
+			Some(0)
+		),
+		(
+			"standard dice 4D6",
+			&["keep highest 3", "drop lowest 1"],
+			None
+		),
+		("custom dice 4D[1, 5]", &["keep lowest 1"], None)
+	]
+	{
+		let body = body(roll, clauses);
+		let function = crate::Assembler::assemble(&format!(
+			"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n{body}"
+		))
+		.unwrap();
+		let folded = optimize(function.clone(), Pass::ConstantFolding.into())
+			.to_string();
+		let actual = folded.split_once("body:\n").unwrap().1;
+		match expected
+		{
+			Some(expected) =>
+			{
+				assert_eq!(
+					actual,
+					format!("\t\treturn {expected}\n"),
+					"{body}"
+				);
+				let result = Evaluator::new(function)
+					.evaluate([], &mut StdRng::seed_from_u64(0))
+					.unwrap()
+					.result;
+				assert_eq!(result, expected, "{body}");
+			},
+			None => assert_eq!(actual, body)
+		}
+	}
+	let body = "\
+\t\t⚅0 <- roll range 1:2
+\t\t@0 <- sum rolling record ⚅0
+\t\t⚅1 <- roll standard dice 4D1
+\t\t⚅1 <- keep highest @0 from ⚅1
+\t\t@1 <- sum rolling record ⚅1
+\t\treturn @1
+";
+	let function = crate::Assembler::assemble(&format!(
+		"Function() r#2 ⚅#2\n\textern[]\n\tbody:\n{body}"
+	))
+	.unwrap();
+	let folded = optimize(function, Pass::ConstantFolding.into()).to_string();
+	assert_eq!(folded.split_once("body:\n").unwrap().1, body);
+}
+
 /// Test that strength reduction never combines two drops of a record across a
 /// keep of it, since the keep counts from the dice that the drops before it
 /// left: of `4D6`, dropping the lowest, keeping the lowest 2 of the other 3,

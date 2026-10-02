@@ -27,7 +27,7 @@ use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
 	Add, AddressingMode, Assembler, BuildError, Distribution, EvaluationError,
-	Evaluator, Function, Instruction, Passes, ProgramCounter, Rational,
+	Evaluator, Function, Instruction, Pass, Passes, ProgramCounter, Rational,
 	RegisterIndex, Return, RollingRecordIndex, SumRollingRecord, Weight,
 	compiler::{compile, compile_unoptimized},
 	distribution::propagation::{
@@ -3176,12 +3176,13 @@ fn test_propagated_resummed_dynamic_programs()
 }
 
 /// Ensure that the pass answers every random [clause program](ClauseProgram),
-/// a roll followed by drops and keeps in any order, optimized and not, exactly
-/// as [enumerating](ClauseProgram::enumerate) its outcomes through a model that
-/// slices the sorted results, clause by clause, does; that it answers them
-/// soundly, within its estimate; that the bounds are exact when every operand
-/// is fixed; and that the evaluator answers each evaluation as the model does
-/// on the dice that it records.
+/// a roll followed by drops and keeps in any order, unoptimized, optimized by
+/// constant folding or strength reduction alone, and optimized by every pass,
+/// exactly as [enumerating](ClauseProgram::enumerate) its outcomes through a
+/// model that slices the sorted results, clause by clause, does; that it
+/// answers them soundly, within its estimate; that the bounds are exact when
+/// every operand is fixed; and that the evaluator answers each evaluation as
+/// the model does on the dice that it records.
 #[test]
 fn test_propagated_clauses()
 {
@@ -3203,7 +3204,12 @@ fn test_propagated_clauses()
 				evaluation.records
 			);
 		}
-		for function in [function.clone(), optimize(function, Passes::all())]
+		for function in [
+			function.clone(),
+			optimize(function.clone(), Pass::ConstantFolding.into()),
+			optimize(function.clone(), Pass::StrengthReduction.into()),
+			optimize(function, Passes::all())
+		]
 		{
 			let evaluator = Evaluator::new(function);
 			let (propagated, usage) =
