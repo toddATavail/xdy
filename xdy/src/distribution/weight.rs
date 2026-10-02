@@ -59,8 +59,7 @@ use serde::{
 /// assert_eq!(promoted.checked_sub(&Weight::ONE), Some(max));
 /// ```
 ///
-/// The total of `100D6` is 6¹⁰⁰, which converts to the nearest [`f64`], unlike
-/// [`f64::powi`], which rounds at every step:
+/// The total of `100D6` is 6¹⁰⁰, which converts to the nearest [`f64`]:
 ///
 /// ```rust
 /// use xdy::Weight;
@@ -68,7 +67,6 @@ use serde::{
 /// let total = Weight::from(6u8).pow(100);
 /// assert_eq!(total.bits(), 259);
 /// assert_eq!(total.to_f64(), 6.533186235000709e77);
-/// assert_ne!(total.to_f64(), 6f64.powi(100));
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Weight(Repr);
