@@ -350,6 +350,103 @@ impl RollingRecord
 			.collect::<Vec<_>>()
 	}
 
+	/// Keep the lowest `count` of the results that are still kept, marking the
+	/// rest of them as dropped from the high end. A `count` of zero or less
+	/// keeps nothing. Unlike a drop, a keep counts from the results that are
+	/// still kept, so it does not commute with drops or other keeps.
+	///
+	/// # Parameters
+	/// - `count`: The number of results to keep.
+	///
+	/// # Examples
+	/// Roll `4D6` and keep the lowest 3 results:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
+	/// rolling_record.keep_lowest(3);
+	/// assert_eq!(rolling_record.highest_dropped, 1);
+	/// assert_eq!(rolling_record.kept().len(), 3);
+	/// ```
+	///
+	/// Roll `4D6`, drop the lowest result, and keep the lowest 2 of the other
+	/// 3, which drops 1 more:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
+	/// rolling_record.drop_lowest(1);
+	/// rolling_record.keep_lowest(2);
+	/// assert_eq!(rolling_record.lowest_dropped, 1);
+	/// assert_eq!(rolling_record.highest_dropped, 1);
+	/// ```
+	///
+	/// Roll `4D6`, but try to keep `7` results, which keeps all `4`, or `0`
+	/// results, which keeps none:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
+	/// rolling_record.keep_lowest(7);
+	/// assert_eq!(rolling_record.kept().len(), 4);
+	/// rolling_record.keep_lowest(0);
+	/// assert_eq!(rolling_record.kept().len(), 0);
+	/// ```
+	pub fn keep_lowest(&mut self, count: i32)
+	{
+		self.drop_highest(keep_drops(
+			self.results.len() as i32,
+			self.lowest_dropped,
+			self.highest_dropped,
+			count
+		));
+	}
+
+	/// Keep the highest `count` of the results that are still kept, marking
+	/// the rest of them as dropped from the low end. A `count` of zero or less
+	/// keeps nothing. Unlike a drop, a keep counts from the results that are
+	/// still kept, so it does not commute with drops or other keeps.
+	///
+	/// # Parameters
+	/// - `count`: The number of results to keep.
+	///
+	/// # Examples
+	/// Roll `2D20` and keep the highest result:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 2, 20);
+	/// rolling_record.keep_highest(1);
+	/// assert_eq!(rolling_record.lowest_dropped, 1);
+	/// assert_eq!(rolling_record.kept().len(), 1);
+	/// ```
+	///
+	/// Roll `5D10`, keep the highest 3 results, and then keep the highest 2 of
+	/// those, which drops 1 more:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 10);
+	/// rolling_record.keep_highest(3);
+	/// rolling_record.keep_highest(2);
+	/// assert_eq!(rolling_record.lowest_dropped, 3);
+	/// assert_eq!(rolling_record.kept().len(), 2);
+	/// ```
+	pub fn keep_highest(&mut self, count: i32)
+	{
+		self.drop_lowest(keep_drops(
+			self.results.len() as i32,
+			self.lowest_dropped,
+			self.highest_dropped,
+			count
+		));
+	}
+
 	/// Answer the kept results, dropping the lowest and highest results as
 	/// necessary.
 	///
@@ -428,6 +525,34 @@ impl RollingRecord
 	{
 		self.kept().iter().fold(0i32, |a, b| a.saturating_add(*b))
 	}
+}
+
+/// Answer how many of the kept results of a rolling record a keep drops: all
+/// of them but `count`, or none if no more than `count` are kept. This serves
+/// as the definition of [`RollingRecord::keep_lowest`] and
+/// [`RollingRecord::keep_highest`], which drop this many results from the
+/// opposite end, and of the keeps of the forward pass, which share it.
+///
+/// # Parameters
+/// - `results`: The number of results in the record.
+/// - `lowest`: The number of lowest results dropped, clamped to `results`.
+/// - `highest`: The number of highest results dropped, clamped to `results`.
+/// - `count`: The number of results to keep. A count of zero or less keeps
+///   nothing.
+///
+/// # Returns
+/// The number of results to drop, between `0` and the number kept.
+#[inline]
+pub(crate) fn keep_drops(
+	results: i32,
+	lowest: i32,
+	highest: i32,
+	count: i32
+) -> i32
+{
+	// Each drop is clamped to the results, so the difference cannot overflow.
+	let kept = (results - lowest - highest).max(0);
+	kept - count.clamp(0, kept)
 }
 
 /// Computes the sum of the two operands, saturating on overflow. This serves as

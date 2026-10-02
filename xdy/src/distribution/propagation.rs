@@ -4,16 +4,16 @@
 //! outcomes of a dice expression in one forward pass over its instructions,
 //! in which every register holds the distribution of its value rather than one
 //! value. Arguments and external variables are fixed, so they enter as point
-//! masses. Each rolling record fuses its roll, drops, and sum into [one
+//! masses. Each rolling record fuses its roll, drops, keeps, and sum into [one
 //! operator](Roll::sum), and each arithmetic instruction combines the
 //! distributions of its operands pair by pair, through the same
 //! [primitives](crate::primitives) that the [evaluator](Evaluator) uses, so
 //! that every edge case is inherited rather than rederived.
 //!
-//! A roll whose count, faces, or range endpoints are random, or whose drop
-//! counts are, fills its record with a weighted [mixture](Mixture) of rolls
-//! with fixed operands, one for each outcome of its operands, whose sum is the
-//! mixture of their sums.
+//! A roll whose count, faces, or range endpoints are random, or whose drop or
+//! keep counts are, fills its record with a weighted [mixture](Mixture) of
+//! rolls with fixed operands, one for each outcome of its operands, whose sum
+//! is the mixture of their sums.
 //!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of
@@ -80,10 +80,10 @@ use record::{Roll, clamp, convolve, distinct_faces};
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
 	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
-	Exp, Instruction, InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter,
-	RegisterIndex, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord, Weight, add, div, exp, max,
-	r#mod, mul, neg, sub
+	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod,
+	Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord, Weight, add,
+	div, exp, max, r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1763,6 +1763,32 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		let record = &mut world.records[inst.dest.0];
 		record.mixture.drop_highest(&counts, meter)?;
 		// The drop writes a new value, which no sum has read yet.
+		record.summed = false;
+		Ok(())
+	}
+
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), Halt>
+	{
+		// A keep drops from the high end all of the results still kept but
+		// its count, which depends on the record only through its setups.
+		let Self { world, meter } = self;
+		let counts = world.read(inst.count, meter)?;
+		let record = &mut world.records[inst.dest.0];
+		record.mixture.keep_lowest(&counts, meter)?;
+		// The keep writes a new value, which no sum has read yet.
+		record.summed = false;
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), Halt>
+	{
+		// A keep drops from the low end all of the results still kept but its
+		// count, which depends on the record only through its setups.
+		let Self { world, meter } = self;
+		let counts = world.read(inst.count, meter)?;
+		let record = &mut world.records[inst.dest.0];
+		record.mixture.keep_highest(&counts, meter)?;
+		// The keep writes a new value, which no sum has read yet.
 		record.summed = false;
 		Ok(())
 	}

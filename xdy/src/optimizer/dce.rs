@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	DependencyAnalyzer, Div, DropHighest, DropLowest, Exp, Function,
-	Instruction, InstructionVisitor, Max, Mod, Mul, Neg, Optimizer,
-	RegisterIndex, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul,
+	Neg, Optimizer, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,6 +160,30 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 			self.emit(DropHighest {
 				dest: self.replacement(drop.dest).try_into().unwrap(),
 				count: self.replacement(drop.count)
+			});
+		}
+		Ok(())
+	}
+
+	fn visit_keep_lowest(&mut self, keep: &KeepLowest) -> Result<(), ()>
+	{
+		if self.is_rolling_record_live(keep.dest)
+		{
+			self.emit(KeepLowest {
+				dest: self.replacement(keep.dest).try_into().unwrap(),
+				count: self.replacement(keep.count)
+			});
+		}
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, keep: &KeepHighest) -> Result<(), ()>
+	{
+		if self.is_rolling_record_live(keep.dest)
+		{
+			self.emit(KeepHighest {
+				dest: self.replacement(keep.dest).try_into().unwrap(),
+				count: self.replacement(keep.count)
 			});
 		}
 		Ok(())

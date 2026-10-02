@@ -21,10 +21,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
-	InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
-	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
-	SourceSpan, Sub, SumRollingRecord, add, div, exp, max, r#mod, mul, neg,
-	parser::ParseError, roll_custom_dice, roll_range, roll_standard_dice, sub
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
+	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, SourceSpan, Sub, SumRollingRecord,
+	add, div, exp, max, r#mod, mul, neg, parser::ParseError, roll_custom_dice,
+	roll_range, roll_standard_dice, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -621,6 +622,32 @@ where
 		let count = self.value(inst.count);
 		let record = self.record_mut(inst.dest);
 		record.drop_highest(count);
+		Ok(())
+	}
+
+	fn visit_keep_lowest(
+		&mut self,
+		inst: &KeepLowest
+	) -> Result<(), EvaluationError<'static>>
+	{
+		// RollingRecord keeps nothing for a count of zero or less, and keeps
+		// every die still kept for a count that exceeds them.
+		let count = self.value(inst.count);
+		let record = self.record_mut(inst.dest);
+		record.keep_lowest(count);
+		Ok(())
+	}
+
+	fn visit_keep_highest(
+		&mut self,
+		inst: &KeepHighest
+	) -> Result<(), EvaluationError<'static>>
+	{
+		// RollingRecord keeps nothing for a count of zero or less, and keeps
+		// every die still kept for a count that exceeds them.
+		let count = self.value(inst.count);
+		let record = self.record_mut(inst.dest);
+		record.keep_highest(count);
 		Ok(())
 	}
 
@@ -1397,11 +1424,12 @@ struct RollingRecordBounds
 	/// The kind of rolling record.
 	kind: RollingRecordKind<EvaluationBounds>,
 
-	/// The bounds on the number of lowest dice dropped.
-	lowest_dropped: EvaluationBounds,
-
-	/// The bounds on the number of highest dice dropped.
-	highest_dropped: EvaluationBounds
+	/// The bounds on the number of dice still kept, which every roll sets
+	/// and every drop and keep narrows, clause by clause. Keeping the count
+	/// itself, rather than the drops at either end, keeps the bounds of a keep
+	/// exact: a keep counts from the dice still kept, so `{x}D6 keep highest
+	/// 2` keeps at most 2 dice, however many it rolls.
+	kept: EvaluationBounds
 }
 
 impl RollingRecordKind<EvaluationBounds>
@@ -1761,6 +1789,36 @@ impl<'eval> BoundsEvaluator<'eval>
 		&mut self.records[op.0]
 	}
 
+	/// Narrow the number of dice still kept by a rolling record by a drop. Only
+	/// the number of dice dropped matters to the bounds, not the end from
+	/// which they are dropped.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record.
+	/// - `count`: The number of dice to drop. A count of zero or less drops
+	///   nothing.
+	fn drop(&mut self, dest: RollingRecordIndex, count: AddressingMode)
+	{
+		let count = self.value(count).clamp(0.into(), i32::MAX.into());
+		let record = self.record_mut(dest);
+		record.kept = (record.kept - count).max(0.into());
+	}
+
+	/// Narrow the number of dice still kept by a rolling record by a keep,
+	/// which keeps no more than `count` of them. Only the number of dice kept
+	/// matters to the bounds, not the end from which they are kept.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record.
+	/// - `count`: The number of dice to keep. A count of zero or less keeps
+	///   nothing.
+	fn keep(&mut self, dest: RollingRecordIndex, count: AddressingMode)
+	{
+		let count = self.value(count);
+		let record = self.record_mut(dest);
+		record.kept = record.kept.min(count).max(0.into());
+	}
+
 	/// Multiply the number of outcomes by the number of branches of a range or
 	/// roll, whether or not its rolling record is ever summed, since the total
 	/// weight of the exact [distribution](crate::Distribution) counts every
@@ -1787,6 +1845,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			start: (start.min, start.max).into(),
 			end: (end.min, end.max).into()
 		};
+		record.kept = 1.into();
 		self.dice = self.dice.saturating_add(1);
 		if self.sum(inst.start) || self.sum(inst.end)
 		{
@@ -1816,6 +1875,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			count: (count.min, count.max).into(),
 			faces: (faces.min, faces.max).into()
 		};
+		record.kept = count.max(0.into());
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count) || self.sum(inst.faces)
 		{
@@ -1845,6 +1905,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			count: (count.min, count.max).into(),
 			faces
 		};
+		record.kept = count.max(0.into());
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count)
 		{
@@ -1861,21 +1922,25 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 
 	fn visit_drop_lowest(&mut self, inst: &DropLowest) -> Result<(), ()>
 	{
-		// A negative count drops nothing. The total is clamped to the number
-		// of results when the record is summed.
-		let count = self.value(inst.count).clamp(0.into(), i32::MAX.into());
-		let record = self.record_mut(inst.dest);
-		record.lowest_dropped += count;
+		self.drop(inst.dest, inst.count);
 		Ok(())
 	}
 
 	fn visit_drop_highest(&mut self, inst: &DropHighest) -> Result<(), ()>
 	{
-		// A negative count drops nothing. The total is clamped to the number
-		// of results when the record is summed.
-		let count = self.value(inst.count).clamp(0.into(), i32::MAX.into());
-		let record = self.record_mut(inst.dest);
-		record.highest_dropped += count;
+		self.drop(inst.dest, inst.count);
+		Ok(())
+	}
+
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), ()>
+	{
+		self.keep(inst.dest, inst.count);
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
+	{
+		self.keep(inst.dest, inst.count);
 		Ok(())
 	}
 
@@ -1887,19 +1952,13 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		let record = self.record(inst.src);
 		// A record that was never rolled is empty, so it sums to zero, as the
 		// evaluator's does. Zero is fixed, not the result of a roll.
-		let Some(count) = record.kind.count()
-		else
+		if matches!(record.kind, RollingRecordKind::Uninitialized)
 		{
 			self.set_register(inst.dest, 0);
 			self.set_sum(inst.dest, false);
 			return Ok(())
-		};
-		let count: EvaluationBounds =
-			(count.min.max(0), count.max.max(0)).into();
-		let lowest_dropped = record.lowest_dropped;
-		let highest_dropped = record.highest_dropped;
-		let kept =
-			(count - lowest_dropped - highest_dropped).clamp(0.into(), count);
+		}
+		let kept = record.kept;
 		let sum = match record.kind
 		{
 			RollingRecordKind::Uninitialized => unreachable!(),
@@ -2360,6 +2419,23 @@ impl EvaluationBounds
 		Self {
 			min: self.min.max(rhs.min),
 			max: self.max.max(rhs.max)
+		}
+	}
+
+	/// Compute the bounds of the minimum of two bounds. The lesser of two
+	/// values is monotonic in each, so its bounds are the lesser of the lower
+	/// bounds and the lesser of the upper bounds.
+	///
+	/// # Parameters
+	/// - `rhs`: The other bounds.
+	///
+	/// # Returns
+	/// The bounds of the result.
+	fn min(self, rhs: EvaluationBounds) -> Self
+	{
+		Self {
+			min: self.min.min(rhs.min),
+			max: self.max.min(rhs.max)
 		}
 	}
 

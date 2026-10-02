@@ -18,6 +18,7 @@ This document covers the internal architecture for contributors and curious powe
 	* [Addressing modes](#addressing-modes)
 	* [Roll instructions](#roll-instructions)
 	* [Drop instructions](#drop-instructions)
+	* [Keep instructions](#keep-instructions)
 	* [Reduce instructions](#reduce-instructions)
 	* [Arithmetic instructions](#arithmetic-instructions)
 	* [Control instructions](#control-instructions)
@@ -169,16 +170,16 @@ The distribution engine computes the exact probability distribution of a dice ex
 
 #### Forward pass
 
-* Each rolling record fuses its roll, drops, and sum into one operator: a pool without drops sums by powers of its die's distribution under convolution, found by repeated squaring, and a pool with drops sums by order statistics, face by face.
+* Each rolling record fuses its roll, drops, keeps, and sum into one operator: a pool without drops sums by powers of its die's distribution under convolution, found by repeated squaring, and a pool with drops sums by order statistics, face by face.
 * Each arithmetic instruction combines the distributions of its operands pair by pair, through the same primitives that the evaluator uses, so every edge case of saturation and division is inherited rather than rederived.
-* A roll whose count, faces, range endpoints, or drop counts are random fills its record with a weighted mixture of rolls with fixed operands, one for each outcome of its operands.
+* A roll whose count, faces, range endpoints, or drop or keep counts are random fills its record with a weighted mixture of rolls with fixed operands, one for each outcome of its operands.
 * Combining operands pair by pair is exact only if they are independent, which fails only where some random value is read more than once. The pass conditions on such a value, as its plan directs: it splits each of its _worlds_, each a complete state of the pass, into one for each outcome of the value, in which the value is fixed, and later merges them, once one value carries the whole influence of the conditioned one, by mixing that value's distributions over the worlds. The worlds of open splits form a stack, merged last in, first out.
 
 Where no roll has random operands, every path through the expression, one branch of every range and die, is equally likely, and every outcome weighs the number of paths that reach it. Elsewhere, paths may be unequally likely, as in `(1D3)D3`, and every outcome weighs its probability over a total that is a multiple of the least common multiple of the paths' denominators.
 
 #### Estimates, budgets, and progress
 
-`Evaluator::plan_distribution()` answers a `DistributionPlan`, whose `estimate()` predicts the cost of the pass before it computes any weight: the steps, the operations on weights; the peak cells, the entries alive at once across every world; the peak worlds; and the bits of the answer's total weight. The estimate shadows the pass over the bounds of each register, and follows the pass's own algorithms rather than pricing them by formula. Where a split fixes the operands of later rolls, as in `{x}@(10D6) + {x}D6`, the estimate prices the split's outcomes apart, in up to 256 lanes that nested splits share fairly, and prices a split of more values than it can spare lanes in buckets of several values, which loosen the estimate gracefully. It never falls below what the pass uses; it is exact on pools of dice with fixed operands, and within a factor of two on every case of the test corpus. It also records the function's `Class`: whether it drops dice, has random roll or drop operands, reads a random value more than once, or combines two random values by multiplication, division, remainder, exponentiation, or maximum, whose pairs the pass enumerates.
+`Evaluator::plan_distribution()` answers a `DistributionPlan`, whose `estimate()` predicts the cost of the pass before it computes any weight: the steps, the operations on weights; the peak cells, the entries alive at once across every world; the peak worlds; and the bits of the answer's total weight. The estimate shadows the pass over the bounds of each register, and follows the pass's own algorithms rather than pricing them by formula. Where a split fixes the operands of later rolls, as in `{x}@(10D6) + {x}D6`, the estimate prices the split's outcomes apart, in up to 256 lanes that nested splits share fairly, and prices a split of more values than it can spare lanes in buckets of several values, which loosen the estimate gracefully. It never falls below what the pass uses; it is exact on pools of dice with fixed operands, and within a factor of two on every case of the test corpus. It also records the function's `Class`: whether it drops dice, has random roll, drop, or keep operands, reads a random value more than once, or combines two random values by multiplication, division, remainder, exponentiation, or maximum, whose pairs the pass enumerates.
 
 `DistributionPlan::build()` runs the pass within a `Budget` of steps and cells. Every operation charges the most that it may take before it takes any, so one that would exceed the budget is refused, before it expands anything, with `BuildError::BudgetExhausted`, which carries the estimate. The charges depend only on the function and its bindings, so a budget that suffices once always suffices, and one that covers the estimate never refuses. A roll charges its dice when it fills its record, so the budget bounds the number of dice too. After every charge that the budget admits, the pass reports its `Usage` so far, with the estimate, to a `Progress`, which may cancel the build, whereupon it answers `BuildError::Cancelled`; `Unobserved` ignores the reports. Either way, there is no partial distribution.
 
@@ -267,11 +268,20 @@ Both formats brace every name, and read only canonical names, as their writers e
 
 Drops accumulate: each drop instruction marks `K` more results of its direction, and the total is clamped to the number of results, so the order of the drop instructions does not matter.
 
+### Keep instructions
+
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `KeepLowest` | `⚅N <- keep lowest K from ⚅N` | Of the results of rolling record `N` still kept, mark all but the `K` lowest as dropped, from the high end; a `K` of zero or less keeps nothing |
+| `KeepHighest` | `⚅N <- keep highest K from ⚅N` | Of the results of rolling record `N` still kept, mark all but the `K` highest as dropped, from the low end; a `K` of zero or less keeps nothing |
+
+A keep counts from the results that earlier drops and keeps left kept, so, unlike drops, keeps do not commute with drops or with each other: of `4D6`, dropping the lowest and then keeping the lowest 2 keeps the second and third lowest results. A keep only moves the counts of dropped results, so a rolling record shows its keeps as drops.
+
 ### Reduce instructions
 
 | Instruction | Syntax | Semantics |
 |-------------|--------|-----------|
-| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the non-dropped results of rolling record `M` into register `N` (saturating) |
+| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the results of rolling record `M` that no drop or keep dropped into register `N` (saturating) |
 
 ### Arithmetic instructions
 

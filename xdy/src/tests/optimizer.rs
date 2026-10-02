@@ -262,6 +262,76 @@ Function({x}@0) r#4 ⚅#0
 	assert_eq!(evaluate(function), 21);
 }
 
+/// Test that no pass folds or reduces a roll that keeps as though its keeps
+/// were drops: every die of `4D1` shows 1, but a keep counts from the dice
+/// still kept, so `4D1 keep highest 2` is 2, not the 4 that counting only the
+/// drops would answer, and `5D1 drop lowest 1 keep highest 2 drop lowest 1` is
+/// 1.
+#[test]
+fn test_keeps_are_not_folded_as_drops()
+{
+	for (clauses, expected) in [
+		("\t\t⚅0 <- keep highest 2 from ⚅0\n", 2),
+		("\t\t⚅0 <- keep lowest 0 from ⚅0\n", 0),
+		(
+			"\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t⚅0 <- keep highest 2 from \
+			 ⚅0\n\t\t⚅0 <- drop lowest 1 from ⚅0\n",
+			1
+		)
+	]
+	{
+		for die in ["standard dice 5D1", "custom dice 5D[1, 1]"]
+		{
+			let function = crate::Assembler::assemble(&format!(
+				"Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll {die}
+{clauses}		@0 <- sum rolling record ⚅0
+		return @0"
+			))
+			.unwrap();
+			for passes in [
+				Pass::ConstantFolding.into(),
+				Pass::StrengthReduction.into(),
+				Passes::all()
+			]
+			{
+				let optimized = optimize(function.clone(), passes);
+				let result = Evaluator::new(optimized.clone())
+					.evaluate([], &mut StdRng::seed_from_u64(0))
+					.unwrap()
+					.result;
+				assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
+			}
+		}
+	}
+}
+
+/// Test that strength reduction never combines two drops of a record across a
+/// keep of it, since the keep counts from the dice that the drops before it
+/// left: of `4D6`, dropping the lowest, keeping the lowest 2 of the other 3,
+/// and dropping the lowest of those keeps the third lowest die, whereas
+/// dropping the lowest 2 after keeping the lowest 2 of all 4 keeps nothing.
+#[test]
+fn test_drops_do_not_combine_across_keeps()
+{
+	let body = "\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- keep lowest 2 from ⚅0
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+";
+	let function = crate::Assembler::assemble(&format!(
+		"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n{body}"
+	))
+	.unwrap();
+	let optimized = optimize(function, Passes::all()).to_string();
+	assert_eq!(optimized.split_once("body:\n").unwrap().1, body);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                 Exactness.                                 //
 ////////////////////////////////////////////////////////////////////////////////

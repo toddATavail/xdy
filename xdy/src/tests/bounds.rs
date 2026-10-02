@@ -703,3 +703,80 @@ fn test_bounds_over_interval_drop_count()
 		(2, 30).into()
 	);
 }
+
+/// Test that the bounds of a keep are exact even when the number of dice, the
+/// number kept, or both are intervals: a keep counts from the dice still kept,
+/// so it keeps no more than its count, however many dice were rolled, and no
+/// more than remain. Each answer must equal the union of the bounds over every
+/// member of the interval, which are exact, since each member fixes every
+/// operand.
+#[test]
+fn test_bounds_over_interval_keep()
+{
+	let function = |count: &str, clauses: &str| {
+		Assembler::assemble(&format!(
+			"Function({{x}}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice {count}D6
+{clauses}		@1 <- sum rolling record ⚅0
+		return @1"
+		))
+		.unwrap()
+	};
+	for (function, binding, expected) in [
+		(
+			function("@0", "\t\t⚅0 <- keep highest 2 from ⚅0\n"),
+			(1, 10),
+			(1, 12)
+		),
+		(
+			function("@0", "\t\t⚅0 <- keep lowest 2 from ⚅0\n"),
+			(-3, 4),
+			(0, 12)
+		),
+		(
+			function("5", "\t\t⚅0 <- keep highest @0 from ⚅0\n"),
+			(-2, 3),
+			(0, 18)
+		),
+		(
+			function(
+				"@0",
+				"\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t⚅0 <- keep highest 2 \
+				 from ⚅0\n"
+			),
+			(1, 6),
+			(0, 12)
+		),
+		(
+			function(
+				"@0",
+				"\t\t⚅0 <- keep highest 3 from ⚅0\n\t\t⚅0 <- drop lowest @0 \
+				 from ⚅0\n"
+			),
+			(3, 5),
+			(0, 0)
+		)
+	]
+	{
+		let evaluator = Evaluator::new(function);
+		let actual = evaluator
+			.bounds_over([Some(binding.into())], [])
+			.unwrap()
+			.value;
+		let truth = (binding.0..=binding.1)
+			.map(|x| evaluator.bounds_over([Some(x.into())], []).unwrap().value)
+			.reduce(|a, b| (a.min.min(b.min), a.max.max(b.max)).into())
+			.unwrap();
+		assert_eq!(
+			actual,
+			expected.into(),
+			"{}over [{}, {}]",
+			evaluator.function,
+			binding.0,
+			binding.1
+		);
+		assert_eq!(actual, truth, "{}", evaluator.function);
+	}
+}

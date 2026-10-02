@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor, Max,
-	Mod, Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
-	ir::Instruction
+	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor,
+	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
+	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	Sub, SumRollingRecord, ir::Instruction
 };
 
 use crate::{Optimizer, add, div, exp, max, r#mod, mul, neg, sub};
@@ -28,9 +28,10 @@ pub struct ConstantFolder
 	/// The previous version of the function body.
 	previous: Option<Vec<Instruction>>,
 
-	/// The program counters of the drop instructions of the previous version
-	/// of the function body, by the rolling record that they target, so that
-	/// finding the drops of a roll takes time proportional to their number.
+	/// The program counters of the drop and keep instructions of the previous
+	/// version of the function body, by the rolling record that they target,
+	/// so that finding the drops and keeps of a roll takes time proportional
+	/// to their number.
 	drops: HashMap<RollingRecordIndex, Vec<usize>>,
 
 	/// Replacements for registers, due to renumbering or folding, as a map
@@ -74,6 +75,8 @@ impl Optimizer<()> for ConstantFolder
 				{
 					Instruction::DropLowest(drop) => drop.dest,
 					Instruction::DropHighest(drop) => drop.dest,
+					Instruction::KeepLowest(keep) => keep.dest,
+					Instruction::KeepHighest(keep) => keep.dest,
 					_ => continue
 				};
 				self.drops.entry(target).or_default().push(pc);
@@ -367,6 +370,60 @@ impl InstructionVisitor<()> for ConstantFolder
 		}
 	}
 
+	fn visit_keep_lowest(&mut self, keep: &KeepLowest) -> Result<(), ()>
+	{
+		// The heavy lifting was already done when the roll instruction was
+		// encountered. We either rewrite the keep instruction in terms of the
+		// new rolling record or we eliminate it entirely.
+		match self.replacement(keep.dest)
+		{
+			AddressingMode::Immediate(_) =>
+			{
+				// The rolling record is an immediate value, so the roll must
+				// have been folded away. Eliminate the keep instruction.
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// The rolling record is a register, so we need to rewrite the
+				// keep instruction in terms of the new rolling record.
+				self.emit(KeepLowest {
+					dest,
+					count: self.replacement(keep.count)
+				});
+				Ok(())
+			},
+			_ => unreachable!()
+		}
+	}
+
+	fn visit_keep_highest(&mut self, keep: &KeepHighest) -> Result<(), ()>
+	{
+		// The heavy lifting was already done when the roll instruction was
+		// encountered. We either rewrite the keep instruction in terms of the
+		// new rolling record or we eliminate it entirely.
+		match self.replacement(keep.dest)
+		{
+			AddressingMode::Immediate(_) =>
+			{
+				// The rolling record is an immediate value, so the roll must
+				// have been folded away. Eliminate the keep instruction.
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// The rolling record is a register, so we need to rewrite the
+				// keep instruction in terms of the new rolling record.
+				self.emit(KeepHighest {
+					dest,
+					count: self.replacement(keep.count)
+				});
+				Ok(())
+			},
+			_ => unreachable!()
+		}
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		sum: &SumRollingRecord
@@ -545,14 +602,14 @@ impl ConstantFolder
 		*self.replacements.get(&op).unwrap_or(&op)
 	}
 
-	/// Find every drop instruction subsequent to the current program counter
-	/// that targets the given rolling record.
+	/// Find every drop and keep instruction subsequent to the current program
+	/// counter that targets the given rolling record.
 	///
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
 	///
 	/// # Returns
-	/// The relevant drop instructions.
+	/// The relevant drop and keep instructions.
 	fn find_drop_instructions(
 		&self,
 		dest: RollingRecordIndex
@@ -572,16 +629,23 @@ impl ConstantFolder
 	/// whether in the instruction or by an earlier fold of this pass.
 	///
 	/// # Parameters
-	/// - `drop`: A drop instruction.
+	/// - `drop`: A drop or keep instruction.
 	///
 	/// # Returns
-	/// The constant count, or `None` if the count is not constant.
+	/// The constant count, or `None` if the count is not constant or the
+	/// instruction is a keep.
 	fn resolved_count(&self, drop: &Instruction) -> Option<i32>
 	{
 		let count = match drop
 		{
 			Instruction::DropLowest(drop) => drop.count,
 			Instruction::DropHighest(drop) => drop.count,
+			// A keep counts from the dice still kept, so no total of drop
+			// counts accounts for it. Decline to fold a roll that keeps.
+			Instruction::KeepLowest(_) | Instruction::KeepHighest(_) =>
+			{
+				return None
+			},
 			_ => return None
 		};
 		match self.replacement(count)
@@ -719,6 +783,30 @@ impl GetConstantOperands<i32> for DropLowest
 }
 
 impl GetConstantOperands<i32> for DropHighest
+{
+	fn const_ops(&self) -> Option<i32>
+	{
+		match self.count
+		{
+			AddressingMode::Immediate(Immediate(count)) => Some(count),
+			_ => None
+		}
+	}
+}
+
+impl GetConstantOperands<i32> for KeepLowest
+{
+	fn const_ops(&self) -> Option<i32>
+	{
+		match self.count
+		{
+			AddressingMode::Immediate(Immediate(count)) => Some(count),
+			_ => None
+		}
+	}
+}
+
+impl GetConstantOperands<i32> for KeepHighest
 {
 	fn const_ops(&self) -> Option<i32>
 	{
@@ -880,6 +968,14 @@ impl GetConstantOperands<(i32, Option<i32>)> for Instruction
 				drop.const_ops().map(|count| (count, None))
 			},
 			Instruction::DropHighest(drop) =>
+			{
+				drop.const_ops().map(|count| (count, None))
+			},
+			Instruction::KeepLowest(drop) =>
+			{
+				drop.const_ops().map(|count| (count, None))
+			},
+			Instruction::KeepHighest(drop) =>
 			{
 				drop.const_ops().map(|count| (count, None))
 			},

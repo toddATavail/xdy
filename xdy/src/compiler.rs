@@ -962,8 +962,8 @@ impl Function
 	/// 4. Every [`RollCustomDice`](crate::RollCustomDice) has at least one
 	///    face.
 	/// 5. No operand is a rolling record: rolling records appear only as the
-	///    destinations of rolls and drops, the sources of drops, and the
-	///    sources of [sums](crate::SumRollingRecord).
+	///    destinations of rolls, drops, and keeps, the sources of drops and
+	///    keeps, and the sources of [sums](crate::SumRollingRecord).
 	/// 6. The last instruction is a [`Return`](crate::Return), and it is the
 	///    only one. Nothing may follow a return, since the answer of the
 	///    function is its one return.
@@ -1174,6 +1174,16 @@ impl Function
 				check_record(inst.dest, record_seen)?;
 				check_mode(inst.count, register_seen)?;
 			},
+			Instruction::KeepLowest(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+			},
+			Instruction::KeepHighest(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				check_mode(inst.count, register_seen)?;
+			},
 			Instruction::SumRollingRecord(inst) =>
 			{
 				check_register(inst.dest, register_seen)?;
@@ -1365,8 +1375,8 @@ pub enum FunctionError
 
 	/// An operand is an [`AddressingMode::RollingRecord`], which the
 	/// [`Evaluator`](crate::Evaluator) cannot read as a value. Rolling records
-	/// appear only as the destinations of rolls and drops, the sources of
-	/// drops, and the sources of [sums](crate::SumRollingRecord).
+	/// appear only as the destinations of rolls, drops, and keeps, the sources
+	/// of drops and keeps, and the sources of [sums](crate::SumRollingRecord).
 	UnexpectedRollingRecordOperand
 	{
 		/// The index of the offending instruction.

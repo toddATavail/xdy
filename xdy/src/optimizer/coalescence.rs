@@ -19,8 +19,9 @@ use std::{
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, DependencyAnalyzer, Div,
 	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
-	Max, Mod, Mul, Neg, Optimizer, ProgramCounter, RegisterIndex, Return,
-	RollCustomDice, RollRange, RollStandardDice, Sub, SumRollingRecord
+	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, Optimizer, ProgramCounter,
+	RegisterIndex, Return, RollCustomDice, RollRange, RollStandardDice, Sub,
+	SumRollingRecord
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -248,6 +249,22 @@ impl InstructionVisitor<()> for RegisterCoalescer
 	fn visit_drop_highest(&mut self, inst: &DropHighest) -> Result<(), ()>
 	{
 		self.emit(DropHighest {
+			dest: inst.dest,
+			count: self.color(inst.count)
+		})
+	}
+
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), ()>
+	{
+		self.emit(KeepLowest {
+			dest: inst.dest,
+			count: self.color(inst.count)
+		})
+	}
+
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
+	{
+		self.emit(KeepHighest {
 			dest: inst.dest,
 			count: self.color(inst.count)
 		})

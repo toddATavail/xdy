@@ -37,7 +37,7 @@ use super::{
 	meter::{Halt, Meter, charge_of},
 	record::{Powers, Roll}
 };
-use crate::{Distribution, Weight};
+use crate::{Distribution, Weight, primitives::keep_drops};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                  Setups.                                   //
@@ -168,6 +168,60 @@ impl Mixture
 		self.drop(counts, |setup| &mut setup.lowest, meter)
 	}
 
+	/// Keep the lowest results of every setup, by each of the given counts,
+	/// dropping all of the results still kept but that many from the high end.
+	///
+	/// # Parameters
+	/// - `counts`: The distribution of the number of results to keep.
+	/// - `meter`: The meter.
+	///
+	/// # Errors
+	/// [`Halt`] if the keep would exceed the budget or is cancelled.
+	pub(super) fn keep_lowest(
+		&mut self,
+		counts: &Distribution,
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
+		self.clause(
+			counts,
+			|setup, count| {
+				let results = setup.results();
+				let dropped =
+					keep_drops(results, setup.lowest, setup.highest, count);
+				drop_into(&mut setup.highest, dropped, results);
+			},
+			meter
+		)
+	}
+
+	/// Keep the highest results of every setup, by each of the given counts,
+	/// dropping all of the results still kept but that many from the low end.
+	///
+	/// # Parameters
+	/// - `counts`: The distribution of the number of results to keep.
+	/// - `meter`: The meter.
+	///
+	/// # Errors
+	/// [`Halt`] if the keep would exceed the budget or is cancelled.
+	pub(super) fn keep_highest(
+		&mut self,
+		counts: &Distribution,
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
+		self.clause(
+			counts,
+			|setup, count| {
+				let results = setup.results();
+				let dropped =
+					keep_drops(results, setup.lowest, setup.highest, count);
+				drop_into(&mut setup.lowest, dropped, results);
+			},
+			meter
+		)
+	}
+
 	/// Drop the highest results of every setup, by each of the given counts.
 	///
 	/// # Parameters
@@ -212,6 +266,34 @@ impl Mixture
 		meter: &mut Meter
 	) -> Result<(), Halt>
 	{
+		self.clause(
+			counts,
+			|setup, count| {
+				let results = setup.results();
+				drop_into(dropped(setup), count, results);
+			},
+			meter
+		)
+	}
+
+	/// Apply a drop or keep to every setup, by each of the given counts,
+	/// splitting each setup by each count and merging the setups that coincide.
+	///
+	/// # Parameters
+	/// - `counts`: The distribution of the count of the drop or keep.
+	/// - `apply`: The drop or keep, which updates a setup by one count.
+	/// - `meter`: The meter, which the clause charges for each new setup, and
+	///   for its dice, since the new setup's total is computed anew.
+	///
+	/// # Errors
+	/// [`Halt`] if the clause would exceed the budget or is cancelled.
+	fn clause(
+		&mut self,
+		counts: &Distribution,
+		apply: impl Fn(&mut Setup, i32),
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
 		let outcomes = counts.len() as u128;
 		let (steps, cells) =
 			self.0.keys().fold((0u128, 0u128), |(steps, cells), setup| {
@@ -227,12 +309,7 @@ impl Mixture
 			for (count, count_weight) in counts
 			{
 				let mut setup = setup.clone();
-				let results = setup.results();
-				// Clamp exactly as `RollingRecord::drop_lowest` and
-				// `RollingRecord::drop_highest` do.
-				let dropped = dropped(&mut setup);
-				*dropped =
-					dropped.saturating_add(count.max(0)).clamp(0, results);
+				apply(&mut setup, count);
 				*setups.entry(setup).or_default() += &weight * count_weight;
 			}
 		}
@@ -424,6 +501,21 @@ impl Mixture
 			})
 			.collect())
 	}
+}
+
+/// Add a count of results dropped to a setup's running total at one end,
+/// exactly as [`RollingRecord::drop_lowest`](crate::RollingRecord::drop_lowest)
+/// and [`RollingRecord::drop_highest`](crate::RollingRecord::drop_highest) do:
+/// a count of zero or less drops nothing, and the total is clamped to the
+/// results.
+///
+/// # Parameters
+/// - `dropped`: The running total of results dropped at one end.
+/// - `count`: The number of results to drop.
+/// - `results`: The number of results of the setup.
+fn drop_into(dropped: &mut i32, count: i32, results: i32)
+{
+	*dropped = dropped.saturating_add(count.max(0)).clamp(0, results);
 }
 
 /// Answer the distribution of the sum of one setup.

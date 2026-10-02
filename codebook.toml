@@ -30,6 +30,7 @@ words = [
     "cse",
     "dep",
     "deref",
+    "desynchronize",
     "diagnostic's",
     "docstrings",
     "ebnf",

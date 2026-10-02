@@ -8,12 +8,13 @@
 //!
 //! # Instruction set architecture
 //!
-//! The ISA has 15 instructions across five categories:
+//! The ISA has 17 instructions across six categories:
 //!
 //! | Category | Instructions | Destination | Sources |
 //! |----------|-------------|-------------|---------|
 //! | **Roll** | `RollRange`, `RollStandardDice`, `RollCustomDice` | `⚅N` | addressing modes |
 //! | **Drop** | `DropLowest`, `DropHighest` | `⚅N` | addressing mode |
+//! | **Keep** | `KeepLowest`, `KeepHighest` | `⚅N` | addressing mode |
 //! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
 //! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Neg` | `@N` | addressing modes |
 //! | **Control** | `Return` | — | addressing mode |
@@ -198,9 +199,68 @@ impl Display for DropHighest
 	}
 }
 
+/// Instruction: Keep the lowest dice of a rolling record, dropping the highest
+/// of the dice that are still kept, so that at most `count` of them remain
+/// kept. Unlike a drop, a keep counts from the dice that earlier drops and
+/// keeps left kept, so `4D6 drop lowest keep lowest 2` keeps the second and
+/// third lowest dice. A count of zero or less keeps nothing. The keep marks
+/// the dice as dropped from the high end, exactly as [DropHighest] does.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KeepLowest
+{
+	/// The [rolling record](RollingRecord) whose dice to keep.
+	pub dest: RollingRecordIndex,
+
+	/// The number of dice to keep.
+	pub count: AddressingMode
+}
+
+impl Display for KeepLowest
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(
+			f,
+			"{} <- keep lowest {} from {}",
+			self.dest, self.count, self.dest
+		)
+	}
+}
+
+/// Instruction: Keep the highest dice of a rolling record, dropping the lowest
+/// of the dice that are still kept, so that at most `count` of them remain
+/// kept. Unlike a drop, a keep counts from the dice that earlier drops and
+/// keeps left kept, so `4D6 drop highest keep highest 2` keeps the second and
+/// third highest dice. A count of zero or less keeps nothing. The keep marks
+/// the dice as dropped from the low end, exactly as [DropLowest] does.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KeepHighest
+{
+	/// The [rolling record](RollingRecord) whose dice to keep.
+	pub dest: RollingRecordIndex,
+
+	/// The number of dice to keep.
+	pub count: AddressingMode
+}
+
+impl Display for KeepHighest
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(
+			f,
+			"{} <- keep highest {} from {}",
+			self.dest, self.count, self.dest
+		)
+	}
+}
+
 /// Instruction: Compute the result of a [rolling record](RollingRecord),
-/// ignoring any dice marked as dropped by [DropLowest] or [DropHighest].
-/// The summation is clamped to the range of an `i32`.
+/// ignoring any dice marked as dropped by [DropLowest], [DropHighest],
+/// [KeepLowest], or [KeepHighest]. The summation is clamped to the range of an
+/// `i32`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SumRollingRecord
@@ -444,6 +504,12 @@ pub enum Instruction
 	/// [Drop the highest dice](DropHighest) from a rolling record.
 	DropHighest(DropHighest),
 
+	/// [Keep the lowest dice](KeepLowest) of a rolling record.
+	KeepLowest(KeepLowest),
+
+	/// [Keep the highest dice](KeepHighest) of a rolling record.
+	KeepHighest(KeepHighest),
+
 	/// [Sum a rolling record](SumRollingRecord).
 	SumRollingRecord(SumRollingRecord),
 
@@ -490,6 +556,8 @@ impl Instruction
 			Self::RollCustomDice(inst) => Some(inst.dest.into()),
 			Self::DropLowest(inst) => Some(inst.dest.into()),
 			Self::DropHighest(inst) => Some(inst.dest.into()),
+			Self::KeepLowest(inst) => Some(inst.dest.into()),
+			Self::KeepHighest(inst) => Some(inst.dest.into()),
 			Self::SumRollingRecord(inst) => Some(inst.dest.into()),
 			Self::Add(inst) => Some(inst.dest.into()),
 			Self::Sub(inst) => Some(inst.dest.into()),
@@ -516,6 +584,8 @@ impl Instruction
 			Self::RollCustomDice(inst) => vec![inst.count],
 			Self::DropLowest(inst) => vec![inst.dest.into(), inst.count],
 			Self::DropHighest(inst) => vec![inst.dest.into(), inst.count],
+			Self::KeepLowest(inst) => vec![inst.dest.into(), inst.count],
+			Self::KeepHighest(inst) => vec![inst.dest.into(), inst.count],
 			Self::SumRollingRecord(inst) => vec![inst.src.into()],
 			Self::Add(inst) => vec![inst.op1, inst.op2],
 			Self::Sub(inst) => vec![inst.op1, inst.op2],
@@ -618,6 +688,40 @@ impl Instruction
 	) -> Self
 	{
 		Self::DropHighest(DropHighest { dest, count })
+	}
+
+	/// Create an instruction to keep the lowest dice of a rolling record.
+	///
+	/// # Parameters
+	/// - `dest`: The destination rolling record.
+	/// - `count`: The number of dice to keep.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn keep_lowest(
+		dest: RollingRecordIndex,
+		count: AddressingMode
+	) -> Self
+	{
+		Self::KeepLowest(KeepLowest { dest, count })
+	}
+
+	/// Create an instruction to keep the highest dice of a rolling record.
+	///
+	/// # Parameters
+	/// - `dest`: The destination rolling record.
+	/// - `count`: The number of dice to keep.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn keep_highest(
+		dest: RollingRecordIndex,
+		count: AddressingMode
+	) -> Self
+	{
+		Self::KeepHighest(KeepHighest { dest, count })
 	}
 
 	/// Create an instruction to sum the values in a rolling record.
@@ -809,6 +913,8 @@ impl Display for Instruction
 			Self::RollCustomDice(inst) => write!(f, "{}", inst),
 			Self::DropLowest(inst) => write!(f, "{}", inst),
 			Self::DropHighest(inst) => write!(f, "{}", inst),
+			Self::KeepLowest(inst) => write!(f, "{}", inst),
+			Self::KeepHighest(inst) => write!(f, "{}", inst),
 			Self::SumRollingRecord(inst) => write!(f, "{}", inst),
 			Self::Add(inst) => write!(f, "{}", inst),
 			Self::Sub(inst) => write!(f, "{}", inst),
@@ -846,6 +952,16 @@ impl From<DropLowest> for Instruction
 impl From<DropHighest> for Instruction
 {
 	fn from(inst: DropHighest) -> Self { Self::DropHighest(inst) }
+}
+
+impl From<KeepLowest> for Instruction
+{
+	fn from(inst: KeepLowest) -> Self { Self::KeepLowest(inst) }
+}
+
+impl From<KeepHighest> for Instruction
+{
+	fn from(inst: KeepHighest) -> Self { Self::KeepHighest(inst) }
 }
 
 impl From<SumRollingRecord> for Instruction
@@ -963,6 +1079,34 @@ impl TryFrom<Instruction> for DropHighest
 		match inst
 		{
 			Instruction::DropHighest(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for KeepLowest
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::KeepLowest(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for KeepHighest
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::KeepHighest(inst) => Ok(inst),
 			_ => Err(())
 		}
 	}
@@ -1439,6 +1583,24 @@ pub trait InstructionVisitor<E>
 	/// An error if the visitor fails to visit the instruction.
 	fn visit_drop_highest(&mut self, inst: &DropHighest) -> Result<(), E>;
 
+	/// Visit a keep lowest instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), E>;
+
+	/// Visit a keep highest instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), E>;
+
 	/// Visit a sum rolling record instruction.
 	///
 	/// # Parameters
@@ -1571,6 +1733,8 @@ where
 			},
 			Instruction::DropLowest(inst) => visitor.visit_drop_lowest(inst),
 			Instruction::DropHighest(inst) => visitor.visit_drop_highest(inst),
+			Instruction::KeepLowest(inst) => visitor.visit_keep_lowest(inst),
+			Instruction::KeepHighest(inst) => visitor.visit_keep_highest(inst),
 			Instruction::SumRollingRecord(inst) =>
 			{
 				visitor.visit_sum_rolling_record(inst)
@@ -1834,6 +1998,34 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 	}
 
 	fn visit_drop_highest(&mut self, inst: &DropHighest) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers.entry(inst.count).or_default().insert(self.pc);
+		Ok(())
+	}
+
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers.entry(inst.count).or_default().insert(self.pc);
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
 	{
 		self.writers
 			.entry(inst.dest.into())

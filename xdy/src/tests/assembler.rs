@@ -23,7 +23,7 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	AddressingMode, Assembler, AssemblyError, AssemblyLocation, DropKind,
-	Function, FunctionError, Immediate, Instruction, RegisterIndex,
+	Function, FunctionError, Immediate, Instruction, KeepKind, RegisterIndex,
 	RollingRecordIndex,
 	support::{compile_valid, read_compilation_test_cases}
 };
@@ -481,6 +481,39 @@ Function() r#1 ⚅#1
 			AddressingMode::Immediate(Immediate(1))
 		)
 	);
+}
+
+/// Keep lowest and keep highest, with both immediate and register counts, which
+/// round-trip through the text.
+#[test]
+fn test_assemble_keep_clauses()
+{
+	let text = "\
+Function({k}@0) r#2 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- keep highest 3 from ⚅0
+\t\t⚅0 <- keep lowest @0 from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+";
+	let function = Assembler::assemble(text).unwrap();
+	assert_eq!(
+		function.instructions[1],
+		Instruction::keep_highest(
+			RollingRecordIndex(0),
+			AddressingMode::Immediate(Immediate(3))
+		)
+	);
+	assert_eq!(
+		function.instructions[2],
+		Instruction::keep_lowest(
+			RollingRecordIndex(0),
+			AddressingMode::Register(RegisterIndex(0))
+		)
+	);
+	assert_eq!(function.to_string(), text);
 }
 
 /// Negative integer operands at every supported slot — regression check for the
@@ -1020,6 +1053,53 @@ fn test_reject_drop_highest_source_disagrees_with_destination()
 	assert_eq!(kind, DropKind::Highest);
 }
 
+/// A `keep lowest` instruction whose destination disagrees with its `from ⚅N`
+/// source yields [`AssemblyError::KeepSourceMismatch`] with
+/// [`KeepKind::Lowest`] and the mismatched indices surfaced on the variant.
+#[test]
+fn test_reject_keep_source_disagrees_with_destination()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅1 <- roll standard dice 3D6\n\t\t⚅0 <- keep lowest 1 from ⚅1\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n"
+	);
+	let AssemblyError::KeepSourceMismatch {
+		kind,
+		destination,
+		source,
+		..
+	} = e
+	else
+	{
+		panic!("expected KeepSourceMismatch, got: {:?}", e);
+	};
+	assert_eq!(kind, KeepKind::Lowest);
+	assert_eq!(destination, 0);
+	assert_eq!(source, 1);
+}
+
+/// The `keep highest` counterpart to
+/// [`test_reject_keep_source_disagrees_with_destination`].
+#[test]
+fn test_reject_keep_highest_source_disagrees_with_destination()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅1 <- roll standard dice 3D6\n\t\t⚅1 <- keep highest 1 from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n"
+	);
+	let AssemblyError::KeepSourceMismatch {
+		kind,
+		destination,
+		source,
+		..
+	} = e
+	else
+	{
+		panic!("expected KeepSourceMismatch, got: {:?}", e);
+	};
+	assert_eq!(kind, KeepKind::Highest);
+	assert_eq!(destination, 1);
+	assert_eq!(source, 0);
+}
+
 /// Non-whitespace content following the final instruction yields
 /// [`AssemblyError::Syntax`]. The trailing-garbage check catches stray tokens
 /// that might otherwise be silently discarded, which would hide regressions in
@@ -1254,9 +1334,9 @@ fn test_from_str_propagates_errors()
 /// Exercise the [`Display`] rendering and [`AssemblyError::location`] accessor
 /// for every [`AssemblyError`] variant. Each error is constructed directly so
 /// its user-facing message and location are pinned against regression, and
-/// both [`DropKind`] arms are covered. An [`AssemblyError::Invalid`] describes
-/// its [`FunctionError`] without the index of the offending instruction, which
-/// the location supersedes.
+/// both [`DropKind`] arms and both [`KeepKind`] arms are covered. An
+/// [`AssemblyError::Invalid`] describes its [`FunctionError`] without the index
+/// of the offending instruction, which the location supersedes.
 #[test]
 fn test_assembly_error_display_and_location()
 {
@@ -1315,6 +1395,26 @@ fn test_assembly_error_display_and_location()
 				location: loc(5)
 			},
 			"assembly error at line 5, column 5 (byte 5): drop highest \
+			 destination ⚅3 disagrees with its `from` source ⚅4"
+		),
+		(
+			AssemblyError::KeepSourceMismatch {
+				kind: KeepKind::Lowest,
+				destination: 1,
+				source: 2,
+				location: loc(8)
+			},
+			"assembly error at line 8, column 8 (byte 8): keep lowest \
+			 destination ⚅1 disagrees with its `from` source ⚅2"
+		),
+		(
+			AssemblyError::KeepSourceMismatch {
+				kind: KeepKind::Highest,
+				destination: 3,
+				source: 4,
+				location: loc(9)
+			},
+			"assembly error at line 9, column 9 (byte 9): keep highest \
 			 destination ⚅3 disagrees with its `from` source ⚅4"
 		),
 		(

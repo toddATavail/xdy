@@ -14,9 +14,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, Instruction,
-	InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
-	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
-	Sub, SumRollingRecord
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
+	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
 };
 
 use crate::Optimizer;
@@ -42,10 +42,17 @@ pub struct StrengthReducer
 	/// The next rolling record to allocate.
 	next_rolling_record: RollingRecordIndex,
 
-	/// The rolling records that drop instructions target, relative to the
-	/// original function. A range into one of them must remain a range, even
-	/// if it has only one value, since a drop can remove that value.
+	/// The rolling records that drop or keep instructions target, relative to
+	/// the original function. A range into one of them must remain a range,
+	/// even if it has only one value, since a drop or keep can remove that
+	/// value.
 	dropped: HashSet<RollingRecordIndex>,
+
+	/// The rolling records that keep instructions target, relative to the
+	/// original function. A roll into one of them is never [reduced to its
+	/// count of dice](Self::reduce_to_count), since the reduction accounts for
+	/// drops but not for keeps.
+	kept: HashSet<RollingRecordIndex>,
 
 	/// The sole face of each rolling record, relative to the original
 	/// function, that was reduced to its count of dice, which is never
@@ -77,6 +84,18 @@ impl Optimizer<()> for StrengthReducer
 				{
 					Instruction::DropLowest(drop) => Some(drop.dest),
 					Instruction::DropHighest(drop) => Some(drop.dest),
+					Instruction::KeepLowest(keep) => Some(keep.dest),
+					Instruction::KeepHighest(keep) => Some(keep.dest),
+					_ => None
+				})
+				.collect();
+			self.kept = function
+				.instructions
+				.iter()
+				.filter_map(|inst| match inst
+				{
+					Instruction::KeepLowest(keep) => Some(keep.dest),
+					Instruction::KeepHighest(keep) => Some(keep.dest),
 					_ => None
 				})
 				.collect();
@@ -140,6 +159,7 @@ impl InstructionVisitor<()> for StrengthReducer
 		let (count, faces) =
 			(self.replacement(roll.count), self.replacement(roll.faces));
 		if let AddressingMode::Immediate(Immediate(1)) = faces
+			&& !self.kept.contains(&roll.dest)
 		{
 			self.reduce_to_count(roll.dest, roll.count, 1);
 			return Ok(());
@@ -173,7 +193,7 @@ impl InstructionVisitor<()> for StrengthReducer
 		// If the die has only one distinct face, then every die shows it, so
 		// we can replace the roll with its count of dice, or zero if the count
 		// is negative. The sum multiplies the count by the face.
-		if roll.distinct_faces() == 1
+		if roll.distinct_faces() == 1 && !self.kept.contains(&roll.dest)
 		{
 			self.reduce_to_count(roll.dest, roll.count, roll.faces[0]);
 			return Ok(());
@@ -260,12 +280,13 @@ impl InstructionVisitor<()> for StrengthReducer
 				// If there is a previous drop lowest instruction with a
 				// constant count, and our count is also constant, then we can
 				// combine them by dropping the previous instruction and adding
-				// its count to our count. Both counts are positive, since a
-				// count of zero or less was eliminated. A count that is not
-				// constant may be negative, which drops nothing, so it cannot
-				// be added.
+				// its count to our count, unless a keep intervenes, since a
+				// keep counts from the dice that the drops before it left. Both
+				// counts are positive, since a count of zero or less was
+				// eliminated. A count that is not constant may be negative,
+				// which drops nothing, so it cannot be added.
 				if let AddressingMode::Immediate(Immediate(count)) = count
-					&& let Some(pc) = self.find_drop_instruction(|inst| {
+					&& let Some(pc) = self.find_drop_instruction(dest, |inst| {
 						match DropLowest::try_from(inst.clone()).ok()
 						{
 							Some(drop) =>
@@ -328,12 +349,13 @@ impl InstructionVisitor<()> for StrengthReducer
 				// If there is a previous drop highest instruction with a
 				// constant count, and our count is also constant, then we can
 				// combine them by dropping the previous instruction and adding
-				// its count to our count. Both counts are positive, since a
-				// count of zero or less was eliminated. A count that is not
-				// constant may be negative, which drops nothing, so it cannot
-				// be added.
+				// its count to our count, unless a keep intervenes, since a
+				// keep counts from the dice that the drops before it left. Both
+				// counts are positive, since a count of zero or less was
+				// eliminated. A count that is not constant may be negative,
+				// which drops nothing, so it cannot be added.
 				if let AddressingMode::Immediate(Immediate(count)) = count
-					&& let Some(pc) = self.find_drop_instruction(|inst| {
+					&& let Some(pc) = self.find_drop_instruction(dest, |inst| {
 						match DropHighest::try_from(inst.clone()).ok()
 						{
 							Some(drop) =>
@@ -370,6 +392,40 @@ impl InstructionVisitor<()> for StrengthReducer
 				Ok(())
 			}
 		}
+	}
+
+	fn visit_keep_lowest(&mut self, keep: &KeepLowest) -> Result<(), ()>
+	{
+		// A roll that keeps is never reduced to a value, so its record remains
+		// a record. A keep keeps nothing for a count of zero or less, so,
+		// unlike a drop, it is never eliminated.
+		let AddressingMode::RollingRecord(dest) = self.replacement(keep.dest)
+		else
+		{
+			unreachable!("a keep of a roll reduced to a value")
+		};
+		self.emit(KeepLowest {
+			dest,
+			count: self.replacement(keep.count)
+		});
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, keep: &KeepHighest) -> Result<(), ()>
+	{
+		// A roll that keeps is never reduced to a value, so its record remains
+		// a record. A keep keeps nothing for a count of zero or less, so,
+		// unlike a drop, it is never eliminated.
+		let AddressingMode::RollingRecord(dest) = self.replacement(keep.dest)
+		else
+		{
+			unreachable!("a keep of a roll reduced to a value")
+		};
+		self.emit(KeepHighest {
+			dest,
+			count: self.replacement(keep.count)
+		});
+		Ok(())
 	}
 
 	fn visit_sum_rolling_record(
@@ -801,25 +857,37 @@ impl StrengthReducer
 	}
 
 	/// Find the program counter of the last drop instruction that satisfies the
-	/// specified filter.
+	/// specified filter, provided that no keep of the specified rolling record
+	/// follows it. Drops of a record commute with one another, but not with
+	/// its keeps, so a drop may combine with a later one only if no keep
+	/// separates them.
 	///
 	/// # Parameters
+	/// - `dest`: The rolling record, relative to the optimized function.
 	/// - `filter`: The predicate that the drop instruction must satisfy.
 	///
 	/// # Returns
 	/// The program counter of the drop instruction, if found.
 	fn find_drop_instruction(
 		&self,
+		dest: RollingRecordIndex,
 		filter: impl Fn(&Instruction) -> bool
 	) -> Option<ProgramCounter>
 	{
-		self.instructions.iter().enumerate().rev().find_map(
-			move |(pc, inst)| match filter(inst)
+		for (pc, inst) in self.instructions.iter().enumerate().rev()
+		{
+			match inst
 			{
-				true => Some(pc.into()),
-				false => None
+				Instruction::KeepLowest(KeepLowest { dest: kept, .. })
+				| Instruction::KeepHighest(KeepHighest {
+					dest: kept, ..
+				}) if *kept == dest => return None,
+				inst if filter(inst) => return Some(pc.into()),
+				_ =>
+				{}
 			}
-		)
+		}
+		None
 	}
 
 	/// Answer an operand whose value is that of the specified operand, or zero

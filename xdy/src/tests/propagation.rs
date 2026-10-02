@@ -903,6 +903,107 @@ fn test_dynamic_drops()
 	assert_agrees(function, &weights(&[(0, 3)]));
 }
 
+/// Ensure that keeps answer as expected, weight for weight: the highest of
+/// `2D6`, whose outcome `k` arises `2k - 1` ways; a keep that counts from the
+/// dice that a drop left, rather than from all of them; keeps that keep more
+/// dice than remain, or none; and a keep whose count is random.
+#[test]
+fn test_keeps()
+{
+	let program = |clauses: &str| {
+		format!(
+			"Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D4
+{clauses}		@0 <- sum rolling record ⚅0
+		return @0"
+		)
+	};
+	assert_eq!(
+		propagate_assembly(
+			"Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D6
+		⚅0 <- keep highest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0"
+		),
+		weights(&[(1, 1), (2, 3), (3, 5), (4, 7), (5, 9), (6, 11)])
+	);
+	// Keeping the lowest 2 of the 3 dice that remain after the lowest is
+	// dropped keeps the second and third lowest, unlike dropping 2 more of
+	// the highest, which keeps only the second lowest.
+	for (clauses, reference) in [
+		(
+			"		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- keep lowest 2 from ⚅0
+",
+			"		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- drop highest 1 from ⚅0
+"
+		),
+		(
+			"		⚅0 <- keep highest 3 from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+",
+			"		⚅0 <- drop lowest 2 from ⚅0
+"
+		),
+		(
+			"		⚅0 <- keep lowest 7 from ⚅0
+",
+			""
+		),
+		(
+			"		⚅0 <- keep highest 0 from ⚅0
+",
+			"		⚅0 <- drop lowest 4 from ⚅0
+"
+		),
+		(
+			"		⚅0 <- keep highest -2 from ⚅0
+",
+			"		⚅0 <- drop highest 4 from ⚅0
+"
+		)
+	]
+	{
+		assert_eq!(
+			propagate_assembly(&program(clauses)),
+			propagate_assembly(&program(reference)),
+			"{clauses}"
+		);
+	}
+	// Keeping 1D2 of the highest is dropping the lowest 3 or 2, equally.
+	let random = Assembler::assemble(
+		"Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll range 1:2
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 4D4
+		⚅1 <- keep highest @0 from ⚅1
+		@1 <- sum rolling record ⚅1
+		return @1"
+	)
+	.unwrap();
+	let one = propagate_assembly(&program(
+		"		⚅0 <- keep highest 1 from ⚅0
+"
+	));
+	let two = propagate_assembly(&program(
+		"		⚅0 <- keep highest 2 from ⚅0
+"
+	));
+	let expected = Distribution::from_weights(
+		(1..=8).map(|outcome| (outcome, one.get(outcome) + two.get(outcome)))
+	)
+	.unwrap();
+	assert_agrees(random, &expected);
+}
+
 /// Ensure that ranges of random endpoints answer as expected, weight for
 /// weight, including empty ranges.
 #[test]
@@ -3072,6 +3173,410 @@ fn test_propagated_resummed_dynamic_programs()
 			})
 		}
 	);
+}
+
+/// Ensure that the pass answers every random [clause program](ClauseProgram),
+/// a roll followed by drops and keeps in any order, optimized and not, exactly
+/// as [enumerating](ClauseProgram::enumerate) its outcomes through a model that
+/// slices the sorted results, clause by clause, does; that it answers them
+/// soundly, within its estimate; that the bounds are exact when every operand
+/// is fixed; and that the evaluator answers each evaluation as the model does
+/// on the dice that it records.
+#[test]
+fn test_propagated_clauses()
+{
+	check_within(CASES, file!(), clause_program, |program| {
+		let function = Assembler::assemble(&program.assembly()).unwrap();
+		let expected = program.enumerate();
+		let mut evaluator = Evaluator::new(function.clone());
+		for seed in SEEDS
+		{
+			let evaluation = evaluator
+				.evaluate(Vec::<i32>::new(), &mut StdRng::seed_from_u64(seed))
+				.unwrap();
+			prop_assert_eq!(
+				evaluation.result,
+				program.model(&evaluation.records),
+				"evaluated otherwise than the model\nfunction:\n{}\n\
+					records: {:?}",
+				function,
+				evaluation.records
+			);
+		}
+		for function in [function.clone(), optimize(function, Passes::all())]
+		{
+			let evaluator = Evaluator::new(function);
+			let (propagated, usage) =
+				match propagate_within(&evaluator, &[], BUDGET)
+				{
+					Ok(answer) => answer,
+					Err(PropagationError::Exhausted(_)) => continue,
+					Err(e) =>
+					{
+						return Err(TestCaseError::fail(format!(
+							"refused: {e:?}\nfunction:\n{}",
+							evaluator.function
+						)))
+					},
+				};
+			prop_assert!(
+				agree(&propagated, &expected),
+				"propagated otherwise than enumerated\nfunction:\n{}\n\
+					propagated:\n{}\nexpected:\n{}",
+				evaluator.function,
+				propagated,
+				expected
+			);
+			check_sound(&evaluator, &[], &[], &propagated)?;
+			if program.fixed()
+			{
+				let bounds = evaluator
+					.bounds_over([], std::iter::empty::<(&str, _)>())
+					.unwrap();
+				let outcomes = propagated.iter().map(|(outcome, _)| outcome);
+				prop_assert_eq!(
+					(bounds.value.min, bounds.value.max),
+					(outcomes.clone().min().unwrap(), outcomes.max().unwrap()),
+					"inexact bounds\nfunction:\n{}",
+					evaluator.function
+				);
+			}
+			check_exact_budget(&evaluator, &[], &propagated, usage)
+				.map_err(TestCaseError::fail)?;
+			check_estimate(&evaluator, &[], &propagated, usage)
+				.map_err(TestCaseError::fail)?;
+			check_progress(
+				&evaluator,
+				&[],
+				&propagated,
+				usage,
+				PROPERTY_CANCELLATIONS
+			)
+			.map_err(TestCaseError::fail)?;
+		}
+		Ok(())
+	});
+}
+
+/// A random program that rolls dice and applies drops and keeps to them, in
+/// order, whose counts are fixed or rolled from ranges, for
+/// [`test_propagated_clauses`].
+#[derive(Debug, Clone)]
+struct ClauseProgram
+{
+	/// The number of dice.
+	count: ClauseCount,
+
+	/// The die.
+	die: ClauseDie,
+
+	/// The clauses, in order.
+	clauses: Vec<Clause>
+}
+
+/// The die of a [`ClauseProgram`].
+#[derive(Debug, Clone)]
+enum ClauseDie
+{
+	/// A standard die of the specified number of faces, which may be none.
+	Standard(i32),
+
+	/// A custom die of the specified faces.
+	Custom(Vec<i32>)
+}
+
+/// A drop or keep of a [`ClauseProgram`].
+#[derive(Debug, Clone, Copy)]
+struct Clause
+{
+	/// Whether the clause keeps rather than drops.
+	keep: bool,
+
+	/// Whether the clause drops or keeps the lowest dice rather than the
+	/// highest.
+	lowest: bool,
+
+	/// The count of the clause.
+	count: ClauseCount
+}
+
+/// A count of a [`ClauseProgram`]: fixed, or rolled from an inclusive range,
+/// which may be empty, and then answers zero.
+#[derive(Debug, Clone, Copy)]
+enum ClauseCount
+{
+	/// A fixed count.
+	Fixed(i32),
+
+	/// A count rolled from the range of the specified endpoints.
+	Rolled(i32, i32)
+}
+
+impl ClauseCount
+{
+	/// Answer the values of the count, one for each branch of its roll.
+	///
+	/// # Returns
+	/// The values.
+	fn values(self) -> Vec<i32>
+	{
+		match self
+		{
+			ClauseCount::Fixed(count) => vec![count],
+			ClauseCount::Rolled(start, end) if end < start => vec![0],
+			ClauseCount::Rolled(start, end) => (start..=end).collect()
+		}
+	}
+}
+
+impl ClauseProgram
+{
+	/// Answer the counts of the program that it rolls, in the order that it
+	/// rolls them: the number of dice first, then the counts of the clauses.
+	///
+	/// # Returns
+	/// The rolled counts.
+	fn counts(&self) -> Vec<ClauseCount>
+	{
+		std::iter::once(self.count)
+			.chain(self.clauses.iter().map(|clause| clause.count))
+			.collect()
+	}
+
+	/// Answer whether every count of the program is fixed.
+	///
+	/// # Returns
+	/// `true` if every count is fixed.
+	fn fixed(&self) -> bool
+	{
+		self.counts()
+			.iter()
+			.all(|count| matches!(count, ClauseCount::Fixed(_)))
+	}
+
+	/// Answer the text of the program: each rolled count rolls its range into
+	/// a record of its own, which it sums into a register of its own, in
+	/// order, and then the dice roll into the last record, and the clauses
+	/// apply to it, in order.
+	///
+	/// # Returns
+	/// The text, which assembles.
+	fn assembly(&self) -> String
+	{
+		let mut body = String::new();
+		let mut next = 0;
+		let mut operand = |count: ClauseCount, body: &mut String| match count
+		{
+			ClauseCount::Fixed(count) => count.to_string(),
+			ClauseCount::Rolled(start, end) =>
+			{
+				body.push_str(&format!(
+					"\t\t⚅{next} <- roll range {start}:{end}\n\t\t@{next} <- \
+					 sum rolling record ⚅{next}\n"
+				));
+				next += 1;
+				format!("@{}", next - 1)
+			}
+		};
+		let count = operand(self.count, &mut body);
+		let operands = self
+			.clauses
+			.iter()
+			.map(|clause| operand(clause.count, &mut body))
+			.collect::<Vec<_>>();
+		let dice = next;
+		match &self.die
+		{
+			ClauseDie::Standard(faces) => body.push_str(&format!(
+				"\t\t⚅{dice} <- roll standard dice {count}D{faces}\n"
+			)),
+			ClauseDie::Custom(faces) => body.push_str(&format!(
+				"\t\t⚅{dice} <- roll custom dice {count}D[{}]\n",
+				faces
+					.iter()
+					.map(i32::to_string)
+					.collect::<Vec<_>>()
+					.join(", ")
+			))
+		}
+		for (clause, operand) in self.clauses.iter().zip(operands)
+		{
+			body.push_str(&format!(
+				"\t\t⚅{dice} <- {} {} {operand} from ⚅{dice}\n",
+				if clause.keep { "keep" } else { "drop" },
+				if clause.lowest { "lowest" } else { "highest" }
+			));
+		}
+		body.push_str(&format!(
+			"\t\t@{dice} <- sum rolling record ⚅{dice}\n\t\treturn @{dice}"
+		));
+		format!(
+			"Function() r#{} ⚅#{}\n\textern[]\n\tbody:\n{body}",
+			dice + 1,
+			dice + 1
+		)
+	}
+
+	/// Answer the result of the program, as a model that slices the sorted
+	/// results, clause by clause, computes it: a drop removes dice from one
+	/// end of those still kept, and a keep removes all but some of them.
+	///
+	/// # Parameters
+	/// - `counts`: The values of the counts, in the order of
+	///   [`counts`](Self::counts).
+	/// - `results`: The results of the dice.
+	///
+	/// # Returns
+	/// The result.
+	fn slice(&self, counts: &[i32], results: &[i32]) -> i32
+	{
+		let mut kept = results.to_vec();
+		kept.sort();
+		let mut kept = &kept[..];
+		for (clause, &count) in self.clauses.iter().zip(&counts[1..])
+		{
+			let count = (count.max(0) as usize).min(kept.len());
+			let remove = match clause.keep
+			{
+				true => kept.len() - count,
+				false => count
+			};
+			kept = match clause.lowest != clause.keep
+			{
+				true => &kept[remove..],
+				false => &kept[..kept.len() - remove]
+			};
+		}
+		kept.iter()
+			.fold(0, |sum, result| sum.saturating_add(*result))
+	}
+
+	/// Answer the result of an evaluation of the program, as the
+	/// [model](Self::slice) computes it from the records of the evaluation.
+	///
+	/// # Parameters
+	/// - `records`: The rolling records of the evaluation.
+	///
+	/// # Returns
+	/// The result.
+	fn model(&self, records: &[crate::RollingRecord]) -> i32
+	{
+		let (dice, ranges) = records.split_last().unwrap();
+		let mut ranges = ranges.iter().map(|record| record.results[0]);
+		let counts = self
+			.counts()
+			.into_iter()
+			.map(|count| match count
+			{
+				ClauseCount::Fixed(count) => count,
+				ClauseCount::Rolled(..) => ranges.next().unwrap()
+			})
+			.collect::<Vec<_>>();
+		self.slice(&counts, &dice.results)
+	}
+
+	/// Answer the distribution of the program, by enumerating every branch of
+	/// every count and every die, and computing each result with the
+	/// [model](Self::slice). Every branch of the counts is equally likely, so
+	/// each result weighs the branches of the dice that the most dice have
+	/// for each branch of the dice that its own have.
+	///
+	/// # Returns
+	/// The distribution.
+	fn enumerate(&self) -> Distribution
+	{
+		let mut weights = std::collections::BTreeMap::<i32, u64>::new();
+		let mut counts = vec![Vec::new()];
+		for count in self.counts()
+		{
+			counts = counts
+				.into_iter()
+				.flat_map(|prefix: Vec<i32>| {
+					count.values().into_iter().map(move |value| {
+						let mut counts = prefix.clone();
+						counts.push(value);
+						counts
+					})
+				})
+				.collect();
+		}
+		let faces = match &self.die
+		{
+			ClauseDie::Standard(faces) if *faces <= 0 => vec![0],
+			ClauseDie::Standard(faces) => (1..=*faces).collect(),
+			ClauseDie::Custom(faces) => faces.clone()
+		};
+		let rolls = counts
+			.into_iter()
+			.map(|counts| {
+				let mut results = vec![Vec::new()];
+				for _ in 0..counts[0].max(0)
+				{
+					results = results
+						.into_iter()
+						.flat_map(|prefix: Vec<i32>| {
+							faces.iter().map(move |face| {
+								let mut results = prefix.clone();
+								results.push(*face);
+								results
+							})
+						})
+						.collect();
+				}
+				(counts, results)
+			})
+			.collect::<Vec<_>>();
+		let most = rolls.iter().map(|(_, results)| results.len()).max();
+		for (counts, results) in &rolls
+		{
+			let weight = (most.unwrap() / results.len()) as u64;
+			for results in results
+			{
+				*weights.entry(self.slice(counts, results)).or_default() +=
+					weight;
+			}
+		}
+		Distribution::from_weights(
+			weights
+				.into_iter()
+				.map(|(outcome, weight)| (outcome, Weight::from(weight)))
+		)
+		.unwrap()
+	}
+}
+
+/// Answer a strategy that generates [clause programs](ClauseProgram), small
+/// enough to [enumerate](ClauseProgram::enumerate).
+///
+/// # Returns
+/// The strategy.
+fn clause_program() -> impl Strategy<Value = ClauseProgram>
+{
+	let count = |fixed: std::ops::RangeInclusive<i32>| {
+		prop_oneof![
+			3 => fixed.prop_map(ClauseCount::Fixed),
+			1 => (-1..=2, 0..=4)
+				.prop_map(|(start, end)| ClauseCount::Rolled(start, end))
+		]
+	};
+	let die = prop_oneof![
+		(-1..=4).prop_map(ClauseDie::Standard),
+		prop::collection::vec(-3..=3, 1..=3).prop_map(ClauseDie::Custom)
+	];
+	let clause = (any::<bool>(), any::<bool>(), count(-1..=5)).prop_map(
+		|(keep, lowest, count)| Clause {
+			keep,
+			lowest,
+			count
+		}
+	);
+	(count(-1..=4), die, prop::collection::vec(clause, 1..=3)).prop_map(
+		|(count, die, clauses)| ClauseProgram {
+			count,
+			die,
+			clauses
+		}
+	)
 }
 
 /// Rewrite a function so that it reads its rolling records more than once, as

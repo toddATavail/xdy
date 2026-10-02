@@ -59,9 +59,9 @@ use super::{
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
 	DropLowest, EvaluationBounds, Evaluator, Exp, Function, Instruction,
-	InstructionVisitor, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
-	Return, RollCustomDice, RollRange, RollStandardDice, Sub, SumRollingRecord,
-	evaluator::BoundsEvaluator
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
+	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	RollStandardDice, Sub, SumRollingRecord, evaluator::BoundsEvaluator
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -103,13 +103,13 @@ pub struct Cost
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Class
 {
-	/// Whether some drop may drop a result, so that some record may be summed
-	/// by order statistics rather than by convolution.
+	/// Whether some drop or keep may drop a result, so that some record may be
+	/// summed by order statistics rather than by convolution.
 	pub drops: bool,
 
 	/// Whether the count, faces, or range endpoints of some roll, or the
-	/// count of some drop, depend on a roll, so that some record holds a
-	/// mixture of setups.
+	/// count of some drop or keep, depend on a roll, so that some record holds
+	/// a mixture of setups.
 	pub dynamic: bool,
 
 	/// Whether some random value fans out, so that the pass splits its worlds
@@ -1647,6 +1647,18 @@ impl InstructionVisitor<()> for Pricing<'_>
 		Ok(())
 	}
 
+	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), ()>
+	{
+		self.keep(inst.dest.0, inst.count, false);
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
+	{
+		self.keep(inst.dest.0, inst.count, true);
+		Ok(())
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		inst: &SumRollingRecord
@@ -1811,9 +1823,60 @@ impl Pricing<'_>
 	/// - `lowest`: Whether to drop the lowest results rather than the highest.
 	fn drop(&mut self, dest: usize, op: AddressingMode, lowest: bool)
 	{
+		let count = self.clause(dest, op);
+		self.shadow.class.drops |= count.max > 0;
+		// A negative count drops nothing, and the drops accumulate.
+		let count = count.max(0.into());
+		let record = &mut self.shadow.records[dest];
+		match lowest
+		{
+			true => record.lowest += count,
+			false => record.highest += count
+		}
+	}
+
+	/// Keep results of the specified rolling record, as
+	/// [`Mixture::keep_lowest`](super::mixture::Mixture) and
+	/// [`Mixture::keep_highest`](super::mixture::Mixture) do, by dropping all
+	/// of the results still kept but the count from the opposite end. The
+	/// number dropped is bounded by interval arithmetic over the results and
+	/// the drops so far, so it is exact when they and the count are fixed.
+	///
+	/// # Parameters
+	/// - `dest`: The index of the record.
+	/// - `op`: The count of results to keep.
+	/// - `highest`: Whether to keep the highest results rather than the lowest.
+	fn keep(&mut self, dest: usize, op: AddressingMode, highest: bool)
+	{
+		let count = self.clause(dest, op);
+		let record = &mut self.shadow.records[dest];
+		// A count of zero or less keeps nothing, so it drops every result
+		// still kept.
+		let kept =
+			(record.results() - record.lowest - record.highest).max(0.into());
+		let dropped = (kept - count.max(0.into())).max(0.into());
+		self.shadow.class.drops |= dropped.max > 0;
+		match highest
+		{
+			true => record.lowest += dropped,
+			false => record.highest += dropped
+		}
+	}
+
+	/// Charge for a drop or keep of the specified rolling record, as
+	/// [`Mixture::clause`](super::mixture::Mixture) charges, and split its
+	/// setups by the outcomes of the count.
+	///
+	/// # Parameters
+	/// - `dest`: The index of the record.
+	/// - `op`: The count of the drop or keep.
+	///
+	/// # Returns
+	/// The interval of the count.
+	fn clause(&mut self, dest: usize, op: AddressingMode) -> EvaluationBounds
+	{
 		let count = self.read(op);
 		self.shadow.class.dynamic |= count.random;
-		self.shadow.class.drops |= count.bounds.max > 0;
 		let record = &mut self.shadow.records[dest];
 		let outcomes = count.support;
 		self.tally.charge(
@@ -1825,17 +1888,7 @@ impl Pricing<'_>
 		record.dice = record.dice.saturating_mul(outcomes);
 		record.random |= count.random;
 		record.summed = false;
-		// A negative count drops nothing, and the drops accumulate as the
-		// bounds evaluator accumulates them.
-		let count = EvaluationBounds::from((
-			count.bounds.min.max(0),
-			count.bounds.max.max(0)
-		));
-		match lowest
-		{
-			true => record.lowest += count,
-			false => record.highest += count
-		}
+		count.bounds
 	}
 }
 
@@ -2194,6 +2247,27 @@ impl Record
 	fn scales(&self) -> bool
 	{
 		!self.summed && (self.kind != Kind::Empty || self.setups > 1)
+	}
+
+	/// Answer the interval of the number of results of the record, as
+	/// [`Roll::results`](super::record::Roll) counts them, before any drops.
+	/// Results fixed by a split may number anything, since the shadow keeps
+	/// only the number of their distinct values.
+	///
+	/// # Returns
+	/// The interval of the number of results.
+	fn results(&self) -> EvaluationBounds
+	{
+		match &self.kind
+		{
+			Kind::Empty => 0.into(),
+			Kind::Range { .. } => 1.into(),
+			Kind::Standard { count, .. } | Kind::Custom { count, .. } =>
+			{
+				count.bounds.max(0.into())
+			},
+			Kind::Results(_) => (0, i32::MAX).into()
+		}
 	}
 
 	/// Answer the least numbers of lowest and highest results dropped, each

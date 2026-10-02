@@ -10,8 +10,8 @@ use std::collections::{HashMap, hash_map::Entry};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
-	Max, Mod, Mul, Neg, RegisterIndex, Return, RollCustomDice, RollRange,
-	RollStandardDice, Sub, SumRollingRecord
+	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, RegisterIndex, Return,
+	RollCustomDice, RollRange, RollStandardDice, Sub, SumRollingRecord
 };
 
 use super::Optimizer;
@@ -151,6 +151,30 @@ impl InstructionVisitor<()> for CommonSubexpressionEliminator
 		self.emit(DropHighest {
 			dest: drop.dest,
 			count: self.replacement(drop.count)
+		});
+		Ok(())
+	}
+
+	fn visit_keep_lowest(&mut self, keep: &KeepLowest) -> Result<(), ()>
+	{
+		// Dice instructions are not pure, so they cannot be eliminated. The
+		// rolling records are not affected by this optimization, so we don't
+		// need to allocate replacements for them.
+		self.emit(KeepLowest {
+			dest: keep.dest,
+			count: self.replacement(keep.count)
+		});
+		Ok(())
+	}
+
+	fn visit_keep_highest(&mut self, keep: &KeepHighest) -> Result<(), ()>
+	{
+		// Dice instructions are not pure, so they cannot be eliminated. The
+		// rolling records are not affected by this optimization, so we don't
+		// need to allocate replacements for them.
+		self.emit(KeepHighest {
+			dest: keep.dest,
+			count: self.replacement(keep.count)
 		});
 		Ok(())
 	}
@@ -432,6 +456,30 @@ impl CanScrub for DropHighest
 	}
 }
 
+impl CanScrub for KeepLowest
+{
+	fn scrub(&self) -> Self
+	{
+		// The destination is a rolling record, so it unaffected.
+		KeepLowest {
+			dest: self.dest,
+			count: self.count
+		}
+	}
+}
+
+impl CanScrub for KeepHighest
+{
+	fn scrub(&self) -> Self
+	{
+		// The destination is a rolling record, so it unaffected.
+		KeepHighest {
+			dest: self.dest,
+			count: self.count
+		}
+	}
+}
+
 impl CanScrub for SumRollingRecord
 {
 	fn scrub(&self) -> Self
@@ -554,6 +602,8 @@ impl CanScrub for Instruction
 			Instruction::RollCustomDice(inst) => inst.scrub().into(),
 			Instruction::DropLowest(inst) => inst.scrub().into(),
 			Instruction::DropHighest(inst) => inst.scrub().into(),
+			Instruction::KeepLowest(inst) => inst.scrub().into(),
+			Instruction::KeepHighest(inst) => inst.scrub().into(),
 			Instruction::SumRollingRecord(inst) => inst.scrub().into(),
 			Instruction::Add(inst) => inst.scrub().into(),
 			Instruction::Sub(inst) => inst.scrub().into(),

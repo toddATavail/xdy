@@ -19,6 +19,8 @@
               |  <roll_custom_dice>
               |  <drop_lowest>
               |  <drop_highest>
+              |  <keep_lowest>
+              |  <keep_highest>
               |  <sum_rolling_record>
               |  <binary_op>
               |  <unary_neg>
@@ -33,6 +35,10 @@
 <drop_lowest> ::= "⚅" <INDEX> "<-" "drop lowest" <value_operand> "from" "⚅" <INDEX>
 
 <drop_highest> ::= "⚅" <INDEX> "<-" "drop highest" <value_operand> "from" "⚅" <INDEX>
+
+<keep_lowest> ::= "⚅" <INDEX> "<-" "keep lowest" <value_operand> "from" "⚅" <INDEX>
+
+<keep_highest> ::= "⚅" <INDEX> "<-" "keep highest" <value_operand> "from" "⚅" <INDEX>
 
 <sum_rolling_record> ::= "@" <INDEX> "<-" "sum rolling record" "⚅" <INDEX>
 

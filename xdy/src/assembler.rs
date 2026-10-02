@@ -32,7 +32,8 @@
 //! body_header       ::= "body:" EOL
 //! instruction_line  ::= instruction (EOL | EOF)
 //! instruction       ::= roll_range | roll_standard_dice | roll_custom_dice
-//!                     | drop_lowest | drop_highest | sum_rolling_record
+//!                     | drop_lowest | drop_highest | keep_lowest
+//!                     | keep_highest | sum_rolling_record
 //!                     | binary_op | unary_neg | return
 //! roll_range        ::= "⚅" INDEX "<-" "roll range" value_operand ":"
 //!                         value_operand
@@ -43,6 +44,10 @@
 //! drop_lowest       ::= "⚅" INDEX "<-" "drop lowest" value_operand "from"
 //!                         "⚅" INDEX
 //! drop_highest      ::= "⚅" INDEX "<-" "drop highest" value_operand "from"
+//!                         "⚅" INDEX
+//! keep_lowest       ::= "⚅" INDEX "<-" "keep lowest" value_operand "from"
+//!                         "⚅" INDEX
+//! keep_highest      ::= "⚅" INDEX "<-" "keep highest" value_operand "from"
 //!                         "⚅" INDEX
 //! sum_rolling_record::= "@" INDEX "<-" "sum rolling record" "⚅" INDEX
 //! binary_op         ::= "@" INDEX "<-" value_operand BINARY_OP value_operand
@@ -72,10 +77,10 @@
 //!
 //! Rolling records (`⚅N`) are syntactically restricted to the slots where the
 //! intermediate representation expects them: the destination of every
-//! rolling instruction, the source of the `from` clause on the drop
+//! rolling instruction, the source of the `from` clause on the drop and keep
 //! instructions, and the source of `sum rolling record`. They are not
 //! permitted anywhere else — in particular, not as operands of arithmetic,
-//! roll-count, drop-count, or return instructions — because
+//! roll-count, drop-count, keep-count, or return instructions — because
 //! [`Evaluator`](crate::Evaluator)'s operand-dispatch would otherwise
 //! unreachable-panic on an unmapped rolling record read.
 //!
@@ -229,8 +234,10 @@ impl Assembler
 	/// 1. Parameter indices are exactly `0..parameters.len()` in order.
 	/// 2. External-variable indices are exactly
 	///    `parameters.len()..parameters.len() + externals.len()` in order.
-	/// 3. Every [`DropLowest`](crate::DropLowest) and
-	///    [`DropHighest`](crate::DropHighest) names the same rolling record as
+	/// 3. Every [`DropLowest`](crate::DropLowest),
+	///    [`DropHighest`](crate::DropHighest),
+	///    [`KeepLowest`](crate::KeepLowest), and
+	///    [`KeepHighest`](crate::KeepHighest) names the same rolling record as
 	///    its destination and its `from` clause.
 	///
 	/// Then it checks that the assembled [`Function`] is
@@ -281,9 +288,9 @@ impl Assembler
 				})
 			}
 		}
-		// Drop instructions must read back from their own destination. The
-		// parser accepts two independent rolling record indices; the
-		// validator confirms they agree.
+		// Drop and keep instructions must read back from their own
+		// destination. The parser accepts two independent rolling record
+		// indices; the validator confirms they agree.
 		for raw_inst in &raw.instructions
 		{
 			match (&raw_inst.instruction, raw_inst.drop_source)
@@ -303,6 +310,26 @@ impl Assembler
 				{
 					return Err(AssemblyError::DropSourceMismatch {
 						kind: DropKind::Highest,
+						destination: inst.dest.0,
+						source: src.0,
+						location: raw_inst.location
+					})
+				},
+				(Instruction::KeepLowest(inst), Some(src))
+					if inst.dest != src =>
+				{
+					return Err(AssemblyError::KeepSourceMismatch {
+						kind: KeepKind::Lowest,
+						destination: inst.dest.0,
+						source: src.0,
+						location: raw_inst.location
+					})
+				},
+				(Instruction::KeepHighest(inst), Some(src))
+					if inst.dest != src =>
+				{
+					return Err(AssemblyError::KeepSourceMismatch {
+						kind: KeepKind::Highest,
 						destination: inst.dest.0,
 						source: src.0,
 						location: raw_inst.location
@@ -445,6 +472,26 @@ pub enum AssemblyError
 		location: AssemblyLocation
 	},
 
+	/// A keep instruction's destination disagrees with its `from ⚅N` source.
+	/// [`Function`]'s [`Display`] impl always emits the same rolling record on
+	/// both sides; the assembler enforces the invariant so hand-authored IR
+	/// cannot desynchronize.
+	KeepSourceMismatch
+	{
+		/// Whether the mismatch is in a `keep lowest` or `keep highest`
+		/// instruction.
+		kind: KeepKind,
+
+		/// The destination rolling record index.
+		destination: usize,
+
+		/// The `from` source rolling record index.
+		source: usize,
+
+		/// The source position of the offending instruction.
+		location: AssemblyLocation
+	},
+
 	/// The assembled [`Function`] is not [well formed](Function::validate). The
 	/// grammar already forbids some of these defects, such as non-canonical
 	/// names and rolling record operands, but the rest are possible in text.
@@ -473,6 +520,7 @@ impl AssemblyError
 			| Self::NonContiguousParameter { location, .. }
 			| Self::NonContiguousExternal { location, .. }
 			| Self::DropSourceMismatch { location, .. }
+			| Self::KeepSourceMismatch { location, .. }
 			| Self::Invalid { location, .. } => *location
 		}
 	}
@@ -548,6 +596,17 @@ impl Display for AssemblyError
 				 ⚅{}",
 				kind, destination, source
 			),
+			Self::KeepSourceMismatch {
+				kind,
+				destination,
+				source,
+				..
+			} => write!(
+				f,
+				"keep {} destination ⚅{} disagrees with its `from` source \
+				 ⚅{}",
+				kind, destination, source
+			),
 			Self::Invalid { error, .. } => error.describe(f)
 		}
 	}
@@ -577,6 +636,29 @@ pub enum DropKind
 }
 
 impl Display for DropKind
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		match self
+		{
+			Self::Lowest => write!(f, "lowest"),
+			Self::Highest => write!(f, "highest")
+		}
+	}
+}
+
+/// Which keep-direction triggered an [`AssemblyError::KeepSourceMismatch`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum KeepKind
+{
+	/// The offending instruction was a `keep lowest`.
+	Lowest,
+
+	/// The offending instruction was a `keep highest`.
+	Highest
+}
+
+impl Display for KeepKind
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
 	{
@@ -664,7 +746,8 @@ struct RawInstruction
 	/// The source position of the instruction.
 	location: AssemblyLocation,
 
-	/// For [`Instruction::DropLowest`] and [`Instruction::DropHighest`], the
+	/// For [`Instruction::DropLowest`], [`Instruction::DropHighest`],
+	/// [`Instruction::KeepLowest`], and [`Instruction::KeepHighest`], the
 	/// `from ⚅N` clause's rolling record index. Validator compares this
 	/// against the destination. `None` for any other instruction.
 	drop_source: Option<RollingRecordIndex>
@@ -1156,6 +1239,53 @@ fn inst_drop_highest(
 	Ok((input, (Instruction::drop_highest(dest, count), src)))
 }
 
+/// Parse a `keep_lowest` instruction, returning both the parsed
+/// [`Instruction`] and the `from ⚅N` source.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed instruction and its `from` source.
+///
+/// # Errors
+/// `nom` error if the input does not match.
+fn inst_keep_lowest(input: Span)
+-> AsmResult<(Instruction, RollingRecordIndex)>
+{
+	let (input, dest) = record_ref(input)?;
+	let (input, _) = delimited(hws, tag("<-"), hws).parse(input)?;
+	let (input, _) = kw("keep lowest")(input)?;
+	let (input, count) = value_operand(input)?;
+	let (input, _) = delimited(hws, tag("from"), hws).parse(input)?;
+	let (input, src) = record_ref(input)?;
+	Ok((input, (Instruction::keep_lowest(dest, count), src)))
+}
+
+/// Parse a `keep_highest` instruction, returning both the parsed
+/// [`Instruction`] and the `from ⚅N` source.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed instruction and its `from` source.
+///
+/// # Errors
+/// `nom` error if the input does not match.
+fn inst_keep_highest(
+	input: Span
+) -> AsmResult<(Instruction, RollingRecordIndex)>
+{
+	let (input, dest) = record_ref(input)?;
+	let (input, _) = delimited(hws, tag("<-"), hws).parse(input)?;
+	let (input, _) = kw("keep highest")(input)?;
+	let (input, count) = value_operand(input)?;
+	let (input, _) = delimited(hws, tag("from"), hws).parse(input)?;
+	let (input, src) = record_ref(input)?;
+	Ok((input, (Instruction::keep_highest(dest, count), src)))
+}
+
 /// A binary arithmetic operator.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum BinaryOp
@@ -1309,7 +1439,7 @@ fn inst_return(input: Span) -> AsmResult<Instruction>
 /// - `input`: The input text to parse.
 ///
 /// # Returns
-/// The parsed instruction, paired with the `from ⚅N` source for drop
+/// The parsed instruction, paired with the `from ⚅N` source for drop and keep
 /// instructions (or `None` for the other forms).
 ///
 /// # Errors
@@ -1326,7 +1456,9 @@ fn record_instruction(
 	let alt3 = map(inst_roll_custom_dice, |i| (i, None));
 	let alt4 = map(inst_drop_lowest, |(i, src)| (i, Some(src)));
 	let alt5 = map(inst_drop_highest, |(i, src)| (i, Some(src)));
-	alt((alt1, alt2, alt3, alt4, alt5)).parse(input)
+	let alt6 = map(inst_keep_lowest, |(i, src)| (i, Some(src)));
+	let alt7 = map(inst_keep_highest, |(i, src)| (i, Some(src)));
+	alt((alt1, alt2, alt3, alt4, alt5, alt6, alt7)).parse(input)
 }
 
 /// Parse a single body instruction, discarding the leading horizontal
