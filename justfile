@@ -67,6 +67,11 @@ spec:
 oracle *args: lean
     cargo test -p xdy --lib {{args}} oracle -- --ignored --nocapture
 
+# Regenerate the railroad diagrams of the grammars, xdy/doc/*.svg, from their
+# EBNF sources, xdy/grammar/*.ebnf. A test fails while they disagree.
+railroad:
+    XDY_REGENERATE_RAILROAD=1 cargo test -p xdy --lib tests::railroad
+
 # Build documentation.
 doc *args:
     cargo doc --workspace --no-deps {{args}}

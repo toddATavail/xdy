@@ -22,9 +22,6 @@ num-bigint = { workspace = true }
 num-traits = { workspace = true }
 rand = { workspace = true }
 
-[build-dependencies]
-ebnsf = { workspace = true }
-
 [dependencies.serde]
 workspace = true
 optional = true
@@ -36,6 +33,7 @@ serde = ["dep:serde"]
 
 [dev-dependencies]
 criterion = { workspace = true }
+ebnsf = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

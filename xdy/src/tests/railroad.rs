@@ -1,8 +1,15 @@
-//! Build script for the xdy crate.
+//! # Railroad diagram tests
 //!
-//! Generates SVG railroad diagrams from EBNF grammar files in the `grammar/`
-//! directory. The generated SVGs are written to the `doc/` directory and
-//! inlined into Rustdoc via `include_str!`.
+//! The documentation of the [parser](crate::parser) and the
+//! [assembler](crate::assembler) includes railroad diagrams of their grammars,
+//! which `doc/` holds as SVGs, rendered from the EBNF grammars in `grammar/`.
+//! They are rendered here, in a test, rather than by a build script, since a
+//! build script may write only to its own output directory: docs.rs, which
+//! builds documentation from a read-only copy of the crate, refused every
+//! version whose build script wrote them into `doc/`. The test checks that
+//! every diagram is the rendering of its grammar, and, when the environment
+//! variable [`REGENERATE`] is set, as `just railroad` sets it, writes them
+//! instead.
 //!
 //! The SVGs are post-processed to be Rustdoc-compatible:
 //!
@@ -15,41 +22,77 @@
 //!   `&#x5D;`) so that bracketed terminals like `"D["`, `"extern["`, and `"["`
 //!   in railroad diagram text nodes are not resolved as intra-doc links.
 
-use std::fs;
-use std::path::Path;
+use std::{env, fs, path::Path};
 
-fn main()
+////////////////////////////////////////////////////////////////////////////////
+//                                   Tests.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The environment variable that, when set, makes
+/// [`test_railroad_diagrams`] write the railroad diagrams rather than check
+/// them.
+const REGENERATE: &str = "XDY_REGENERATE_RAILROAD";
+
+/// Ensure that every railroad diagram in `doc/` is the rendering of its
+/// grammar in `grammar/`, or, if [`REGENERATE`] is set, write them.
+#[test]
+fn test_railroad_diagrams()
 {
-	let grammar_dir = Path::new("grammar");
-	let doc_dir = Path::new("doc");
-	fs::create_dir_all(doc_dir).expect("failed to create doc/ directory");
-
-	for entry in
-		fs::read_dir(grammar_dir).expect("failed to read grammar/ directory")
+	let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+	let regenerate = env::var_os(REGENERATE).is_some();
+	let mut grammars = 0;
+	let mut stale = Vec::new();
+	for entry in fs::read_dir(root.join("grammar")).unwrap()
 	{
-		let entry = entry.expect("failed to read directory entry");
-		let path = entry.path();
-		if path.extension().is_some_and(|ext| ext == "ebnf")
+		let path = entry.unwrap().path();
+		if path.extension().is_none_or(|extension| extension != "ebnf")
 		{
-			let stem = path
-				.file_stem()
-				.expect("no file stem")
-				.to_str()
-				.expect("non-UTF-8 filename");
-			let source =
-				fs::read_to_string(&path).expect("failed to read EBNF file");
-			let diagram = ebnsf::parse_ebnf(&source)
-				.unwrap_or_else(|e| panic!("failed to parse {}: {e}", stem));
-			let svg = diagram.to_string();
-			let svg = inline_styles(&svg);
-			let svg = escape_brackets(&svg);
-			let output_path = doc_dir.join(format!("{stem}.svg"));
-			fs::write(&output_path, &svg).unwrap_or_else(|e| {
-				panic!("failed to write {}: {e}", output_path.display())
-			});
-			println!("cargo::rerun-if-changed={}", path.display());
+			continue
+		}
+		grammars += 1;
+		let stem = path.file_stem().unwrap().to_str().unwrap();
+		let svg = render(&fs::read_to_string(&path).unwrap())
+			.unwrap_or_else(|e| panic!("failed to parse {stem}: {e}"));
+		let output = root.join("doc").join(format!("{stem}.svg"));
+		if regenerate
+		{
+			fs::write(&output, &svg).unwrap();
+		}
+		else if fs::read_to_string(&output).ok().as_ref() != Some(&svg)
+		{
+			stale.push(output);
 		}
 	}
+	assert!(
+		grammars > 0,
+		"no grammars in {}",
+		root.join("grammar").display()
+	);
+	assert!(
+		stale.is_empty(),
+		"railroad diagrams disagree with their grammars, so regenerate them \
+		 with `just railroad`: {stale:?}"
+	);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 Rendering.                                 //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Render an EBNF grammar as a Rustdoc-compatible railroad diagram.
+///
+/// # Parameters
+/// - `source`: The grammar.
+///
+/// # Returns
+/// The SVG.
+///
+/// # Errors
+/// A description of the error if the grammar does not parse.
+fn render(source: &str) -> Result<String, String>
+{
+	let diagram = ebnsf::parse_ebnf(source).map_err(|e| e.to_string())?;
+	Ok(escape_brackets(&inline_styles(&diagram.to_string())))
 }
 
 /// Remove the `<style>` block and apply its rules as inline `style` attributes
@@ -60,11 +103,9 @@ fn main()
 /// match, then strip the `<style>` block entirely.
 ///
 /// # Parameters
-///
-/// * `svg` — the SVG's content.
+/// - `svg`: The SVG.
 ///
 /// # Returns
-///
 /// The same SVG, with inlined styles.
 fn inline_styles(svg: &str) -> String
 {
@@ -219,12 +260,10 @@ fn inline_styles(svg: &str) -> String
 /// intra-doc links.
 ///
 /// # Parameters
-///
-/// * `svg` — the SVG's content.
+/// - `svg`: The SVG.
 ///
 /// # Returns
-///
-/// The same content, but with square brackets escaped.
+/// The same SVG, but with square brackets escaped.
 fn escape_brackets(svg: &str) -> String
 {
 	svg.replace('[', "&#x5B;").replace(']', "&#x5D;")

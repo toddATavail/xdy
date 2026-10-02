@@ -20,6 +20,7 @@ mod oracle;
 mod parser;
 mod propagation;
 mod property;
+mod railroad;
 mod recovery;
 mod recovery_parity;
 mod sampling;
