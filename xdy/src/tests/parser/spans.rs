@@ -312,6 +312,73 @@ fn test_drop_highest_with_count_span()
 	}
 }
 
+/// A [`KeepLowest`] or [`KeepHighest`] extends its span from the start of the
+/// inner dice through its count, or through its direction if it has none,
+/// while the inner dice retains its pre-clause span.
+#[test]
+fn test_keep_clause_spans()
+{
+	let (_, result) = dice(Span::new("4D6 keep highest")).unwrap();
+	match &result
+	{
+		DiceExpression::KeepHighest(keep) =>
+		{
+			assert_eq!(keep.span, span(0, 16));
+			assert_eq!(keep.dice.span(), span(0, 3));
+			assert!(keep.keep.is_none());
+		},
+		other => panic!("expected KeepHighest, got {:?}", other)
+	}
+	let (_, result) = dice(Span::new("4D6 keep lowest 2")).unwrap();
+	match &result
+	{
+		DiceExpression::KeepLowest(keep) =>
+		{
+			assert_eq!(keep.span, span(0, 17));
+			assert_eq!(keep.dice.span(), span(0, 3));
+			assert_eq!(
+				keep.keep.as_ref().expect("keep count").span(),
+				span(16, 17)
+			);
+		},
+		other => panic!("expected KeepLowest, got {:?}", other)
+	}
+}
+
+/// Mixed drop and keep clauses produce nested wrappers, each with a span
+/// extending through its own clause.
+#[test]
+fn test_stacked_mixed_clauses_span()
+{
+	let (_, result) =
+		dice(Span::new("8D6 drop lowest 3 keep highest 2 drop highest"))
+			.unwrap();
+	match &result
+	{
+		DiceExpression::DropHighest(outer) =>
+		{
+			assert_eq!(outer.span, span(0, 45));
+			match outer.dice.as_ref()
+			{
+				DiceExpression::KeepHighest(middle) =>
+				{
+					assert_eq!(middle.span, span(0, 32));
+					match middle.dice.as_ref()
+					{
+						DiceExpression::DropLowest(inner) =>
+						{
+							assert_eq!(inner.span, span(0, 17));
+						},
+						other => panic!("expected DropLowest, got {:?}", other)
+					}
+				},
+				other => panic!("expected KeepHighest, got {:?}", other)
+			}
+		},
+		other => panic!("expected DropHighest, got {:?}", other)
+	}
+}
+
 /// Stacked drop clauses produce nested wrappers, each with a span extending
 /// through its own clause; inner wrappers keep the pre-outer-clause span.
 #[test]

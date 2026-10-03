@@ -40,6 +40,8 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 		DiagnosticKind::MissingDiceFaces => "MissingDiceFaces",
 		DiagnosticKind::IncompleteDropClause => "IncompleteDropClause",
 		DiagnosticKind::MisplacedDropClause => "MisplacedDropClause",
+		DiagnosticKind::IncompleteKeepClause => "IncompleteKeepClause",
+		DiagnosticKind::MisplacedKeepClause => "MisplacedKeepClause",
 		DiagnosticKind::IncompleteParameterDefinition =>
 		{
 			"IncompleteParameterDefinition"
@@ -481,6 +483,12 @@ fn test_valid_programs_produce_no_diagnostics()
 		"4D6 drop highest",
 		"4D6 drop lowest 1",
 		"8D6 drop lowest 3 drop highest 1",
+		"4D6 keep highest",
+		"4D6 keep lowest 3",
+		"2D20 keep highest {adv}",
+		"5D10 drop lowest keep highest 3 drop highest",
+		"4D6 keep highest 3 - 1",
+		"4d6 keeplowest",
 		"1D6 + 1D8 + 1D10",
 	];
 	for source in &valid
@@ -687,6 +695,11 @@ fn test_diagnose_stray_whitespace()
 			"3d\u{a0}6 drop\u{2003}lowest",
 			"3d 6 drop lowest",
 			vec![(2, 4), (10, 13)]
+		),
+		(
+			"4d6 keep\u{2003}highest\u{a0}3",
+			"4d6 keep highest 3",
+			vec![(8, 11), (18, 20)]
 		),
 		("{x},\u{b}{y}: {x}", "{x}, {y}: {x}", vec![(4, 5)]),
 		("{x}@\u{a0}(1)", "{x}@ (1)", vec![(4, 6)])
@@ -1008,6 +1021,21 @@ fn test_diagnose_deep_drop_expression()
 #[ignore = "stress: run with just stress"]
 fn test_diagnose_deep_drop_clauses() { diagnose_deep(Nesting::DropClauses) }
 
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of keep expressions on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_keep_expression()
+{
+	diagnose_deep(Nesting::KeepExpression)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep stack of drop and keep clauses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_mixed_clauses() { diagnose_deep(Nesting::MixedClauses) }
+
 /// On a small stack, [diagnose](diagnostics::diagnose) a binding that collides
 /// with a parameter, a duplicate binding, and a use before binding, each
 /// followed by a [deep](Nesting::depth) nesting and then a reference to the
@@ -1224,6 +1252,26 @@ fn test_diagnose_deep_hole_drop_clauses()
 	diagnose_deep_failing(Nesting::DropClauses, Breakage::Hole)
 }
 
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep chain of
+/// keep expressions with a [hole](Breakage::Hole) at its innermost level, on a
+/// small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_hole_keep_expression()
+{
+	diagnose_deep_failing(Nesting::KeepExpression, Breakage::Hole)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep stack of
+/// drop and keep clauses with a [hole](Breakage::Hole) at its innermost level,
+/// on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_hole_mixed_clauses()
+{
+	diagnose_deep_failing(Nesting::MixedClauses, Breakage::Hole)
+}
+
 /// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep mixture of
 /// every nesting construct with a [hole](Breakage::Hole) at its innermost
 /// level, on a small stack.
@@ -1394,6 +1442,26 @@ fn test_diagnose_deep_truncated_drop_clauses()
 	diagnose_deep_failing(Nesting::DropClauses, Breakage::Truncated)
 }
 
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep chain of
+/// keep expressions [truncated](Breakage::Truncated) at its innermost level, on
+/// a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_truncated_keep_expression()
+{
+	diagnose_deep_failing(Nesting::KeepExpression, Breakage::Truncated)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep stack of
+/// drop and keep clauses [truncated](Breakage::Truncated) at its innermost
+/// level, on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_truncated_mixed_clauses()
+{
+	diagnose_deep_failing(Nesting::MixedClauses, Breakage::Truncated)
+}
+
 /// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep mixture of
 /// every nesting construct [truncated](Breakage::Truncated) at its innermost
 /// level, on a small stack.
@@ -1562,6 +1630,26 @@ fn test_diagnose_deep_stray_drop_expression()
 fn test_diagnose_deep_stray_drop_clauses()
 {
 	diagnose_deep_failing(Nesting::DropClauses, Breakage::Stray)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep chain of
+/// keep expressions with a [stray](Breakage::Stray) `@` at its innermost level,
+/// on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_stray_keep_expression()
+{
+	diagnose_deep_failing(Nesting::KeepExpression, Breakage::Stray)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep stack of
+/// drop and keep clauses with a [stray](Breakage::Stray) `@` at its innermost
+/// level, on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_stray_mixed_clauses()
+{
+	diagnose_deep_failing(Nesting::MixedClauses, Breakage::Stray)
 }
 
 /// Ensure that [`diagnose`](diagnostics::diagnose) diagnoses a deep mixture of

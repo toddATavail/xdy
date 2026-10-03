@@ -920,3 +920,106 @@ Function({x}@0, {y}@1) r#3 ⚅#1
 		⚅0 <- drop highest @1 from ⚅0
 		@2 <- sum rolling record ⚅0
 		return @2
+
+1D6 keep highest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		⚅0 <- keep highest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+1D6 keep lowest 0
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		⚅0 <- keep lowest 0 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D1 keep highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D1
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: {x}D1 keep lowest 2
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice @0D1
+		⚅0 <- keep lowest 2 from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+4D6 drop lowest 1 keep highest 2 drop lowest 1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 drop lowest 1 drop lowest 1 keep highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 2 from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 keep highest 0
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 0 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D[1, 2, 3, 4, 5, 6] keep highest 3
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 3 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+1D[3, 4, 5] keep lowest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 3:5
+		⚅0 <- keep lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 keep highest 2 drop lowest (-1)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0

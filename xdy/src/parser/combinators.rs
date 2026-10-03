@@ -637,8 +637,47 @@ pub fn drop_highest(
 	run(Goal::DropHighest, input).map(|(rest, value)| (rest, value.into_drop()))
 }
 
-/// Parse a drop expression, without leading whitespace. A drop expression
-/// never begins with `-`, so a negative count must be grouped, as in `(-1)`.
+/// Parse a keep-lowest clause, `keep lowest` and an optional
+/// [drop expression](drop_expression), without leading whitespace.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed drop expression, i.e., the count of dice to keep, or `None` if
+/// the clause has none.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+pub fn keep_lowest(
+	input: Span<'_>
+) -> IResult<Span<'_>, Option<Box<Expression<'_>>>, ParseError<'_>>
+{
+	run(Goal::KeepLowest, input).map(|(rest, value)| (rest, value.into_drop()))
+}
+
+/// Parse a keep-highest clause, `keep highest` and an optional
+/// [drop expression](drop_expression), without leading whitespace.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed drop expression, i.e., the count of dice to keep, or `None` if
+/// the clause has none.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+pub fn keep_highest(
+	input: Span<'_>
+) -> IResult<Span<'_>, Option<Box<Expression<'_>>>, ParseError<'_>>
+{
+	run(Goal::KeepHighest, input).map(|(rest, value)| (rest, value.into_drop()))
+}
+
+/// Parse a drop expression, without leading whitespace: the count of a drop
+/// or keep clause. A drop expression never begins with `-`, so a negative
+/// count must be grouped, as in `(-1)`.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -945,6 +984,30 @@ pub(crate) fn bare_word(input: Span) -> IResult<Span, Span, ParseError>
 	.parse_complete(input)?;
 	let len = run.fragment().trim_end_matches(is_token_space).len();
 	Ok(input.take_split(len))
+}
+
+/// Answer whether text begins with the verb of a clause, e.g., `drop` or
+/// `keep`, as the clause would, rather than with a name that begins with the
+/// verb, e.g., `dropout` or `keeper`: the verb must be followed by a
+/// direction, or by something that cannot continue a [bare word](bare_word),
+/// e.g., whitespace or the end of the text.
+///
+/// # Parameters
+/// - `text`: The text.
+/// - `verb`: The verb.
+///
+/// # Returns
+/// `true` if `text` begins with the verb, `false` otherwise.
+pub(crate) fn begins_verb(text: &str, verb: &str) -> bool
+{
+	text.strip_prefix(verb).is_some_and(|after| {
+		after.starts_with("lowest")
+			|| after.starts_with("highest")
+			|| after
+				.chars()
+				.next()
+				.is_none_or(|c| c.is_whitespace() || !is_bare_word_continue(c))
+	})
 }
 
 /// The characters before which the name of an unclosed variable may

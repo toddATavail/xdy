@@ -665,7 +665,8 @@ fn expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates dice expressions, whose operands come
-/// from the specified strategy. Any drop clause may lack a drop expression.
+/// from the specified strategy, with drop and keep clauses in any order. Any
+/// clause may lack a drop expression.
 ///
 /// # Parameters
 /// - `inner`: The strategy for nested expressions.
@@ -693,11 +694,15 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 			drop
 		}
 	});
-	let clause = (select(&["lowest", "highest"][..]), option::of(drop))
-		.prop_map(|(direction, drop)| match drop
+	let clause = (
+		select(&["drop", "keep"][..]),
+		select(&["lowest", "highest"][..]),
+		option::of(drop)
+	)
+		.prop_map(|(verb, direction, drop)| match drop
 		{
-			Some(drop) => format!(" drop {} {}", direction, drop),
-			None => format!(" drop {}", direction)
+			Some(drop) => format!(" {} {} {}", verb, direction, drop),
+			None => format!(" {} {}", verb, direction)
 		});
 	(
 		atom(inner),

@@ -418,3 +418,15 @@ Function({x}@0) r#6 ⚅#0
 		@4 <- @1 / 60
 		@5 <- @4 / @0
 		return @5
+
+{x}: 4D6 keep highest ({x} + 1 + 2)
+=
+Function({x}@0) r#4 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		@1 <- 1 + @0
+		@2 <- 3 + @0
+		⚅0 <- keep highest @2 from ⚅0
+		@3 <- sum rolling record ⚅0
+		return @3

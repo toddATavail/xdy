@@ -671,3 +671,98 @@ Function() r#1 ⚅#0
 	body:
 		@0 <- 7 + 7
 		return @0
+
+4D6 keep highest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 keep lowest 3
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep lowest 3 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 drop lowest keep highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 keep highest 2 drop lowest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 2 from ⚅0
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: 4D6 keep highest {x}
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest @0 from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+4D6 keep lowest (1D3)
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅1 <- roll standard dice 1D3
+		@0 <- sum rolling record ⚅1
+		⚅0 <- keep lowest @0 from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+4D6 keep highest (-1)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest -1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[1, 2, 3] keep lowest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 3D[1, 2, 3]
+		⚅0 <- keep lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+5D10 keep highest 4 keep lowest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 5D10
+		⚅0 <- keep highest 4 from ⚅0
+		⚅0 <- keep lowest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0

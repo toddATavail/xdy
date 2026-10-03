@@ -1158,3 +1158,178 @@ span: 0..2
 message: bare identifier `hd` is not valid here; bindings must be wrapped in `{}`
 rendered: bare identifier (0..2): bare identifier `hd` is not valid here; bindings must be wrapped in `{}`
 suggestion: {hd}@(3) + {hd}
+
+4D6 keep
+=
+kind: IncompleteKeepClause
+span: 4..8
+message: expected `lowest` or `highest` after `keep`
+rendered: incomplete keep clause (4..8): expected `lowest` or `highest` after `keep`
+suggestion: 4D6 keep highest
+placeholder: 9..16 "direction" [lowest, highest]
+
+{x}d[1, 2] drop lowest keep
+=
+kind: IncompleteKeepClause
+span: 23..27
+message: expected `lowest` or `highest` after `keep`
+rendered: incomplete keep clause (23..27): expected `lowest` or `highest` after `keep`
+suggestion: {x}d[1, 2] drop lowest keep highest
+placeholder: 28..35 "direction" [lowest, highest]
+
+3 keep lowest
+=
+kind: MisplacedKeepClause
+span: 2..6
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (2..6): `keep` must follow a dice expression
+suggestion: 3D6 keep lowest
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+3keep highest 2
+=
+kind: MisplacedKeepClause
+span: 1..5
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (1..5): `keep` must follow a dice expression
+suggestion: 3D6 keep highest 2
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+-3 keep lowest
+=
+kind: MisplacedKeepClause
+span: 3..7
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (3..7): `keep` must follow a dice expression
+suggestion: -3D6 keep lowest
+placeholder: 3..4 "face count" [integer, {variable}, (expression)]
+
+1 + keep highest
+=
+kind: MisplacedKeepClause
+span: 4..8
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (4..8): `keep` must follow a dice expression
+suggestion: 1 + 1D6 keep highest
+placeholder: 4..7 "dice expression" [dice expression]
+
+keep lowest 2
+=
+kind: MisplacedKeepClause
+span: 0..4
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (0..4): `keep` must follow a dice expression
+suggestion: 1D6 keep lowest 2
+placeholder: 0..3 "dice expression" [dice expression]
+
+(keep highest)
+=
+kind: MisplacedKeepClause
+span: 1..5
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (1..5): `keep` must follow a dice expression
+suggestion: (1D6 keep highest)
+placeholder: 1..4 "dice expression" [dice expression]
+
+(3 keep lowest)
+=
+kind: MisplacedKeepClause
+span: 3..7
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (3..7): `keep` must follow a dice expression
+suggestion: (3D6 keep lowest)
+placeholder: 3..4 "face count" [integer, {variable}, (expression)]
+
+[3 keep lowest:4]
+=
+kind: MisplacedKeepClause
+span: 3..7
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (3..7): `keep` must follow a dice expression
+suggestion: [3D6 keep lowest:4]
+placeholder: 3..4 "face count" [integer, {variable}, (expression)]
+
+{a}@(3 keep lowest)
+=
+kind: MisplacedKeepClause
+span: 7..11
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (7..11): `keep` must follow a dice expression
+suggestion: {a}@(3D6 keep lowest)
+placeholder: 7..8 "face count" [integer, {variable}, (expression)]
+
+(1)keep highest 2
+=
+kind: MisplacedKeepClause
+span: 3..7
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (3..7): `keep` must follow a dice expression
+suggestion: (1)D6 keep highest 2
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+
+{x} keep
+=
+kind: MisplacedKeepClause
+span: 4..8
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (4..8): `keep` must follow a dice expression
+suggestion: {x}D6 keep
+placeholder: 4..5 "face count" [integer, {variable}, (expression)]
+---
+kind: IncompleteKeepClause
+span: 4..8
+message: expected `lowest` or `highest` after `keep`
+rendered: incomplete keep clause (4..8): expected `lowest` or `highest` after `keep`
+suggestion: {x}D6 keep highest
+placeholder: 11..18 "direction" [lowest, highest]
+
+2 ^ 3 keep highest
+=
+kind: MisplacedKeepClause
+span: 6..10
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (6..10): `keep` must follow a dice expression
+suggestion: 2 ^ 3D6 keep highest
+placeholder: 6..7 "face count" [integer, {variable}, (expression)]
+
+3 keep lowest dz (
+=
+kind: MisplacedKeepClause
+span: 2..6
+message: `keep` must follow a dice expression
+rendered: misplaced keep clause (2..6): `keep` must follow a dice expression
+suggestion: 3D6 keep lowest dz (
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+---
+kind: TrailingInput
+span: 14..18
+message: unexpected `dz` after expression
+rendered: trailing input (14..18): unexpected `dz` after expression
+suggestion: 3D6 keep lowest
+
+4D6 keep highest -
+=
+kind: MissingRightOperand
+span: 17..18
+message: expected operand after `-`
+rendered: missing right operand of `-` (17..18): expected operand after `-`
+suggestion: 4D6 keep highest - 0
+placeholder: 19..20 "operand" [integer, {variable}, (expression), dice expression]
+suggestion: 4D6 keep highest
+
+4D6 keep lowest 2 drop
+=
+kind: IncompleteDropClause
+span: 18..22
+message: expected `lowest` or `highest` after `drop`
+rendered: incomplete drop clause (18..22): expected `lowest` or `highest` after `drop`
+suggestion: 4D6 keep lowest 2 drop lowest
+placeholder: 23..29 "direction" [lowest, highest]
+
+3 keeper
+=
+kind: TrailingInput
+span: 2..8
+message: unexpected `keeper` after expression
+rendered: trailing input (2..8): unexpected `keeper` after expression
+suggestion: 3

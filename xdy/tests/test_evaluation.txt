@@ -3410,3 +3410,114 @@ value ∈ [8, 8], count = 1, dice = 0
 =
 externs: $env|count=2
 value ∈ [2, 12], count = 36, dice = 2
+
+2D6 keep highest
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+2D6 keep lowest
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+2D20 keep highest
+=
+value ∈ [1, 20], count = 400, dice = 2
+
+4D6 keep highest 3
+=
+value ∈ [3, 18], count = 1296, dice = 4
+
+4D6 keep lowest 3
+=
+value ∈ [3, 18], count = 1296, dice = 4
+
+3D6 keep lowest 0
+=
+value ∈ [0, 0], count = 1, dice = 0
+
+3D6 keep highest (-1)
+=
+value ∈ [0, 0], count = 1, dice = 0
+
+3D4 keep highest 3
+=
+value ∈ [3, 12], count = 64, dice = 3
+
+3D4 keep lowest 5
+=
+value ∈ [3, 12], count = 64, dice = 3
+
+4D4 drop lowest keep highest 2
+=
+value ∈ [2, 8], count = 256, dice = 4
+
+4D4 keep highest 2 drop lowest
+=
+value ∈ [1, 4], count = 256, dice = 4
+
+5D2 keep highest 3 keep lowest 2
+=
+value ∈ [2, 4], count = 32, dice = 5
+
+3D[1, 1] keep highest 2
+=
+value ∈ [2, 2], count = 1, dice = 0
+
+4D1 keep highest 2
+=
+value ∈ [2, 2], count = 1, dice = 0
+
+0D6 keep highest
+=
+value ∈ [0, 0], count = 1, dice = 0
+
+3D0 keep lowest
+=
+value ∈ [0, 0], count = 1, dice = 0
+
+2D[-1, 0, 1] keep lowest
+=
+value ∈ [-1, 1], count = 9, dice = 2
+
+(1D3)D4 keep highest 2
+=
+value ∈ [1, 8], count = None, dice = 4
+
+3D4 keep highest (1D3)
+=
+value ∈ [1, 12], count = 192, dice = 4
+
+3D4 keep highest {k}@(2) + {k}
+=
+value ∈ [4, 10], count = 64, dice = 3
+
+{x}: {x}D4 keep highest 2
+=
+args: 0
+value ∈ [0, 0], count = 1, dice = 0
+=
+args: 1
+value ∈ [1, 4], count = 4, dice = 1
+=
+args: 2
+value ∈ [2, 8], count = 16, dice = 2
+=
+args: 3
+value ∈ [2, 8], count = 64, dice = 3
+
+4D4 keep highest {k}
+=
+externs: k=-1
+value ∈ [0, 0], count = 256, dice = 4
+=
+externs: k=0
+value ∈ [0, 0], count = 256, dice = 4
+=
+externs: k=1
+value ∈ [1, 4], count = 256, dice = 4
+=
+externs: k=2
+value ∈ [2, 8], count = 256, dice = 4
+=
+externs: k=5
+value ∈ [4, 16], count = 256, dice = 4

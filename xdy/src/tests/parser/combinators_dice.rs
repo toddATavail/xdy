@@ -2,8 +2,8 @@
 //!
 //! Herein are the test cases for the [`dice`] combinator and its
 //! sub-combinators: [`standard_dice`], [`custom_dice`], [`dice_count`],
-//! [`standard_faces`], [`custom_faces`], [`drop_lowest`], [`drop_highest`], and
-//! [`drop_expression`].
+//! [`standard_faces`], [`custom_faces`], [`drop_lowest`], [`drop_highest`],
+//! [`keep_lowest`], [`keep_highest`], and [`drop_expression`].
 
 use crate::{
 	ast::*,
@@ -1032,6 +1032,147 @@ fn test_drop_highest()
 			"Failed to reject invalid input: {}",
 			input
 		);
+	}
+}
+
+/// Ensure that [`dice`] reads keep clauses, alone and chained with drop
+/// clauses in either order, each modifying the clauses before it, and that it
+/// rejects a keep clause without a direction, or with a count that begins with
+/// `-`, which ends the dice expression before the `-`.
+#[test]
+fn test_dice_keep_clauses()
+{
+	for (input, rendering, s_expr) in [
+		(
+			"4d6 keep highest",
+			"4D6 keep highest",
+			"(keep-highest (standard-dice 4 6))"
+		),
+		(
+			"4d6 keep lowest 3",
+			"4D6 keep lowest 3",
+			"(keep-lowest (standard-dice 4 6) 3)"
+		),
+		(
+			"2D20 keep highest {n}",
+			"2D20 keep highest {n}",
+			"(keep-highest (standard-dice 2 20) {n})"
+		),
+		(
+			"{x}d[1,2,3] keep lowest (1+1)",
+			"{x}D[1, 2, 3] keep lowest (1 + 1)",
+			"(keep-lowest (custom-dice {x} [1 2 3]) (group (add 1 1)))"
+		),
+		(
+			"5d10 drop lowest keep highest 3",
+			"5D10 drop lowest keep highest 3",
+			"(keep-highest (drop-lowest (standard-dice 5 10)) 3)"
+		),
+		(
+			"5d10 keep highest 3 drop lowest",
+			"5D10 keep highest 3 drop lowest",
+			"(drop-lowest (keep-highest (standard-dice 5 10) 3))"
+		),
+		(
+			"5d10 keep highest 4 keep lowest 2 drop highest 1",
+			"5D10 keep highest 4 keep lowest 2 drop highest 1",
+			"(drop-highest (keep-lowest (keep-highest (standard-dice 5 10) 4) \
+			 2) 1)"
+		),
+		(
+			"4d6\nkeep\thighest\n3",
+			"4D6 keep highest 3",
+			"(keep-highest (standard-dice 4 6) 3)"
+		),
+		(
+			"4d6 keeplowest",
+			"4D6 keep lowest",
+			"(keep-lowest (standard-dice 4 6))"
+		)
+	]
+	{
+		let (residue, result) = dice(Span::new(input))
+			.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		assert_eq!(result.to_string(), rendering, "{input:?}");
+		let source = format!("(function [] {s_expr})");
+		let expected = crate::s_expr::read_s_expr(&source).unwrap();
+		let Expression::Dice(expected) = &expected.body
+		else
+		{
+			unreachable!()
+		};
+		assert!(
+			result.untethered() == expected.untethered(),
+			"AST mismatch for {input:?}"
+		);
+	}
+	for input in [
+		"keep lowest",
+		"3d6 keep",
+		"3d6 keep middle",
+		"3 keep lowest"
+	]
+	{
+		let result = dice(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+	let (residue, result) = dice(Span::new("4d6 keep lowest -1")).unwrap();
+	assert_eq!(result.to_string(), "4D6 keep lowest");
+	assert_eq!(*residue.fragment(), " -1");
+}
+
+/// Ensure that [`keep_lowest`] and [`keep_highest`] behave as expected.
+#[test]
+fn test_keep_lowest_and_highest()
+{
+	type Combinator = fn(
+		Span<'_>
+	) -> nom::IResult<
+		Span<'_>,
+		Option<Box<Expression<'_>>>,
+		ParseError<'_>
+	>;
+	for (combinator, direction, other) in [
+		(keep_lowest as Combinator, "lowest", "highest"),
+		(keep_highest as Combinator, "highest", "lowest")
+	]
+	{
+		for (input, expected) in [
+			(format!("keep {direction}"), None),
+			(format!("keep {direction} 2"), Some("2")),
+			(format!("keep {direction} {{num}}"), Some("{num}")),
+			(format!("keep  {direction}  (3)"), Some("(3)"))
+		]
+		{
+			let (residue, result) = combinator(Span::new(&input))
+				.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+			assert!(residue.fragment().is_empty(), "residue for {input:?}");
+			assert_eq!(
+				result.map(|count| count.to_string()).as_deref(),
+				expected,
+				"{input:?}"
+			);
+		}
+		for input in [
+			String::new(),
+			" ".into(),
+			"2d6 keep".into(),
+			format!("keep {other}"),
+			format!("drop {direction}")
+		]
+		{
+			let result = combinator(Span::new(&input));
+			assert!(
+				result.is_err() || !result.unwrap().0.fragment().is_empty(),
+				"Failed to reject invalid input: {}",
+				input
+			);
+		}
 	}
 }
 

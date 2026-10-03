@@ -371,6 +371,7 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		STANDARD_FACES_CONTEXT => &["`{`", "`(`", "integer"],
 		CUSTOM_FACES_CONTEXT => &["`[`"],
 		DROP_EXPRESSION_CONTEXT => &["`{`", "`(`", "integer"],
+		KEEP_EXPRESSION_CONTEXT => &["`{`", "`(`", "integer"],
 		GROUP_CONTEXT => &["`(`"],
 		VARIABLE_CONTEXT => &["`{`"],
 		BINDING_CONTEXT => &["binding"],
@@ -388,6 +389,7 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
 		},
 		DROP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
+		KEEP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		unexpected =>
 		{
 			unreachable!("unexpected context classifier: {}", unexpected)
@@ -444,6 +446,10 @@ pub(crate) const CUSTOM_FACES_CONTEXT: &str = "custom faces";
 /// Context classifier for the `drop_expression` production rule.
 pub(crate) const DROP_EXPRESSION_CONTEXT: &str = "drop expression";
 
+/// Context classifier for the `drop_expression` production rule as the count
+/// of a keep clause.
+pub(crate) const KEEP_EXPRESSION_CONTEXT: &str = "keep expression";
+
 /// Context classifier for the `group` production rule.
 pub(crate) const GROUP_CONTEXT: &str = "primary";
 
@@ -476,3 +482,6 @@ pub(crate) const RIGHT_OPERAND_CONTEXT: &str = "right operand";
 
 /// Context classifier for a missing drop direction (`lowest` or `highest`).
 pub(crate) const DROP_DIRECTION_CONTEXT: &str = "drop direction";
+
+/// Context classifier for a missing keep direction (`lowest` or `highest`).
+pub(crate) const KEEP_DIRECTION_CONTEXT: &str = "keep direction";

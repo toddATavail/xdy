@@ -21,12 +21,13 @@
 //! variable       ::= name
 //! binding        ::= name '@' '(' expression ')'
 //! range          ::= '[' expression ':' expression ']'
-//! dice           ::= base_dice drop_clause*
+//! dice           ::= base_dice (drop_clause | keep_clause)*
 //! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
 //! dice_count     ::= CONSTANT | variable | binding | group
 //! standard_faces ::= INTEGER | variable | binding | group
 //! custom_faces   ::= '[' INTEGER (',' INTEGER)* ']'
 //! drop_clause    ::= 'drop' ('lowest' | 'highest') drop_expression?
+//! keep_clause    ::= 'keep' ('lowest' | 'highest') drop_expression?
 //! drop_expression::= CONSTANT | variable | binding | group
 //! CONSTANT       ::= DIGIT+
 //! INTEGER        ::= '-'? DIGIT+
@@ -45,17 +46,22 @@
 //! and `1D[-1, 0, 1]`, where nothing but a face may follow. Each combinator
 //! accepts just what its rule does, so [`constant`], [`primary`],
 //! [`dice_count`], and [`dice`] reject `-3`, while [`integer`] and
-//! [`standard_faces`] accept it. In particular, a drop expression never begins
-//! with `-`, so after a drop clause, a `-` is subtraction: `4D6 drop lowest -1`
-//! is `(4D6 drop lowest) - 1`. A count of zero or less drops nothing, so no one
+//! [`standard_faces`] accept it. In particular, a drop expression, which is
+//! the count of a drop or keep clause, never begins with `-`, so after a
+//! clause, a `-` is subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) -
+//! 1`. A count of zero or less drops nothing, or keeps nothing, so no one
 //! means to write a negative count, but one may be grouped, as in `4D6 drop
 //! lowest (-1)`.
+//!
+//! The clauses of a dice expression apply in the order written. A keep counts
+//! from the dice that the clauses before it left kept, so `4D6 drop lowest
+//! keep highest 2` keeps the highest 2 of the 3 dice that the drop left.
 //!
 //! Tokens may be separated by spaces, horizontal tabs, line feeds, and carriage
 //! returns, but by no other whitespace; the [doctor](crate::diagnostics)
 //! replaces stray whitespace between tokens, such as U+00A0 NO-BREAK SPACE,
-//! with a space. The keywords `drop`, `lowest`, and `highest` are lowercase,
-//! but the dice operator may be `d` or `D`.
+//! with a space. The keywords `drop`, `keep`, `lowest`, and `highest` are
+//! lowercase, but the dice operator may be `d` or `D`.
 //!
 //! Every name is braced, whether it names a parameter, a variable, or a
 //! binding, so no name can run into the text around it. A lone braced name

@@ -853,8 +853,10 @@ impl Display for Neg<'_>
 ///         -> Result<usize, Infallible> { Ok(operand) }
 /// }
 ///
-/// let ast = Parser::parse("(1D6)D[1, 2] + 3D8 drop lowest").unwrap();
-/// assert_eq!(ast.accept(&mut DiceCounter), Ok(3));
+/// let ast =
+///     Parser::parse("(1D6)D[1, 2] + 3D8 drop lowest + 4D6 keep highest 3")
+///         .unwrap();
+/// assert_eq!(ast.accept(&mut DiceCounter), Ok(4));
 /// ```
 #[cfg_attr(doc, aquamarine::aquamarine)]
 pub trait ASTVisitor<'a, 'src: 'a>

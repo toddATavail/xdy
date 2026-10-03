@@ -165,7 +165,28 @@ impl<'src> Recovery<'src> for Canonical<'src>
 			{
 				self.insert(at, PLACEHOLDER_FACE.to_string())
 			},
-			Site::Direction => self.insert(at, "lowest"),
+			Site::Direction { keep: false } => self.insert(at, "lowest"),
+			Site::Direction { keep: true } => self.insert(at, "highest"),
+			// Supply the dice operator and faces just after the dice count,
+			// which an earlier repair may have supplied at the `keep`, and
+			// separate them from the `keep`, unless whitespace already does.
+			Site::DiceOperator =>
+			{
+				let count_end = match self.edits.last()
+				{
+					Some(&(edit, 0, _)) if edit == at => at,
+					_ =>
+					{
+						self.source[..at].trim_end_matches(is_token_space).len()
+					},
+				};
+				let faces = format!("D{}", PLACEHOLDER_FACES);
+				match count_end == at
+				{
+					true => self.insert(count_end, format!("{faces} ")),
+					false => self.insert(count_end, faces)
+				}
+			},
 			Site::TrailingInput =>
 			{
 				self.edits.push((at, self.source.len() - at, String::new()))
@@ -238,6 +259,18 @@ fn test_canonical_repairs()
 		("- -", "- - 0"),
 		("1 + -", "1 + - 0"),
 		("3d6 drop lowest-", "3d6 drop lowest- 0"),
+		("3d6 keep", "3d6 keephighest"),
+		("3d6 keep lowest-", "3d6 keep lowest- 0"),
+		("3 keep lowest", "3D6 keep lowest"),
+		("-3 keep lowest 2", "-3D6 keep lowest 2"),
+		("(1)keep highest 2", "(1)D6 keep highest 2"),
+		("{x} keep", "{x}D6 keephighest"),
+		("[3 keep lowest:4]", "[3D6 keep lowest:4]"),
+		("(2 keep highest", "(2D6 keep highest)"),
+		(
+			"1 + 2 keep lowest drop highest",
+			"1 + 2D6 keep lowest drop highest"
+		),
 		("3d-", "3d-6"),
 		("3d-^2", "3d-6^2"),
 		("3dx", "3d{x}"),
@@ -331,6 +364,34 @@ fn recover<'src>(
 		.ok()
 		.map(|f| f.to_string());
 	(recovered, policy.sites)
+}
+
+/// Ensure that declining a [`Site::DiceOperator`], which is not a failure of
+/// the ordinary parse, leaves the parse as the ordinary parse is, and does not
+/// end recovery: the trailing keep clause after it is still presented, and
+/// fixed, as trailing input.
+#[test]
+fn test_declining_dice_operator_continues()
+{
+	let (recovered, sites) = recover("3 keep lowest", |site| match site.site
+	{
+		Site::DiceOperator => Repair::Stop,
+		_ => Repair::Fix
+	});
+	assert_eq!(recovered.as_deref(), Some("3"));
+	assert_eq!(
+		sites.iter().map(|site| site.site).collect::<Vec<_>>(),
+		[Site::DiceOperator, Site::TrailingInput]
+	);
+	assert_eq!(sites[0].position(), 2);
+	let (recovered, sites) = recover("(3 keep lowest) + 1", |site| match site
+		.site
+	{
+		Site::DiceOperator => Repair::Fix,
+		_ => Repair::Stop
+	});
+	assert_eq!(recovered.as_deref(), Some("(3D6 keep lowest) + 1"));
+	assert_eq!(sites.len(), 1);
 }
 
 /// Ensure that a [skip](Repair::Skip) discards closing delimiters at the start
@@ -549,6 +610,16 @@ pub(super) const FAMILIES: &[Family] = &[
 	Family {
 		name: "missing directions",
 		source: |n| format!("3d6{}", " drop".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing keep directions",
+		source: |n| format!("3d6{}", " keep".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "misplaced keeps",
+		source: |n| format!("1{}", " + 3 keep lowest".repeat(n)),
 		repairs: |n| n
 	},
 	Family {

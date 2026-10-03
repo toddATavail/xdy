@@ -485,3 +485,55 @@
 {'dragon~breath!}
 =
 (function [] {'dragon~breath!})
+
+4D6 keep highest
+=
+(function [] (keep-highest (standard-dice 4 6)))
+
+4D6 keep lowest 3
+=
+(function [] (keep-lowest (standard-dice 4 6) 3))
+
+4d6 keep highest {n}
+=
+(function [] (keep-highest (standard-dice 4 6) {n}))
+
+5D10 drop lowest keep highest 3 drop highest
+=
+(function [] (drop-highest (keep-highest (drop-lowest (standard-dice 5 10)) 3)))
+
+5D10 keep highest 3 keep lowest 2
+=
+(function [] (keep-lowest (keep-highest (standard-dice 5 10) 3) 2))
+
+4D6 keep highest (1 + 2)
+=
+(function [] (keep-highest (standard-dice 4 6) (add 1 2)))
+
+4D6 keep lowest {k}@(2)
+=
+(function [] (keep-lowest (standard-dice 4 6) (binding {k} 2)))
+
+4D6 keep highest -1
+=
+(function [] (sub (keep-highest (standard-dice 4 6)) 1))
+
+4D6 keep highest (-1)
+=
+(function [] (keep-highest (standard-dice 4 6) -1))
+
+(4D6 keep highest 3)D6
+=
+(function [] (standard-dice (keep-highest (standard-dice 4 6) 3) 6))
+
+{x}D[1, 2] keep lowest
+=
+(function [] (keep-lowest (custom-dice {x} [1 2])))
+
+4d6 keeplowest
+=
+(function [] (keep-lowest (standard-dice 4 6)))
+
+2D20 keep highest + 5
+=
+(function [] (add (keep-highest (standard-dice 2 20)) 5))

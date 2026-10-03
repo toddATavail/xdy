@@ -68,7 +68,7 @@ use crate::{
 	CompilationError, Parser, Validator,
 	ast::{Event, Expression, Function, Node, Walk},
 	parser::{
-		FailureSite, Recovery, Repair, Site, canonical_name,
+		FailureSite, Recovery, Repair, Site, begins_verb, canonical_name,
 		is_bare_word_continue, is_bare_word_start, is_token_space,
 		unclosed_name_ends
 	},
@@ -159,6 +159,18 @@ pub enum DiagnosticKind
 	/// # Examples
 	/// `3 drop lowest`, `1 + drop highest`
 	MisplacedDropClause,
+
+	/// A `keep` keyword is not followed by `lowest` or `highest`.
+	///
+	/// # Examples
+	/// `4D6 keep`
+	IncompleteKeepClause,
+
+	/// A keep clause follows something other than a dice expression.
+	///
+	/// # Examples
+	/// `3 keep lowest`, `1 + keep highest`
+	MisplacedKeepClause,
 
 	/// A parameter definition is missing the `:` separator and body.
 	///
@@ -287,6 +299,11 @@ impl Display for DiagnosticKind
 				write!(f, "incomplete drop clause")
 			},
 			Self::MisplacedDropClause => write!(f, "misplaced drop clause"),
+			Self::IncompleteKeepClause =>
+			{
+				write!(f, "incomplete keep clause")
+			},
+			Self::MisplacedKeepClause => write!(f, "misplaced keep clause"),
 			Self::IncompleteParameterDefinition =>
 			{
 				write!(f, "incomplete parameter definition")
@@ -519,8 +536,8 @@ const FACE_COUNT_KINDS: &[&str] = &["integer", "{variable}", "(expression)"];
 /// Valid expression kinds for positions that only a dice expression may fill.
 const DICE_KINDS: &[&str] = &["dice expression"];
 
-/// Valid kinds for drop direction.
-const DROP_DIRECTION_KINDS: &[&str] = &["lowest", "highest"];
+/// Valid kinds for the direction of a drop or keep clause.
+const DIRECTION_KINDS: &[&str] = &["lowest", "highest"];
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Error analysis.                               //
@@ -592,6 +609,12 @@ struct Doctor<'src>
 	/// dice expression, if the parser has yet to read the `d` of the `drop`
 	/// as its dice operator, and fail at its faces.
 	reread: Option<usize>,
+
+	/// The byte offset of a misplaced `keep`, before which a fix supplied a
+	/// dice expression where an expression was expected, if the parser has
+	/// yet to read the operand that the fix supplied as a dice count, and fail
+	/// at the missing dice operator.
+	misplaced_keep: Option<usize>,
 
 	/// The byte offsets of the start and end of the last run of unopened
 	/// closing delimiters that fixes discarded, separated by whitespace only.
@@ -676,6 +699,7 @@ impl<'src> Doctor<'src>
 			bare_word: None,
 			trailing: false,
 			reread: None,
+			misplaced_keep: None,
 			skipped: None
 		}
 	}
@@ -970,10 +994,13 @@ impl<'src> Doctor<'src>
 		{
 			Site::Faces => self
 				.preceding(pos)
-				.filter(|&(c, d_pos)| c == 'd' && begins_drop(&source[d_pos..]))
+				.filter(|&(c, d_pos)| {
+					c == 'd' && begins_verb(&source[d_pos..], "drop")
+				})
 				.map(|(_, d_pos)| d_pos),
 			Site::Goal { .. }
-				if expects_expression && begins_drop(&source[pos..]) =>
+				if expects_expression
+					&& begins_verb(&source[pos..], "drop") =>
 			{
 				Some(pos)
 			},
@@ -992,8 +1019,38 @@ impl<'src> Doctor<'src>
 				Repair::Fix
 			};
 			return Analysis::Diagnosed(
-				make_misplaced_drop(source, drop_pos, after_operand),
+				make_misplaced_clause(source, drop_pos, false, after_operand),
 				repair
+			);
+		}
+
+		// Pattern: a keep clause that follows no dice expression, e.g.,
+		// `3 keep lowest`, after a dice count, or `1 + keep lowest`, where an
+		// expression was expected, rather than a bare name. After a dice
+		// count, the parse supplies the dice operator and faces. Where an
+		// expression was expected, the parse supplies an operand, which it
+		// reads as a dice count, and then fails at the dice operator, as after
+		// a dice count.
+		let misplaced_keep = match site.site
+		{
+			Site::DiceOperator => Some(true),
+			Site::Goal { .. }
+				if expects_expression
+					&& begins_verb(&source[pos..], "keep") =>
+			{
+				Some(false)
+			},
+			_ => None
+		};
+		if let Some(after_operand) = misplaced_keep
+		{
+			if !after_operand
+			{
+				self.misplaced_keep = Some(pos);
+			}
+			return Analysis::Diagnosed(
+				make_misplaced_clause(source, pos, true, after_operand),
+				Repair::Fix
 			);
 		}
 
@@ -1104,17 +1161,17 @@ impl<'src> Doctor<'src>
 			}
 		}
 
-		// Pattern: drop direction expected → incomplete drop clause. The drop
-		// keyword ends just before the whitespace before the direction.
-		if site.site == Site::Direction
+		// Pattern: direction expected → incomplete drop or keep clause. The
+		// verb ends just before the whitespace before the direction.
+		if let Site::Direction { keep } = site.site
 			&& expectations
 				.iter()
 				.any(|e| e.as_ref() == "`lowest`" || e.as_ref() == "`highest`")
 			&& let Some((last, last_pos)) = self.preceding(pos)
 		{
-			let drop_end = last_pos + last.len_utf8();
+			let verb_end = last_pos + last.len_utf8();
 			return Analysis::Diagnosed(
-				make_incomplete_drop(drop_end.saturating_sub(4), drop_end),
+				make_incomplete_clause(keep, verb_end),
 				Repair::Fix
 			);
 		}
@@ -1476,6 +1533,14 @@ impl<'src> Recovery<'src> for Doctor<'src>
 				.is_some_and(|(_, operator)| operator == drop_pos)
 		{
 			return Repair::Reread;
+		}
+		// Likewise, the dice operator after the operand that a fix supplied
+		// before a misplaced `keep` fails at once, at the `keep`.
+		if let Some(keep_pos) = self.misplaced_keep.take()
+			&& site.site == Site::DiceOperator
+			&& site.position() == keep_pos
+		{
+			return Repair::Fix;
 		}
 		match self.analyze(site)
 		{
@@ -2293,60 +2358,50 @@ fn make_missing_dice_faces(source: &str, d_pos: usize) -> Diagnostic
 	}
 }
 
-/// Answer whether text begins with the keyword `drop`, as a drop clause would,
-/// rather than a name that begins with `drop`, e.g., `dropout`: `drop` must
-/// be followed by a direction, or by something that cannot continue a [bare
-/// word](crate::parser::bare_word), e.g., whitespace or the end of the text.
-///
-/// # Parameters
-/// - `text`: The text.
-///
-/// # Returns
-/// `true` if `text` begins with the keyword `drop`, `false` otherwise.
-fn begins_drop(text: &str) -> bool
-{
-	text.strip_prefix("drop").is_some_and(|after| {
-		after.starts_with("lowest")
-			|| after.starts_with("highest")
-			|| after
-				.chars()
-				.next()
-				.is_none_or(|c| c.is_whitespace() || !is_bare_word_continue(c))
-	})
-}
-
-/// Create a diagnostic for a drop clause that follows something other than a
-/// dice expression. After an operand, which the parser read as the count of a
-/// dice expression whose operator is the `d` of `drop`, the fix inserts
-/// placeholder faces after the operand, e.g., `3D6 drop lowest` for
-/// `3 drop lowest`. Otherwise, it inserts a placeholder dice expression
-/// before `drop`, e.g., `1 + 1D6 drop lowest` for `1 + drop lowest`.
+/// Create a diagnostic for a drop or keep clause that follows something other
+/// than a dice expression. After an operand, which the parser read as the
+/// count of a dice expression, the fix inserts placeholder faces after the
+/// operand, e.g., `3D6 drop lowest` for `3 drop lowest`, whose `d` of `drop`
+/// the parser read as the dice operator, or a dice operator and placeholder
+/// faces, e.g., `3D6 keep lowest` for `3 keep lowest`. Otherwise, it inserts a
+/// placeholder dice expression before the verb, e.g., `1 + 1D6 drop lowest`
+/// for `1 + drop lowest`.
 ///
 /// # Parameters
 /// - `source`: The source.
-/// - `drop_pos`: The byte offset of `drop`.
-/// - `after_operand`: Whether an operand precedes `drop`.
+/// - `verb_pos`: The byte offset of the verb, `drop` or `keep`.
+/// - `keep`: Whether the verb is `keep` rather than `drop`.
+/// - `after_operand`: Whether an operand precedes the verb.
 ///
 /// # Returns
-/// A diagnostic with a `MisplacedDropClause` kind and a suggestion with a
-/// placeholder for the faces or the dice expression.
-fn make_misplaced_drop(
+/// A diagnostic with a `MisplacedDropClause` or `MisplacedKeepClause` kind and
+/// a suggestion with a placeholder for the faces or the dice expression.
+fn make_misplaced_clause(
 	source: &str,
-	drop_pos: usize,
+	verb_pos: usize,
+	keep: bool,
 	after_operand: bool
 ) -> Diagnostic
 {
+	let (kind, verb) = if keep
+	{
+		(DiagnosticKind::MisplacedKeepClause, "keep")
+	}
+	else
+	{
+		(DiagnosticKind::MisplacedDropClause, "drop")
+	};
 	let edit = if after_operand
 	{
 		// Separate the faces from `drop`, unless whitespace already does.
 		let operand_end =
-			source[..drop_pos].trim_end_matches(is_token_space).len();
+			source[..verb_pos].trim_end_matches(is_token_space).len();
 		Edit {
 			span: SourceSpan {
 				start: operand_end,
 				end: operand_end
 			},
-			replacement: if operand_end == drop_pos { "D6 " } else { "D6" }
+			replacement: if operand_end == verb_pos { "D6 " } else { "D6" }
 				.into(),
 			placeholders: vec![Placeholder {
 				span: SourceSpan { start: 1, end: 2 },
@@ -2359,7 +2414,7 @@ fn make_misplaced_drop(
 	{
 		// Separate the dice expression from a `-` just before it, which
 		// would otherwise make its count a negative constant.
-		let separator = if source[..drop_pos].ends_with('-')
+		let separator = if source[..verb_pos].ends_with('-')
 		{
 			" "
 		}
@@ -2369,8 +2424,8 @@ fn make_misplaced_drop(
 		};
 		Edit {
 			span: SourceSpan {
-				start: drop_pos,
-				end: drop_pos
+				start: verb_pos,
+				end: verb_pos
 			},
 			replacement: format!("{}1D6 ", separator),
 			placeholders: vec![Placeholder {
@@ -2384,61 +2439,75 @@ fn make_misplaced_drop(
 		}
 	};
 	Diagnostic {
-		kind: DiagnosticKind::MisplacedDropClause,
+		kind,
 		span: SourceSpan {
-			start: drop_pos,
-			end: drop_pos + "drop".len()
+			start: verb_pos,
+			end: verb_pos + verb.len()
 		},
-		message: "`drop` must follow a dice expression".into(),
+		message: format!("`{verb}` must follow a dice expression"),
 		related: vec![],
 		suggestions: vec![Suggestion {
-			description: if after_operand
+			description: match (after_operand, keep)
 			{
-				"insert dice faces before `drop`"
-			}
-			else
-			{
-				"insert a dice expression before `drop`"
-			}
-			.into(),
+				(true, false) => format!("insert dice faces before `{verb}`"),
+				(true, true) =>
+				{
+					format!("insert a dice operator and faces before `{verb}`")
+				},
+				(false, _) =>
+				{
+					format!("insert a dice expression before `{verb}`")
+				}
+			},
 			edits: vec![edit]
 		}]
 	}
 }
 
-/// Create a diagnostic for an incomplete drop clause. The fix inserts
-/// `lowest` as a placeholder direction after the `drop` keyword.
+/// Create a diagnostic for an incomplete drop or keep clause. The fix inserts
+/// the commonest direction of the verb as a placeholder after it: `lowest`
+/// after `drop`, and `highest` after `keep`.
 ///
 /// # Parameters
-/// - `drop_start`: The byte offset of `drop`.
-/// - `drop_end`: The byte offset of the end of `drop`.
+/// - `keep`: Whether the verb is `keep` rather than `drop`.
+/// - `verb_end`: The byte offset of the end of the verb.
 ///
 /// # Returns
-/// A diagnostic with an `IncompleteDropClause` kind and a suggestion with a
-/// placeholder for the drop direction.
-fn make_incomplete_drop(drop_start: usize, drop_end: usize) -> Diagnostic
+/// A diagnostic with an `IncompleteDropClause` or `IncompleteKeepClause`
+/// kind and a suggestion with a placeholder for the direction.
+fn make_incomplete_clause(keep: bool, verb_end: usize) -> Diagnostic
 {
-	// Insert ` lowest` after `drop`.
+	let (kind, verb, direction) = if keep
+	{
+		(DiagnosticKind::IncompleteKeepClause, "keep", "highest")
+	}
+	else
+	{
+		(DiagnosticKind::IncompleteDropClause, "drop", "lowest")
+	};
 	Diagnostic {
-		kind: DiagnosticKind::IncompleteDropClause,
+		kind,
 		span: SourceSpan {
-			start: drop_start,
-			end: drop_end
+			start: verb_end.saturating_sub(verb.len()),
+			end: verb_end
 		},
-		message: "expected `lowest` or `highest` after `drop`".into(),
+		message: format!("expected `lowest` or `highest` after `{verb}`"),
 		related: vec![],
 		suggestions: vec![Suggestion {
-			description: "insert drop direction".into(),
+			description: format!("insert {verb} direction"),
 			edits: vec![Edit {
 				span: SourceSpan {
-					start: drop_end,
-					end: drop_end
+					start: verb_end,
+					end: verb_end
 				},
-				replacement: " lowest".into(),
+				replacement: format!(" {direction}"),
 				placeholders: vec![Placeholder {
-					span: SourceSpan { start: 1, end: 7 },
+					span: SourceSpan {
+						start: 1,
+						end: 1 + direction.len()
+					},
 					description: "direction",
-					valid_kinds: DROP_DIRECTION_KINDS
+					valid_kinds: DIRECTION_KINDS
 				}]
 			}]
 		}]

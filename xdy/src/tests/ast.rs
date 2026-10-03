@@ -202,6 +202,13 @@ fn test_equality_distinguishes()
 			"4D6 drop lowest drop lowest",
 			"4D6 drop lowest drop highest"
 		),
+		("4D6 keep lowest", "4D6 drop lowest"),
+		("4D6 keep highest", "4D6 keep lowest"),
+		("4D6 keep highest", "4D6 keep highest 1"),
+		(
+			"4D6 drop lowest keep highest 2",
+			"4D6 keep highest 2 drop lowest"
+		),
 		("{x}: {x}", "{y}: {y}"),
 		("-(1)", "-(2)")
 	];
@@ -257,8 +264,9 @@ fn test_keeps_are_distinct_from_drops()
 }
 
 /// Ensure that keep clauses render as their source, chained with drops in
-/// either order, a negative constant count grouped as for drops, and that the
-/// S-expressions of their trees read back to the same trees.
+/// either order, a negative constant count grouped as for drops, that the
+/// renderings parse back to the same trees, and that the S-expressions of the
+/// trees read back to the same trees.
 #[test]
 fn test_display_keep_clauses()
 {
@@ -292,11 +300,14 @@ fn test_display_keep_clauses()
 	]
 	{
 		let function = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let options = SExpressibleOptions::default().with_groups(true);
 		assert_eq!(function.to_string(), expected);
+		assert_eq!(function.to_s_expr(options), s_expr);
+		// A reparsed negative count is grouped, so compare without groups.
+		let reparsed = Parser::parse(expected).unwrap();
 		assert_eq!(
-			function
-				.to_s_expr(SExpressibleOptions::default().with_groups(true)),
-			s_expr
+			reparsed.to_s_expr(SExpressibleOptions::default()),
+			function.to_s_expr(SExpressibleOptions::default())
 		);
 	}
 }
@@ -330,8 +341,8 @@ fn test_display_groups_negative_drop_count()
 #[test]
 fn test_hash_agrees_with_equality()
 {
-	let source =
-		"{x}: 8D8 drop lowest (2) drop highest {a}@({x}) + [1:6] ^ -(3)";
+	let source = "{x}: 8D8 drop lowest (2) keep highest 5 drop highest \
+	              {a}@({x}) keep lowest + [1:6] ^ -(3)";
 	let first = Parser::parse(source).unwrap();
 	let second = Parser::parse(source).unwrap();
 	assert!(first == second);
@@ -463,22 +474,20 @@ fn test_deep_drop_expression()
 #[ignore = "stress: run with just stress"]
 fn test_deep_drop_clauses() { exercise_on_small_stack(Nesting::DropClauses) }
 
+/// Ensure that a deep chain of keep expressions survives every trait on a
+/// small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_keep_expression()
+{
+	exercise_on_small_stack(Nesting::KeepExpression)
+}
+
 /// Ensure that a deep stack of drop and keep clauses, of every kind, survives
 /// every trait on a small stack.
 #[test]
 #[ignore = "stress: run with just stress"]
-fn test_deep_mixed_clauses()
-{
-	let depth = Nesting::DropClauses.depth();
-	on_small_stack(|| {
-		exercise(|leaf| {
-			Expression::Dice(mixed_clauses(
-				standard_dice(constant(leaf)),
-				depth
-			))
-		})
-	});
-}
+fn test_deep_mixed_clauses() { exercise_on_small_stack(Nesting::MixedClauses) }
 
 /// Ensure that a deep interleaving of every nesting construct survives every
 /// trait on a small stack.
@@ -532,9 +541,7 @@ fn test_miri_standalone_drop_clauses()
 #[test]
 fn test_miri_mixed_clauses()
 {
-	exercise(|leaf| {
-		Expression::Dice(mixed_clauses(standard_dice(constant(leaf)), 40))
-	})
+	exercise(|leaf| nest(Nesting::MixedClauses, 40, leaf))
 }
 
 /// Ensure that a standalone chain of drop and keep clauses drops, both as a
@@ -643,6 +650,14 @@ pub(super) enum Nesting
 	/// `e`.
 	DropClauses,
 
+	/// `1D6 keep highest (e)`.
+	KeepExpression,
+
+	/// `1D6 drop lowest (e) keep highest`: a stack of drop and keep clauses.
+	/// Nested alone, this produces a single chain of [clauses of every
+	/// kind](mixed_clauses) whose leaf count is `e`.
+	MixedClauses,
+
 	/// Every other construct, in rotation.
 	Mixed
 }
@@ -650,7 +665,7 @@ pub(super) enum Nesting
 impl Nesting
 {
 	/// The constructs through which [`Mixed`](Self::Mixed) rotates.
-	pub(super) const ROTATION: [Nesting; 16] = [
+	pub(super) const ROTATION: [Nesting; 18] = [
 		Nesting::Group,
 		Nesting::Binding,
 		Nesting::RangeStart,
@@ -666,7 +681,9 @@ impl Nesting
 		Nesting::DiceFaces,
 		Nesting::CustomCount,
 		Nesting::DropExpression,
-		Nesting::DropClauses
+		Nesting::DropClauses,
+		Nesting::KeepExpression,
+		Nesting::MixedClauses
 	];
 
 	/// Answer whether nesting this way introduces [bindings](Binding). Every
@@ -713,12 +730,24 @@ pub(super) fn nest(
 	leaf: i32
 ) -> Expression<'static>
 {
-	if let Nesting::DropClauses = nesting
+	match nesting
 	{
-		return Expression::Dice(drop_clauses(
-			standard_dice(constant(leaf)),
-			depth
-		))
+		Nesting::DropClauses =>
+		{
+			return Expression::Dice(drop_clauses(
+				standard_dice(constant(leaf)),
+				depth
+			))
+		},
+		Nesting::MixedClauses =>
+		{
+			return Expression::Dice(mixed_clauses(
+				standard_dice(constant(leaf)),
+				depth
+			))
+		},
+		_ =>
+		{}
 	}
 	let mut expression = constant(leaf);
 	for level in 0..depth
@@ -787,7 +816,7 @@ pub(super) fn nest_parsable(
 	leaf: i32
 ) -> Expression<'static>
 {
-	if let Nesting::DropClauses = nesting
+	if let Nesting::DropClauses | Nesting::MixedClauses = nesting
 	{
 		return nest(nesting, depth, leaf)
 	}
@@ -815,7 +844,9 @@ pub(super) fn nest_parsable(
 			| Nesting::DiceFaces
 			| Nesting::CustomCount
 			| Nesting::DropExpression
-			| Nesting::DropClauses => !atomic,
+			| Nesting::DropClauses
+			| Nesting::KeepExpression
+			| Nesting::MixedClauses => !atomic,
 			Nesting::Negation => matches!(expression, Expression::Constant(_)),
 			Nesting::Multiplication | Nesting::Division | Nesting::Modulo =>
 			{
@@ -981,6 +1012,26 @@ fn wrap(nesting: Nesting, inner: Expression<'static>) -> Expression<'static>
 					span
 				})),
 				drop: None,
+				span
+			}))
+		},
+		Nesting::KeepExpression =>
+		{
+			Expression::Dice(DiceExpression::KeepHighest(KeepHighest {
+				dice: Box::new(standard_dice(constant(1))),
+				keep: Some(inner),
+				span
+			}))
+		},
+		Nesting::MixedClauses =>
+		{
+			Expression::Dice(DiceExpression::KeepHighest(KeepHighest {
+				dice: Box::new(DiceExpression::DropLowest(DropLowest {
+					dice: Box::new(standard_dice(constant(1))),
+					drop: Some(inner),
+					span
+				})),
+				keep: None,
 				span
 			}))
 		},

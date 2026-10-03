@@ -594,3 +594,149 @@ Function() r#0 ⚅#0
 	extern[]
 	body:
 		return 10
+
+4D1 keep highest 2
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2
+
+4D1 drop lowest 1 keep highest 2
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2
+
+4D1 keep highest 2 drop lowest 1
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 1
+
+3D1 keep lowest 7
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 3
+
+3D1 keep highest 3
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 3
+
+5D[2, 2] drop lowest 1 keep highest 2 drop lowest 1
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2
+
+4D[-3, -3] keep lowest 3 keep highest 2
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return -6
+
+4D6 keep lowest 0
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D6 keep highest (-1)
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D6 keep highest 2 drop lowest 2
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D[1, 5] drop lowest 1 keep highest 5 drop highest 3
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D6 keep highest 3 drop lowest 1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 3 from ⚅0
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D[1, 5] keep lowest 1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 4D[1, 5]
+		⚅0 <- keep lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: 4D1 keep highest {x}
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D1
+		⚅0 <- keep highest @0 from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+{x}: {x}D1 keep highest 2
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice @0D1
+		⚅0 <- keep highest 2 from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+0D6 keep highest
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D0 keep lowest
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+(2 + 2)D1 keep highest (1 + 1)
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2
+
+4D1 keep highest 2 + 4D1 keep lowest 0
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2

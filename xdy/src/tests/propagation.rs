@@ -3859,9 +3859,9 @@ fn static_expression() -> impl Strategy<Value = String>
 	})
 }
 
-/// Answer a strategy that generates dice whose counts, faces, and drops are
-/// fixed, with custom faces that often reach the extremes of [`i32`], so that
-/// their sums saturate.
+/// Answer a strategy that generates dice whose counts, faces, drops, and keeps
+/// are fixed, with custom faces that often reach the extremes of [`i32`], so
+/// that their sums saturate.
 ///
 /// # Returns
 /// The strategy.
@@ -3899,11 +3899,15 @@ fn static_dice() -> impl Strategy<Value = String>
 			drop
 		}
 	});
-	let clause = (select(&["lowest", "highest"][..]), option::of(drop))
-		.prop_map(|(direction, drop)| match drop
+	let clause = (
+		select(&["drop", "keep"][..]),
+		select(&["lowest", "highest"][..]),
+		option::of(drop)
+	)
+		.prop_map(|(verb, direction, drop)| match drop
 		{
-			Some(drop) => format!(" drop {} {}", direction, drop),
-			None => format!(" drop {}", direction)
+			Some(drop) => format!(" {} {} {}", verb, direction, drop),
+			None => format!(" {} {}", verb, direction)
 		});
 	(static_operand(), faces, prop::collection::vec(clause, 0..3)).prop_map(
 		|(count, faces, clauses)| {
@@ -3938,7 +3942,7 @@ fn dynamic_program() -> impl Strategy<Value = String>
 
 /// Answer a strategy that generates dynamic expressions: [static
 /// expressions](static_expression), within dice whose counts, faces, and drop
-/// counts, and ranges whose endpoints, may be random.
+/// and keep counts, and ranges whose endpoints, may be random.
 ///
 /// # Returns
 /// The strategy.
@@ -3957,10 +3961,15 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 				format!("[{}]", faces.join(", "))
 			})
 		];
-		// A drop expression never begins with `-`, so every drop is grouped.
-		let clause = (select(&["lowest", "highest"][..]), operand.clone())
-			.prop_map(|(direction, drop)| {
-				format!(" drop {} ({})", direction, drop)
+		// A drop expression never begins with `-`, so every count of a drop
+		// or keep is grouped.
+		let clause = (
+			select(&["drop", "keep"][..]),
+			select(&["lowest", "highest"][..]),
+			operand.clone()
+		)
+			.prop_map(|(verb, direction, drop)| {
+				format!(" {} {} ({})", verb, direction, drop)
 			});
 		prop_oneof![
 			3 => (operand.clone(), faces, prop::collection::vec(clause, 0..3))

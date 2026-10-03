@@ -56,8 +56,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, Mod, Mul, Neg, Parameter, Range, StandardDice, Sub,
-		Variable
+		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
+		Range, StandardDice, Sub, Variable
 	},
 	span::{SourceSpan, Spanned}
 };
@@ -68,12 +68,12 @@ use super::{
 	CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
 	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT,
 	FUNCTION_BODY_CONTEXT, FUNCTION_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
-	NEXT_PARAMETER_CONTEXT, NomErrorKind, PARAMETER_CONTEXT, ParseError,
-	RANGE_CONTEXT, RANGE_END_CONTEXT, RANGE_START_CONTEXT,
-	RIGHT_OPERAND_CONTEXT, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT,
-	braced_name, canonical_name, constant, custom_faces, d_operator,
-	identifier, integer, is_token_space, name_space0, negative_constant,
-	parameter, parameters
+	KEEP_DIRECTION_CONTEXT, KEEP_EXPRESSION_CONTEXT, NEXT_PARAMETER_CONTEXT,
+	NomErrorKind, PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT,
+	RANGE_END_CONTEXT, RANGE_START_CONTEXT, RIGHT_OPERAND_CONTEXT,
+	STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT, begins_verb, braced_name,
+	canonical_name, constant, custom_faces, d_operator, identifier, integer,
+	is_token_space, name_space0, negative_constant, parameter, parameters
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -132,7 +132,8 @@ pub(crate) enum Goal
 
 	/// [`dice_count`](super::dice_count) or
 	/// [`drop_expression`](super::drop_expression), which are identical, and
-	/// whose constant is unsigned, producing [`Value::Expression`].
+	/// whose constant is unsigned, producing [`Value::Expression`]. The count
+	/// of a keep clause is a drop expression too.
 	Atom,
 
 	/// [`standard_faces`](super::standard_faces), which is [`Goal::Atom`] but
@@ -144,7 +145,13 @@ pub(crate) enum Goal
 	DropLowest,
 
 	/// [`drop_highest`](super::drop_highest), producing [`Value::Drop`].
-	DropHighest
+	DropHighest,
+
+	/// [`keep_lowest`](super::keep_lowest), producing [`Value::Drop`].
+	KeepLowest,
+
+	/// [`keep_highest`](super::keep_highest), producing [`Value::Drop`].
+	KeepHighest
 }
 
 /// The value produced by a [goal](Goal).
@@ -178,7 +185,7 @@ pub(super) enum Value<'src>
 	/// A custom dice expression.
 	CustomDice(CustomDice<'src>),
 
-	/// The optional drop expression of a drop clause.
+	/// The optional drop expression of a drop or keep clause, i.e., its count.
 	Drop(Option<Box<Expression<'src>>>)
 }
 
@@ -400,15 +407,131 @@ impl Level
 	}
 }
 
-/// The direction of a drop clause.
+/// The kind of a drop or keep clause.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum DropDirection
+enum ClauseKind
 {
 	/// `drop lowest`.
-	Lowest,
+	DropLowest,
 
 	/// `drop highest`.
-	Highest
+	DropHighest,
+
+	/// `keep lowest`.
+	KeepLowest,
+
+	/// `keep highest`.
+	KeepHighest
+}
+
+impl ClauseKind
+{
+	/// Answer the kind of a clause from its verb and its direction.
+	///
+	/// # Parameters
+	/// - `keep`: Whether the verb is `keep` rather than `drop`.
+	/// - `lowest`: Whether the direction is `lowest` rather than `highest`.
+	///
+	/// # Returns
+	/// The kind.
+	const fn of(keep: bool, lowest: bool) -> Self
+	{
+		match (keep, lowest)
+		{
+			(false, true) => ClauseKind::DropLowest,
+			(false, false) => ClauseKind::DropHighest,
+			(true, true) => ClauseKind::KeepLowest,
+			(true, false) => ClauseKind::KeepHighest
+		}
+	}
+
+	/// Answer whether a clause of this kind keeps rather than drops.
+	///
+	/// # Returns
+	/// `true` for a keep, `false` for a drop.
+	const fn keeps(self) -> bool
+	{
+		matches!(self, ClauseKind::KeepLowest | ClauseKind::KeepHighest)
+	}
+
+	/// Answer the keywords of a clause of this kind.
+	///
+	/// # Returns
+	/// The verb, `drop` or `keep`, and the direction, `lowest` or `highest`.
+	const fn keywords(self) -> (&'static str, &'static str)
+	{
+		match self
+		{
+			ClauseKind::DropLowest => ("drop", "lowest"),
+			ClauseKind::DropHighest => ("drop", "highest"),
+			ClauseKind::KeepLowest => ("keep", "lowest"),
+			ClauseKind::KeepHighest => ("keep", "highest")
+		}
+	}
+
+	/// Answer the context classifier of the count of a clause of this kind.
+	///
+	/// # Returns
+	/// The classifier.
+	const fn count_context(self) -> &'static str
+	{
+		if self.keeps()
+		{
+			KEEP_EXPRESSION_CONTEXT
+		}
+		else
+		{
+			DROP_EXPRESSION_CONTEXT
+		}
+	}
+
+	/// Build a clause of this kind.
+	///
+	/// # Parameters
+	/// - `dice`: The dice expression that the clause modifies.
+	/// - `count`: The count of the clause, if any.
+	/// - `span`: The span of the clause.
+	///
+	/// # Returns
+	/// The clause.
+	fn build<'src>(
+		self,
+		dice: DiceExpression<'src>,
+		count: Option<Box<Expression<'src>>>,
+		span: SourceSpan
+	) -> DiceExpression<'src>
+	{
+		let dice = Box::new(dice);
+		match self
+		{
+			ClauseKind::DropLowest => DiceExpression::DropLowest(DropLowest {
+				dice,
+				drop: count,
+				span
+			}),
+			ClauseKind::DropHighest =>
+			{
+				DiceExpression::DropHighest(DropHighest {
+					dice,
+					drop: count,
+					span
+				})
+			},
+			ClauseKind::KeepLowest => DiceExpression::KeepLowest(KeepLowest {
+				dice,
+				keep: count,
+				span
+			}),
+			ClauseKind::KeepHighest =>
+			{
+				DiceExpression::KeepHighest(KeepHighest {
+					dice,
+					keep: count,
+					span
+				})
+			},
+		}
+	}
 }
 
 /// A suspended production, awaiting the outcome of a subproduction. Each
@@ -577,13 +700,13 @@ enum Frame<'src>
 	},
 
 	/// [`Goal::Dice`] or [`Goal::PrimaryDice`], awaiting the drop expression
-	/// of a drop clause. It carries the dice expression that the clause
-	/// modifies, and the input after the direction, as a
+	/// of a drop or keep clause. It carries the dice expression that the
+	/// clause modifies, and the input after the direction, as a
 	/// [drop](Payload::Drop).
 	DiceDrop
 	{
-		/// The direction of the clause.
-		direction: DropDirection,
+		/// The kind of the clause.
+		kind: ClauseKind,
 
 		/// The input of the drop expression.
 		input: Span<'src>
@@ -600,11 +723,18 @@ enum Frame<'src>
 	/// [`Goal::CustomDice`], awaiting the dice count.
 	CustomCount(Span<'src>),
 
-	/// [`Goal::DropLowest`] or [`Goal::DropHighest`], awaiting the drop
-	/// expression. It holds the input of the drop expression, and carries the
+	/// [`Goal::DropLowest`], [`Goal::DropHighest`], [`Goal::KeepLowest`], or
+	/// [`Goal::KeepHighest`], awaiting the drop expression. It carries the
 	/// input after the direction, where the clause ends if it has no drop
 	/// expression, as a [rest](Payload::Rest).
-	DropExpression(Span<'src>)
+	DropExpression
+	{
+		/// The kind of the clause.
+		kind: ClauseKind,
+
+		/// The input of the drop expression.
+		input: Span<'src>
+	}
 }
 
 // A frame is at most as large as a span and an offset, and a tag.
@@ -629,7 +759,7 @@ impl Frame<'_>
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
 			| Frame::StandardFaces(_)
-			| Frame::DropExpression(_) => true,
+			| Frame::DropExpression { .. } => true,
 			Frame::UnaryExponent { merged, .. } => *merged,
 			Frame::BinaryFirst(_)
 			| Frame::UnaryNegation(_)
@@ -1000,7 +1130,7 @@ impl<'src> std::ops::Index<usize> for Stack<'src>
 ///     Group --> AddSub
 ///     Binding --> AddSub
 ///     PrimaryDice & Dice & StandardDice & CustomDice --> Atom
-///     DropLowest & DropHighest --> Atom
+///     DropLowest & DropHighest & KeepLowest & KeepHighest --> Atom
 ///     Atom --> Binding & Group
 /// ```
 ///
@@ -1227,8 +1357,10 @@ fn start<'src, R: Recovery<'src>>(
 		},
 		Goal::Atom => start_atom(input, false, stack, rec),
 		Goal::Faces => start_atom(input, true, stack, rec),
-		Goal::DropLowest => start_drop(input, "lowest", stack),
-		Goal::DropHighest => start_drop(input, "highest", stack)
+		Goal::DropLowest => start_drop(input, ClauseKind::DropLowest, stack),
+		Goal::DropHighest => start_drop(input, ClauseKind::DropHighest, stack),
+		Goal::KeepLowest => start_drop(input, ClauseKind::KeepLowest, stack),
+		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack)
 	}
 }
 
@@ -1330,10 +1462,10 @@ fn resume<'src, R: Recovery<'src>>(
 			let count = stack.pop_payload().into_expression();
 			resume_dice_faces(start, count, input, outcome, stack, rec)
 		},
-		Frame::DiceDrop { direction, input } =>
+		Frame::DiceDrop { kind, input } =>
 		{
 			let (dice, rest) = stack.pop_payload().into_drop();
-			resume_dice_drop(dice, direction, rest, input, outcome, stack, rec)
+			resume_dice_drop(dice, kind, rest, input, outcome, stack, rec)
 		},
 		Frame::StandardCount(input) =>
 		{
@@ -1345,10 +1477,10 @@ fn resume<'src, R: Recovery<'src>>(
 			resume_standard_faces(count, input, outcome)
 		},
 		Frame::CustomCount(input) => resume_custom_count(input, outcome),
-		Frame::DropExpression(input) =>
+		Frame::DropExpression { kind, input } =>
 		{
 			let rest = stack.pop_payload().into_rest();
-			resume_drop_expression(rest, input, outcome)
+			resume_drop_expression(kind, rest, input, outcome)
 		}
 	}
 }
@@ -2688,8 +2820,8 @@ fn resume_range_end<'src, R: Recovery<'src>>(
 /// `preceded(multispace0, d_operator)`, then `cut(preceded(multispace0,
 /// alt((context(STANDARD_FACES_CONTEXT, standard_faces),
 /// context(CUSTOM_FACES_CONTEXT, custom_faces)))))`, then
-/// `fold_many0(drop_clause)`. [`Goal::PrimaryDice`] is the same, except that
-/// it produces the dice count if no dice operator follows it.
+/// `fold_many0(alt((drop_clause, keep_clause)))`. [`Goal::PrimaryDice`] is the
+/// same, except that it produces the dice count if no dice operator follows it.
 ///
 /// # Parameters
 /// - `primary`: Whether the goal is [`Goal::PrimaryDice`].
@@ -2737,7 +2869,31 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 				faces
 			)
 		},
-		Err(_) if primary => succeed(rest, Value::Expression(count)),
+		Err(e) if primary =>
+		{
+			// A keep clause after the dice count follows no dice expression.
+			// A fix supplies the dice operator and faces just after the
+			// count, and the clause then modifies the dice expression. If the
+			// policy declines, the expression ends at the dice count, as in
+			// the ordinary parse.
+			if rec.recovering()
+				&& begins_verb(skip_whitespace(rest).fragment(), "keep")
+				&& rec.offer(Site::DiceOperator, cut_error(e), stack)
+			{
+				let at = rest.location_offset();
+				let faces = Expression::Constant(Constant {
+					value: PLACEHOLDER_FACES,
+					span: SourceSpan { start: at, end: at }
+				});
+				return dice_continue(
+					standard_dice(count, faces),
+					rest,
+					stack,
+					rec
+				);
+			}
+			succeed(rest, Value::Expression(count))
+		},
 		Err(e) => fail(e)
 	}
 }
@@ -2852,14 +3008,16 @@ fn standard_dice<'src>(
 }
 
 /// Continue [`Goal::Dice`] or [`Goal::PrimaryDice`] after the dice expression
-/// so far, as `fold_many0(drop_clause)`. If a drop clause follows, parse its
-/// direction and call its drop expression; otherwise, finish with the dice
-/// expression so far.
+/// so far, as `fold_many0(alt((drop_clause, keep_clause)))`. If a drop or keep
+/// clause follows, parse its direction and call its drop expression;
+/// otherwise, finish with the dice expression so far.
 ///
 /// A drop clause is `multispace0`, then `tag("drop")`, then
 /// `cut(preceded(multispace0, context(DROP_DIRECTION_CONTEXT,
 /// alt((tag("lowest"), tag("highest"))))))`, then `opt(preceded(multispace0,
-/// context(DROP_EXPRESSION_CONTEXT, drop_expression)))`.
+/// context(DROP_EXPRESSION_CONTEXT, drop_expression)))`. A keep clause is the
+/// same, but with `tag("keep")`, [`KEEP_DIRECTION_CONTEXT`], and
+/// [`KEEP_EXPRESSION_CONTEXT`].
 ///
 /// # Parameters
 /// - `dice`: The dice expression so far.
@@ -2876,32 +3034,45 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let keyword: IResult<Span, Span, ParseError> =
-		preceded(multispace0, tag("drop")).parse_complete(rest);
-	let after_keyword = match keyword
+	let keyword: IResult<Span, bool, ParseError> = preceded(
+		multispace0,
+		alt((map(tag("drop"), |_| false), map(tag("keep"), |_| true)))
+	)
+	.parse_complete(rest);
+	let (after_keyword, keep) = match keyword
 	{
-		Ok((after_keyword, _)) => after_keyword,
+		Ok(parsed) => parsed,
 		// `fold_many0` stops at the first recoverable error, and discards it.
 		// The keyword cannot fail unrecoverably.
 		Err(_) => return succeed(rest, Value::Dice(dice))
 	};
-	let direction: IResult<Span, DropDirection, ParseError> = cut(preceded(
+	let label = if keep
+	{
+		KEEP_DIRECTION_CONTEXT
+	}
+	else
+	{
+		DROP_DIRECTION_CONTEXT
+	};
+	let direction: IResult<Span, bool, ParseError> = cut(preceded(
 		multispace0,
 		context(
-			DROP_DIRECTION_CONTEXT,
-			alt((
-				map(tag("lowest"), |_| DropDirection::Lowest),
-				map(tag("highest"), |_| DropDirection::Highest)
-			))
+			label,
+			alt((map(tag("lowest"), |_| true), map(tag("highest"), |_| false)))
 		)
 	))
 	.parse_complete(after_keyword);
-	let (after_direction, direction) = match direction
+	let (after_direction, kind) = match direction
 	{
-		Ok(parsed) => parsed,
-		Err(e) => match rec.repair(Site::Direction, e, stack)
+		Ok((after_direction, lowest)) =>
 		{
-			Ok(at) => (at, DropDirection::Lowest),
+			(after_direction, ClauseKind::of(keep, lowest))
+		},
+		// The repair supplies the commonest direction of the verb: `drop
+		// lowest`, or `keep highest`.
+		Err(e) => match rec.repair(Site::Direction { keep }, e, stack)
+		{
+			Ok(at) => (at, ClauseKind::of(keep, !keep)),
 			Err(e) => return fail(e)
 		}
 	};
@@ -2910,7 +3081,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	{
 		return finish_drop_clause(
 			dice,
-			direction,
+			kind,
 			after_direction,
 			None,
 			stack,
@@ -2919,7 +3090,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	}
 	call_with(
 		stack,
-		Frame::DiceDrop { direction, input },
+		Frame::DiceDrop { kind, input },
 		Payload::Drop {
 			dice,
 			rest: after_direction
@@ -2930,11 +3101,11 @@ fn dice_continue<'src, R: Recovery<'src>>(
 }
 
 /// Resume [`Goal::Dice`] or [`Goal::PrimaryDice`] with the outcome of the
-/// optional drop expression of a drop clause.
+/// optional drop expression of a drop or keep clause.
 ///
 /// # Parameters
 /// - `dice`: The dice expression that the clause modifies.
-/// - `direction`: The direction of the clause.
+/// - `kind`: The kind of the clause.
 /// - `rest`: The input after the direction.
 /// - `input`: The input of the drop expression.
 /// - `outcome`: The outcome of the drop expression.
@@ -2945,7 +3116,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 /// The next step.
 fn resume_dice_drop<'src, R: Recovery<'src>>(
 	dice: DiceExpression<'src>,
-	direction: DropDirection,
+	kind: ClauseKind,
 	rest: Span<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
@@ -2953,22 +3124,22 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	match optional_drop(rest, input, outcome)
+	match optional_drop(kind, rest, input, outcome)
 	{
 		Ok((rest, drop)) =>
 		{
-			finish_drop_clause(dice, direction, rest, drop, stack, rec)
+			finish_drop_clause(dice, kind, rest, drop, stack, rec)
 		},
 		Err(e) => fail(e)
 	}
 }
 
-/// Finish a drop clause of [`Goal::Dice`] or [`Goal::PrimaryDice`], and look
-/// for another.
+/// Finish a drop or keep clause of [`Goal::Dice`] or [`Goal::PrimaryDice`],
+/// and look for another.
 ///
 /// # Parameters
 /// - `dice`: The dice expression that the clause modifies.
-/// - `direction`: The direction of the clause.
+/// - `kind`: The kind of the clause.
 /// - `rest`: The input after the clause.
 /// - `drop`: The drop expression of the clause, if any.
 /// - `stack`: The stack of suspended productions.
@@ -2978,7 +3149,7 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 /// The next step.
 fn finish_drop_clause<'src, R: Recovery<'src>>(
 	dice: DiceExpression<'src>,
-	direction: DropDirection,
+	kind: ClauseKind,
 	rest: Span<'src>,
 	drop: Option<Box<Expression<'src>>>,
 	stack: &mut Stack<'src>,
@@ -2989,19 +3160,7 @@ fn finish_drop_clause<'src, R: Recovery<'src>>(
 		start: dice.span().start,
 		end: rest.location_offset()
 	};
-	let dice = Box::new(dice);
-	let dice = match direction
-	{
-		DropDirection::Lowest =>
-		{
-			DiceExpression::DropLowest(DropLowest { dice, drop, span })
-		},
-		DropDirection::Highest =>
-		{
-			DiceExpression::DropHighest(DropHighest { dice, drop, span })
-		},
-	};
-	dice_continue(dice, rest, stack, rec)
+	dice_continue(kind.build(dice, drop, span), rest, stack, rec)
 }
 
 /// Resume [`Goal::StandardDice`] with the outcome of the dice count.
@@ -3134,26 +3293,28 @@ fn resume_custom_count<'src>(
 	}
 }
 
-/// Start [`Goal::DropLowest`] or [`Goal::DropHighest`]:
-/// `preceded(multispace0, tag("drop"))`, then `preceded(multispace0,
-/// tag(DIRECTION))`, then `opt(preceded(multispace0,
-/// context(DROP_EXPRESSION_CONTEXT, drop_expression)))`.
+/// Start [`Goal::DropLowest`], [`Goal::DropHighest`], [`Goal::KeepLowest`],
+/// or [`Goal::KeepHighest`]: `preceded(multispace0, tag(VERB))`, then
+/// `preceded(multispace0, tag(DIRECTION))`, then `opt(preceded(multispace0,
+/// context(COUNT_CONTEXT, drop_expression)))`, where `COUNT_CONTEXT` is
+/// [`DROP_EXPRESSION_CONTEXT`] or [`KEEP_EXPRESSION_CONTEXT`].
 ///
 /// # Parameters
 /// - `input`: The input of the production.
-/// - `direction`: The direction keyword, `lowest` or `highest`.
+/// - `kind`: The kind of the clause.
 /// - `stack`: The stack of suspended productions.
 ///
 /// # Returns
 /// The next step.
 fn start_drop<'src>(
 	input: Span<'src>,
-	direction: &'static str,
+	kind: ClauseKind,
 	stack: &mut Stack<'src>
 ) -> Step<'src>
 {
+	let (verb, direction) = kind.keywords();
 	let keywords: IResult<Span, (Span, Span), ParseError> =
-		preceded(multispace0, tag("drop"))
+		preceded(multispace0, tag(verb))
 			.and(preceded(multispace0, tag(direction)))
 			.parse_complete(input);
 	match keywords
@@ -3167,7 +3328,7 @@ fn start_drop<'src>(
 			}
 			call_with(
 				stack,
-				Frame::DropExpression(input),
+				Frame::DropExpression { kind, input },
 				Payload::Rest(rest),
 				Goal::Atom,
 				input
@@ -3177,10 +3338,12 @@ fn start_drop<'src>(
 	}
 }
 
-/// Resume [`Goal::DropLowest`] or [`Goal::DropHighest`] with the outcome of the
-/// optional drop expression, and finish it.
+/// Resume [`Goal::DropLowest`], [`Goal::DropHighest`], [`Goal::KeepLowest`],
+/// or [`Goal::KeepHighest`] with the outcome of the optional drop expression,
+/// and finish it.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `rest`: The input after the direction.
 /// - `input`: The input of the drop expression.
 /// - `outcome`: The outcome of the drop expression.
@@ -3188,12 +3351,13 @@ fn start_drop<'src>(
 /// # Returns
 /// The next step.
 fn resume_drop_expression<'src>(
+	kind: ClauseKind,
 	rest: Span<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>
 ) -> Step<'src>
 {
-	match optional_drop(rest, input, outcome)
+	match optional_drop(kind, rest, input, outcome)
 	{
 		Ok((rest, drop)) => succeed(rest, Value::Drop(drop)),
 		Err(e) => fail(e)
@@ -3265,7 +3429,9 @@ pub(crate) enum Repair
 {
 	/// Decline to repair the failure. The run then ends as the ordinary parse
 	/// would from that point, with the error of the failure, and consults the
-	/// policy no more.
+	/// policy no more. At [`Site::DiceOperator`], which is not a failure of the
+	/// ordinary parse, the run instead continues as the ordinary parse does,
+	/// and still consults the policy.
 	Stop,
 
 	/// Repair the failure in the canonical way for its [site](Site), by
@@ -3283,7 +3449,8 @@ pub(crate) enum Repair
 	/// | [`Site::VariableName`] | a name, [`PLACEHOLDER_NAME`]             |
 	/// | [`Site::Faces`]       | standard faces, [`PLACEHOLDER_FACES`]; see [`Reread`](Repair::Reread) |
 	/// | [`Site::FaceValue`]   | a face, [`PLACEHOLDER_FACE`]              |
-	/// | [`Site::Direction`]   | `lowest`                                  |
+	/// | [`Site::Direction`]   | `lowest` after `drop`, `highest` after `keep` |
+	/// | [`Site::DiceOperator`] | a dice operator and standard faces, [`PLACEHOLDER_FACES`] |
 	/// | [`Site::TrailingInput`] | nothing: the trailing input is discarded |
 	///
 	/// At [`Site::Goal`], the edit must separate the operand from a `-` just
@@ -3445,8 +3612,24 @@ pub(crate) enum Site
 		opener: usize
 	},
 
-	/// The direction of a drop clause is missing after its `drop`.
-	Direction,
+	/// The direction of a drop or keep clause is missing after its verb.
+	Direction
+	{
+		/// Whether the verb is `keep` rather than `drop`.
+		keep: bool
+	},
+
+	/// A keep clause follows a dice count without a dice operator and faces
+	/// between them, e.g., `3 keep lowest`, so the clause follows no dice
+	/// expression. Only a [recovering](Recovery::ENABLED) parse looks for
+	/// this failure, since the ordinary parse ends the expression at the dice
+	/// count, and fails later, wherever the clause stands, e.g., as trailing
+	/// input, or before a missing `)`. A misplaced drop clause needs no such
+	/// site, since the `d` of `drop` reads as a dice operator, whose faces
+	/// then fail at [`Site::Faces`]. The [position](FailureSite::position) of
+	/// the failure is that of the `keep`. Since the ordinary parse does not
+	/// fail here, [declining](Repair::Stop) the repair does not end recovery.
+	DiceOperator,
 
 	/// A complete function is followed by input that is not whitespace.
 	TrailingInput
@@ -3533,7 +3716,7 @@ impl Role
 			| Frame::PrimaryGroup(_)
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
-			| Frame::DropExpression(_) => Role::Catch,
+			| Frame::DropExpression { .. } => Role::Catch,
 			Frame::BinaryRight { .. }
 			| Frame::ExponentPower(_)
 			| Frame::GroupExpression { .. }
@@ -3909,6 +4092,37 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		self.consult(site, e, stack)
 	}
 
+	/// Offer the policy a repair at a site that is not a failure of the
+	/// ordinary parse, [`Site::DiceOperator`], unless the engine is not
+	/// recovering, or a repair's token is still to be read. Unlike at a
+	/// failure, declining the repair does not stop recovery, since the parse
+	/// then continues as the ordinary parse does, and fails, if at all, later.
+	///
+	/// # Parameters
+	/// - `site`: The site.
+	/// - `e`: The error that the site presents.
+	/// - `stack`: The stack of suspended productions.
+	///
+	/// # Returns
+	/// `true` if the policy [fixes](Repair::Fix) the site, `false` otherwise.
+	fn offer(
+		&mut self,
+		site: Site,
+		e: nom::Err<ParseError<'src>>,
+		stack: &Stack<'src>
+	) -> bool
+	{
+		if !self.recovering() || self.overlay.is_some()
+		{
+			return false;
+		}
+		let site = FailureSite {
+			site,
+			error: settle(e, stack, self.root)
+		};
+		self.policy.repair(&site) == Repair::Fix
+	}
+
 	/// Consult the policy on behalf of [`repair`](Self::repair).
 	///
 	/// # Parameters
@@ -4215,11 +4429,10 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		};
 		let sign: IResult<Span, char, ParseError> = char('-')(input);
 		let rest = skip_whitespace(sign.ok()?.0);
+		let after = rest.fragment().trim_start_matches(is_token_space);
 		if rest.location_offset() != at
-			|| rest
-				.fragment()
-				.trim_start_matches(is_token_space)
-				.starts_with(['d', 'D', '^'])
+			|| after.starts_with(['d', 'D', '^'])
+			|| begins_verb(after, "keep")
 		{
 			return None;
 		}
@@ -4392,9 +4605,10 @@ fn unwind<'src>(
 		{
 			with_context(*input, STANDARD_FACES_CONTEXT, e)
 		},
-		Frame::DiceDrop { input, .. } | Frame::DropExpression(input) =>
+		Frame::DiceDrop { kind, input }
+		| Frame::DropExpression { kind, input } =>
 		{
-			with_context(*input, DROP_EXPRESSION_CONTEXT, e)
+			with_context(*input, kind.count_context(), e)
 		},
 	}
 }
@@ -4463,7 +4677,12 @@ fn literal<'src>(
 }
 
 /// Parse a negative constant, as [`negative_constant`], but read an
-/// [overlaid](Overlay::Constant) constant after the `-`.
+/// [overlaid](Overlay::Constant) constant after the `-`. While recovering,
+/// decline a negative constant that a keep clause follows, as
+/// [`negative_constant`] declines one that a dice operator follows, so that
+/// the constant is read as a dice count, and the keep clause offers a repair
+/// at [`Site::DiceOperator`], e.g., `-3D6 keep lowest` for `-3 keep lowest`.
+/// The input fails in the ordinary parse anyway, so only the error differs.
 ///
 /// # Parameters
 /// - `input`: The input.
@@ -4485,7 +4704,19 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 	{
 		return Ok(parsed);
 	}
-	negative_constant(input)
+	match negative_constant(input)
+	{
+		Ok((rest, _))
+			if rec.recovering()
+				&& begins_verb(skip_whitespace(rest).fragment(), "keep") =>
+		{
+			Err(nom::Err::Error(ParseError::from_error_kind(
+				input,
+				ErrorKind::Digit
+			)))
+		},
+		parsed => parsed
+	}
 }
 
 /// Parse a variable, as `context(VARIABLE_CONTEXT, variable)`, but read an
@@ -4885,15 +5116,16 @@ fn skip_whitespace(input: Span<'_>) -> Span<'_>
 	skipped.map_or(input, |(rest, _)| rest)
 }
 
-/// Answer whether the input begins with `-`. After a drop direction, this
-/// precludes a drop count, which never begins with `-`, so after a drop clause,
-/// a `-` is always subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) -
-/// 1`. A count of zero or less drops nothing, so reading `-1` as the count
-/// would quietly discard the clause, which is never what the author meant. A
-/// negative count must be grouped, as in `4D6 drop lowest (-1)`, or bound to a
-/// variable. The [constant] of a drop count is unsigned anyway, but the drop
-/// count is optional, so the clause ends before the `-`, rather than the engine
-/// trying, and perhaps [repairing](Repair), a drop count there.
+/// Answer whether the input begins with `-`. After the direction of a drop or
+/// keep clause, this precludes a count, which never begins with `-`, so after
+/// a clause, a `-` is always subtraction: `4D6 drop lowest -1` is `(4D6 drop
+/// lowest) - 1`. A count of zero or less drops nothing, or keeps nothing, so
+/// reading `-1` as the count would quietly discard the clause, or every die,
+/// which is never what the author meant. A negative count must be grouped, as
+/// in `4D6 drop lowest (-1)`, or bound to a variable. The [constant] of a count
+/// is unsigned anyway, but the count is optional, so the clause ends before the
+/// `-`, rather than the engine trying, and perhaps [repairing](Repair), a count
+/// there.
 ///
 /// # Parameters
 /// - `input`: The input, without leading whitespace.
@@ -5022,11 +5254,13 @@ fn close<'src>(
 		.map(|(rest, _)| rest)
 }
 
-/// Settle the optional drop expression of a drop clause, as
-/// `opt(preceded(multispace0, context(DROP_EXPRESSION_CONTEXT,
-/// drop_expression)))`.
+/// Settle the optional drop expression of a drop or keep clause, as
+/// `opt(preceded(multispace0, context(COUNT_CONTEXT, drop_expression)))`,
+/// where `COUNT_CONTEXT` is [`DROP_EXPRESSION_CONTEXT`] or
+/// [`KEEP_EXPRESSION_CONTEXT`].
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `rest`: The input after the direction, where the clause ends if it has no
 ///   drop expression.
 /// - `input`: The input of the drop expression.
@@ -5039,12 +5273,13 @@ fn close<'src>(
 /// * [`Failure`](nom::Err::Failure) if the drop expression failed
 ///   unrecoverably.
 fn optional_drop<'src>(
+	kind: ClauseKind,
 	rest: Span<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>
 ) -> IResult<Span<'src>, Option<Box<Expression<'src>>>, ParseError<'src>>
 {
-	match with_context_on_error(input, DROP_EXPRESSION_CONTEXT, outcome)
+	match with_context_on_error(input, kind.count_context(), outcome)
 	{
 		Ok((rest, drop)) => Ok((rest, Some(Box::new(drop.into_expression())))),
 		// `opt` rewinds after a recoverable error, and discards it.

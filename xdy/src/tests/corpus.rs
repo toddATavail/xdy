@@ -56,6 +56,7 @@ pub(super) const TOKENS: &[&str] = &[
 	"{hit points}",
 	"{weapon: 2/3}",
 	"{1d6 drop lowest}",
+	"{2d20 keep highest}",
 	"{Ω-(1)}",
 	"{a\u{202E}b}",
 	"{a}@(",
@@ -64,6 +65,7 @@ pub(super) const TOKENS: &[&str] = &[
 	"6",
 	"[1,2]",
 	"drop",
+	"keep",
 	"lowest",
 	"highest"
 ];

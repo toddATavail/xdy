@@ -111,6 +111,16 @@ fn test_parse_deep_drop_expression() { parse_deep(Nesting::DropExpression) }
 #[ignore = "stress: run with just stress"]
 fn test_parse_deep_drop_clauses() { parse_deep(Nesting::DropClauses) }
 
+/// Ensure that a deep chain of keep expressions parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_keep_expression() { parse_deep(Nesting::KeepExpression) }
+
+/// Ensure that a deep stack of drop and keep clauses parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_mixed_clauses() { parse_deep(Nesting::MixedClauses) }
+
 /// Ensure that a deep mixture of every nesting construct parses on a small
 /// stack.
 #[test]

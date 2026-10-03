@@ -678,3 +678,134 @@ Function {
         end: 23,
     },
 }
+
+4D6 keep highest 3
+=
+Function {
+    parameters: None,
+    body: Dice(
+        KeepHighest(
+            KeepHighest {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 4,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                keep: Some(
+                    Constant(
+                        Constant {
+                            value: 3,
+                            span: SourceSpan {
+                                start: 17,
+                                end: 18,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 18,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 18,
+    },
+}
+
+5D10 drop lowest keep lowest (2)
+=
+Function {
+    parameters: None,
+    body: Dice(
+        KeepLowest(
+            KeepLowest {
+                dice: DropLowest(
+                    DropLowest {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 5,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 10,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 4,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 4,
+                                },
+                            },
+                        ),
+                        drop: None,
+                        span: SourceSpan {
+                            start: 0,
+                            end: 16,
+                        },
+                    },
+                ),
+                keep: Some(
+                    Group(
+                        Group {
+                            expression: Constant(
+                                Constant {
+                                    value: 2,
+                                    span: SourceSpan {
+                                        start: 30,
+                                        end: 31,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 29,
+                                end: 32,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 32,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 32,
+    },
+}
