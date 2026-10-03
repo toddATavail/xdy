@@ -3,8 +3,8 @@ import XdySpec.Record
 /-!
 # Rolling record tests
 
-Roll order, drop accumulation and clamping, the kept window of the sorted
-results, and the ascending saturating fold, mirroring `RollingRecord` in
+Roll order, drop accumulation and clamping, keeps, the kept window of the
+sorted results, and the ascending saturating fold, mirroring `RollingRecord` in
 `xdy/src/primitives.rs`.
 -/
 
@@ -32,6 +32,11 @@ private def rec (xs : List Int) : Record := xs.foldl Record.push {}
   == ((rec [5, 1, 3]).dropLowest 1).sum
 example : (rec [3, 1]).toOracle = ((rec [3]).toOracle.push 1) :=
   Record.toOracle_push _ 1
+#guard ((rec [5, 1, 3]).keepHighest 2).toOracle
+  == (rec [5, 1, 3]).toOracle.keepHighest 2
+example : ((rec [5, 1, 3]).keepLowest 2).toOracle =
+    (rec [5, 1, 3]).toOracle.keepLowest 2 :=
+  Record.toOracle_keepLowest _ 2
 
 /-! ## Drops accumulate and clamp to the number of results -/
 
@@ -42,6 +47,16 @@ example : (rec [3, 1]).toOracle = ((rec [3]).toOracle.push 1) :=
 -- Dropping leaves the results, and their order, alone.
 #guard ((rec [3, 1, 2]).dropLowest 1).results == [3, 1, 2]
 
+/-! ## Keeps count from the results still kept -/
+
+#guard ((rec [3, 1, 2]).keepLowest 1).highest == 2
+#guard ((rec [3, 1, 2]).keepHighest 1).lowest == 2
+#guard ((rec [3, 1, 2]).dropLowest 1 |>.keepLowest 1).highest == 1
+#guard ((rec [3, 1, 2]).keepLowest 5).highest == 0
+#guard ((rec [3, 1, 2]).keepHighest (-1)).lowest == 3
+-- Keeping leaves the results, and their order, alone.
+#guard ((rec [3, 1, 2]).keepLowest 1).results == [3, 1, 2]
+
 /-! ## The kept window -/
 
 #guard (rec [5, 1, 3]).kept == [1, 3, 5]
@@ -49,6 +64,9 @@ example : (rec [3, 1]).toOracle = ((rec [3]).toOracle.push 1) :=
 #guard ((rec [5, 1, 3]).dropHighest 1).kept == [1, 3]
 #guard ((rec [5, 1, 3]).dropLowest 1 |>.dropHighest 1).kept == [3]
 #guard ((rec [5, 1, 3]).dropLowest 2 |>.dropHighest 2).kept == []
+#guard ((rec [5, 1, 3]).keepHighest 2 |>.keepLowest 1).kept == [3]
+#guard ((rec [5, 1, 3]).keepHighest 2 |>.dropLowest 1).kept == [5]
+#guard ((rec [5, 1, 3]).dropLowest 1 |>.keepHighest 2).kept == [3, 5]
 #guard (rec []).kept == []
 
 /-! ## The ascending saturating fold -/
@@ -74,6 +92,11 @@ example : (rec [3, 1]).toOracle = ((rec [3]).toOracle.push 1) :=
 #guard (({ results := [3, 1, 2] } : Record).dropLowest 5).lowest == 3
 #guard (({ results := [3, 1, 2] } : Record).dropLowest (-1)).lowest == 0
 #guard (({ results := [3, 1, 2] } : Record).dropHighest 1).highest == 1
+#guard (({ results := [3, 1, 4, 2] } : Record).keepLowest 3).highest == 1
+#guard (({ results := [3, 1, 2] } : Record).keepLowest 0).highest == 3
+#guard (({ results := [3, 1, 4, 2] } : Record).keepHighest 3).lowest == 1
+#guard (({ results := [3, 1, 2], highest := 1 } : Record).keepHighest 1).lowest
+  == 1
 #guard ({ results := [3, 1, 2] } : Record).sorted == [1, 2, 3]
 #guard ({ results := [4, 1, 3, 2], lowest := 1, highest := 1 } : Record).kept
   == [2, 3]

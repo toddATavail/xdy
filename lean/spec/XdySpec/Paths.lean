@@ -144,6 +144,8 @@ def forks (s : State) : Instruction → List State
     (diceForks (s.value c) (customFaces faces)).map (s.setRecord d)
   | .dropLowest d c => [s.setRecord d ((s.record d).dropLowest (s.value c))]
   | .dropHighest d c => [s.setRecord d ((s.record d).dropHighest (s.value c))]
+  | .keepLowest d c => [s.setRecord d ((s.record d).keepLowest (s.value c))]
+  | .keepHighest d c => [s.setRecord d ((s.record d).keepHighest (s.value c))]
   | .sumRollingRecord d r => [s.setRegister d (s.record r).sum]
   | .binary op d a b => [s.setRegister d (op.apply (s.value a) (s.value b))]
   | .neg d a => [s.setRegister d (neg (s.value a))]

@@ -49,7 +49,8 @@ the pass's operations act on it:
   roll's law over its operands' (`law_rollRange_operands`,
   `law_rollStandardDice`, `law_rollCustomDice`), and a drop is lemma 1's
   `lift` of the drop over the record's law and the count's (`law_dropLowest`,
-  `law_dropHighest`). Each is the law that the visit of its instruction in
+  `law_dropHighest`), as a keep is of the keep (`law_keepLowest`,
+  `law_keepHighest`). Each is the law that the visit of its instruction in
   `propagation.rs` computes.
 
 That the plan's analysis keeps the law of states such a world, in each world
@@ -2006,6 +2007,56 @@ theorem law_dropHighest {d : Nat} {c : AddressingMode}
       lift Record.dropHighest (laws (.record d)) (operandLaw laws c) := by
   refine (law_of_record_operand (i := .dropHighest d c)
     (k := fun r x => PMF.pure (r.dropHighest x)) (fun s hs => by
+      simp only [step, PMF.pure_map]
+      exact congrArg PMF.pure (State.get_set_self hs _)) hd hd hc).trans ?_
+  simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]
+  exact congrArg _ (funext fun r => PMF.bind_pure_comp _ _)
+
+/--
+Keeping the lowest results writes lemma 1's `lift` of the keep over the
+record's law and the count's, as `visit_keep_lowest` in `propagation.rs`
+keeps every setup of the record by every count.
+
+# Parameters
+- `d`: The rolling record.
+- `c`: The count.
+
+# Hypotheses
+- `hd`: The base has the rolling record.
+- `hc`: The base has the count's register, if any.
+-/
+theorem law_keepLowest {d : Nat} {c : AddressingMode}
+    (hd : base.Has (.record d)) (hc : ∀ ℓ ∈ operandLocations c, base.Has ℓ) :
+    ((product base (.record d :: operandLocations c) laws).bind
+        (step · (.keepLowest d c))).map (·.get (.record d)) =
+      lift Record.keepLowest (laws (.record d)) (operandLaw laws c) := by
+  refine (law_of_record_operand (i := .keepLowest d c)
+    (k := fun r x => PMF.pure (r.keepLowest x)) (fun s hs => by
+      simp only [step, PMF.pure_map]
+      exact congrArg PMF.pure (State.get_set_self hs _)) hd hd hc).trans ?_
+  simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]
+  exact congrArg _ (funext fun r => PMF.bind_pure_comp _ _)
+
+/--
+Keeping the highest results writes lemma 1's `lift` of the keep over the
+record's law and the count's, as `visit_keep_highest` in `propagation.rs`
+keeps every setup of the record by every count.
+
+# Parameters
+- `d`: The rolling record.
+- `c`: The count.
+
+# Hypotheses
+- `hd`: The base has the rolling record.
+- `hc`: The base has the count's register, if any.
+-/
+theorem law_keepHighest {d : Nat} {c : AddressingMode}
+    (hd : base.Has (.record d)) (hc : ∀ ℓ ∈ operandLocations c, base.Has ℓ) :
+    ((product base (.record d :: operandLocations c) laws).bind
+        (step · (.keepHighest d c))).map (·.get (.record d)) =
+      lift Record.keepHighest (laws (.record d)) (operandLaw laws c) := by
+  refine (law_of_record_operand (i := .keepHighest d c)
+    (k := fun r x => PMF.pure (r.keepHighest x)) (fun s hs => by
       simp only [step, PMF.pure_map]
       exact congrArg PMF.pure (State.get_set_self hs _)) hd hd hc).trans ?_
   simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]

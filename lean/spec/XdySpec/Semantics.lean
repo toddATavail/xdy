@@ -11,12 +11,12 @@ of each result that it can answer. Mirrors `Evaluator` in
 generator replaced by a draw from a probability mass function.
 
 A machine state holds every register and every rolling record. Each
-instruction maps one state to a `PMF` of next states: arithmetic, drops and
-sums to a certain state, and the rolls to a draw. A die is `PMF.ofMultiset`
-of its faces, so each face is equally likely by position, and a set of dice is
-that many independent draws, recorded in the order rolled. The instructions
-never branch or loop, so a function's meaning binds them in order and then
-reads the returned operand.
+instruction maps one state to a `PMF` of next states: arithmetic, drops,
+keeps and sums to a certain state, and the rolls to a draw. A die is
+`PMF.ofMultiset` of its faces, so each face is equally likely by position, and
+a set of dice is that many independent draws, recorded in the order rolled.
+The instructions never branch or loop, so a function's meaning binds them in
+order and then reads the returned operand.
 
 This is the specification that the oracle, `Xdy.Function.run`, must meet, and
 does, by `run_eq` in `XdySpec/Oracle.lean`. It
@@ -247,6 +247,10 @@ noncomputable def step (s : State) : Instruction → PMF State
     PMF.pure (s.setRecord d ((s.record d).dropLowest (s.value c)))
   | .dropHighest d c =>
     PMF.pure (s.setRecord d ((s.record d).dropHighest (s.value c)))
+  | .keepLowest d c =>
+    PMF.pure (s.setRecord d ((s.record d).keepLowest (s.value c)))
+  | .keepHighest d c =>
+    PMF.pure (s.setRecord d ((s.record d).keepHighest (s.value c)))
   | .sumRollingRecord d r => PMF.pure (s.setRegister d (s.record r).sum)
   | .binary op d a b =>
     PMF.pure (s.setRegister d (op.apply (s.value a) (s.value b)))

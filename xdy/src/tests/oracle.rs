@@ -61,8 +61,8 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
-	Unobserved, Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
+	Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
@@ -102,7 +102,12 @@ const FIXTURES: &[(&str, &str)] = &[
 	),
 	("dynamic_faces", "3D(2D6)"),
 	("dynamic_range", "[1D3:2D6]"),
+	(
+		"dynamic_keeps",
+		"{n}, {m}: 5D6 keep highest {n} drop lowest {m}"
+	),
 	("external", "1D6 + {y}"),
+	("keep_highest", "4D6 keep highest 3"),
 	("max", "{x}: {x}D1"),
 	("range", "[1:6]"),
 	("shared_register", "{x}@(3D6) + {x}"),
@@ -476,32 +481,6 @@ fn test_oracle_distribution_corpus()
 		let case = format!("case {}: {source} {args:?} {externs:?}", index + 1);
 		// Compile exactly as the distribution tests do.
 		let function = optimize(compile_valid(source), Passes::all());
-		// The oracle does not read keep instructions yet, so record a case
-		// that still keeps after optimization as the corpus has it, unchecked.
-		if function.instructions.iter().any(|inst| {
-			matches!(
-				inst,
-				Instruction::KeepLowest(_) | Instruction::KeepHighest(_)
-			)
-		})
-		{
-			let expected = Distribution::from_weights(
-				expected
-					.iter()
-					.map(|&(outcome, count)| (outcome, Weight::from(count)))
-			)
-			.unwrap();
-			report_case(
-				&mut report,
-				previous,
-				source,
-				args,
-				externs,
-				&expected
-			);
-			previous = Some(source);
-			continue;
-		}
 		let actual =
 			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
 				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
@@ -925,7 +904,7 @@ fn small_expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates small dice expressions, whose operands
-/// come from the specified strategy. Any drop clause may lack a drop
+/// come from the specified strategy. Any drop or keep clause may lack a drop
 /// expression.
 ///
 /// # Parameters
@@ -954,11 +933,15 @@ fn small_dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 			drop
 		}
 	});
-	let clause = (select(&["lowest", "highest"][..]), option::of(drop))
-		.prop_map(|(direction, drop)| match drop
+	let clause = (
+		select(&["drop", "keep"][..]),
+		select(&["lowest", "highest"][..]),
+		option::of(drop)
+	)
+		.prop_map(|(kind, direction, drop)| match drop
 		{
-			Some(drop) => format!(" drop {} {}", direction, drop),
-			None => format!(" drop {}", direction)
+			Some(drop) => format!(" {} {} {}", kind, direction, drop),
+			None => format!(" {} {}", kind, direction)
 		});
 	(
 		small_atom(inner, small_size()),

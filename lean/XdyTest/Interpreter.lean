@@ -151,6 +151,41 @@ private def dropping (drops : List Instruction) : Function :=
     .sumRollingRecord 0 0, .return (reg 0)]) ==
   reduced (dropping [])
 
+/-! ## Keeps -/
+
+-- Keeping one of `3D4` drops the other two from the opposite end.
+#guard dist (dropping [.keepLowest 0 (imm 1)]) ==
+  dist (dropping [.dropHighest 0 (imm 2)])
+#guard dist (dropping [.keepHighest 0 (imm 1)]) ==
+  dist (dropping [.dropLowest 0 (imm 2)])
+-- A keep counts from the results still kept, so this keeps the middle die,
+-- as does keeping the lower of the higher two.
+#guard dist (dropping [.dropLowest 0 (imm 1), .keepLowest 0 (imm 1)]) ==
+  dist (dropping [.dropLowest 0 (imm 1), .dropHighest 0 (imm 1)])
+#guard dist (dropping [.keepHighest 0 (imm 2), .keepLowest 0 (imm 1)]) ==
+  dist (dropping [.dropLowest 0 (imm 1), .dropHighest 0 (imm 1)])
+-- So keeps do not commute with drops: dropping after keeping the highest two
+-- keeps one die, but keeping the highest two after dropping keeps two.
+#guard dist (dropping [.keepHighest 0 (imm 2), .dropLowest 0 (imm 1)]) ==
+  dist (dropping [.dropLowest 0 (imm 2)])
+#guard dist (dropping [.dropLowest 0 (imm 1), .keepHighest 0 (imm 2)]) ==
+  dist (dropping [.dropLowest 0 (imm 1)])
+-- Keeping no more than are kept keeps them all.
+#guard dist (dropping [.keepLowest 0 (imm 3)]) == dist (dropping [])
+#guard dist (dropping [.keepHighest 0 (imm i32Max)]) == dist (dropping [])
+-- A count of `0` or less keeps nothing, which sums to `0` in all 64 ways.
+#guard dist (dropping [.keepLowest 0 (imm 0)]) == .ok [(0, 64)]
+#guard dist (dropping [.keepHighest 0 (imm i32Min)]) == .ok [(0, 64)]
+-- Keeping from a record whose drops cover every result keeps nothing.
+#guard dist (dropping [.dropLowest 0 (imm 2), .dropHighest 0 (imm 2),
+    .keepLowest 0 (imm 1)]) ==
+  .ok [(0, 64)]
+-- Rolling again replaces the record, discarding its keeps.
+#guard reduced (prog [.rollStandardDice 0 (imm 3) (imm 4),
+    .keepLowest 0 (imm 0), .rollStandardDice 0 (imm 3) (imm 4),
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  reduced (dropping [])
+
 /-! ## Sums, arithmetic and registers -/
 
 -- A rolling record that was never rolled sums to `0`.
@@ -256,6 +291,25 @@ private def drops (n m : Int) : Except String (List (Int × Nat)) :=
 #guard drops 0 0 == .ok (sumDice 5 (d 6)).toList
 #guard drops (-1) (-1) == drops 0 0
 #guard drops 3 3 == .ok [(0, 7776)]
+
+-- `4D6 keep highest 3`, which is `4D6 drop lowest`.
+#guard dist (fixture (include_str "Fixtures/keep_highest.json")) ==
+  dist (fixture (include_str "Fixtures/drop_lowest.json"))
+
+-- `{n}, {m}: 5D6 keep highest {n} drop lowest {m}`.
+/-- The `5D6` keep fixture, with the given keep and drop. -/
+private def keeps (n m : Int) : Except String (List (Int × Nat)) :=
+  dist (fixture (include_str "Fixtures/dynamic_keeps.json")) [n, m]
+-- The highest of `5D6`, kept, or kept as the higher of two and then dropped.
+#guard keeps 1 0 == drops 4 0
+#guard keeps 2 1 == drops 4 0
+-- The drop counts from the dice that the keep left kept.
+#guard keeps 4 2 == drops 3 0
+#guard keeps 5 0 == .ok (sumDice 5 (d 6)).toList
+#guard keeps i32Max 0 == keeps 5 0
+#guard keeps 0 0 == .ok [(0, 7776)]
+#guard keeps (-1) 0 == .ok [(0, 7776)]
+#guard keeps 3 3 == .ok [(0, 7776)]
 
 -- `3D(2D6)`: a face count from a register.
 #guard dist (fixture (include_str "Fixtures/dynamic_faces.json")) ==

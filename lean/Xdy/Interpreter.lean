@@ -13,7 +13,7 @@ every outcome.
 
 A machine state holds every register and every rolling record. Each
 instruction maps one state to a distribution of next states: arithmetic,
-drops and sums to a single certain state, and the rolls to one state per
+drops, keeps and sums to a single certain state, and the rolls to one state per
 outcome. Rolls draw one die at a time, and since records keep their results
 sorted, states that differ only in the order of their rolls merge as they
 arise. The instructions never branch or loop, so the interpreter binds them
@@ -246,6 +246,10 @@ def step (s : State) : Instruction → Dist State
     .pure (s.setRecord d ((s.record d).dropLowest (s.value c)))
   | .dropHighest d c =>
     .pure (s.setRecord d ((s.record d).dropHighest (s.value c)))
+  | .keepLowest d c =>
+    .pure (s.setRecord d ((s.record d).keepLowest (s.value c)))
+  | .keepHighest d c =>
+    .pure (s.setRecord d ((s.record d).keepHighest (s.value c)))
   | .sumRollingRecord d r => .pure (s.setRegister d (s.record r).sum)
   | .binary op d a b =>
     .pure (s.setRegister d (op.apply (s.value a) (s.value b)))

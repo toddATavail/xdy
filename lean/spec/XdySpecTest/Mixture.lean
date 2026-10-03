@@ -3,9 +3,10 @@ import XdySpec.Mixture
 /-!
 # Mixture tests
 
-The number of results of each roll, the clamped drops of a setup, and the
-laws of mixtures: a custom die of weighted faces, a roll of a random count of
-dice, a drop of a random count, and the sum of a record never rolled.
+The number of results of each roll, the clamped drops and the keeps of a
+setup, and the laws of mixtures: a custom die of weighted faces, a roll of a
+random count of dice, a drop or a keep of a random count, and the sum of a
+record never rolled.
 -/
 
 namespace Xdy.Spec.Test.Mixture
@@ -29,6 +30,14 @@ private def twoD6 : Setup := { roll := some (.standard 2 6) }
 -- A record never rolled has no results to drop.
 #guard (({} : Setup).dropLowest 3).lowest == 0
 
+-- Keeps drop from the opposite end, counting from the results still kept.
+#guard (twoD6.keepLowest 1).highest == 1
+#guard (twoD6.keepHighest 1).lowest == 1
+#guard ((twoD6.dropLowest 1).keepLowest 1).highest == 0
+#guard (twoD6.keepHighest 0).lowest == 2
+#guard ((twoD6.keepHighest 0).keepLowest 1).highest == 0
+#guard (({} : Setup).keepLowest 3).highest == 0
+
 /-! ## Laws -/
 
 -- A die of weighted faces is the custom die of the faces repeated.
@@ -43,6 +52,12 @@ example : weightedDie [(2, 1), (1, 2)] = customDie [1, 2, 1] :=
 example : twoD6.law.map (·.dropLowest 1) =
     ({ roll := some (.standard 2 6), lowest := 1 } : Setup).law := by
   rw [Setup.law_dropLowest]
+  rfl
+
+-- Keeping the highest of two dice describes the setup that drops the lowest.
+example : twoD6.law.map (·.keepHighest 1) =
+    ({ roll := some (.standard 2 6), lowest := 1 } : Setup).law := by
+  rw [Setup.law_keepHighest]
   rfl
 
 -- A roll of a random count of dice mixes the dice of each count.
@@ -66,6 +81,23 @@ example (κ : PMF Int) :
       (PMF.pure { roll := some (.standard 3 6) }) κ) =
       lift Record.dropHighest (rollDice 3 (standardDie 6)) κ := by
   rw [mixtureLaw_dropHighest, mixtureLaw_pure, Setup.law_roll]
+  rfl
+
+-- Keeping a random count of the lowest of three dice is lemma 1's lift of
+-- the keep over the dice and the count.
+example (κ : PMF Int) :
+    mixtureLaw (lift Setup.keepLowest
+      (PMF.pure { roll := some (.standard 3 6) }) κ) =
+      lift Record.keepLowest (rollDice 3 (standardDie 6)) κ := by
+  rw [mixtureLaw_keepLowest, mixtureLaw_pure, Setup.law_roll]
+  rfl
+
+-- So is keeping the highest.
+example (κ : PMF Int) :
+    mixtureLaw (lift Setup.keepHighest
+      (PMF.pure { roll := some (.standard 3 6) }) κ) =
+      lift Record.keepHighest (rollDice 3 (standardDie 6)) κ := by
+  rw [mixtureLaw_keepHighest, mixtureLaw_pure, Setup.law_roll]
   rfl
 
 -- A record never rolled is empty, and sums to `0`.

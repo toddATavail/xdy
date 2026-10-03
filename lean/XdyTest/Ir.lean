@@ -48,8 +48,10 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard reads (include_str "Fixtures/dynamic_custom_count.json")
 #guard reads (include_str "Fixtures/dynamic_drops.json")
 #guard reads (include_str "Fixtures/dynamic_faces.json")
+#guard reads (include_str "Fixtures/dynamic_keeps.json")
 #guard reads (include_str "Fixtures/dynamic_range.json")
 #guard reads (include_str "Fixtures/external.json")
+#guard reads (include_str "Fixtures/keep_highest.json")
 #guard reads (include_str "Fixtures/max.json")
 #guard reads (include_str "Fixtures/range.json")
 #guard reads (include_str "Fixtures/shared_register.json")
@@ -101,6 +103,26 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
     .dropHighest 0 (.register 1),
     .sumRollingRecord 0 0,
     .return (.register 0)] }
+
+-- `{n}, {m}: 5D6 keep highest {n} drop lowest {m}`: a dynamic keep, then a
+-- dynamic drop.
+#guard read (include_str "Fixtures/dynamic_keeps.json") == some {
+  parameters := #["n", "m"], externals := #[]
+  registerCount := 2, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 5) (.immediate 6),
+    .keepHighest 0 (.register 0),
+    .dropLowest 0 (.register 1),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- A keep of the lowest, which no fixture holds.
+#guard read
+    (body ("{\"KeepLowest\": {\"dest\": 0, \"count\": {\"Register\": 1}}}, " ++
+      ret)) == some {
+  parameters := #[], externals := #[]
+  registerCount := 2, rollingRecordCount := 1
+  instructions := #[.keepLowest 0 (.register 1), .return (.immediate 0)] }
 
 -- `{x}: {x}D1`: the optimizer's `Max`.
 #guard read (include_str "Fixtures/max.json") == some {
@@ -156,6 +178,13 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard rejects (body
   ("{\"DropLowest\": {\"dest\": 1, \"count\": {\"Immediate\": 1}}}, " ++ ret))
   "rolling record ⚅1 does not exist"
+#guard rejects (body
+  ("{\"KeepLowest\": {\"dest\": 1, \"count\": {\"Immediate\": 1}}}, " ++ ret))
+  "rolling record ⚅1 does not exist"
+#guard rejects (body
+  ("{\"KeepHighest\": {\"dest\": 0, \"count\": {\"Register\": 2}}}, " ++
+   ret))
+  "register @2 does not exist"
 #guard rejects (body "{\"Return\": {\"src\": {\"RollingRecord\": 0}}}")
   "rolling record ⚅0 used as a value"
 #guard rejects

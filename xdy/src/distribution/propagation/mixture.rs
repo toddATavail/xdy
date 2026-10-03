@@ -20,7 +20,7 @@
 //!
 //! `lean/spec/XdySpec/Mixture.lean` gives each setup the law of the record
 //! that it fills, and a mixture the mixture of its setups' laws, and proves
-//! that rolling, dropping and summing a mixture act on that law as the
+//! that rolling, dropping, keeping and summing a mixture act on that law as the
 //! instructions do on the record. When those operands are rolls with
 //! fixed operands, every path through them is equally likely, and the mixture
 //! weighs each outcome by the number of paths that reach it. When some path to
@@ -177,6 +177,12 @@ impl Mixture
 	///
 	/// # Errors
 	/// [`Halt`] if the keep would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `mixtureLaw_keepLowest`, in `lean/spec/XdySpec/Mixture.lean`, proves
+	/// that the mixture then describes lemma 1's lift of the keep over the
+	/// record and the counts, and `Setup.law_keepLowest` that a setup may count
+	/// the results that its keep drops itself, from its own results and drops.
 	pub(super) fn keep_lowest(
 		&mut self,
 		counts: &Distribution,
@@ -204,6 +210,13 @@ impl Mixture
 	///
 	/// # Errors
 	/// [`Halt`] if the keep would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `mixtureLaw_keepHighest`, in `lean/spec/XdySpec/Mixture.lean`, proves
+	/// that the mixture then describes lemma 1's lift of the keep over the
+	/// record and the counts, and `Setup.law_keepHighest` that a setup may
+	/// count the results that its keep drops itself, from its own results and
+	/// drops.
 	pub(super) fn keep_highest(
 		&mut self,
 		counts: &Distribution,

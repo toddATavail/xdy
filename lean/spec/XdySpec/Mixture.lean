@@ -26,6 +26,14 @@ mixture's operations act on that law as the instructions do:
   `law_dropHighest` give it. A setup can clamp its drops itself, since it
   fixes the number of results of every record that it fills
   (`Setup.mem_support_roll`).
+- A keep keeps every setup by every count (`mixtureLaw_keepLowest`,
+  `mixtureLaw_keepHighest`), as `Mixture::keep_lowest` and
+  `Mixture::keep_highest` do, which is lemma 1's lift of the keep over the
+  record's law and the count's, as `law_keepLowest` and `law_keepHighest`
+  give it. A keep is a drop of as many results as `Xdy.Record.keepDrops`
+  counts, which a setup can count itself, since it fixes the number of
+  results and drops of every record that it fills (`Setup.mem_support_law`,
+  `Setup.law_keepLowest`, `Setup.law_keepHighest`).
 - The sum of a mixture is the mixture of its setups' sums
   (`map_sum_mixtureLaw`), as `Mixture::sum` mixes them, and a setup without a
   roll sums to `0` (`Setup.map_sum_law_of_none`). The sums of ranges without
@@ -276,6 +284,36 @@ def dropHighest (s : Setup) (count : Int) : Setup :=
   { s with highest := min (s.highest + count.toNat) s.results }
 
 /--
+Keep the lowest results of a setup that are still kept, dropping the rest of
+them from the high end, as `Mixture::keep_lowest` does.
+
+# Parameters
+- `s`: The setup.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The setup with its count of highest results dropped updated.
+-/
+def keepLowest (s : Setup) (count : Int) : Setup :=
+  s.dropHighest (Xdy.Record.keepDrops s.results s.lowest s.highest count)
+
+/--
+Keep the highest results of a setup that are still kept, dropping the rest of
+them from the low end, as `Mixture::keep_highest` does.
+
+# Parameters
+- `s`: The setup.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The setup with its count of lowest results dropped updated.
+-/
+def keepHighest (s : Setup) (count : Int) : Setup :=
+  s.dropLowest (Xdy.Record.keepDrops s.results s.lowest s.highest count)
+
+/--
 Every record that a setup's roll can fill holds the setup's number of
 results.
 
@@ -332,6 +370,56 @@ theorem law_dropHighest (s : Setup) (count : Int) :
   have hlen := mem_support_roll hr
   simp only [Function.comp_apply, dropHighest, ← hlen]
   rfl
+
+/--
+Every record that a setup describes holds the setup's number of results and
+its drops.
+
+# Parameters
+- `s`: The setup.
+- `r`: The record.
+
+# Hypotheses
+- `h`: The setup describes `r`.
+-/
+theorem mem_support_law {s : Setup} {r : Record} (h : r ∈ s.law.support) :
+    r.results.length = s.results ∧ r.lowest = s.lowest ∧
+      r.highest = s.highest := by
+  rw [law, PMF.support_map] at h
+  obtain ⟨r', hr', rfl⟩ := h
+  exact ⟨mem_support_roll (r := r') hr', rfl, rfl⟩
+
+/--
+Keeping the lowest results of the records that a setup describes describes
+the setup with its keep applied, since every such record has the setup's
+number of results and drops, and so drops as many as the setup's keep.
+
+# Parameters
+- `s`: The setup.
+- `count`: The number of results to keep.
+-/
+theorem law_keepLowest (s : Setup) (count : Int) :
+    s.law.map (·.keepLowest count) = (s.keepLowest count).law := by
+  rw [keepLowest, ← law_dropHighest]
+  refine map_congr_support fun r hr => ?_
+  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hr
+  simp only [Record.keepLowest, hlen, hlow, hhigh]
+
+/--
+Keeping the highest results of the records that a setup describes describes
+the setup with its keep applied, since every such record has the setup's
+number of results and drops, and so drops as many as the setup's keep.
+
+# Parameters
+- `s`: The setup.
+- `count`: The number of results to keep.
+-/
+theorem law_keepHighest (s : Setup) (count : Int) :
+    s.law.map (·.keepHighest count) = (s.keepHighest count).law := by
+  rw [keepHighest, ← law_dropLowest]
+  refine map_congr_support fun r hr => ?_
+  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hr
+  simp only [Record.keepHighest, hlen, hlow, hhigh]
 
 /--
 A setup of a roll without drops describes the roll's law, as
@@ -444,6 +532,48 @@ theorem mixtureLaw_dropHighest (μ : PMF Setup) (κ : PMF Int) :
   calc κ.bind (Setup.law ∘ s.dropHighest)
       _ = κ.bind fun c => s.law.map (·.dropHighest c) :=
         congrArg κ.bind (funext fun c => (Setup.law_dropHighest s c).symm)
+      _ = _ := by
+        simp only [← PMF.bind_pure_comp]
+        exact PMF.bind_comm _ _ _
+
+/--
+Keeping the lowest results of every setup by every count describes lemma 1's
+lift of the keep over the mixture's law and the count's, as
+`Mixture::keep_lowest` keeps a record whose count is independent of it.
+
+# Parameters
+- `μ`: The law of the setups.
+- `κ`: The law of the count.
+-/
+theorem mixtureLaw_keepLowest (μ : PMF Setup) (κ : PMF Int) :
+    mixtureLaw (lift Setup.keepLowest μ κ) =
+      lift Record.keepLowest (mixtureLaw μ) κ := by
+  simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
+  refine congrArg μ.bind (funext fun s => ?_)
+  calc κ.bind (Setup.law ∘ s.keepLowest)
+      _ = κ.bind fun c => s.law.map (·.keepLowest c) :=
+        congrArg κ.bind (funext fun c => (Setup.law_keepLowest s c).symm)
+      _ = _ := by
+        simp only [← PMF.bind_pure_comp]
+        exact PMF.bind_comm _ _ _
+
+/--
+Keeping the highest results of every setup by every count describes lemma
+1's lift of the keep over the mixture's law and the count's, as
+`Mixture::keep_highest` keeps a record whose count is independent of it.
+
+# Parameters
+- `μ`: The law of the setups.
+- `κ`: The law of the count.
+-/
+theorem mixtureLaw_keepHighest (μ : PMF Setup) (κ : PMF Int) :
+    mixtureLaw (lift Setup.keepHighest μ κ) =
+      lift Record.keepHighest (mixtureLaw μ) κ := by
+  simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
+  refine congrArg μ.bind (funext fun s => ?_)
+  calc κ.bind (Setup.law ∘ s.keepHighest)
+      _ = κ.bind fun c => s.law.map (·.keepHighest c) :=
+        congrArg κ.bind (funext fun c => (Setup.law_keepHighest s c).symm)
       _ = _ := by
         simp only [← PMF.bind_pure_comp]
         exact PMF.bind_comm _ _ _

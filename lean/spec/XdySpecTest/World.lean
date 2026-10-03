@@ -244,6 +244,23 @@ example :
   law_dropHighest hasRecord
     (by simp [operandLocations, has 0 (by decide)])
 
+-- Keeping a roll's count of the lowest results of an empty record keeps each
+-- count independently of the record.
+example :
+    ((product base (.record 0 :: operandLocations (.register 0)) rolls).bind
+        (step · (.keepLowest 0 (.register 0)))).map (·.get (.record 0)) =
+      lift Record.keepLowest (PMF.pure {}) roll :=
+  law_keepLowest hasRecord
+    (by simp [operandLocations, has 0 (by decide)])
+
+-- So does keeping the highest.
+example :
+    ((product base (.record 0 :: operandLocations (.register 0)) rolls).bind
+        (step · (.keepHighest 0 (.register 0)))).map (·.get (.record 0)) =
+      lift Record.keepHighest (PMF.pure {}) roll :=
+  law_keepHighest hasRecord
+    (by simp [operandLocations, has 0 (by decide)])
+
 /-! ## Docstring examples, verbatim -/
 
 example (base : State) (laws : (ℓ : Location) → PMF (Content ℓ)) :

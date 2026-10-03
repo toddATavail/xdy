@@ -93,6 +93,12 @@ inductive Instruction where
   | dropLowest (dest : Nat) (count : AddressingMode)
   /-- Drop `count` more of the highest results of rolling record `dest`. -/
   | dropHighest (dest : Nat) (count : AddressingMode)
+  /-- Keep the lowest `count` of the results of rolling record `dest` that are
+  still kept, dropping the rest of them from the high end. -/
+  | keepLowest (dest : Nat) (count : AddressingMode)
+  /-- Keep the highest `count` of the results of rolling record `dest` that are
+  still kept, dropping the rest of them from the low end. -/
+  | keepHighest (dest : Nat) (count : AddressingMode)
   /-- Write the sum of the kept results of rolling record `src` to register
   `dest`. -/
   | sumRollingRecord (dest src : Nat)
@@ -203,6 +209,8 @@ instance : FromJson Instruction where
         (← faces.toList.mapM getI32)
     | "DropLowest" => return .dropLowest (← dest) (← mode "count")
     | "DropHighest" => return .dropHighest (← dest) (← mode "count")
+    | "KeepLowest" => return .keepLowest (← dest) (← mode "count")
+    | "KeepHighest" => return .keepHighest (← dest) (← mode "count")
     | "SumRollingRecord" =>
       return .sumRollingRecord (← dest) (← p.getObjValAs? Nat "src")
     | "Neg" => return .neg (← dest) (← mode "op")
@@ -290,8 +298,8 @@ private def checkInstruction (f : Function) :
   | .rollStandardDice d c n => do
     f.checkRecord d; f.checkValue c; f.checkValue n
   | .rollCustomDice d c _ => do f.checkRecord d; f.checkValue c
-  | .dropLowest d c | .dropHighest d c => do
-    f.checkRecord d; f.checkValue c
+  | .dropLowest d c | .dropHighest d c | .keepLowest d c | .keepHighest d c =>
+    do f.checkRecord d; f.checkValue c
   | .sumRollingRecord d s => do f.checkRegister d; f.checkRecord s
   | .binary _ d a b => do
     f.checkRegister d; f.checkValue a; f.checkValue b

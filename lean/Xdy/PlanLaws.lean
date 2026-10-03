@@ -60,8 +60,8 @@ requires. Where they are, `Location.readBy` and `Instruction.sources` agree.
 def Instruction.operandsAreValues : Instruction → Bool
   | .rollRange _ a b | .rollStandardDice _ a b | .binary _ _ a b =>
     a.isValue && b.isValue
-  | .rollCustomDice _ c _ | .dropLowest _ c | .dropHighest _ c | .neg _ c
-  | .return c => c.isValue
+  | .rollCustomDice _ c _ | .dropLowest _ c | .dropHighest _ c
+  | .keepLowest _ c | .keepHighest _ c | .neg _ c | .return c => c.isValue
   | .sumRollingRecord .. => true
 
 /--

@@ -29,6 +29,8 @@ private def blankState : State :=
 #guard (forks blankState (.binary .add 0 (.immediate 1) (.immediate 2))).length
   == 1
 #guard (forks blankState (.return (.register 0))).length == 1
+#guard (forks blankState (.keepLowest 0 (.immediate 1))).length == 1
+#guard (forks blankState (.keepHighest 1 (.register 2))).length == 1
 
 /-! ## Paths -/
 

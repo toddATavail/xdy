@@ -14,8 +14,8 @@ that its drops keep. The oracle sorts on arrival so that it can merge states
 that differ only in the order of their rolls; the specification merges
 nothing, so it follows the Rust as written. `toOracle` reads a record as the
 oracle's by sorting it, and the lemmas beside it, that sorting commutes with
-rolling, dropping and summing, are how `XdySpec/Oracle.lean` proves that
-sorting early changes nothing.
+rolling, dropping, keeping and summing, are how `XdySpec/Oracle.lean` proves
+that sorting early changes nothing.
 -/
 
 namespace Xdy.Spec
@@ -111,6 +111,53 @@ order, are unchanged.
 -/
 def dropHighest (r : Record) (count : Int) : Record :=
   { r with highest := accumulate r.highest count r.results.length }
+
+/--
+Keep the lowest `count` of the results still kept, dropping the rest of them
+from the high end, as many as `Xdy.Record.keepDrops` counts. Mirrors
+`keep_lowest` in `primitives.rs`.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The record with its count of highest results dropped updated. The results
+themselves, and their order, are unchanged.
+
+# Examples
+```lean
+#guard (({ results := [3, 1, 4, 2] } : Record).keepLowest 3).highest == 1
+#guard (({ results := [3, 1, 2] } : Record).keepLowest 0).highest == 3
+```
+-/
+def keepLowest (r : Record) (count : Int) : Record :=
+  r.dropHighest (Xdy.Record.keepDrops r.results.length r.lowest r.highest count)
+
+/--
+Keep the highest `count` of the results still kept, dropping the rest of them
+from the low end, as many as `Xdy.Record.keepDrops` counts. Mirrors
+`keep_highest` in `primitives.rs`.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The record with its count of lowest results dropped updated. The results
+themselves, and their order, are unchanged.
+
+# Examples
+```lean
+#guard (({ results := [3, 1, 4, 2] } : Record).keepHighest 3).lowest == 1
+#guard (({ results := [3, 1, 2], highest := 1 } : Record).keepHighest 1).lowest
+  == 1
+```
+-/
+def keepHighest (r : Record) (count : Int) : Record :=
+  r.dropLowest (Xdy.Record.keepDrops r.results.length r.lowest r.highest count)
 
 /--
 Answer the results in ascending order, as `kept` in `primitives.rs` sorts a
@@ -286,6 +333,32 @@ theorem toOracle_dropHighest (r : Record) (c : Int) :
   simp only [toOracle, dropHighest, Xdy.Record.dropHighest, sorted,
     List.length_mergeSort]
   rfl
+
+/--
+Sorting commutes with keeping the lowest results, which, as the drop that it
+is, depends only on how many results there are and how many are dropped.
+
+# Parameters
+- `r`: The record.
+- `c`: The number of results to keep.
+-/
+theorem toOracle_keepLowest (r : Record) (c : Int) :
+    (r.keepLowest c).toOracle = r.toOracle.keepLowest c := by
+  rw [keepLowest, toOracle_dropHighest]
+  simp only [Xdy.Record.keepLowest, toOracle, sorted, List.length_mergeSort]
+
+/--
+Sorting commutes with keeping the highest results, which, as the drop that it
+is, depends only on how many results there are and how many are dropped.
+
+# Parameters
+- `r`: The record.
+- `c`: The number of results to keep.
+-/
+theorem toOracle_keepHighest (r : Record) (c : Int) :
+    (r.keepHighest c).toOracle = r.toOracle.keepHighest c := by
+  rw [keepHighest, toOracle_dropLowest]
+  simp only [Xdy.Record.keepHighest, toOracle, sorted, List.length_mergeSort]
 
 /--
 The oracle's sum of the sorted record is the specification's sum, which

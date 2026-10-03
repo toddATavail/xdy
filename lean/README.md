@@ -26,7 +26,7 @@ exponentiation.
 | Module | Contents |
 |--------|----------|
 | [`Xdy/Primitives.lean`](Xdy/Primitives.lean) | The `i32` arithmetic primitives, as saturating operations on `Int`. |
-| [`Xdy/Record.lean`](Xdy/Record.lean) | Rolling records: results, drops, the kept window and the saturating sum. |
+| [`Xdy/Record.lean`](Xdy/Record.lean) | Rolling records: results, drops and keeps, the kept window and the saturating sum. |
 | [`Xdy/Saturation.lean`](Xdy/Saturation.lean) | Proofs of closed forms for the saturating fold that sums a record, and of the soundness of the test by which the Rust forward pass replaces it with one clamp, `folds_to_clamp`. |
 | [`Xdy/Dist.lean`](Xdy/Dist.lean) | Finite distributions: exact natural weights over one total, merging equal outcomes. |
 | [`Xdy/DistLaws.lean`](Xdy/DistLaws.lean) | Proofs of the weight and total of every distribution that `Dist` builds, as sums over its entries, for the proof that the oracle meets the specification. |

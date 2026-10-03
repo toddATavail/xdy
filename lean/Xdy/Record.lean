@@ -200,6 +200,84 @@ def dropHighest (r : Record) (count : Int) : Record :=
   { r with highest := accumulate r.highest count r.results.length }
 
 /--
+Answer how many of the kept results of a record a keep drops: all of them but
+`count`, or none if no more than `count` are kept. Mirrors `keep_drops` in
+`primitives.rs`, which serves as the definition of both keeps, in the
+evaluator and in the forward pass alike.
+
+# Parameters
+- `results`: The number of results.
+- `lowest`: The number of lowest results dropped.
+- `highest`: The number of highest results dropped.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The number of results to drop, between `0` and the number kept.
+
+# Notes
+Rust clamps the number kept at `0`, as subtraction of naturals does here.
+
+# Examples
+```lean
+#guard Record.keepDrops 4 0 0 3 == 1
+#guard Record.keepDrops 4 1 0 3 == 0
+#guard Record.keepDrops 4 1 1 (-1) == 2
+#guard Record.keepDrops 2 2 2 1 == 0
+```
+-/
+def keepDrops (results lowest highest : Nat) (count : Int) : Int :=
+  let kept : Nat := results - lowest - highest
+  kept - min (max count 0) kept
+
+/--
+Keep the lowest `count` of the results still kept, dropping the rest of them
+from the high end. Mirrors `keep_lowest` in `primitives.rs`.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The record with its count of highest results dropped updated.
+
+# Examples
+```lean
+#guard (({ results := [1, 2, 3, 4] } : Record).keepLowest 3).highest == 1
+#guard (({ results := [1, 2, 3, 4], lowest := 1 } : Record).keepLowest 2
+  |>.kept) == [2, 3]
+#guard (({ results := [1, 2, 3] } : Record).keepLowest 5).highest == 0
+#guard (({ results := [1, 2, 3] } : Record).keepLowest 0).kept == []
+```
+-/
+def keepLowest (r : Record) (count : Int) : Record :=
+  r.dropHighest (keepDrops r.results.length r.lowest r.highest count)
+
+/--
+Keep the highest `count` of the results still kept, dropping the rest of them
+from the low end. Mirrors `keep_highest` in `primitives.rs`.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to keep. A count of zero or less keeps
+  nothing.
+
+# Returns
+The record with its count of lowest results dropped updated.
+
+# Examples
+```lean
+#guard (({ results := [1, 2, 3, 4] } : Record).keepHighest 3).lowest == 1
+#guard (({ results := [1, 2, 3, 4], highest := 1 } : Record).keepHighest 2
+  |>.kept) == [2, 3]
+#guard (({ results := [1, 2, 3] } : Record).keepHighest (-2)).kept == []
+```
+-/
+def keepHighest (r : Record) (count : Int) : Record :=
+  r.dropLowest (keepDrops r.results.length r.lowest r.highest count)
+
+/--
 Answer the results that survive the drops: skip the lowest dropped, then take
 what the highest dropped leave. Mirrors `kept` in `primitives.rs`.
 

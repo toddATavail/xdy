@@ -1769,8 +1769,8 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 
 	fn visit_keep_lowest(&mut self, inst: &KeepLowest) -> Result<(), Halt>
 	{
-		// A keep drops from the high end all of the results still kept but
-		// its count, which depends on the record only through its setups.
+		// `law_keepLowest`, in `lean/spec/XdySpec/World.lean`, proves that the
+		// record has the law of the keep over independent records and counts.
 		let Self { world, meter } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];
@@ -1782,8 +1782,8 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 
 	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), Halt>
 	{
-		// A keep drops from the low end all of the results still kept but its
-		// count, which depends on the record only through its setups.
+		// `law_keepHighest`, in `lean/spec/XdySpec/World.lean`, proves that the
+		// record has the law of the keep over independent records and counts.
 		let Self { world, meter } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];

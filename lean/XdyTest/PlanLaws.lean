@@ -143,6 +143,20 @@ private def allLaws (is : List Instruction) (src : AddressingMode) : Bool :=
     .sumRollingRecord 1 1,
     .return (reg 1)] (reg 1)
 #guard allLaws [
+    dice 0 (imm 3) (imm 6),
+    .sumRollingRecord 0 0,
+    .keepHighest 0 (imm 2),
+    .sumRollingRecord 1 0,
+    .binary .sub 2 (reg 0) (reg 1),
+    .return (reg 2)] (reg 2)
+#guard allLaws [
+    dice 0 (imm 1) (imm 4),
+    .sumRollingRecord 0 0,
+    dice 1 (imm 4) (imm 6),
+    .keepLowest 1 (reg 0),
+    .sumRollingRecord 1 1,
+    .return (reg 1)] (reg 1)
+#guard allLaws [
     dice 0 (imm 1) (imm 6),
     .sumRollingRecord 0 0,
     dice 1 (imm 1) (imm 4),

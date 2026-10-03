@@ -27,8 +27,10 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `dynamic_custom_count` | `{x}: {x}D[1, 3]` | a custom dice count from a parameter |
 | `dynamic_drops` | `{n}, {m}: 5D6 drop lowest {n} drop highest {m}` | `DropHighest`; drop counts from parameters |
 | `dynamic_faces` | `3D(2D6)` | a face count from a register |
+| `dynamic_keeps` | `{n}, {m}: 5D6 keep highest {n} drop lowest {m}` | a keep count from a parameter; a drop after a keep |
 | `dynamic_range` | `[1D3:2D6]` | range endpoints from registers |
 | `external` | `1D6 + {y}` | an external variable |
+| `keep_highest` | `4D6 keep highest 3` | `KeepHighest` |
 | `max` | `{x}: {x}D1` | the optimizer's `Max` |
 | `range` | `[1:6]` | `RollRange` |
 | `shared_register` | `{x}@(3D6) + {x}` | one random register read twice |

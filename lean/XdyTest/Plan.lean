@@ -142,6 +142,18 @@ example : (Location.register 0).dead (.register 0) [] = false := rfl
   (1, [.split (.register 0)]),
   (4, [.merge 0 (some (.register 1)) [.register 0, .record 1]])]
 
+-- ...and across a keep, which rewrites the record too.
+#guard schedule [
+    dice 0 (imm 3) (imm 6),
+    .sumRollingRecord 0 0,
+    .keepHighest 0 (imm 2),
+    .sumRollingRecord 1 0,
+    .binary .sub 2 (reg 0) (reg 1),
+    .return (reg 2)] == [
+  (0, [.split (.record 0)]),
+  (4, [.merge 0 (some (.register 2))
+    [.register 0, .record 0, .register 1]])]
+
 /-! ## Nested splits -/
 
 -- A split merges beneath a later split that is independent of it. This is

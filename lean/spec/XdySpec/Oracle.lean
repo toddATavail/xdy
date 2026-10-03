@@ -15,8 +15,8 @@ arrive, so that states differing only in the order of their rolls merge. So
 the proof relates each oracle distribution of states to the specification's
 law of states with every record sorted, read by `State.toOracle`. That
 relation holds of the initial state, whose records are empty; each
-instruction keeps it, since sorting commutes with rolling, dropping and
-summing, by `hasLaw_step`; so it holds of the final states, by
+instruction keeps it, since sorting commutes with rolling, dropping, keeping
+and summing, by `hasLaw_step`; so it holds of the final states, by
 `hasLaw_foldl`; and the returned operand reads only registers, which sorting
 leaves alone.
 
@@ -271,6 +271,16 @@ theorem hasLaw_step (s : State) (i : Instruction) :
   | dropHighest d c =>
     simp only [Xdy.step, step, PMF.pure_map, State.setRecord_toOracle,
       Record.toOracle_dropHighest, State.record_toOracle,
+      State.value_toOracle]
+    exact Dist.hasLaw_pure _
+  | keepLowest d c =>
+    simp only [Xdy.step, step, PMF.pure_map, State.setRecord_toOracle,
+      Record.toOracle_keepLowest, State.record_toOracle,
+      State.value_toOracle]
+    exact Dist.hasLaw_pure _
+  | keepHighest d c =>
+    simp only [Xdy.step, step, PMF.pure_map, State.setRecord_toOracle,
+      Record.toOracle_keepHighest, State.record_toOracle,
       State.value_toOracle]
     exact Dist.hasLaw_pure _
   | sumRollingRecord d r =>

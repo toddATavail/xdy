@@ -3,8 +3,9 @@ import Xdy.Record
 /-!
 # Rolling record tests
 
-Sorting on arrival, drop accumulation and clamping, the kept window, and the
-ascending saturating fold, mirroring `RollingRecord` in `xdy/src/primitives.rs`.
+Sorting on arrival, drop accumulation and clamping, keeps, the kept window,
+and the ascending saturating fold, mirroring `RollingRecord` in
+`xdy/src/primitives.rs`.
 -/
 
 namespace Xdy.Test
@@ -53,6 +54,28 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 #guard ((rec [5, 1, 3]).dropLowest 2 |>.dropHighest 2).kept == []
 #guard (rec []).kept == []
 
+/-! ## Keeps count from the results still kept -/
+
+#guard Record.keepDrops 3 0 0 1 == 2
+#guard Record.keepDrops 3 0 0 3 == 0
+#guard Record.keepDrops 3 0 0 i32Max == 0
+#guard Record.keepDrops 3 0 0 0 == 3
+#guard Record.keepDrops 3 0 0 i32Min == 3
+#guard Record.keepDrops 3 1 1 1 == 0
+#guard Record.keepDrops 3 3 3 1 == 0
+#guard ((rec [5, 1, 3]).keepLowest 2).kept == [1, 3]
+#guard ((rec [5, 1, 3]).keepHighest 2).kept == [3, 5]
+#guard ((rec [5, 1, 3]).dropLowest 1 |>.keepLowest 1).kept == [3]
+#guard ((rec [5, 1, 3]).keepHighest 2 |>.keepLowest 1).kept == [3]
+-- Keeps do not commute with drops.
+#guard ((rec [5, 1, 3]).keepHighest 2 |>.dropLowest 1).kept == [5]
+#guard ((rec [5, 1, 3]).dropLowest 1 |>.keepHighest 2).kept == [3, 5]
+-- A keep drops from the opposite end, within the clamp of the drops.
+#guard ((rec [5, 1, 3]).keepLowest 0) == (rec [5, 1, 3]).dropHighest 3
+#guard ((rec [5, 1, 3]).keepHighest (-1)) == (rec [5, 1, 3]).dropLowest 3
+#guard ((rec [5, 1, 3]).dropLowest 3 |>.keepHighest 0).lowest == 3
+#guard ((rec []).keepLowest 1).kept == []
+
 /-! ## The ascending saturating fold -/
 
 #guard (rec [1, 2, 3]).sum == 6
@@ -75,6 +98,19 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 #guard ({ results := [1, 2, 3, 4], lowest := 1, highest := 1 } : Record).kept
   == [2, 3]
 #guard ({ results := [1, 2], lowest := 2, highest := 2 } : Record).kept == []
+#guard Record.keepDrops 4 0 0 3 == 1
+#guard Record.keepDrops 4 1 0 3 == 0
+#guard Record.keepDrops 4 1 1 (-1) == 2
+#guard Record.keepDrops 2 2 2 1 == 0
+#guard (({ results := [1, 2, 3, 4] } : Record).keepLowest 3).highest == 1
+#guard (({ results := [1, 2, 3, 4], lowest := 1 } : Record).keepLowest 2
+  |>.kept) == [2, 3]
+#guard (({ results := [1, 2, 3] } : Record).keepLowest 5).highest == 0
+#guard (({ results := [1, 2, 3] } : Record).keepLowest 0).kept == []
+#guard (({ results := [1, 2, 3, 4] } : Record).keepHighest 3).lowest == 1
+#guard (({ results := [1, 2, 3, 4], highest := 1 } : Record).keepHighest 2
+  |>.kept) == [2, 3]
+#guard (({ results := [1, 2, 3] } : Record).keepHighest (-2)).kept == []
 #guard ({ results := [1, 2, 3], lowest := 1 } : Record).sum == 5
 #guard ({ results := [i32Min, i32Max, i32Max] } : Record).sum == i32Max - 1
 
