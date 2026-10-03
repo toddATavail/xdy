@@ -44,6 +44,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -111,6 +119,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -187,6 +203,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -330,6 +354,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -400,6 +432,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -452,6 +492,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           }
@@ -499,6 +547,14 @@
           },
           {
             "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -576,6 +632,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -643,6 +707,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -720,6 +792,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -809,6 +889,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -830,6 +918,122 @@
           },
           {
             "type": "sub",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "keep_highest",
+    "named": true,
+    "fields": {
+      "dice": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          }
+        ]
+      },
+      "keep": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "keep_lowest",
+    "named": true,
+    "fields": {
+      "dice": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          }
+        ]
+      },
+      "keep": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "group",
             "named": true
           },
           {
@@ -882,6 +1086,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -952,6 +1164,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -1031,6 +1251,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -1098,6 +1326,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -1174,6 +1410,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -1285,6 +1529,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -1352,6 +1604,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -1481,6 +1741,14 @@
             "named": true
           },
           {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
             "type": "mod",
             "named": true
           },
@@ -1548,6 +1816,14 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
             "named": true
           },
           {
@@ -1661,6 +1937,10 @@
   {
     "type": "integer",
     "named": true
+  },
+  {
+    "type": "keep",
+    "named": false
   },
   {
     "type": "lowest",

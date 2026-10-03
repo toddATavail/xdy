@@ -256,6 +256,14 @@
         {
           "type": "SYMBOL",
           "name": "drop_highest"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keep_lowest"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keep_highest"
         }
       ]
     },
@@ -458,6 +466,88 @@
           {
             "type": "FIELD",
             "name": "drop",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_drop_expression"
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "keep_lowest": {
+      "type": "PREC_LEFT",
+      "value": 5,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "dice",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_dice"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "keep"
+          },
+          {
+            "type": "STRING",
+            "value": "lowest"
+          },
+          {
+            "type": "FIELD",
+            "name": "keep",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_drop_expression"
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "keep_highest": {
+      "type": "PREC_LEFT",
+      "value": 5,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "dice",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_dice"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "keep"
+          },
+          {
+            "type": "STRING",
+            "value": "highest"
+          },
+          {
+            "type": "FIELD",
+            "name": "keep",
             "content": {
               "type": "CHOICE",
               "members": [

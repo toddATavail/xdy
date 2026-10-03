@@ -77,7 +77,14 @@ module.exports = grammar({
 
     // A dice expression.
     _dice: ($) =>
-      choice($.standard_dice, $.custom_dice, $.drop_lowest, $.drop_highest),
+      choice(
+        $.standard_dice,
+        $.custom_dice,
+        $.drop_lowest,
+        $.drop_highest,
+        $.keep_lowest,
+        $.keep_highest,
+      ),
 
     // A standard dice expression, i.e., the faces of the dice are numbered
     // from 1 to N.
@@ -132,7 +139,33 @@ module.exports = grammar({
         ),
       ),
 
-    // An expression that represents the number of dice to drop.
+    // A dice expression that keeps the N lowest of the dice that the clauses
+    // before it left kept, or one if N is absent.
+    keep_lowest: ($) =>
+      prec.left(
+        5,
+        seq(
+          field("dice", $._dice),
+          "keep",
+          "lowest",
+          field("keep", optional($._drop_expression)),
+        ),
+      ),
+
+    // A dice expression that keeps the N highest of the dice that the clauses
+    // before it left kept, or one if N is absent.
+    keep_highest: ($) =>
+      prec.left(
+        5,
+        seq(
+          field("dice", $._dice),
+          "keep",
+          "highest",
+          field("keep", optional($._drop_expression)),
+        ),
+      ),
+
+    // An expression that represents the number of dice to drop or keep.
     _drop_expression: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // An arithmetic expression.
