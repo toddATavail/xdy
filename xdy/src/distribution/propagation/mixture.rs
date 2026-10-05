@@ -1,10 +1,10 @@
 //! # Mixtures
 //!
-//! When the count, faces, or range endpoints of a roll, or the counts of its
-//! drops, come from random registers, the rolling record holds not one
-//! [setup](Setup) but a weighted mixture of them, each a roll with fixed
-//! operands and fixed drop counts. By the law of total probability, the sum of
-//! the record is the mixture of the sums of its setups.
+//! When the count, faces, or range endpoints of a roll, the counts of its
+//! drops, or the operands of its rerolls come from random registers, the
+//! rolling record holds not one [setup](Setup) but a weighted mixture of them,
+//! each a roll with fixed operands and fixed drop counts. By the law of total
+//! probability, the sum of the record is the mixture of the sums of its setups.
 //!
 //! A setup of weight `w` answers sums of total `T`, and the setups' totals
 //! differ, as the totals `zᵏ` of `k` dice of `z` faces do, so the mixture
@@ -35,21 +35,26 @@ use std::{
 
 use super::{
 	meter::{Halt, Meter, charge_of},
-	record::{Powers, Roll}
+	record::{Die, Effect, Powers, Roll, redraw}
 };
-use crate::{Distribution, Weight, primitives::keep_drops};
+use crate::{Criterion, Distribution, Weight, primitives::keep_drops};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                  Setups.                                   //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// One setup of a rolling record: its roll, if any, and its drops, with every
-/// operand resolved to a value.
+/// One setup of a rolling record: its roll, if any, as its rerolls left it,
+/// and its drops, with every operand resolved to a value.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct Setup
 {
 	/// The roll that filled the record, if any.
 	roll: Option<Roll>,
+
+	/// The die from which rerolls draw replacements, if the roll no longer
+	/// shows it, as when a reroll changed it, or a split fixed its results
+	/// before a reroll. Fixed results that no reroll reads hold none.
+	die: Option<Die>,
 
 	/// The number of lowest results dropped, clamped to the number of results.
 	lowest: i32,
@@ -85,11 +90,100 @@ impl Setup
 	fn dice(&self) -> u64 { self.roll.as_ref().map_or(0, Roll::dice) }
 
 	/// Answer the number of cells that the setup occupies: those of its roll,
-	/// or one if it has none.
+	/// or one if it has none, and those of its die.
 	///
 	/// # Returns
 	/// The number of cells.
-	fn cells(&self) -> u64 { self.roll.as_ref().map_or(1, Roll::cells) }
+	fn cells(&self) -> u64
+	{
+		self.roll.as_ref().map_or(1, Roll::cells)
+			+ self.die.as_ref().map_or(0, Die::cells)
+	}
+
+	/// Answer the die from which rerolls draw replacements.
+	///
+	/// # Returns
+	/// The die, or `None` if the setup has no roll, or fixed results that no
+	/// reroll reads.
+	fn die(&self) -> Option<Die>
+	{
+		self.die
+			.clone()
+			.or_else(|| self.roll.as_ref().and_then(Roll::replacement))
+	}
+
+	/// Reroll the dice still kept of the setup.
+	///
+	/// A reroll that does nothing leaves the setup as it was, and one that
+	/// crosses out every die still kept drops them all. Otherwise, if no
+	/// result has been dropped and the roll is a range or dice, then its dice
+	/// are alike, and the reroll [rewrites](Roll::rewrite) the law of each;
+	/// if not, it [pools](Roll::pool) the multisets of the dice still kept.
+	/// Either way, the setup keeps its die, and the total of its roll grows by
+	/// the [padding](super::record::Redraw) of each die still kept.
+	///
+	/// # Parameters
+	/// - `criterion`: The results that the reroll rerolls.
+	/// - `limit`: The number of times that each die may be rerolled, or `None`
+	///   for no limit.
+	/// - `meter`: The meter, to which the rerolled setup stays charged beyond
+	///   the cells of the setup.
+	///
+	/// # Returns
+	/// The rerolled setup.
+	///
+	/// # Errors
+	/// [`Halt`] if the reroll would exceed the budget or is cancelled.
+	///
+	/// # Panics
+	/// If the setup holds fixed results without their die, which the
+	/// [plan](super::plan::rerolled) prevents.
+	fn reroll(
+		&self,
+		criterion: &Criterion,
+		limit: Option<i32>,
+		meter: &mut Meter
+	) -> Result<Setup, Halt>
+	{
+		let results = self.results();
+		let kept = results - self.lowest - self.highest;
+		let Some(roll) = self.roll.as_ref().filter(|_| kept > 0)
+		else
+		{
+			// Without dice still kept, there is nothing to reroll.
+			return Ok(self.clone())
+		};
+		let die = self.die().expect("a reroll reads fixed results with a die");
+		match redraw(&die, criterion, limit, meter)?
+		{
+			Effect::Nothing => Ok(self.clone()),
+			Effect::CrossOut => Ok(Setup {
+				lowest: results,
+				..self.clone()
+			}),
+			Effect::Redraw(redraw) =>
+			{
+				meter.charge(0, die.cells())?;
+				let roll = match (roll, self.lowest, self.highest)
+				{
+					(
+						Roll::Range { .. }
+						| Roll::Standard { .. }
+						| Roll::Custom { .. },
+						0,
+						0
+					) => roll.rewrite(&redraw, meter)?,
+					_ => roll.pool(self.lowest, self.highest, &redraw, meter)?
+				};
+				Ok(Setup {
+					roll: Some(roll),
+					die: Some(die),
+					lowest: 0,
+					highest: 0
+				})
+			}
+		}
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -330,6 +424,47 @@ impl Mixture
 		Ok(())
 	}
 
+	/// Reroll the dice still kept of every setup, by each of the given
+	/// resolutions of the reroll's operands, splitting each setup by each
+	/// resolution and merging the setups that coincide, as when the reroll
+	/// does nothing.
+	///
+	/// # Parameters
+	/// - `rerolls`: The resolutions of the reroll: each set of results that it
+	///   rerolls, with the number of times that each die may be rerolled, or
+	///   `None` for no limit, and the weight of the outcome of the operands
+	///   that chose them.
+	/// - `meter`: The meter, which the reroll charges a step and the cells of a
+	///   setup for each new setup, before each [setup's reroll](Setup::reroll)
+	///   charges its own work.
+	///
+	/// # Errors
+	/// [`Halt`] if the reroll would exceed the budget or is cancelled.
+	pub(super) fn reroll(
+		&mut self,
+		rerolls: &[(Criterion, Option<i32>, Weight)],
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
+		let outcomes = rerolls.len() as u128;
+		let (steps, cells) =
+			self.0.keys().fold((0u128, 0u128), |(steps, cells), setup| {
+				(steps + outcomes, cells + outcomes * setup.cells() as u128)
+			});
+		meter.charge(charge_of(steps), charge_of(cells))?;
+		let mut setups = BTreeMap::<Setup, Weight>::new();
+		for (setup, weight) in mem::take(&mut self.0)
+		{
+			for (criterion, limit, reroll_weight) in rerolls
+			{
+				let setup = setup.reroll(criterion, *limit, meter)?;
+				*setups.entry(setup).or_default() += &weight * reroll_weight;
+			}
+		}
+		self.0 = setups;
+		Ok(())
+	}
+
 	/// Answer the least common multiple of the totals of the setups, the
 	/// common denominator to which the mixture scales their sums.
 	///
@@ -417,7 +552,8 @@ impl Mixture
 				&Setup {
 					roll: Some(Roll::Range { start, end }),
 					lowest: 0,
-					highest: 0
+					highest: 0,
+					..
 				} if start <= end => ranges.add(start, end, scale, meter)?,
 				_ =>
 				{
@@ -446,7 +582,8 @@ impl Mixture
 	}
 
 	/// Answer every outcome of the record: each setup with each multiset of
-	/// the [results](Roll::outcomes) of its roll, fixed, keeping its drops.
+	/// the [results](Roll::outcomes) of its roll, fixed, keeping its drops,
+	/// and its die, if a reroll will draw from it.
 	/// An outcome of a setup of weight `w` and total `T` whose roll reaches it
 	/// along `b` branches weighs `w · (L / T) · b`, so that the outcomes of
 	/// each setup share the [common denominator](Self::denominator) `L`, as its
@@ -455,6 +592,8 @@ impl Mixture
 	/// weights, so that the outcomes are distinct.
 	///
 	/// # Parameters
+	/// - `rerolled`: Whether a reroll reads the record before a roll refills
+	///   it, so that each outcome must keep the die from which it draws.
 	/// - `meter`: The meter, to which the outcomes stay charged.
 	///
 	/// # Returns
@@ -473,6 +612,7 @@ impl Mixture
 	/// denominator mixes their laws.
 	pub(super) fn outcomes(
 		&self,
+		rerolled: bool,
 		meter: &mut Meter
 	) -> Result<Vec<(Mixture, Weight)>, Halt>
 	{
@@ -496,12 +636,16 @@ impl Mixture
 					vec![(None, Weight::ONE)]
 				}
 			};
-			// Each outcome moves its cells into the setup that holds it.
-			meter.charge(rolls.len() as u64, 0)?;
+			// Each outcome moves its cells into the setup that holds it, with
+			// a copy of the die, if it keeps it.
+			let die = setup.die().filter(|_| rerolled);
+			let len = rolls.len() as u64;
+			meter.charge(len, len * die.as_ref().map_or(0, Die::cells))?;
 			for (roll, branches) in rolls
 			{
 				let outcome = Setup {
 					roll,
+					die: die.clone(),
 					..setup.clone()
 				};
 				*outcomes.entry(outcome).or_default() += branches * &scale;

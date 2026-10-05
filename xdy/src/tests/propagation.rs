@@ -16,7 +16,11 @@
 //! itself, optimized and not.
 
 use std::{
-	cell::RefCell, collections::HashSet, mem, ops::ControlFlow, sync::OnceLock
+	cell::RefCell,
+	collections::{BTreeMap, HashSet, btree_map::Entry},
+	mem,
+	ops::ControlFlow,
+	sync::OnceLock
 };
 
 use pretty_assertions::assert_eq;
@@ -27,8 +31,9 @@ use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
 	Add, AddressingMode, Assembler, BuildError, Distribution, EvaluationError,
-	Evaluator, Function, Instruction, Pass, Passes, ProgramCounter, Rational,
-	RegisterIndex, Return, RollingRecordIndex, SumRollingRecord, Weight,
+	Evaluator, Function, Immediate, Instruction, Limit, Pass, Passes,
+	Predicate, ProgramCounter, Rational, RegisterIndex, Return,
+	RollingRecordIndex, SumRollingRecord, Weight,
 	compiler::{compile, compile_unoptimized},
 	distribution::propagation::{
 		PropagationError,
@@ -3987,19 +3992,18 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 //                                  Rerolls.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Test that, until the forward pass weighs rerolls, the estimate prices a
-/// function that rerolls beyond every budget but the unlimited one, and a
-/// build within any lesser budget refuses it, rather than answering a wrong
-/// distribution.
+/// Test that, until the cost model prices rerolls, the estimate prices a
+/// function that rerolls beyond every budget but the unlimited one, though the
+/// pass, which charges its work as it goes, answers within the unlimited one.
 #[test]
-fn test_rerolls_exceed_every_budget()
+fn test_reroll_estimates_exceed_every_budget()
 {
 	let function = Assembler::assemble(
 		"\
 Function() r#1 ⚅#1
 \textern[]
 \tbody:
-\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅0 <- roll standard dice 1D6
 \t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
 \t\t@0 <- sum rolling record ⚅0
 \t\treturn @0
@@ -4009,16 +4013,904 @@ Function() r#1 ⚅#1
 	let evaluator = Evaluator::new(function);
 	let plan = evaluator.plan_distribution([]).unwrap();
 	assert_eq!(plan.estimate().steps, u64::MAX);
-	let budget = Budget {
-		steps: u64::MAX - 1,
-		cells: u64::MAX - 1
-	};
-	assert!(matches!(
-		plan.build(budget, &Unobserved),
-		Err(BuildError::BudgetExhausted {
-			dimension: Dimension::Steps,
-			requested: u64::MAX,
-			..
+	assert_eq!(
+		plan.build(Budget::UNLIMITED, &Unobserved),
+		Ok(weights(&[(1, 1), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7)]))
+	);
+}
+
+/// Answer the assembly of a function that rolls `roll` into `⚅0`, applies the
+/// specified clauses to it, sums it, and returns the sum.
+///
+/// # Parameters
+/// - `roll`: The roll, as in `roll standard dice 3D6`.
+/// - `clauses`: The clauses, each as in `reroll = 1 up to 1 times`.
+///
+/// # Returns
+/// The assembly.
+fn rerolled(roll: &str, clauses: &[&str]) -> String
+{
+	let mut assembly =
+		format!("Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- {roll}\n");
+	for clause in clauses
+	{
+		assembly.push_str(&format!("\t\t⚅0 <- {clause} from ⚅0\n"));
+	}
+	assembly.push_str("\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n");
+	assembly
+}
+
+/// Test that rerolls answer as expected, weight for weight, counting their
+/// branches as [`Bounds::count`](crate::Bounds::count) does: each die still
+/// kept grows by the branches of its die raised to the limit, or, without
+/// limit, by the branches that the predicate does not match.
+#[test]
+fn test_rerolls()
+{
+	for (roll, clauses, expected) in [
+		// A `1` rerolled once shows `1` again along one path of 36, and any
+		// other face along 6 + 1.
+		(
+			"roll standard dice 1D6",
+			&["reroll = 1 up to 1 times"][..],
+			&[(1, 1), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7)][..]
+		),
+		// Without limit, each face but `1` is equally likely, over 6 · 5.
+		(
+			"roll standard dice 1D6",
+			&["reroll = 1 unlimited times"],
+			&[(2, 6), (3, 6), (4, 6), (5, 6), (6, 6)]
+		),
+		// Twice: `1` along 1, any other face along 36 + 6 + 1, over 6³.
+		(
+			"roll standard dice 1D6",
+			&["reroll = 1 up to 2 times"],
+			&[(1, 1), (2, 43), (3, 43), (4, 43), (5, 43), (6, 43)]
+		),
+		// A reroll that cannot happen changes nothing.
+		(
+			"roll standard dice 1D4",
+			&["reroll = 5 up to 3 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		(
+			"roll standard dice 1D4",
+			&["reroll = 1 up to 0 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		(
+			"roll standard dice 1D4",
+			&["reroll in 3..3 unlimited times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		(
+			"roll standard dice 1D4",
+			&["reroll in 3..=2 up to 1 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		// An unlimited reroll that matches every face crosses out every die.
+		(
+			"roll standard dice 3D1",
+			&["reroll = 1 unlimited times"],
+			&[(0, 1)]
+		),
+		(
+			"roll standard dice 2D3",
+			&["reroll < 4 unlimited times"],
+			&[(0, 9)]
+		),
+		(
+			"roll standard dice 2D0",
+			&["reroll = 0 unlimited times"],
+			&[(0, 1)]
+		),
+		("roll range 3:2", &["reroll = 0 unlimited times"], &[(0, 1)]),
+		// A die without faces rerolls to the face `0` again.
+		(
+			"roll standard dice 2D0",
+			&["reroll = 0 up to 2 times"],
+			&[(0, 1)]
+		),
+		// A reroll after a drop conditions on the dice still kept: of 2D2,
+		// the highest is `1` only for `[1, 1]`, and then rerolled.
+		(
+			"roll standard dice 2D2",
+			&["drop lowest 1", "reroll = 1 up to 1 times"],
+			&[(1, 1), (2, 7)]
+		),
+		// A range is one die.
+		(
+			"roll range 1:3",
+			&["reroll >= 2 unlimited times"],
+			&[(1, 3)]
+		),
+		(
+			"roll range -1:1",
+			&["reroll != 0 up to 1 times"],
+			&[(-1, 2), (0, 5), (1, 2)]
+		),
+		// A custom die rerolls from its faces, each as often as it is listed.
+		(
+			"roll custom dice 1D[1, 1, 2]",
+			&["reroll = 1 unlimited times"],
+			&[(2, 3)]
+		),
+		(
+			"roll custom dice 1D[1, 1, 2]",
+			&["reroll in [2] up to 1 times"],
+			&[(1, 8), (2, 1)]
+		)
+	]
+	{
+		let assembly = rerolled(roll, clauses);
+		assert_eq!(
+			propagate_assembly(&assembly),
+			weights(expected),
+			"{assembly}"
+		);
+	}
+}
+
+/// Test that a reroll that follows a split on its record, which fixes the
+/// record's results, draws from the die of the roll that the split fixed: a
+/// record summed both before and after a reroll, with and without a drop
+/// between, and a record whose sum before the reroll is never read.
+#[test]
+fn test_rerolls_after_splits()
+{
+	// `1D4` shows `x`; `x ≤ 2` is rerolled to `y`, else `y = x`; the answer is
+	// `x + y`, over 4 · 4.
+	let function = Assembler::assemble(
+		"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D4
+		@0 <- sum rolling record ⚅0
+		⚅0 <- reroll <= 2 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 + @1
+		return @2"
+	)
+	.unwrap();
+	assert_agrees(
+		function,
+		&weights(&[(2, 1), (3, 2), (4, 2), (5, 2), (6, 5), (8, 4)])
+	);
+	// `2D3` shows `[a, b]`; the higher is rerolled once if it is `1`, which
+	// it is only for `[1, 1]`, and the answer is the sum of both rolls.
+	let function = Assembler::assemble(
+		"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D3
+		@0 <- sum rolling record ⚅0
+		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 + @1
+		return @2"
+	)
+	.unwrap();
+	let mut expected = BTreeMap::<i32, u64>::new();
+	for a in 1..=3
+	{
+		for b in 1..=3
+		{
+			let high = a.max(b);
+			for c in 1..=3
+			{
+				let kept = match high
+				{
+					1 => c,
+					_ => high
+				};
+				*expected.entry(a + b + kept).or_default() += 1;
+			}
+		}
+	}
+	assert_agrees(
+		function,
+		&weights(&expected.into_iter().collect::<Vec<_>>())
+	);
+}
+
+/// A chance, as a fraction that the reference reduces as it goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Chance
+{
+	/// The numerator.
+	numerator: Weight,
+
+	/// The denominator, which is positive.
+	denominator: Weight
+}
+
+impl Chance
+{
+	/// Answer the chance `numerator / denominator`, reduced.
+	///
+	/// # Parameters
+	/// - `numerator`: The numerator.
+	/// - `denominator`: The denominator, which is positive.
+	///
+	/// # Returns
+	/// The chance.
+	fn new(numerator: Weight, denominator: Weight) -> Self
+	{
+		let gcd = numerator.gcd(&denominator);
+		Self {
+			numerator: numerator.exact_div(&gcd),
+			denominator: denominator.exact_div(&gcd)
+		}
+	}
+
+	/// Answer the chance one in `n`.
+	///
+	/// # Parameters
+	/// - `n`: The number of equally likely possibilities, which is positive.
+	///
+	/// # Returns
+	/// The chance.
+	fn one_in(n: usize) -> Self { Self::new(Weight::ONE, Weight::from(n)) }
+
+	/// Answer the product of two chances.
+	///
+	/// # Parameters
+	/// - `other`: The other chance.
+	///
+	/// # Returns
+	/// The product.
+	fn times(&self, other: &Self) -> Self
+	{
+		Self::new(
+			&self.numerator * &other.numerator,
+			&self.denominator * &other.denominator
+		)
+	}
+
+	/// Add another chance to this one.
+	///
+	/// # Parameters
+	/// - `other`: The other chance.
+	fn add(&mut self, other: &Self)
+	{
+		*self = Self::new(
+			&self.numerator * &other.denominator
+				+ &other.numerator * &self.denominator,
+			&self.denominator * &other.denominator
+		);
+	}
+}
+
+/// A law over values, as the reference computes it.
+type Law<T> = BTreeMap<T, Chance>;
+
+/// Add a chance of the specified value to a law.
+///
+/// # Parameters
+/// - `law`: The law.
+/// - `value`: The value.
+/// - `chance`: The chance.
+fn weigh<T: Ord>(law: &mut Law<T>, value: T, chance: Chance)
+{
+	match law.entry(value)
+	{
+		Entry::Vacant(entry) =>
+		{
+			entry.insert(chance);
+		},
+		Entry::Occupied(mut entry) => entry.get_mut().add(&chance)
+	}
+}
+
+/// The roll of a [reroll program](RerollProgram).
+#[derive(Debug, Clone)]
+enum RerollRoll
+{
+	/// Standard dice, of a count and faces.
+	Standard(AddressingMode, AddressingMode),
+
+	/// Custom dice, of a count and the faces listed.
+	Custom(AddressingMode, Vec<i32>),
+
+	/// A range, of a start and end.
+	Range(AddressingMode, AddressingMode)
+}
+
+/// A clause of a [reroll program](RerollProgram).
+#[derive(Debug, Clone)]
+enum RerollClause
+{
+	/// Drop the lowest results, by the count.
+	DropLowest(AddressingMode),
+
+	/// Drop the highest results, by the count.
+	DropHighest(AddressingMode),
+
+	/// Keep the lowest results, by the count.
+	KeepLowest(AddressingMode),
+
+	/// Keep the highest results, by the count.
+	KeepHighest(AddressingMode),
+
+	/// Reroll the results that satisfy the predicate, up to the limit.
+	Reroll(Predicate, Limit)
+}
+
+/// A program that rolls a rolling record, applies clauses to it, and sums it,
+/// whose operands may be immediates or registers, each register the sum of
+/// one roll and an offset. The [reference](RerollProgram::reference) answers
+/// its law by enumerating every roll and reroll that it might make.
+#[derive(Debug, Clone)]
+struct RerollProgram
+{
+	/// The registers, each the sum of `count` dice of `faces` faces, plus an
+	/// offset.
+	registers: Vec<(i32, i32, i32)>,
+
+	/// The roll.
+	roll: RerollRoll,
+
+	/// The clauses, in order.
+	clauses: Vec<RerollClause>
+}
+
+impl RerollProgram
+{
+	/// Answer the assembly of the program, in static single assignment form,
+	/// as the optimizer expects: the sum of the roll of register `i` is
+	/// `@2i`, and the register itself, the sum and its offset, is `@2i+1`.
+	///
+	/// # Returns
+	/// The assembly.
+	fn assembly(&self) -> String
+	{
+		let n = self.registers.len();
+		let mut assembly = format!(
+			"Function() r#{} ⚅#{}\n\textern[]\n\tbody:\n",
+			2 * n + 1,
+			n + 1
+		);
+		for (i, (count, faces, offset)) in self.registers.iter().enumerate()
+		{
+			assembly.push_str(&format!(
+				"\t\t⚅{} <- roll standard dice {count}D{faces}\n\
+				 \t\t@{} <- sum rolling record ⚅{}\n\
+				 \t\t@{} <- @{} + {offset}\n",
+				i + 1,
+				2 * i,
+				i + 1,
+				2 * i + 1,
+				2 * i
+			));
+		}
+		let op = |op: AddressingMode| match op
+		{
+			AddressingMode::Register(reg) =>
+			{
+				RegisterIndex(2 * reg.0 + 1).into()
+			},
+			op => op
+		};
+		let roll = match &self.roll
+		{
+			RerollRoll::Standard(count, faces) =>
+			{
+				format!("roll standard dice {}D{}", op(*count), op(*faces))
+			},
+			RerollRoll::Custom(count, faces) =>
+			{
+				let faces = faces
+					.iter()
+					.map(ToString::to_string)
+					.collect::<Vec<_>>()
+					.join(", ");
+				format!("roll custom dice {}D[{faces}]", op(*count))
+			},
+			RerollRoll::Range(start, end) =>
+			{
+				format!("roll range {}:{}", op(*start), op(*end))
+			}
+		};
+		assembly.push_str(&format!("\t\t⚅0 <- {roll}\n"));
+		for clause in &self.clauses
+		{
+			let clause = match clause
+			{
+				RerollClause::DropLowest(count) =>
+				{
+					format!("drop lowest {}", op(*count))
+				},
+				RerollClause::DropHighest(count) =>
+				{
+					format!("drop highest {}", op(*count))
+				},
+				RerollClause::KeepLowest(count) =>
+				{
+					format!("keep lowest {}", op(*count))
+				},
+				RerollClause::KeepHighest(count) =>
+				{
+					format!("keep highest {}", op(*count))
+				},
+				RerollClause::Reroll(predicate, limit) =>
+				{
+					format!("reroll {} {}", predicate.map(op), limit.map(op))
+				}
+			};
+			assembly.push_str(&format!("\t\t⚅0 <- {clause} from ⚅0\n"));
+		}
+		assembly.push_str(&format!(
+			"\t\t@{} <- sum rolling record ⚅0\n\t\treturn @{}\n",
+			2 * n,
+			2 * n
+		));
+		assembly
+	}
+
+	/// Answer the law of the program's answer, by enumerating every value of
+	/// its registers, every roll of its dice, and every reroll that each die
+	/// still kept may make, independently of the forward pass.
+	///
+	/// # Returns
+	/// The law, as a distribution, which agrees with the program's in
+	/// probability.
+	fn reference(&self) -> Distribution
+	{
+		let mut assignments = vec![(Vec::<i32>::new(), Chance::one_in(1))];
+		for &(count, faces, offset) in &self.registers
+		{
+			let mut sums = Law::<i32>::from([(offset, Chance::one_in(1))]);
+			for _ in 0..count
+			{
+				let mut next = Law::new();
+				for (sum, chance) in &sums
+				{
+					for face in 1..=faces
+					{
+						weigh(
+							&mut next,
+							sum + face,
+							chance.times(&Chance::one_in(faces as usize))
+						);
+					}
+				}
+				sums = next;
+			}
+			assignments = assignments
+				.iter()
+				.flat_map(|(values, chance)| {
+					sums.iter().map(move |(sum, sum_chance)| {
+						let mut values = values.clone();
+						values.push(*sum);
+						(values, chance.times(sum_chance))
+					})
+				})
+				.collect();
+		}
+		let mut answers = Law::<i32>::new();
+		for (values, chance) in assignments
+		{
+			for (sum, sum_chance) in self.sums(&values)
+			{
+				weigh(&mut answers, sum, chance.times(&sum_chance));
+			}
+		}
+		let denominator = answers
+			.values()
+			.fold(Weight::ONE, |lcm, chance| lcm.lcm(&chance.denominator));
+		Distribution::from_weights(answers.into_iter().map(|(sum, chance)| {
+			(
+				sum,
+				chance.numerator * denominator.exact_div(&chance.denominator)
+			)
+		}))
+		.unwrap()
+	}
+
+	/// Answer the law of the sum of the record, given the values of the
+	/// registers.
+	///
+	/// # Parameters
+	/// - `values`: The values of the registers.
+	///
+	/// # Returns
+	/// The law of the sum.
+	fn sums(&self, values: &[i32]) -> Law<i32>
+	{
+		let value = |op: AddressingMode| match op
+		{
+			AddressingMode::Immediate(immediate) => immediate.0,
+			AddressingMode::Register(reg) => values[reg.0],
+			AddressingMode::RollingRecord(_) => unreachable!()
+		};
+		// A die without faces, or an empty range, shows `0`.
+		let (count, faces) = match &self.roll
+		{
+			RerollRoll::Standard(count, faces) => match value(*faces)
+			{
+				faces if faces <= 0 => (value(*count), vec![0]),
+				faces => (value(*count), (1..=faces).collect())
+			},
+			RerollRoll::Custom(count, faces) => (value(*count), faces.clone()),
+			RerollRoll::Range(start, end) =>
+			{
+				let (start, end) = (value(*start), value(*end));
+				match start <= end
+				{
+					true => (1, (start..=end).collect()),
+					false => (1, vec![0])
+				}
+			}
+		};
+		// Each state is the sorted multiset of the dice still kept.
+		let mut states = Law::<Vec<i32>>::from([(vec![], Chance::one_in(1))]);
+		for _ in 0..count.max(0)
+		{
+			let mut next = Law::new();
+			for (kept, chance) in &states
+			{
+				for face in &faces
+				{
+					let mut kept = kept.clone();
+					kept.push(*face);
+					kept.sort();
+					weigh(
+						&mut next,
+						kept,
+						chance.times(&Chance::one_in(faces.len()))
+					);
+				}
+			}
+			states = next;
+		}
+		for clause in &self.clauses
+		{
+			let mut next = Law::new();
+			for (kept, chance) in states
+			{
+				let len = kept.len();
+				let clamp = |count: AddressingMode| {
+					value(count).clamp(0, len as i32) as usize
+				};
+				let outcomes = match clause
+				{
+					RerollClause::DropLowest(count) =>
+					{
+						vec![(
+							kept[clamp(*count)..].to_vec(),
+							Chance::one_in(1)
+						)]
+					},
+					RerollClause::DropHighest(count) => vec![(
+						kept[..len - clamp(*count)].to_vec(),
+						Chance::one_in(1)
+					)],
+					RerollClause::KeepLowest(count) =>
+					{
+						vec![(
+							kept[..clamp(*count)].to_vec(),
+							Chance::one_in(1)
+						)]
+					},
+					RerollClause::KeepHighest(count) => vec![(
+						kept[len - clamp(*count)..].to_vec(),
+						Chance::one_in(1)
+					)],
+					RerollClause::Reroll(predicate, limit) => reroll_reference(
+						&kept,
+						&faces,
+						|result| satisfies(predicate, result, value),
+						match limit
+						{
+							Limit::Times(count) => Some(value(*count)),
+							Limit::Unlimited => None
+						}
+					)
+					.into_iter()
+					.collect()
+				};
+				for (kept, outcome_chance) in outcomes
+				{
+					weigh(&mut next, kept, chance.times(&outcome_chance));
+				}
+			}
+			states = next;
+		}
+		let mut sums = Law::new();
+		for (kept, chance) in states
+		{
+			let sum = kept
+				.iter()
+				.fold(0i32, |sum, result| sum.saturating_add(*result));
+			weigh(&mut sums, sum, chance);
+		}
+		sums
+	}
+}
+
+/// Answer whether a result satisfies a predicate, given the values of its
+/// operands, by the predicate's definition.
+///
+/// # Parameters
+/// - `predicate`: The predicate.
+/// - `result`: The result.
+/// - `value`: The function that answers the value of an operand.
+///
+/// # Returns
+/// `true` if the result satisfies the predicate, `false` otherwise.
+fn satisfies(
+	predicate: &Predicate,
+	result: i32,
+	value: impl Fn(AddressingMode) -> i32
+) -> bool
+{
+	match predicate
+	{
+		Predicate::Eq(op) => result == value(*op),
+		Predicate::Ne(op) => result != value(*op),
+		Predicate::Lt(op) => result < value(*op),
+		Predicate::Le(op) => result <= value(*op),
+		Predicate::Gt(op) => result > value(*op),
+		Predicate::Ge(op) => result >= value(*op),
+		Predicate::In(values) => values.contains(&result),
+		Predicate::InRange { start, end } =>
+		{
+			value(*start) <= result && result < value(*end)
+		},
+		Predicate::InRangeInclusive { start, end } =>
+		{
+			value(*start) <= result && result <= value(*end)
+		},
+	}
+}
+
+/// Answer the law of the dice still kept after a reroll, by its definition:
+/// each die that matches rolls a replacement from the die, which rolls again
+/// while it matches and the limit allows, or, without limit, finally shows
+/// each face that does not match as likely as any other, unless every face
+/// matches, when every die is crossed out.
+///
+/// # Parameters
+/// - `kept`: The dice still kept, sorted.
+/// - `faces`: The faces of the die, each as often as it is listed.
+/// - `matches`: Whether the reroll matches a result.
+/// - `limit`: The number of times that each die may be rerolled, or `None` for
+///   no limit.
+///
+/// # Returns
+/// The law of the dice still kept, sorted.
+fn reroll_reference(
+	kept: &[i32],
+	faces: &[i32],
+	matches: impl Fn(i32) -> bool,
+	limit: Option<i32>
+) -> Law<Vec<i32>>
+{
+	let one = Chance::one_in(1);
+	if limit.is_some_and(|limit| limit <= 0)
+	{
+		return Law::from([(kept.to_vec(), one)])
+	}
+	if limit.is_none() && faces.iter().all(|face| matches(*face))
+	{
+		let kept = kept.iter().copied().filter(|result| !matches(*result));
+		return Law::from([(kept.collect(), one)])
+	}
+	// The law of a replacement that may be rerolled `n` more times.
+	fn replacement(
+		faces: &[i32],
+		matches: &dyn Fn(i32) -> bool,
+		n: Option<i32>
+	) -> Law<i32>
+	{
+		let mut law = Law::new();
+		match n
+		{
+			None =>
+			{
+				let rest = faces
+					.iter()
+					.filter(|face| !matches(**face))
+					.collect::<Vec<_>>();
+				for face in &rest
+				{
+					weigh(&mut law, **face, Chance::one_in(rest.len()));
+				}
+			},
+			Some(n) =>
+			{
+				for face in faces
+				{
+					let chance = Chance::one_in(faces.len());
+					match matches(*face) && n > 0
+					{
+						true =>
+						{
+							for (result, again) in
+								replacement(faces, matches, Some(n - 1))
+							{
+								weigh(&mut law, result, chance.times(&again));
+							}
+						},
+						false => weigh(&mut law, *face, chance)
+					}
+				}
+			}
+		}
+		law
+	}
+	let mut states = Law::from([(Vec::<i32>::new(), one)]);
+	for result in kept
+	{
+		let die = match matches(*result)
+		{
+			true => replacement(faces, &matches, limit.map(|limit| limit - 1)),
+			false => Law::from([(*result, Chance::one_in(1))])
+		};
+		let mut next = Law::new();
+		for (state, chance) in &states
+		{
+			for (result, result_chance) in &die
+			{
+				let mut state = state.clone();
+				state.push(*result);
+				state.sort();
+				weigh(&mut next, state, chance.times(result_chance));
+			}
+		}
+		states = next;
+	}
+	states
+}
+
+/// Answer a strategy that generates an operand: an immediate in the specified
+/// range, or one of the specified number of registers.
+///
+/// # Parameters
+/// - `registers`: The number of registers.
+/// - `least`: The least immediate.
+/// - `greatest`: The greatest immediate.
+///
+/// # Returns
+/// The strategy.
+fn reroll_operand(
+	registers: usize,
+	least: i32,
+	greatest: i32
+) -> BoxedStrategy<AddressingMode>
+{
+	let immediate =
+		(least..=greatest).prop_map(|value| Immediate(value).into());
+	match registers
+	{
+		0 => immediate.boxed(),
+		registers => prop_oneof![
+			immediate,
+			(0..registers).prop_map(|reg| RegisterIndex(reg).into())
+		]
+		.boxed()
+	}
+}
+
+/// Answer a strategy that generates a reroll clause, of every predicate form,
+/// limited or not.
+///
+/// # Parameters
+/// - `registers`: The number of registers.
+///
+/// # Returns
+/// The strategy.
+fn reroll_clause(registers: usize) -> BoxedStrategy<RerollClause>
+{
+	let op = move || reroll_operand(registers, -1, 5);
+	let predicate = prop_oneof![
+		op().prop_map(Predicate::Eq),
+		op().prop_map(Predicate::Ne),
+		op().prop_map(Predicate::Lt),
+		op().prop_map(Predicate::Le),
+		op().prop_map(Predicate::Gt),
+		op().prop_map(Predicate::Ge),
+		prop::collection::vec(-2..=5, 0..=3).prop_map(Predicate::In),
+		(op(), op()).prop_map(|(start, end)| Predicate::InRange { start, end }),
+		(op(), op()).prop_map(|(start, end)| {
+			Predicate::InRangeInclusive { start, end }
 		})
-	));
+	];
+	let limit = prop_oneof![
+		reroll_operand(registers, -1, 3).prop_map(Limit::Times),
+		Just(Limit::Unlimited)
+	];
+	(predicate, limit)
+		.prop_map(|(predicate, limit)| RerollClause::Reroll(predicate, limit))
+		.boxed()
+}
+
+/// Answer a strategy that generates a [reroll program](RerollProgram): up to
+/// two registers, standard or custom dice or a range, and a reroll among up
+/// to two other clauses, drops, keeps, or rerolls.
+///
+/// # Returns
+/// The strategy.
+fn reroll_program() -> impl Strategy<Value = RerollProgram>
+{
+	prop::collection::vec((Just(1), 2..=3, -1..=1), 0..=2).prop_flat_map(
+		|registers| {
+			let n = registers.len();
+			let roll = prop_oneof![
+				(reroll_operand(n, 0, 3), reroll_operand(n, -1, 4)).prop_map(
+					|(count, faces)| RerollRoll::Standard(count, faces)
+				),
+				(
+					reroll_operand(n, 0, 3),
+					prop::collection::vec(-2..=3, 1..=3)
+				)
+					.prop_map(|(count, faces)| {
+						RerollRoll::Custom(count, faces)
+					}),
+				(reroll_operand(n, -1, 3), reroll_operand(n, -1, 3))
+					.prop_map(|(start, end)| RerollRoll::Range(start, end))
+			];
+			let count = move || reroll_operand(n, -1, 3);
+			let clause = prop_oneof![
+				count().prop_map(RerollClause::DropLowest),
+				count().prop_map(RerollClause::DropHighest),
+				count().prop_map(RerollClause::KeepLowest),
+				count().prop_map(RerollClause::KeepHighest),
+				reroll_clause(n)
+			];
+			(
+				Just(registers),
+				roll,
+				prop::collection::vec(clause, 0..=2),
+				reroll_clause(n),
+				any::<prop::sample::Index>()
+			)
+				.prop_map(
+					|(registers, roll, mut clauses, reroll, at)| {
+						clauses.insert(at.index(clauses.len() + 1), reroll);
+						RerollProgram {
+							registers,
+							roll,
+							clauses
+						}
+					}
+				)
+		}
+	)
+}
+
+proptest! {
+	#![proptest_config(ProptestConfig::with_cases(512))]
+
+	/// Rerolls answer the law of their definition, optimized or not, whether
+	/// before or after drops and keeps, of every predicate form, limited or
+	/// not, with fixed or random operands, some of them shared, and their
+	/// totals are the counts of outcomes that their bounds report.
+	#[test]
+	fn test_rerolls_agree_with_reference(program in reroll_program())
+	{
+		let assembly = program.assembly();
+		let function = Assembler::assemble(&assembly).unwrap();
+		let expected = program.reference();
+		for function in [function.clone(), optimize(function, Passes::all())]
+		{
+			let evaluator = Evaluator::new(function);
+			let propagated = propagate(&evaluator, []).unwrap();
+			prop_assert!(
+				agree(&propagated, &expected),
+				"{assembly}\npropagated:\n{propagated}\nexpected:\n{expected}"
+			);
+			if let Some(count) = evaluator.bounds_over([], []).unwrap().count
+				&& count < u128::MAX
+			{
+				prop_assert_eq!(
+					propagated.total(),
+					&Weight::from(count),
+					"{}",
+					assembly
+				);
+			}
+		}
+	}
 }

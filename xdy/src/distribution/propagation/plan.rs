@@ -175,6 +175,49 @@ impl Plan
 	pub(crate) fn steps(&self, pc: ProgramCounter) -> &[Step] { &self.0[pc.0] }
 }
 
+/// Answer whether a reroll reads the rolling record at the specified location
+/// after the specified instruction, before a roll refills it, so that a split
+/// that fixes the record's results must keep the die from which the reroll
+/// draws replacements. Only the roll that fills a record changes its die.
+///
+/// # Parameters
+/// - `instructions`: The instructions of a function.
+/// - `pc`: The program counter of the instruction.
+/// - `location`: The location.
+///
+/// # Returns
+/// `true` if the location is a rolling record that a later reroll reads before
+/// a roll refills it, `false` otherwise.
+pub(crate) fn rerolled(
+	instructions: &[Instruction],
+	pc: ProgramCounter,
+	location: Location
+) -> bool
+{
+	let Location::RollingRecord(rec) = location
+	else
+	{
+		return false
+	};
+	for inst in &instructions[pc.0 + 1..]
+	{
+		if inst.destination() != Some(AddressingMode::RollingRecord(rec))
+		{
+			continue
+		}
+		match inst
+		{
+			Instruction::Reroll(_) => return true,
+			Instruction::RollRange(_)
+			| Instruction::RollStandardDice(_)
+			| Instruction::RollCustomDice(_) => return false,
+			_ =>
+			{}
+		}
+	}
+	false
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                  Values.                                   //
 ////////////////////////////////////////////////////////////////////////////////
@@ -271,11 +314,13 @@ impl Values
 					values[value].readers.push(pc);
 				}
 			}
+			// A reroll rolls dice too.
 			let rolls = matches!(
 				inst,
 				Instruction::RollRange(_)
 					| Instruction::RollStandardDice(_)
 					| Instruction::RollCustomDice(_)
+					| Instruction::Reroll(_)
 			);
 			let random = rolls || read.iter().any(|&v| values[v].random);
 			let location = Location::written_by(inst);

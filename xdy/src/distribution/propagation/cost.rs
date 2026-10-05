@@ -1661,8 +1661,8 @@ impl InstructionVisitor<()> for Pricing<'_>
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
 	{
-		// The pass does not weigh rerolls yet, so a reroll costs more than any
-		// budget but the unlimited one admits.
+		// The cost model does not price rerolls yet, so a reroll costs more
+		// than any budget but the unlimited one admits.
 		for op in inst.operands()
 		{
 			self.read(op);

@@ -15,6 +15,15 @@
 //! rolls with fixed operands, one for each outcome of its operands, whose sum
 //! is the mixture of their sums.
 //!
+//! A reroll counts its branches as though each die still kept rolled in
+//! advance every reroll that it might need, as
+//! [`Bounds::count`](crate::Bounds::count) does, so that every path is equally
+//! likely. Before any drop, the dice of a roll are independent and alike, so a
+//! reroll changes only the law of each die; after a drop, it conditions
+//! exactly on the multisets of the dice still kept. A reroll whose thresholds,
+//! endpoints, or limit are random splits each setup of its record by their
+//! joint outcomes, as a drop does by its count.
+//!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of
 //! an instruction are independent unless some random value reaches both, which
@@ -74,16 +83,16 @@ use meter::{
 	Budget, Dimension, Exhausted, Halt, Meter, Progress, Usage, charge_of
 };
 use mixture::Mixture;
-use plan::{Location, Plan, Step};
+use plan::{Location, Plan, Step, rerolled};
 use record::{Roll, clamp, convolve, distinct_faces};
 
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
 	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
-	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod,
-	Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
-	Weight, add, div, exp, max, r#mod, mul, neg, sub
+	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max,
+	Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
+	SumRollingRecord, Weight, add, div, exp, max, r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -558,7 +567,12 @@ pub(crate) fn propagate_worlds(
 			let before = cells(&worlds);
 			worlds = match step
 			{
-				Step::Split(location) => split(worlds, *location, &mut meter)?,
+				Step::Split(location) =>
+				{
+					let rerolled =
+						rerolled(&function.instructions, pc, *location);
+					split(worlds, *location, rerolled, &mut meter)?
+				},
 				Step::Merge {
 					split,
 					survivor,
@@ -783,6 +797,9 @@ impl World
 /// # Parameters
 /// - `worlds`: The worlds.
 /// - `location`: The location, which is not the answer.
+/// - `rerolled`: Whether a reroll reads the location, a rolling record, before
+///   a roll refills it, so that its outcomes keep the die from which the reroll
+///   draws.
 /// - `meter`: The meter, which the split charges for the outcomes of each
 ///   world, and for the cells of each world that it makes, before it makes
 ///   them.
@@ -804,13 +821,14 @@ impl World
 fn split(
 	worlds: Vec<World>,
 	location: Location,
+	rerolled: bool,
 	meter: &mut Meter
 ) -> Result<Vec<World>, Halt>
 {
 	let mut split = Vec::new();
 	for world in worlds
 	{
-		let outcomes = world.outcomes(location, meter)?;
+		let outcomes = world.outcomes(location, rerolled, meter)?;
 		// Each world of the split copies this one, and holds its outcome twice:
 		// at the location, and atop the stack.
 		let cells = world.cells() as u128;
@@ -837,6 +855,8 @@ impl World
 	/// # Parameters
 	/// - `location`: The location, which is not the answer, and whose value no
 	///   instruction has read yet.
+	/// - `rerolled`: Whether a reroll reads the location, a rolling record,
+	///   before a roll refills it.
 	/// - `meter`: The meter, to which the outcomes stay charged.
 	///
 	/// # Returns
@@ -847,6 +867,7 @@ impl World
 	fn outcomes(
 		&self,
 		location: Location,
+		rerolled: bool,
 		meter: &mut Meter
 	) -> Result<Vec<(Outcome, Weight)>, Halt>
 	{
@@ -877,7 +898,7 @@ impl World
 			},
 			Location::RollingRecord(rec) => Ok(self.records[rec.0]
 				.mixture
-				.outcomes(meter)?
+				.outcomes(rerolled, meter)?
 				.into_iter()
 				.map(|(mixture, weight)| (Outcome::Record(mixture), weight))
 				.collect()),
@@ -1313,29 +1334,80 @@ impl World
 		meter: &mut Meter
 	) -> Result<Pairs, Halt>
 	{
-		match op1
+		Ok(self
+			.read_joint(&[op1, op2], meter)?
+			.into_iter()
+			.map(|(values, w)| ((values[0], values[1]), w))
+			.collect())
+	}
+
+	/// Read the joint distribution of the specified operands, which are
+	/// independent unless some are the same register, whose value they then
+	/// share. Each distinct register is read once, in the order of its first
+	/// operand.
+	///
+	/// # Parameters
+	/// - `ops`: The operands, each an immediate or a register.
+	/// - `meter`: The meter, which the tuples charge a step and a cell apiece.
+	///
+	/// # Returns
+	/// The tuples of values of the operands, in the order of the operands,
+	/// each with its weight. Without operands, there is one empty tuple, of
+	/// weight one.
+	///
+	/// # Errors
+	/// [`Halt`] if reading would exceed the budget or is cancelled.
+	fn read_joint(
+		&mut self,
+		ops: &[AddressingMode],
+		meter: &mut Meter
+	) -> Result<Vec<(Vec<i32>, Weight)>, Halt>
+	{
+		// The position of each operand's value among the values read.
+		let mut read = Vec::<AddressingMode>::new();
+		let mut positions = Vec::with_capacity(ops.len());
+		let mut values = Vec::<Distribution>::new();
+		for &op in ops
 		{
-			AddressingMode::Register(_) if op1 == op2 =>
+			match read.iter().position(|&other| {
+				matches!(op, AddressingMode::Register(_)) && other == op
+			})
 			{
-				let xs = self.read(op1, meter)?;
-				let len = xs.len() as u64;
-				meter.charge(len, len)?;
-				Ok(xs.into_iter().map(|(x, w)| ((x, x), w)).collect())
-			},
-			_ =>
-			{
-				let xs = self.read(op1, meter)?;
-				let ys = self.read(op2, meter)?;
-				let pairs = charge_of(xs.len() as u128 * ys.len() as u128);
-				meter.charge(pairs, pairs)?;
-				Ok(xs
-					.iter()
-					.flat_map(|(x, wx)| {
-						ys.iter().map(move |(y, wy)| ((x, y), wx * wy))
-					})
-					.collect())
+				Some(position) => positions.push(position),
+				None =>
+				{
+					positions.push(read.len());
+					read.push(op);
+					values.push(self.read(op, meter)?);
+				}
 			}
 		}
+		let tuples = charge_of(
+			values
+				.iter()
+				.fold(1u128, |tuples, xs| tuples * xs.len() as u128)
+		);
+		meter.charge(tuples, tuples)?;
+		let mut joint = vec![(Vec::<i32>::new(), Weight::ONE)];
+		for xs in &values
+		{
+			joint = joint
+				.iter()
+				.flat_map(|(tuple, w)| {
+					xs.iter().map(move |(x, wx)| {
+						let mut tuple = tuple.clone();
+						tuple.push(x);
+						(tuple, w * wx)
+					})
+				})
+				.collect();
+		}
+		Ok(joint
+			.into_iter()
+			.map(|(tuple, w)| {
+				(positions.iter().map(|&p| tuple[p]).collect(), w)
+			})
+			.collect())
 	}
 
 	/// Set the distribution of the specified register. A distribution with
@@ -1793,12 +1865,40 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		Ok(())
 	}
 
-	fn visit_reroll(&mut self, _inst: &Reroll) -> Result<(), Halt>
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), Halt>
 	{
-		// The pass does not weigh rerolls yet, so it prices a reroll beyond
-		// every budget, as the estimate does, and refuses it.
-		self.meter.charge(u64::MAX, u64::MAX)?;
-		unimplemented!("the forward pass does not weigh rerolls yet")
+		let Self { world, meter } = self;
+		let ops = inst.operands();
+		let joint = world.read_joint(&ops, meter)?;
+		// Each joint outcome of the operands resolves the predicate, which
+		// holds a copy of a list of literals.
+		let listed = match &inst.predicate
+		{
+			Predicate::In(values) => values.len() as u128,
+			_ => 0
+		};
+		let resolved = charge_of(joint.len() as u128 * (1 + listed));
+		meter.charge(resolved, resolved)?;
+		let rerolls = joint
+			.into_iter()
+			.map(|(values, w)| {
+				let value = |op: AddressingMode| {
+					values[ops.iter().position(|&o| o == op).unwrap()]
+				};
+				let criterion = inst.predicate.resolve(value);
+				let limit = match inst.limit
+				{
+					Limit::Times(count) => Some(value(count)),
+					Limit::Unlimited => None
+				};
+				(criterion, limit, w)
+			})
+			.collect::<Vec<_>>();
+		let record = &mut world.records[inst.dest.0];
+		record.mixture.reroll(&rerolls, meter)?;
+		// The reroll writes a new value, which no sum has read yet.
+		record.summed = false;
+		Ok(())
 	}
 
 	fn visit_sum_rolling_record(
