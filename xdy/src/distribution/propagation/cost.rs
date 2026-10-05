@@ -1034,7 +1034,7 @@ impl Shadow
 		let records = self
 			.records
 			.iter()
-			.fold(0u128, |cells, record| cells.saturating_add(record.cells));
+			.fold(0u128, |cells, record| cells.saturating_add(record.cells()));
 		registers
 			.saturating_add(records)
 			.saturating_add(self.answer.map_or(0, |answer| answer.support))
@@ -1538,16 +1538,14 @@ impl InstructionVisitor<()> for Pricing<'_>
 		let widest = width((start.bounds.min, end.bounds.max).into());
 		let narrowest = width((start.bounds.max, end.bounds.min).into());
 		self.shadow.log += lcm_log(widest, widest - narrowest + 1);
-		let record = Record {
+		let record = Record::rolled(Part {
 			kind: Kind::Range { start, end },
 			setups: pairs,
 			cells: pairs,
 			dice: 0,
 			lowest: 0.into(),
-			highest: 0.into(),
-			summed: false,
-			random: true
-		};
+			highest: 0.into()
+		});
 		self.fill(inst.dest.0, record);
 		Ok(())
 	}
@@ -1582,7 +1580,7 @@ impl InstructionVisitor<()> for Pricing<'_>
 			width((faces.bounds.min.max(1), faces.bounds.max).into());
 		self.shadow.log +=
 			greatest * lcm_log(faces.bounds.max.max(0) as u128, faces_in_any);
-		let record = Record {
+		let record = Record::rolled(Part {
 			kind: Kind::Standard {
 				count,
 				faces,
@@ -1593,10 +1591,8 @@ impl InstructionVisitor<()> for Pricing<'_>
 			cells: pairs,
 			dice,
 			lowest: 0.into(),
-			highest: 0.into(),
-			summed: false,
-			random: true
-		};
+			highest: 0.into()
+		});
 		self.fill(inst.dest.0, record);
 		Ok(())
 	}
@@ -1621,16 +1617,14 @@ impl InstructionVisitor<()> for Pricing<'_>
 		self.shadow.log +=
 			count.bounds.max.max(0) as f64 * (raw as f64).log2().max(0.0);
 		let cells = count.support.saturating_mul(1 + die.faces);
-		let record = Record {
+		let record = Record::rolled(Part {
 			kind: Kind::Custom { count, die },
 			setups: count.support,
 			cells,
 			dice,
 			lowest: 0.into(),
-			highest: 0.into(),
-			summed: false,
-			random: true
-		};
+			highest: 0.into()
+		});
 		self.fill(inst.dest.0, record);
 		Ok(())
 	}
@@ -1840,11 +1834,13 @@ impl Pricing<'_>
 		self.shadow.class.drops |= count.max > 0;
 		// A negative count drops nothing, and the drops accumulate.
 		let count = count.max(0.into());
-		let record = &mut self.shadow.records[dest];
-		match lowest
+		for part in &mut self.shadow.records[dest].parts
 		{
-			true => record.lowest += count,
-			false => record.highest += count
+			match lowest
+			{
+				true => part.lowest += count,
+				false => part.highest += count
+			}
 		}
 	}
 
@@ -1862,17 +1858,19 @@ impl Pricing<'_>
 	fn keep(&mut self, dest: usize, op: AddressingMode, highest: bool)
 	{
 		let count = self.clause(dest, op);
-		let record = &mut self.shadow.records[dest];
-		// A count of zero or less keeps nothing, so it drops every result
-		// still kept.
-		let kept =
-			(record.results() - record.lowest - record.highest).max(0.into());
-		let dropped = (kept - count.max(0.into())).max(0.into());
-		self.shadow.class.drops |= dropped.max > 0;
-		match highest
+		for part in &mut self.shadow.records[dest].parts
 		{
-			true => record.lowest += dropped,
-			false => record.highest += dropped
+			// A count of zero or less keeps nothing, so it drops every result
+			// still kept.
+			let kept =
+				(part.results() - part.lowest - part.highest).max(0.into());
+			let dropped = (kept - count.max(0.into())).max(0.into());
+			self.shadow.class.drops |= dropped.max > 0;
+			match highest
+			{
+				true => part.lowest += dropped,
+				false => part.highest += dropped
+			}
 		}
 	}
 
@@ -1892,13 +1890,16 @@ impl Pricing<'_>
 		self.shadow.class.dynamic |= count.random;
 		let record = &mut self.shadow.records[dest];
 		let outcomes = count.support;
-		self.tally.charge(
-			outcomes.saturating_mul(record.setups.saturating_add(record.dice)),
-			outcomes.saturating_mul(record.cells)
-		);
-		record.setups = record.setups.saturating_mul(outcomes);
-		record.cells = record.cells.saturating_mul(outcomes);
-		record.dice = record.dice.saturating_mul(outcomes);
+		for part in &mut record.parts
+		{
+			self.tally.charge(
+				outcomes.saturating_mul(part.setups.saturating_add(part.dice)),
+				outcomes.saturating_mul(part.cells)
+			);
+			part.setups = part.setups.saturating_mul(outcomes);
+			part.cells = part.cells.saturating_mul(outcomes);
+			part.dice = part.dice.saturating_mul(outcomes);
+		}
 		record.random |= count.random;
 		record.summed = false;
 		count.bounds
@@ -2137,33 +2138,47 @@ impl Shadow
 //                              Rolling records.                              //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The bounds of a rolling record in every world.
+/// The bounds of a rolling record in every world: the bounds of its parts,
+/// which together bound the setups of its mixture.
+///
+/// The setups of a mixture may differ in kind, as when a reroll rewrites the
+/// law of the dice of some setups and leaves others as they were, so the
+/// shadow bounds them by parts, each of one kind, and prices every operation
+/// part by part. A record that no reroll has touched has one part.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Record
 {
-	/// The kind of the roll that filled the record.
-	kind: Kind,
-
-	/// A bound on the number of setups of the record's mixture.
-	setups: u128,
-
-	/// A bound on the cells of the record's mixture.
-	cells: u128,
-
-	/// A bound on the dice of all the setups of the record's mixture.
-	dice: u128,
-
-	/// The interval of the number of lowest results dropped.
-	lowest: EvaluationBounds,
-
-	/// The interval of the number of highest results dropped.
-	highest: EvaluationBounds,
+	/// The parts, which are not empty.
+	parts: Vec<Part>,
 
 	/// Whether the record's current value has been summed.
 	summed: bool,
 
 	/// Whether the record's sum depends on a roll.
 	random: bool
+}
+
+/// The bounds of some setups of a rolling record, all of one kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Part
+{
+	/// The kind of the setups.
+	kind: Kind,
+
+	/// A bound on the number of setups.
+	setups: u128,
+
+	/// A bound on the cells of the setups.
+	cells: u128,
+
+	/// A bound on the dice of the setups.
+	dice: u128,
+
+	/// The interval of the number of lowest results dropped.
+	lowest: EvaluationBounds,
+
+	/// The interval of the number of highest results dropped.
+	highest: EvaluationBounds
 }
 
 impl Default for Record
@@ -2173,15 +2188,59 @@ impl Default for Record
 	fn default() -> Self
 	{
 		Self {
-			kind: Kind::Empty,
-			setups: 1,
-			cells: 1,
-			dice: 0,
-			lowest: 0.into(),
-			highest: 0.into(),
+			parts: vec![Part {
+				kind: Kind::Empty,
+				setups: 1,
+				cells: 1,
+				dice: 0,
+				lowest: 0.into(),
+				highest: 0.into()
+			}],
 			summed: false,
 			random: false
 		}
+	}
+}
+
+impl Record
+{
+	/// Answer the bounds of a record freshly filled by a roll, whose setups are
+	/// those of the specified part.
+	///
+	/// # Parameters
+	/// - `part`: The part.
+	///
+	/// # Returns
+	/// The bounds.
+	fn rolled(part: Part) -> Self
+	{
+		Self {
+			parts: vec![part],
+			summed: false,
+			random: true
+		}
+	}
+
+	/// Answer a bound on the number of setups of the record's mixture.
+	///
+	/// # Returns
+	/// The bound.
+	fn setups(&self) -> u128
+	{
+		self.parts
+			.iter()
+			.fold(0u128, |setups, part| setups.saturating_add(part.setups))
+	}
+
+	/// Answer a bound on the cells of the record's mixture.
+	///
+	/// # Returns
+	/// The bound.
+	fn cells(&self) -> u128
+	{
+		self.parts
+			.iter()
+			.fold(0u128, |cells, part| cells.saturating_add(part.cells))
 	}
 }
 
@@ -2248,7 +2307,7 @@ impl Record
 		match self.summed
 		{
 			true => 0,
-			false => self.setups.saturating_mul(2).saturating_add(1)
+			false => self.setups().saturating_mul(2).saturating_add(1)
 		}
 	}
 
@@ -2259,11 +2318,79 @@ impl Record
 	/// `true` if it may.
 	fn scales(&self) -> bool
 	{
-		!self.summed && (self.kind != Kind::Empty || self.setups > 1)
+		!self.summed
+			&& (self.setups() > 1
+				|| self.parts.iter().any(|part| part.kind != Kind::Empty))
 	}
 
-	/// Answer the interval of the number of results of the record, as
-	/// [`Roll::results`](super::record::Roll) counts them, before any drops.
+	/// Answer whether the sum of the record certainly has at least two
+	/// outcomes in every world: whether every part's
+	/// [sum](Part::varied) does.
+	///
+	/// # Returns
+	/// `true` if the sum is varied.
+	fn varied(&self) -> bool { self.parts.iter().all(Part::varied) }
+
+	/// Answer whether the sum of the record certainly takes every value of the
+	/// specified interval in every world: whether the record has one part,
+	/// whose [sum](Part::dense) does.
+	///
+	/// # Parameters
+	/// - `bounds`: The interval of the sum.
+	///
+	/// # Returns
+	/// `true` if the sum takes every value of the interval.
+	fn dense(&self, bounds: EvaluationBounds) -> bool
+	{
+		match self.parts.as_slice()
+		{
+			[part] => part.dense(bounds),
+			_ => false
+		}
+	}
+
+	/// Fix the record to one of its outcomes, as a split does.
+	///
+	/// # Parameters
+	/// - `cells`: A bound on the cells of an outcome.
+	fn fix(&mut self, cells: u128)
+	{
+		// The outcome keeps the drops of the setup that it came from.
+		let (lowest, highest) = self.parts[1..].iter().fold(
+			(self.parts[0].lowest, self.parts[0].highest),
+			|(lowest, highest), part| {
+				(hull(lowest, part.lowest), hull(highest, part.highest))
+			}
+		);
+		self.parts = vec![Part {
+			kind: Kind::Results(cells - 1),
+			setups: 1,
+			cells,
+			dice: 0,
+			lowest,
+			highest
+		}];
+		self.summed = false;
+	}
+}
+
+/// Answer the least interval that contains both of the specified intervals.
+///
+/// # Parameters
+/// - `a`: One interval.
+/// - `b`: The other interval.
+///
+/// # Returns
+/// The hull.
+fn hull(a: EvaluationBounds, b: EvaluationBounds) -> EvaluationBounds
+{
+	(a.min.min(b.min), a.max.max(b.max)).into()
+}
+
+impl Part
+{
+	/// Answer the interval of the number of results of each setup of the part,
+	/// as [`Roll::results`](super::record::Roll) counts them, before any drops.
 	/// Results fixed by a split may number anything, since the shadow keeps
 	/// only the number of their distinct values.
 	///
@@ -2296,8 +2423,8 @@ impl Record
 		)
 	}
 
-	/// Answer whether the sum of the record certainly has at least two
-	/// outcomes in every world: whether every setup keeps a die of at least
+	/// Answer whether the sum of each setup of the part certainly has at least
+	/// two outcomes in every world: whether every setup keeps a die of at least
 	/// two faces, or a range of at least two values, without saturating, so
 	/// that rolling every die at its least face and every die at its greatest
 	/// reach different sums.
@@ -2334,7 +2461,7 @@ impl Record
 		}
 	}
 
-	/// Answer whether the sum of the record certainly takes every value of the
+	/// Answer whether the sum of the part certainly takes every value of the
 	/// specified interval in every world: whether its operands and drops are
 	/// fixed, and it keeps a range, or dice whose faces leave no gap, or
 	/// whether it rolls standard dice of fixed faces, without drops, and a
@@ -2405,24 +2532,6 @@ impl Record
 		reached.is_some_and(|(least, greatest)| {
 			least == bounds.min as i64 && greatest == bounds.max as i64
 		})
-	}
-
-	/// Fix the record to one of its outcomes, as a split does.
-	///
-	/// # Parameters
-	/// - `cells`: A bound on the cells of an outcome.
-	fn fix(&mut self, cells: u128)
-	{
-		*self = Record {
-			kind: Kind::Results(cells - 1),
-			setups: 1,
-			cells,
-			dice: 0,
-			lowest: self.lowest,
-			highest: self.highest,
-			summed: false,
-			random: self.random
-		};
 	}
 }
 
@@ -2693,12 +2802,50 @@ impl Record
 	/// The tally of the sum, and a bound on its support.
 	fn sum(&self, limit: u128) -> (Tally, u128)
 	{
-		if self.setups == 1
+		let total = self.setups();
+		if let [part] = self.parts.as_slice()
+			&& total == 1
 		{
 			// A record of one setup of weight one needs no scaling.
-			return self.setup_sum(limit)
+			return part.setup_sum(limit)
 		}
-		let (setups, outcomes) = match &self.kind
+		// The setups of the parts join the sums in any order.
+		let (setups, outcomes) = self
+			.parts
+			.iter()
+			.map(|part| part.sums(limit))
+			.reduce(|(a, la), (b, lb)| (a.beside(b), la.saturating_add(lb)))
+			.expect("a record has parts");
+		// The sums hold the outcomes of the setups' sums, and no more than the
+		// interval holds.
+		let outcomes = outcomes.min(limit);
+		let mut tally = Tally::default();
+		// The denominator, and a step for each setup. The sums grow as the
+		// setups join them, to at most the outcomes of the sum.
+		tally.charge(total.saturating_mul(2), outcomes);
+		tally.then(setups);
+		// The sums become the distribution.
+		tally.charge(outcomes, outcomes);
+		tally.keep(outcomes.saturating_mul(2), outcomes);
+		(tally, outcomes)
+	}
+}
+
+impl Part
+{
+	/// Sum the setups of the part within a mixture, as
+	/// [`Mixture::sum`](super::mixture::Mixture::sum) does once it has found
+	/// their common denominator.
+	///
+	/// # Parameters
+	/// - `limit`: The width of the interval of the sum.
+	///
+	/// # Returns
+	/// The tally of the setups, whose sums the sums keep, and a bound on the
+	/// outcomes of their sums together.
+	fn sums(&self, limit: u128) -> (Tally, u128)
+	{
+		match &self.kind
 		{
 			Kind::Empty | Kind::Results(_) =>
 			{
@@ -2710,22 +2857,10 @@ impl Record
 			},
 			Kind::Range { start, end } => (self.range_sums(start, end), limit),
 			Kind::Standard { .. } | Kind::Custom { .. } => self.dice_sums(limit)
-		};
-		// The sums hold the outcomes of the setups' sums, and no more than the
-		// interval holds.
-		let outcomes = outcomes.min(limit);
-		let mut tally = Tally::default();
-		// The denominator, and a step for each setup. The sums grow as the
-		// setups join them, to at most the outcomes of the sum.
-		tally.charge(self.setups.saturating_mul(2), outcomes);
-		tally.then(setups);
-		// The sums become the distribution.
-		tally.charge(outcomes, outcomes);
-		tally.keep(outcomes.saturating_mul(2), outcomes);
-		(tally, outcomes)
+		}
 	}
 
-	/// Sum a record of one setup, as [`setup_sum`](super::mixture) does,
+	/// Sum a part of one setup, as [`setup_sum`](super::mixture) does,
 	/// whatever the values of its operands in each world.
 	///
 	/// # Parameters
@@ -3610,7 +3745,29 @@ impl Record
 	fn outcomes(&self, tally: &mut Tally) -> (u128, u128)
 	{
 		// The denominator, and a step for each setup.
-		tally.charge(self.setups.saturating_mul(2), 0);
+		tally.charge(self.setups().saturating_mul(2), 0);
+		self.parts
+			.iter()
+			.fold((0u128, 0u128), |(outcomes, cells), part| {
+				let (more, each) = part.outcomes(tally);
+				(outcomes.saturating_add(more), cells.max(each))
+			})
+	}
+}
+
+impl Part
+{
+	/// Enumerate the outcomes of the setups of the part, as
+	/// [`Mixture::outcomes`](super::mixture::Mixture::outcomes) does, once it
+	/// has found their common denominator.
+	///
+	/// # Parameters
+	/// - `tally`: The tally, to which the outcomes stay charged.
+	///
+	/// # Returns
+	/// A bound on the number of outcomes, and on the cells of each.
+	fn outcomes(&self, tally: &mut Tally) -> (u128, u128)
+	{
 		let mut each = Tally::default();
 		let (outcomes, cells) = match &self.kind
 		{
