@@ -3468,7 +3468,7 @@ impl ClauseProgram
 	fn model(&self, records: &[crate::RollingRecord]) -> i32
 	{
 		let (dice, ranges) = records.split_last().unwrap();
-		let mut ranges = ranges.iter().map(|record| record.results[0]);
+		let mut ranges = ranges.iter().map(|record| record.dice[0].value);
 		let counts = self
 			.counts()
 			.into_iter()
@@ -3478,7 +3478,8 @@ impl ClauseProgram
 				ClauseCount::Rolled(..) => ranges.next().unwrap()
 			})
 			.collect::<Vec<_>>();
-		self.slice(&counts, &dice.results)
+		let results = dice.dice.iter().map(|die| die.value).collect::<Vec<_>>();
+		self.slice(&counts, &results)
 	}
 
 	/// Answer the distribution of the program, by enumerating every branch of

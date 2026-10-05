@@ -8,10 +8,11 @@
 use std::{collections::HashSet, ops::RangeInclusive};
 
 use pretty_assertions::assert_eq;
-use rand::{Rng as _, SeedableRng, rngs::StdRng};
+use rand::{Rng as _, RngExt as _, SeedableRng, rngs::StdRng};
 
 use crate::{
-	Budget, EvaluationError, Evaluator, Passes, RollingRecordKind, Unobserved,
+	Budget, Die, EvaluationError, Evaluator, Passes, RollingRecord,
+	RollingRecordKind, Unobserved,
 	support::{
 		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
 	}
@@ -83,7 +84,7 @@ fn test_evaluation()
 				result
 					.records
 					.iter()
-					.map(|record| record.results.len() as u64)
+					.map(|record| record.dice.len() as u64)
 					.sum::<u64>(),
 				"case {}: {}: misreported dice",
 				index + 1,
@@ -101,7 +102,7 @@ fn test_evaluation()
 				result
 					.records
 					.iter()
-					.map(|record| record.results[0].to_string())
+					.map(|record| record.dice[0].value.to_string())
 					.collect::<Vec<_>>()
 					.join(", ")
 			);
@@ -115,7 +116,7 @@ fn test_evaluation()
 					RollingRecordKind::Range { start, end } =>
 					{
 						assert_eq!(
-							record.results.len(),
+							record.dice.len(),
 							1,
 							"case {}: {}: wrong number of results",
 							index + 1,
@@ -124,12 +125,12 @@ fn test_evaluation()
 						if end < start
 						{
 							assert_eq!(
-								record.results[0],
+								record.dice[0].value,
 								0,
 								"case {}: {}: roll out of bounds: {} ∉ {}..={}",
 								index + 1,
 								key,
-								record.results[0],
+								record.dice[0].value,
 								start,
 								end
 							);
@@ -137,11 +138,11 @@ fn test_evaluation()
 						else
 						{
 							assert!(
-								(start..=end).contains(&record.results[0]),
+								(start..=end).contains(&record.dice[0].value),
 								"case {}: {}: roll out of bounds: {} ∉ {}..={}",
 								index + 1,
 								key,
-								record.results[0],
+								record.dice[0].value,
 								start,
 								end
 							);
@@ -150,13 +151,13 @@ fn test_evaluation()
 					RollingRecordKind::Standard { count, faces } =>
 					{
 						assert_eq!(
-							record.results.len(),
+							record.dice.len(),
 							count.max(0) as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,
 							key
 						);
-						for result in record.results
+						for result in record.dice.iter().map(|die| die.value)
 						{
 							match faces <= 0
 							{
@@ -182,13 +183,13 @@ fn test_evaluation()
 					RollingRecordKind::Custom { count, faces } =>
 					{
 						assert_eq!(
-							record.results.len(),
+							record.dice.len(),
 							count as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,
 							key
 						);
-						for result in record.results
+						for result in record.dice.iter().map(|die| die.value)
 						{
 							assert!(
 								faces.contains(&result),
@@ -655,6 +656,230 @@ fn test_optimizer_respects_clamping()
 						.unwrap()
 				});
 			assert_eq!(optimized, unoptimized, "{} with {}", source, x);
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                            Crossed-out records.                            //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Answer a rolling record of standard dice with the specified results, all of
+/// them kept.
+///
+/// # Parameters
+/// - `faces`: The number of faces on each die.
+/// - `results`: The results, in the order rolled.
+///
+/// # Returns
+/// The rolling record.
+fn record(faces: i32, results: &[i32]) -> RollingRecord
+{
+	RollingRecord {
+		kind: RollingRecordKind::Standard {
+			count: results.len() as i32,
+			faces
+		},
+		dice: results.iter().copied().map(Die::kept).collect()
+	}
+}
+
+/// Test that drops and keeps cross out the lowest or highest dice still kept,
+/// and of equal dice, the first rolled, and that a record prints its dice in
+/// the order rolled, each crossed-out die prefixed with `~`.
+#[test]
+fn test_cross_out_first_rolled_first()
+{
+	type Clause = fn(&mut RollingRecord, i32);
+	let drop_lowest: Clause = RollingRecord::drop_lowest;
+	let drop_highest: Clause = RollingRecord::drop_highest;
+	let keep_lowest: Clause = RollingRecord::keep_lowest;
+	let keep_highest: Clause = RollingRecord::keep_highest;
+	for (results, clauses, expected) in [
+		(
+			&[3, 1, 4, 1][..],
+			&[(drop_lowest, 1)][..],
+			"4D6: [3, ~1, 4, 1]"
+		),
+		(&[3, 1, 4, 1], &[(drop_lowest, 2)], "4D6: [3, ~1, 4, ~1]"),
+		(&[2, 6, 1, 6], &[(drop_highest, 1)], "4D6: [2, ~6, 1, 6]"),
+		(&[3, 3], &[(keep_highest, 1)], "2D6: [~3, 3]"),
+		(&[3, 3], &[(keep_lowest, 1)], "2D6: [~3, 3]"),
+		(
+			&[5, 5, 5],
+			&[(drop_lowest, 1), (drop_highest, 1)],
+			"3D6: [~5, ~5, 5]"
+		),
+		(
+			&[5, 2, 6, 3],
+			&[(drop_lowest, 1), (keep_lowest, 2)],
+			"4D6: [5, ~2, ~6, 3]"
+		),
+		(
+			&[5, 2, 6, 3],
+			&[(keep_lowest, 2), (drop_lowest, 1)],
+			"4D6: [~5, ~2, ~6, 3]"
+		),
+		(
+			&[4, 1, 6],
+			&[(drop_lowest, -1), (drop_highest, 0)],
+			"3D6: [4, 1, 6]"
+		),
+		(&[4, 1, 6], &[(drop_lowest, 7)], "3D6: [~4, ~1, ~6]"),
+		(&[4, 1, 6], &[(keep_highest, 0)], "3D6: [~4, ~1, ~6]"),
+		(&[4, 1, 6], &[(keep_highest, 7)], "3D6: [4, 1, 6]"),
+		(&[], &[(drop_lowest, 1), (keep_highest, 1)], "0D6: []")
+	]
+	{
+		let mut record = record(6, results);
+		for (clause, count) in clauses
+		{
+			clause(&mut record, *count);
+		}
+		assert_eq!(record.to_string(), expected, "{:?}", results);
+		assert_eq!(record.dice.len(), results.len());
+		assert_eq!(
+			record.dice.iter().map(|die| die.value).collect::<Vec<_>>(),
+			results,
+			"the dice moved"
+		);
+	}
+}
+
+/// Test that crossing out dice keeps the same results as counting the drops
+/// from the ends of the sorted results did through 0.14, for random results
+/// with many ties and random clauses with every kind of count, so that every
+/// sum is unchanged. The forward pass and the Lean specification still count
+/// drops, so they rely on this agreement.
+#[test]
+fn test_cross_out_agrees_with_drop_counts()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(5091283750192837);
+	for _ in 0..10_000
+	{
+		let len = rng.random_range(0..=6);
+		let results = (0..len)
+			.map(|_| rng.random_range(-2..=3))
+			.collect::<Vec<_>>();
+		let mut record = record(6, &results);
+		// The model of 0.14: sorted results and the counts of the lowest and
+		// highest results dropped, each clamped to the number of results.
+		let mut sorted = results.clone();
+		sorted.sort();
+		let (mut lowest, mut highest) = (0i32, 0i32);
+		let drop = |total: i32, count: i32| {
+			total.saturating_add(count.max(0)).clamp(0, len)
+		};
+		for _ in 0..rng.random_range(0..=4)
+		{
+			let count = rng.random_range(-2..=len + 2);
+			let kept = (len - lowest - highest).max(0);
+			let keep = kept - count.clamp(0, kept);
+			match rng.random_range(0..4)
+			{
+				0 =>
+				{
+					record.drop_lowest(count);
+					lowest = drop(lowest, count);
+				},
+				1 =>
+				{
+					record.drop_highest(count);
+					highest = drop(highest, count);
+				},
+				2 =>
+				{
+					record.keep_lowest(count);
+					highest = drop(highest, keep);
+				},
+				_ =>
+				{
+					record.keep_highest(count);
+					lowest = drop(lowest, keep);
+				}
+			}
+		}
+		let kept = (len - lowest - highest).max(0) as usize;
+		let expected = sorted
+			.iter()
+			.copied()
+			.skip(lowest as usize)
+			.take(kept)
+			.collect::<Vec<_>>();
+		let mut actual = record.kept();
+		actual.sort();
+		assert_eq!(actual, expected, "{}", record);
+		let mut dropped = record.dropped();
+		dropped.extend(record.kept());
+		dropped.sort();
+		assert_eq!(dropped, sorted, "{}", record);
+		assert_eq!(
+			record.sum(),
+			expected.iter().fold(0i32, |a, b| a.saturating_add(*b)),
+			"{}",
+			record
+		);
+	}
+}
+
+/// Test that a record sums its kept results in ascending order, not in the
+/// order rolled, since saturating addition is not associative.
+#[test]
+fn test_sum_folds_in_ascending_order()
+{
+	let mut record = RollingRecord {
+		kind: RollingRecordKind::Custom {
+			count: 3,
+			faces: vec![i32::MAX, 1, -1]
+		},
+		dice: [i32::MAX, 1, -1].into_iter().map(Die::kept).collect()
+	};
+	assert_eq!(record.sum(), i32::MAX);
+	record.drop_highest(1);
+	assert_eq!(record.sum(), 0);
+	assert_eq!(
+		record.to_string(),
+		"3d[2147483647, 1, -1]: [~2147483647, 1, -1]"
+	);
+}
+
+/// Test that evaluation leaves the dice of each record in the order rolled,
+/// crossing out the dice that its clauses drop, so that the record shows the
+/// whole roll: the dice that a drop crosses out are the lowest, and the first
+/// rolled of any equal to them, and the kept dice sum to the result.
+#[test]
+fn test_evaluation_crosses_out_dice()
+{
+	let mut evaluator = Evaluator::new(compile_valid("8D3 drop lowest 3"));
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(7120598172305981);
+	for _ in 0..100
+	{
+		let evaluation = evaluator.evaluate([], &mut rng).unwrap();
+		let [record] = &evaluation.records[..]
+		else
+		{
+			panic!("expected one record: {:?}", evaluation.records)
+		};
+		assert_eq!(record.dice.len(), 8);
+		assert_eq!(record.dropped().len(), 3);
+		assert_eq!(record.kept().iter().sum::<i32>(), evaluation.result);
+		// Crossing out the lowest dice, first rolled first, crosses out exactly
+		// the first 3 dice in order of value and then of position.
+		let mut order = (0..8).collect::<Vec<_>>();
+		order.sort_by_key(|&i| (record.dice[i].value, i));
+		for (rank, &i) in order.iter().enumerate()
+		{
+			assert_eq!(
+				record.dice[i].is_kept(),
+				rank >= 3,
+				"die {} of {}",
+				i,
+				record
+			);
 		}
 	}
 }

@@ -4,13 +4,17 @@ import Xdy.Record
 # Rolling records, in roll order
 
 A rolling record holds the results of one range or one set of dice, together
-with how many of its lowest and highest results have been dropped. Mirrors
+with how many of its lowest and highest results have been dropped. Models
 `RollingRecord` in `xdy/src/evaluator.rs` and its methods in
 `xdy/src/primitives.rs`.
 
-Like the Rust record, and unlike the oracle's `Xdy.Record`, this one keeps its
-results in the order they were rolled, and sorts them only to find the ones
-that its drops keep. The oracle sorts on arrival so that it can merge states
+The Rust record crosses out each die that a drop or keep drops, always the
+lowest or highest of the dice still kept. Only the multiset of the kept dice
+reaches its sum or any later drop or keep, and counting the lowest and highest
+results dropped determines that multiset, so this record keeps counts instead
+of crossing anything out. Like the Rust record, and unlike the oracle's
+`Xdy.Record`, this one keeps its results in the order they were rolled, and
+sorts them only to find the ones that its drops keep. The oracle sorts on arrival so that it can merge states
 that differ only in the order of their rolls; the specification merges
 nothing, so it follows the Rust as written. `toOracle` reads a record as the
 oracle's by sorting it, and the lemmas beside it, that sorting commutes with
@@ -160,8 +164,8 @@ def keepHighest (r : Record) (count : Int) : Record :=
   r.dropLowest (Xdy.Record.keepDrops r.results.length r.lowest r.highest count)
 
 /--
-Answer the results in ascending order, as `kept` in `primitives.rs` sorts a
-copy of them.
+Answer the results in ascending order, the order in which `sum` in
+`primitives.rs` folds the kept results.
 
 # Parameters
 - `r`: The record.
@@ -182,8 +186,8 @@ def sorted (r : Record) : List Int := r.results.mergeSort (· ≤ ·)
 
 /--
 Answer the results that survive the drops: sort the results, skip the lowest
-dropped, then take what the highest dropped leave. Mirrors `kept` in
-`primitives.rs`.
+dropped, then take what the highest dropped leave. These are the results that
+`kept` in `primitives.rs` answers, sorted rather than in the order rolled.
 
 # Parameters
 - `r`: The record.

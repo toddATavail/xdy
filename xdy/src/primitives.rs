@@ -5,13 +5,13 @@
 //! allows clients to reuse the low-level primitives for their own purposes,
 //! and ensures compatibility with the [evaluator](Evaluator).
 
-use std::ops::RangeInclusive;
+use std::{cmp::Reverse, ops::RangeInclusive};
 
 use rand::{Rng, RngExt as _};
 
 #[cfg(doc)]
 use crate::Evaluator;
-use crate::{RollingRecord, RollingRecordKind};
+use crate::{Die, Fate, RollingRecord, RollingRecordKind};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Primitives.                                 //
@@ -36,8 +36,8 @@ use crate::{RollingRecord, RollingRecordKind};
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_range};
 /// let rolling_record = roll_range(&mut rng(), 1..=6);
-/// assert_eq!(rolling_record.results.len(), 1);
-/// assert!(rolling_record.results[0] >= 1 && rolling_record.results[0] <= 6);
+/// assert_eq!(rolling_record.dice.len(), 1);
+/// assert!(rolling_record.dice[0].value >= 1 && rolling_record.dice[0].value <= 6);
 /// ```
 ///
 /// Use an empty range:
@@ -46,8 +46,8 @@ use crate::{RollingRecord, RollingRecordKind};
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_range};
 /// let rolling_record = roll_range(&mut rng(), 6..=1);
-/// assert_eq!(rolling_record.results.len(), 1);
-/// assert_eq!(rolling_record.results[0], 0);
+/// assert_eq!(rolling_record.dice.len(), 1);
+/// assert_eq!(rolling_record.dice[0].value, 0);
 /// ```
 pub fn roll_range<R>(rng: &mut R, range: RangeInclusive<i32>) -> RollingRecord
 where
@@ -61,9 +61,7 @@ where
 	};
 	RollingRecord {
 		kind: RollingRecordKind::Range { start, end },
-		results: vec![result],
-		lowest_dropped: 0,
-		highest_dropped: 0
+		dice: vec![Die::kept(result)]
 	}
 }
 
@@ -86,8 +84,8 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
 /// let rolling_record = roll_standard_dice(&mut rng(), 3, 6);
-/// assert_eq!(rolling_record.results.len(), 3);
-/// rolling_record.results.iter().for_each(|&result| {
+/// assert_eq!(rolling_record.dice.len(), 3);
+/// rolling_record.kept().into_iter().for_each(|result| {
 ///     assert!(result >= 1 && result <= 6);
 /// });
 /// ```
@@ -97,10 +95,10 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
 /// let rolling_record = roll_standard_dice(&mut rng(), 0, 6);
-/// assert_eq!(rolling_record.results.len(), 0);
+/// assert_eq!(rolling_record.dice.len(), 0);
 ///
 /// let rolling_record = roll_standard_dice(&mut rng(), -1, 6);
-/// assert_eq!(rolling_record.results.len(), 0);
+/// assert_eq!(rolling_record.dice.len(), 0);
 /// ```
 ///
 /// Use dice with no faces:
@@ -108,14 +106,14 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_standard_dice};
 /// let rolling_record = roll_standard_dice(&mut rng(), 3, 0);
-/// assert_eq!(rolling_record.results.len(), 3);
-/// rolling_record.results.iter().for_each(|&result| {
+/// assert_eq!(rolling_record.dice.len(), 3);
+/// rolling_record.kept().into_iter().for_each(|result| {
 ///    assert_eq!(result, 0);
 /// });
 ///
 /// let rolling_record = roll_standard_dice(&mut rng(), 3, -1);
-/// assert_eq!(rolling_record.results.len(), 3);
-/// rolling_record.results.iter().for_each(|&result| {
+/// assert_eq!(rolling_record.dice.len(), 3);
+/// rolling_record.kept().into_iter().for_each(|result| {
 ///   assert_eq!(result, 0);
 /// });
 /// ```
@@ -127,18 +125,16 @@ pub fn roll_standard_dice<R>(
 where
 	R: Rng + ?Sized
 {
-	let results = (0..count)
+	let dice = (0..count)
 		.map(|_| match faces <= 0
 		{
-			false => rng.random_range(1..=faces),
-			true => 0
+			false => Die::kept(rng.random_range(1..=faces)),
+			true => Die::kept(0)
 		})
 		.collect::<Vec<_>>();
 	RollingRecord {
 		kind: RollingRecordKind::Standard { count, faces },
-		results,
-		lowest_dropped: 0,
-		highest_dropped: 0
+		dice
 	}
 }
 
@@ -162,8 +158,8 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
 /// let rolling_record = roll_custom_dice(&mut rng(), 3, vec![-1, 0, 1]);
-/// assert_eq!(rolling_record.results.len(), 3);
-/// rolling_record.results.iter().for_each(|&result| {
+/// assert_eq!(rolling_record.dice.len(), 3);
+/// rolling_record.kept().into_iter().for_each(|result| {
 ///    assert!(result >= -1 && result <= 1);
 /// });
 /// ```
@@ -173,10 +169,10 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
 /// let rolling_record = roll_custom_dice(&mut rng(), 0, vec![1, 2, 3]);
-/// assert_eq!(rolling_record.results.len(), 0);
+/// assert_eq!(rolling_record.dice.len(), 0);
 ///
 /// let rolling_record = roll_custom_dice(&mut rng(), -1, vec![1, 2, 3]);
-/// assert_eq!(rolling_record.results.len(), 0);
+/// assert_eq!(rolling_record.dice.len(), 0);
 /// ```
 ///
 /// Use dice with no faces:
@@ -184,8 +180,8 @@ where
 /// # use rand::{Rng, rng};
 /// # use xdy::{RollingRecord, roll_custom_dice};
 /// let rolling_record = roll_custom_dice(&mut rng(), 3, vec![]);
-/// assert_eq!(rolling_record.results.len(), 3);
-/// rolling_record.results.iter().for_each(|&result| {
+/// assert_eq!(rolling_record.dice.len(), 3);
+/// rolling_record.kept().into_iter().for_each(|result| {
 ///   assert_eq!(result, 0);
 /// });
 /// ```
@@ -198,193 +194,155 @@ where
 	R: Rng + ?Sized
 {
 	let face_count = faces.len();
-	let results = (0..count)
+	let dice = (0..count)
 		.map(|_| match faces.is_empty()
 		{
-			false => faces[rng.random_range(0..face_count)],
-			true => 0
+			false => Die::kept(faces[rng.random_range(0..face_count)]),
+			true => Die::kept(0)
 		})
 		.collect::<Vec<_>>();
 	RollingRecord {
 		kind: RollingRecordKind::Custom { count, faces },
-		results,
-		lowest_dropped: 0,
-		highest_dropped: 0
+		dice
 	}
 }
 
 impl RollingRecord
 {
-	/// Mark the lowest `count` results as dropped. A `count` of zero or less
-	/// drops nothing. Drops accumulate across calls, and the total is clamped
-	/// to the number of results, so the order of the calls does not matter.
+	/// Cross out the lowest `count` of the dice that are still kept. Of equal
+	/// dice, cross out the first rolled first. A `count` of zero or less
+	/// crosses out nothing, and a `count` of at least the dice still kept
+	/// crosses out all of them. Drops accumulate across calls, and their order
+	/// does not change which results are kept.
 	///
 	/// # Parameters
-	/// - `count`: The number of results to drop.
+	/// - `count`: The number of dice to drop.
 	///
 	/// # Examples
-	/// Roll `3D12` and drop the lowest result:
+	/// Roll `3D12` and drop the lowest die:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
 	/// rolling_record.drop_lowest(1);
-	/// assert_eq!(rolling_record.results.len(), 3);
-	/// assert_eq!(rolling_record.lowest_dropped, 1);
+	/// assert_eq!(rolling_record.dice.len(), 3);
+	/// assert_eq!(rolling_record.dropped().len(), 1);
 	/// ```
 	///
-	/// Roll `3D12`, but try to drop `4` results:
+	/// Drop the lowest of `[3, 1, 4, 1]`, which crosses out the first `1`:
+	///
+	/// ```rust
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 4, faces: 4 },
+	///     dice: [3, 1, 4, 1].into_iter().map(Die::kept).collect()
+	/// };
+	/// rolling_record.drop_lowest(1);
+	/// assert_eq!(rolling_record.to_string(), "4D4: [3, ~1, 4, 1]");
+	/// ```
+	///
+	/// Roll `3D12`, but try to drop `4` dice, and then `-1` dice, which
+	/// restores none of them:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
 	/// rolling_record.drop_lowest(4);
-	/// assert_eq!(rolling_record.results.len(), 3);
-	/// assert_eq!(rolling_record.lowest_dropped, 3);
-	/// ```
-	///
-	/// Roll `3D12` and drop the lowest 3 results, then try to drop `-1`
-	/// results, which restores none of them:
-	///
-	/// ```rust
-	/// # use rand::{Rng, rng};
-	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 12);
-	/// rolling_record.drop_lowest(3);
+	/// assert_eq!(rolling_record.dropped().len(), 3);
 	/// rolling_record.drop_lowest(-1);
-	/// assert_eq!(rolling_record.lowest_dropped, 3);
+	/// assert_eq!(rolling_record.dropped().len(), 3);
 	/// ```
-	pub fn drop_lowest(&mut self, count: i32)
-	{
-		self.lowest_dropped = self
-			.lowest_dropped
-			.saturating_add(count.max(0))
-			.clamp(0, self.results.len() as i32);
-	}
+	pub fn drop_lowest(&mut self, count: i32) { self.cross_out(count, |v| v); }
 
-	/// Answer the results that have been dropped because they were the lowest.
-	///
-	/// # Returns
-	/// The lowest dropped results, in ascending order.
-	pub fn lowest_dropped(&self) -> Vec<i32>
-	{
-		let mut results = self.results.to_vec();
-		results.sort();
-		results
-			.iter()
-			.take(self.lowest_dropped as usize)
-			.copied()
-			.collect::<Vec<_>>()
-	}
-
-	/// Mark the highest `count` results as dropped. A `count` of zero or less
-	/// drops nothing. Drops accumulate across calls, and the total is clamped
-	/// to the number of results, so the order of the calls does not matter.
+	/// Cross out the highest `count` of the dice that are still kept. Of equal
+	/// dice, cross out the first rolled first. A `count` of zero or less
+	/// crosses out nothing, and a `count` of at least the dice still kept
+	/// crosses out all of them. Drops accumulate across calls, and their order
+	/// does not change which results are kept.
 	///
 	/// # Parameters
-	/// - `count`: The number of results to drop.
+	/// - `count`: The number of dice to drop.
 	///
 	/// # Examples
-	/// Roll `5D8` and drop the highest result:
+	/// Roll `5D8` and drop the highest die:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
 	/// rolling_record.drop_highest(1);
-	/// assert_eq!(rolling_record.results.len(), 5);
-	/// assert_eq!(rolling_record.highest_dropped, 1);
+	/// assert_eq!(rolling_record.dice.len(), 5);
+	/// assert_eq!(rolling_record.dropped().len(), 1);
 	/// ```
 	///
-	/// Roll `5D8`, but try to drop `7` results:
+	/// Drop the highest of `[2, 7, 1, 7]`, which crosses out the first `7`:
+	///
+	/// ```rust
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 4, faces: 8 },
+	///     dice: [2, 7, 1, 7].into_iter().map(Die::kept).collect()
+	/// };
+	/// rolling_record.drop_highest(1);
+	/// assert_eq!(rolling_record.to_string(), "4D8: [2, ~7, 1, 7]");
+	/// ```
+	///
+	/// Roll `5D8`, but try to drop `7` dice, and then `-1` dice, which
+	/// restores none of them:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
 	/// rolling_record.drop_highest(7);
-	/// assert_eq!(rolling_record.results.len(), 5);
-	/// assert_eq!(rolling_record.highest_dropped, 5);
-	/// ```
-	///
-	/// Roll `5D8` and drop the highest 5 results, then try to drop `-1`
-	/// results, which restores none of them:
-	///
-	/// ```rust
-	/// # use rand::{Rng, rng};
-	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 8);
-	/// rolling_record.drop_highest(5);
+	/// assert_eq!(rolling_record.dropped().len(), 5);
 	/// rolling_record.drop_highest(-1);
-	/// assert_eq!(rolling_record.highest_dropped, 5);
+	/// assert_eq!(rolling_record.dropped().len(), 5);
 	/// ```
 	pub fn drop_highest(&mut self, count: i32)
 	{
-		self.highest_dropped = self
-			.highest_dropped
-			.saturating_add(count.max(0))
-			.clamp(0, self.results.len() as i32);
+		self.cross_out(count, Reverse);
 	}
 
-	/// Answer the results that have been dropped because they were the highest.
-	///
-	/// # Returns
-	/// The highest dropped results, in ascending order.
-	pub fn highest_dropped(&self) -> Vec<i32>
-	{
-		let mut results = self.results.to_vec();
-		results.sort();
-		let lowest_dropped = self.lowest_dropped as usize;
-		let highest_dropped = self.highest_dropped as usize;
-		let count = results
-			.len()
-			.saturating_sub(lowest_dropped)
-			.saturating_sub(highest_dropped);
-		results
-			.iter()
-			.skip(lowest_dropped)
-			.skip(count)
-			.copied()
-			.collect::<Vec<_>>()
-	}
-
-	/// Keep the lowest `count` of the results that are still kept, marking the
-	/// rest of them as dropped from the high end. A `count` of zero or less
-	/// keeps nothing. Unlike a drop, a keep counts from the results that are
-	/// still kept, so it does not commute with drops or other keeps.
+	/// Keep the lowest `count` of the dice that are still kept, crossing out
+	/// the rest of them, highest first. A `count` of zero or less keeps
+	/// nothing. Unlike a drop, a keep counts from the dice that are still
+	/// kept, so it does not commute with drops or other keeps.
 	///
 	/// # Parameters
-	/// - `count`: The number of results to keep.
+	/// - `count`: The number of dice to keep.
 	///
 	/// # Examples
-	/// Roll `4D6` and keep the lowest 3 results:
+	/// Roll `4D6` and keep the lowest 3 dice:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
 	/// rolling_record.keep_lowest(3);
-	/// assert_eq!(rolling_record.highest_dropped, 1);
+	/// assert_eq!(rolling_record.dropped().len(), 1);
 	/// assert_eq!(rolling_record.kept().len(), 3);
 	/// ```
 	///
-	/// Roll `4D6`, drop the lowest result, and keep the lowest 2 of the other
-	/// 3, which drops 1 more:
+	/// Drop the lowest of `[5, 2, 6, 3]`, and keep the lowest 2 of the other
+	/// 3, which crosses out the `6`:
 	///
 	/// ```rust
-	/// # use rand::{Rng, rng};
-	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 4, faces: 6 },
+	///     dice: [5, 2, 6, 3].into_iter().map(Die::kept).collect()
+	/// };
 	/// rolling_record.drop_lowest(1);
 	/// rolling_record.keep_lowest(2);
-	/// assert_eq!(rolling_record.lowest_dropped, 1);
-	/// assert_eq!(rolling_record.highest_dropped, 1);
+	/// assert_eq!(rolling_record.to_string(), "4D6: [5, ~2, ~6, 3]");
+	/// assert_eq!(rolling_record.kept(), vec![5, 3]);
 	/// ```
 	///
-	/// Roll `4D6`, but try to keep `7` results, which keeps all `4`, or `0`
-	/// results, which keeps none:
+	/// Roll `4D6`, but try to keep `7` dice, which keeps all `4`, or `0`
+	/// dice, which keeps none:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
@@ -397,36 +355,43 @@ impl RollingRecord
 	/// ```
 	pub fn keep_lowest(&mut self, count: i32)
 	{
-		self.drop_highest(keep_drops(
-			self.results.len() as i32,
-			self.lowest_dropped,
-			self.highest_dropped,
-			count
-		));
+		self.drop_highest(keep_drops(self.kept_count(), 0, 0, count));
 	}
 
-	/// Keep the highest `count` of the results that are still kept, marking
-	/// the rest of them as dropped from the low end. A `count` of zero or less
-	/// keeps nothing. Unlike a drop, a keep counts from the results that are
-	/// still kept, so it does not commute with drops or other keeps.
+	/// Keep the highest `count` of the dice that are still kept, crossing out
+	/// the rest of them, lowest first. A `count` of zero or less keeps
+	/// nothing. Unlike a drop, a keep counts from the dice that are still
+	/// kept, so it does not commute with drops or other keeps.
 	///
 	/// # Parameters
-	/// - `count`: The number of results to keep.
+	/// - `count`: The number of dice to keep.
 	///
 	/// # Examples
-	/// Roll `2D20` and keep the highest result:
+	/// Roll `2D20` and keep the highest die:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
 	/// # use xdy::{RollingRecord, roll_standard_dice};
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 2, 20);
 	/// rolling_record.keep_highest(1);
-	/// assert_eq!(rolling_record.lowest_dropped, 1);
+	/// assert_eq!(rolling_record.dropped().len(), 1);
 	/// assert_eq!(rolling_record.kept().len(), 1);
 	/// ```
 	///
-	/// Roll `5D10`, keep the highest 3 results, and then keep the highest 2 of
-	/// those, which drops 1 more:
+	/// Keep the highest of `[3, 3]`, which crosses out the first `3`:
+	///
+	/// ```rust
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 2, faces: 20 },
+	///     dice: [3, 3].into_iter().map(Die::kept).collect()
+	/// };
+	/// rolling_record.keep_highest(1);
+	/// assert_eq!(rolling_record.to_string(), "2D20: [~3, 3]");
+	/// ```
+	///
+	/// Roll `5D10`, keep the highest 3 dice, and then keep the highest 2 of
+	/// those, which crosses out 1 more:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
@@ -434,70 +399,71 @@ impl RollingRecord
 	/// let mut rolling_record = roll_standard_dice(&mut rng(), 5, 10);
 	/// rolling_record.keep_highest(3);
 	/// rolling_record.keep_highest(2);
-	/// assert_eq!(rolling_record.lowest_dropped, 3);
+	/// assert_eq!(rolling_record.dropped().len(), 3);
 	/// assert_eq!(rolling_record.kept().len(), 2);
 	/// ```
 	pub fn keep_highest(&mut self, count: i32)
 	{
-		self.drop_lowest(keep_drops(
-			self.results.len() as i32,
-			self.lowest_dropped,
-			self.highest_dropped,
-			count
-		));
+		self.drop_lowest(keep_drops(self.kept_count(), 0, 0, count));
 	}
 
-	/// Answer the kept results, dropping the lowest and highest results as
-	/// necessary.
+	/// Answer the results of the dice that are still kept.
 	///
 	/// # Returns
-	/// The kept results, in ascending order.
+	/// The kept results, in the order rolled.
 	///
 	/// # Examples
-	/// Roll `4D6`, drop the lowest and highest die, leaving the middle two:
+	/// Drop the lowest and highest of `[4, 1, 6, 3]`, leaving the middle two:
 	///
 	/// ```rust
-	/// # use rand::{Rng, rng};
-	/// # use xdy::{RollingRecord, roll_standard_dice};
-	/// let mut rolling_record = roll_standard_dice(&mut rng(), 4, 6);
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 4, faces: 6 },
+	///     dice: [4, 1, 6, 3].into_iter().map(Die::kept).collect()
+	/// };
 	/// rolling_record.drop_lowest(1);
 	/// rolling_record.drop_highest(1);
-	/// assert_eq!(rolling_record.lowest_dropped, 1);
-	/// assert_eq!(rolling_record.highest_dropped, 1);
-	/// let kept = rolling_record.kept();
-	/// assert_eq!(kept.len(), 2);
-	/// for result in rolling_record.lowest_dropped() {
-	///     assert!(result <= kept[0]);
-	/// }
-	/// for result in rolling_record.highest_dropped() {
-	///    assert!(result >= kept[kept.len() - 1]);
-	/// }
+	/// assert_eq!(rolling_record.kept(), vec![4, 3]);
+	/// assert_eq!(rolling_record.dropped(), vec![1, 6]);
 	/// ```
 	pub fn kept(&self) -> Vec<i32>
 	{
-		let mut results = self.results.to_vec();
-		results.sort();
-		let lowest_dropped = self.lowest_dropped as usize;
-		let highest_dropped = self.highest_dropped as usize;
-		let count = results.len();
-		let count = count
-			.saturating_sub(lowest_dropped)
-			.saturating_sub(highest_dropped);
-		results
+		self.dice
 			.iter()
-			.skip(lowest_dropped)
-			.take(count)
-			.copied()
+			.filter(|die| die.is_kept())
+			.map(|die| die.value)
+			.collect()
+	}
+
+	/// Answer the results of the dice that a drop or keep crossed out.
+	///
+	/// # Returns
+	/// The dropped results, in the order rolled.
+	pub fn dropped(&self) -> Vec<i32>
+	{
+		self.dice
+			.iter()
+			.filter(|die| die.fate == Fate::Dropped)
+			.map(|die| die.value)
 			.collect()
 	}
 
 	/// Compute the sum of the [kept](Self::kept) results, i.e., excluding the
-	/// dropped lowest and highest results. If the lowest and highest drops
-	/// together cover every result, then nothing is kept and the sum is `0`.
-	/// Saturate the sum on overflow. Consecutive calls are idempotent.
+	/// dice crossed out. If every die is crossed out, then nothing is kept and
+	/// the sum is `0`. Saturate the sum on overflow. Consecutive calls are
+	/// idempotent.
 	///
 	/// # Returns
 	/// The sum of the results.
+	///
+	/// # Notes
+	/// The sum folds the kept results in ascending order, not in the order
+	/// rolled. Saturating addition is not associative, so the order matters
+	/// when the results have mixed signs and the sum saturates: `i32::MAX`,
+	/// `1`, and `-1` sum to `i32::MAX` in ascending order, but to
+	/// `i32::MAX - 1` in the order given. Folding in ascending order makes the
+	/// sum depend only on the multiset of kept results, as the forward pass
+	/// and the Lean specification require.
 	///
 	/// # Examples
 	/// Roll `5D12` and sum the results:
@@ -510,7 +476,7 @@ impl RollingRecord
 	/// assert!(sum >= 5 && sum <= 60);
 	/// ```
 	///
-	/// Roll `4D6`, drop the lowest and highest die, and sum the middle die:
+	/// Roll `4D6`, drop the lowest and highest die, and sum the middle dice:
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
@@ -523,7 +489,54 @@ impl RollingRecord
 	/// ```
 	pub fn sum(&mut self) -> i32
 	{
-		self.kept().iter().fold(0i32, |a, b| a.saturating_add(*b))
+		let mut kept = self.kept();
+		kept.sort();
+		kept.iter().fold(0i32, |a, b| a.saturating_add(*b))
+	}
+
+	/// Answer the number of dice that are still kept.
+	///
+	/// # Returns
+	/// The number of kept dice, saturated to `i32::MAX`.
+	fn kept_count(&self) -> i32
+	{
+		let kept = self.dice.iter().filter(|die| die.is_kept()).count();
+		i32::try_from(kept).unwrap_or(i32::MAX)
+	}
+
+	/// Cross out the first `count` of the dice that are still kept, ordered by
+	/// the specified key and then by the order rolled, so that of dice with
+	/// equal keys the first rolled is crossed out first. A `count` of zero or
+	/// less crosses out nothing.
+	///
+	/// # Type parameters
+	/// - `K`: The type of the key.
+	///
+	/// # Parameters
+	/// - `count`: The number of dice to cross out.
+	/// - `key`: The key of a result: the result itself to cross out the lowest
+	///   dice, or its [reverse](Reverse) to cross out the highest.
+	fn cross_out<K>(&mut self, count: i32, key: impl Fn(i32) -> K)
+	where
+		K: Ord
+	{
+		let count = usize::try_from(count).unwrap_or(0);
+		if count == 0
+		{
+			return
+		}
+		let mut kept = self
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|(_, die)| die.is_kept())
+			.map(|(index, die)| (key(die.value), index))
+			.collect::<Vec<_>>();
+		kept.sort_unstable();
+		for &(_, index) in kept.iter().take(count)
+		{
+			self.dice[index].fate = Fate::Dropped;
+		}
 	}
 }
 
@@ -531,7 +544,9 @@ impl RollingRecord
 /// of them but `count`, or none if no more than `count` are kept. This serves
 /// as the definition of [`RollingRecord::keep_lowest`] and
 /// [`RollingRecord::keep_highest`], which drop this many results from the
-/// opposite end, and of the keeps of the forward pass, which share it.
+/// opposite end, and of the keeps of the forward pass, which share it. A
+/// rolling record passes the number of dice that it still keeps, and no drops,
+/// since it has already crossed out the dice that it dropped.
 ///
 /// # Parameters
 /// - `results`: The number of results in the record.

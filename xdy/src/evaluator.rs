@@ -32,9 +32,19 @@ use crate::{
 //                                Evaluation.                                 //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// A record of a roll of dice. The record includes the results of each die in
-/// a set of dice. [`RollRange`], [`RollStandardDice`], and [`RollCustomDice`]
-/// each populate a [`RollingRecord`] in the frame's rolling record set.
+/// A record of a roll of dice. The record includes every die of a set of dice,
+/// in the order rolled, each marked with its [fate](Fate). [`RollRange`],
+/// [`RollStandardDice`], and [`RollCustomDice`] each populate a
+/// [`RollingRecord`] in the frame's rolling record set.
+///
+/// A die that a drop or keep dropped stays in the record, crossed out, so the
+/// record shows everything that happened to its dice. Only the
+/// [kept](Fate::Kept) dice reach the sum or any later drop or keep, so the
+/// multiset of kept dice decides everything that the record computes.
+///
+/// A record prints its kind and then its dice, in the order rolled, each
+/// crossed-out die prefixed with `~`, whatever crossed it out, as in
+/// `3D6: [5, ~1, 3]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecord
@@ -42,72 +52,91 @@ pub struct RollingRecord
 	/// The kind of rolling record.
 	pub kind: RollingRecordKind<i32>,
 
-	/// The results of each die in the roll.
-	pub results: Vec<i32>,
-
-	/// The number of lowest dice dropped, clamped to the size of the result
-	/// vector.
-	pub lowest_dropped: i32,
-
-	/// The number of highest dice dropped, clamped to the size of the result
-	/// vector.
-	pub highest_dropped: i32
+	/// Every die in the roll, in the order rolled.
+	pub dice: Vec<Die>
 }
 
 impl Display for RollingRecord
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
 	{
-		// Sort the results, then print them in order. Dropped dice are
-		// separated by semicolons.
-		let sorted = {
-			let mut results = self.results.to_vec();
-			results.sort_unstable();
-			results
-		};
-		write!(f, "{}: ", self.kind)?;
-		write!(f, "[")?;
-		let start = 0;
-		let end = self.lowest_dropped as usize;
-		for i in start..end
+		write!(f, "{}: [", self.kind)?;
+		for (i, die) in self.dice.iter().enumerate()
 		{
-			if i != start
+			if i != 0
 			{
 				write!(f, ", ")?;
 			}
-			write!(f, "{}", sorted[i])?;
-			if i + 1 == self.lowest_dropped as usize && end != sorted.len()
-			{
-				write!(f, "; ")?;
-			}
-		}
-		let start = self.lowest_dropped as usize;
-		let end = sorted.len() - self.highest_dropped as usize;
-		for i in start..end
-		{
-			if i != start
-			{
-				write!(f, ", ")?;
-			}
-			write!(f, "{}", sorted[i])?;
-			if i + 1 == end && end != sorted.len()
-			{
-				write!(f, "; ")?;
-			}
-		}
-		let start = sorted.len() - self.highest_dropped as usize;
-		let end = sorted.len();
-		#[allow(clippy::needless_range_loop)]
-		for i in start..end
-		{
-			if i != start
-			{
-				write!(f, ", ")?;
-			}
-			write!(f, "{}", sorted[i])?;
+			write!(f, "{}", die)?;
 		}
 		write!(f, "]")
 	}
+}
+
+/// A die of a [rolling record](RollingRecord): its result, and its fate. A die
+/// prints as its result, prefixed with `~` if it is crossed out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Die
+{
+	/// The result of the die.
+	pub value: i32,
+
+	/// Whether the die still counts.
+	pub fate: Fate
+}
+
+impl Die
+{
+	/// Answer a freshly rolled die, which is [kept](Fate::Kept).
+	///
+	/// # Parameters
+	/// - `value`: The result of the die.
+	///
+	/// # Returns
+	/// The kept die.
+	#[inline]
+	pub const fn kept(value: i32) -> Self
+	{
+		Self {
+			value,
+			fate: Fate::Kept
+		}
+	}
+
+	/// Answer whether the die is [kept](Fate::Kept), i.e., not crossed out.
+	///
+	/// # Returns
+	/// `true` if the die still counts, `false` otherwise.
+	#[inline]
+	pub const fn is_kept(&self) -> bool { matches!(self.fate, Fate::Kept) }
+}
+
+impl Display for Die
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		match self.fate
+		{
+			Fate::Kept => write!(f, "{}", self.value),
+			Fate::Dropped => write!(f, "~{}", self.value)
+		}
+	}
+}
+
+/// The fate of a [die](Die) of a [rolling record](RollingRecord): whether it
+/// still counts, and if not, what crossed it out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Fate
+{
+	/// The die still counts toward the sum of its record, and any later drop
+	/// or keep may cross it out.
+	#[default]
+	Kept,
+
+	/// A drop or keep crossed out the die, so it no longer counts.
+	Dropped
 }
 
 /// The kind of rolling record.
@@ -604,8 +633,8 @@ where
 		inst: &DropLowest
 	) -> Result<(), EvaluationError<'static>>
 	{
-		// RollingRecord treats a negative count as zero, and clamps the total
-		// to the number of results.
+		// RollingRecord treats a negative count as zero, and crosses out at
+		// most the dice still kept.
 		let count = self.value(inst.count);
 		let record = self.record_mut(inst.dest);
 		record.drop_lowest(count);
@@ -617,8 +646,8 @@ where
 		inst: &DropHighest
 	) -> Result<(), EvaluationError<'static>>
 	{
-		// RollingRecord treats a negative count as zero, and clamps the total
-		// to the number of results.
+		// RollingRecord treats a negative count as zero, and crosses out at
+		// most the dice still kept.
 		let count = self.value(inst.count);
 		let record = self.record_mut(inst.dest);
 		record.drop_highest(count);

@@ -4,17 +4,20 @@ import Xdy.Primitives
 # Rolling records
 
 A rolling record holds the results of one range or one set of dice, together
-with how many of its lowest and highest results have been dropped. Mirrors
+with how many of its lowest and highest results have been dropped. Models
 `RollingRecord` in `xdy/src/evaluator.rs` and its methods in
 `xdy/src/primitives.rs`.
 
-Unlike the Rust record, this one keeps its results sorted in ascending order
-as they arrive. The Rust record sorts its results only when it drops or sums
-them, so nothing that reads a record can observe the order in which its
-results were rolled. Sorting early means that two records holding the same
-multiset of results are equal, which lets the oracle merge machine states that
-differ only in the order of their rolls: `3D6` then has `56` states rather
-than `216`.
+The Rust record keeps its dice in the order rolled and crosses out each die
+that a drop or keep drops, always the lowest or highest of the dice still
+kept, so that it shows everything that happened to its dice. Only the multiset
+of the kept dice reaches its sum or any later drop or keep, and counting the
+lowest and highest results dropped determines that multiset, so this record
+keeps counts instead of crossing anything out. It also keeps its results
+sorted in ascending order as they arrive. Sorting early means that two records
+holding the same multiset of results are equal, which lets the oracle merge
+machine states that differ only in the order of their rolls: `3D6` then has
+`56` states rather than `216`.
 -/
 
 namespace Xdy

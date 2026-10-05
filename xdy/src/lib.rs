@@ -181,8 +181,8 @@
 //!
 //! assert!(1 <= result.result && result.result <= 6);
 //! assert!(result.records.len() == 1);
-//! assert!(result.records[0].results.len() == 1);
-//! assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
+//! assert!(result.records[0].dice.len() == 1);
+//! assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
 //! ```
 //!
 //! Rolling a variable number of dice, using an argument named `x` to supply the
@@ -196,10 +196,10 @@
 //!
 //! assert!(3 <= result.result && result.result <= 18);
 //! assert!(result.records.len() == 1);
-//! assert!(result.records[0].results.len() == 3);
-//! assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-//! assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-//! assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+//! assert!(result.records[0].dice.len() == 3);
+//! assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+//! assert!(1 <= result.records[0].dice[1].value && result.records[0].dice[1].value <= 6);
+//! assert!(1 <= result.records[0].dice[2].value && result.records[0].dice[2].value <= 6);
 //! ```
 //!
 //! Rolling a variable number of dice, using an external variable named `x` to
@@ -214,10 +214,10 @@
 //!
 //! assert!(3 <= result.result && result.result <= 18);
 //! assert!(result.records.len() == 1);
-//! assert!(result.records[0].results.len() == 3);
-//! assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-//! assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-//! assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+//! assert!(result.records[0].dice.len() == 3);
+//! assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+//! assert!(1 <= result.records[0].dice[1].value && result.records[0].dice[1].value <= 6);
+//! assert!(1 <= result.records[0].dice[2].value && result.records[0].dice[2].value <= 6);
 //! ```
 //!
 //! Evaluating an arithmetic expression involving different types of dice:
@@ -230,15 +230,15 @@
 //!
 //! assert!(-7 <= result.result && result.result <= 21);
 //! assert!(result.records.len() == 3);
-//! assert!(result.records[0].results.len() == 1);
-//! assert!(result.records[1].results.len() == 2);
-//! assert!(result.records[2].results.len() == 1);
-//! assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-//! assert!(1 <= result.records[1].results[0] && result.records[1].results[0] <= 8);
-//! assert!(1 <= result.records[1].results[1] && result.records[1].results[1] <= 8);
+//! assert!(result.records[0].dice.len() == 1);
+//! assert!(result.records[1].dice.len() == 2);
+//! assert!(result.records[2].dice.len() == 1);
+//! assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+//! assert!(1 <= result.records[1].dice[0].value && result.records[1].dice[0].value <= 8);
+//! assert!(1 <= result.records[1].dice[1].value && result.records[1].dice[1].value <= 8);
 //! assert!(
-//!     1 <= result.records[2].results[0]
-//!         && result.records[2].results[0] <= 10
+//!     1 <= result.records[2].dice[0].value
+//!         && result.records[2].dice[0].value <= 10
 //! );
 //! ```
 //!
@@ -253,9 +253,9 @@
 //! let result = evaluate("{x}@(3D6) + {x}", vec![], vec![], &mut rng()).unwrap();
 //!
 //! assert!(result.records.len() == 1);
-//! assert!(result.records[0].results.len() == 3);
+//! assert!(result.records[0].dice.len() == 3);
 //!
-//! let total = result.records[0].results.iter().sum::<i32>();
+//! let total = result.records[0].kept().iter().sum::<i32>();
 //! assert!(3 <= total && total <= 18);
 //! assert!(result.result == 2 * total);
 //! ```
@@ -779,8 +779,8 @@ where
 /// let result = evaluate("1D6", vec![], vec![], &mut rng()).unwrap();
 /// assert!(1 <= result.result && result.result <= 6);
 /// assert!(result.records.len() == 1);
-/// assert!(result.records[0].results.len() == 1);
-/// assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
+/// assert!(result.records[0].dice.len() == 1);
+/// assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
 /// ```
 ///
 /// Roll a variable number of dice, using an argument named `x` to supply the
@@ -794,10 +794,10 @@ where
 ///     evaluate("{x}: {x}D6", vec![3], vec![], &mut rng()).unwrap();
 /// assert!(3 <= result.result && result.result <= 18);
 /// assert!(result.records.len() == 1);
-/// assert!(result.records[0].results.len() == 3);
-/// assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-/// assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-/// assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+/// assert!(result.records[0].dice.len() == 3);
+/// assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+/// assert!(1 <= result.records[0].dice[1].value && result.records[0].dice[1].value <= 6);
+/// assert!(1 <= result.records[0].dice[2].value && result.records[0].dice[2].value <= 6);
 /// ```
 ///
 /// Roll a variable number of dice, using an external variable named `x` to
@@ -811,10 +811,10 @@ where
 ///     evaluate("{x}D6", vec![], vec![("x", 3)], &mut rng()).unwrap();
 /// assert!(3 <= result.result && result.result <= 18);
 /// assert!(result.records.len() == 1);
-/// assert!(result.records[0].results.len() == 3);
-/// assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-/// assert!(1 <= result.records[0].results[1] && result.records[0].results[1] <= 6);
-/// assert!(1 <= result.records[0].results[2] && result.records[0].results[2] <= 6);
+/// assert!(result.records[0].dice.len() == 3);
+/// assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+/// assert!(1 <= result.records[0].dice[1].value && result.records[0].dice[1].value <= 6);
+/// assert!(1 <= result.records[0].dice[2].value && result.records[0].dice[2].value <= 6);
 /// ```
 ///
 /// Evaluate an arithmetic expression involving different types of dice:
@@ -826,13 +826,13 @@ where
 /// let result = evaluate("1D6 + 2D8 - 1D10", vec![], vec![], &mut rng()).unwrap();
 /// assert!(-7 <= result.result && result.result <= 21);
 /// assert!(result.records.len() == 3);
-/// assert!(result.records[0].results.len() == 1);
-/// assert!(result.records[1].results.len() == 2);
-/// assert!(result.records[2].results.len() == 1);
-/// assert!(1 <= result.records[0].results[0] && result.records[0].results[0] <= 6);
-/// assert!(1 <= result.records[1].results[0] && result.records[1].results[0] <= 8);
-/// assert!(1 <= result.records[1].results[1] && result.records[1].results[1] <= 8);
-/// assert!(1 <= result.records[2].results[0] && result.records[2].results[0] <= 10);
+/// assert!(result.records[0].dice.len() == 1);
+/// assert!(result.records[1].dice.len() == 2);
+/// assert!(result.records[2].dice.len() == 1);
+/// assert!(1 <= result.records[0].dice[0].value && result.records[0].dice[0].value <= 6);
+/// assert!(1 <= result.records[1].dice[0].value && result.records[1].dice[0].value <= 8);
+/// assert!(1 <= result.records[1].dice[1].value && result.records[1].dice[1].value <= 8);
+/// assert!(1 <= result.records[2].dice[0].value && result.records[2].dice[0].value <= 10);
 /// ```
 pub fn evaluate<'src, 'env, 'rng, R>(
 	source: &'src str,
