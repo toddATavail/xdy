@@ -11,7 +11,8 @@ use pretty_assertions::assert_eq;
 use rand::{Rng as _, RngExt as _, SeedableRng, rngs::StdRng};
 
 use crate::{
-	Budget, Die, EvaluationError, Evaluator, Passes, RollingRecord,
+	AddressingMode, Assembler, Budget, Criterion, Die, EvaluationError,
+	Evaluator, Fate, Immediate, Passes, Predicate, RollingRecord,
 	RollingRecordKind, Unobserved,
 	support::{
 		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
@@ -882,4 +883,624 @@ fn test_evaluation_crosses_out_dice()
 			);
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                  Rerolls.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that every form of predicate resolves to the set of results that it
+/// names, including at the extremes of `i32`, where a strict comparison or a
+/// half-open range may name nothing, and that empty and inverted ranges match
+/// nothing.
+#[test]
+fn test_predicates_resolve()
+{
+	let imm = |value| AddressingMode::Immediate(Immediate(value));
+	let value = |op: AddressingMode| match op
+	{
+		AddressingMode::Immediate(Immediate(value)) => value,
+		_ => unreachable!()
+	};
+	let thresholds = [
+		i32::MIN,
+		i32::MIN + 1,
+		-3,
+		-1,
+		0,
+		1,
+		3,
+		i32::MAX - 1,
+		i32::MAX
+	];
+	let mut probes = thresholds.to_vec();
+	probes.extend(-5..=5);
+	type Comparison = fn(AddressingMode) -> Predicate;
+	type Expected = fn(i32, i32) -> bool;
+	let comparisons: [(Comparison, Expected); 6] = [
+		(Predicate::Eq, |v, t| v == t),
+		(Predicate::Ne, |v, t| v != t),
+		(Predicate::Lt, |v, t| v < t),
+		(Predicate::Le, |v, t| v <= t),
+		(Predicate::Gt, |v, t| v > t),
+		(Predicate::Ge, |v, t| v >= t)
+	];
+	for (predicate, expected) in comparisons
+	{
+		for t in thresholds
+		{
+			let criterion = predicate(imm(t)).resolve(value);
+			for &v in &probes
+			{
+				assert_eq!(
+					criterion.matches(v),
+					expected(v, t),
+					"{} with {}: {:?}",
+					predicate(imm(t)),
+					v,
+					criterion
+				);
+			}
+		}
+	}
+	for start in thresholds
+	{
+		for end in thresholds
+		{
+			let half_open = Predicate::InRange {
+				start: imm(start),
+				end: imm(end)
+			}
+			.resolve(value);
+			let inclusive = Predicate::InRangeInclusive {
+				start: imm(start),
+				end: imm(end)
+			}
+			.resolve(value);
+			for &v in &probes
+			{
+				assert_eq!(
+					half_open.matches(v),
+					start <= v && v < end,
+					"{}..{} with {}",
+					start,
+					end,
+					v
+				);
+				assert_eq!(
+					inclusive.matches(v),
+					start <= v && v <= end,
+					"{}..={} with {}",
+					start,
+					end,
+					v
+				);
+			}
+		}
+	}
+	let list = Predicate::In(vec![3, -1, 3, i32::MIN]).resolve(value);
+	assert_eq!(list, Criterion::Among(vec![i32::MIN, -1, 3]));
+	for &v in &probes
+	{
+		assert_eq!(list.matches(v), [3, -1, i32::MIN].contains(&v), "{}", v);
+	}
+	assert!(!Predicate::In(Vec::new()).resolve(value).matches(0));
+}
+
+/// Answer a record of the specified kind holding the specified results, in
+/// the order rolled, none of them crossed out.
+///
+/// # Parameters
+/// - `kind`: The kind of the record.
+/// - `results`: The results, in the order rolled.
+///
+/// # Returns
+/// The rolling record.
+fn record_of(kind: RollingRecordKind<i32>, results: &[i32]) -> RollingRecord
+{
+	RollingRecord {
+		kind,
+		dice: results.iter().copied().map(Die::kept).collect()
+	}
+}
+
+/// Test that a reroll crosses out each matching die, appends its replacement,
+/// linked to it, after the dice already rolled, and finishes each die before
+/// beginning the next, and that a record prints its replacements in the order
+/// rolled.
+#[test]
+fn test_reroll_appends_linked_replacements()
+{
+	// A die whose only face is `3` always rolls a `3`, so the replacements are
+	// known, even though the record holds other results.
+	let kind = || RollingRecordKind::Custom {
+		count: 3,
+		faces: vec![3]
+	};
+	let mut rng = StdRng::seed_from_u64(0);
+	let mut record = record_of(kind(), &[2, 1, 4]);
+	assert_eq!(
+		record.reroll(&mut rng, &Criterion::Within(1..=1), Some(1)),
+		1
+	);
+	assert_eq!(record.to_string(), "3d[3]: [2, ~1, 4, 3]");
+	assert_eq!(record.dice[1].fate, Fate::Rerolled);
+	assert_eq!(record.dice[3].replaces, Some(1));
+	assert_eq!(record.rerolled(), vec![1]);
+	assert_eq!(record.dropped(), Vec::<i32>::new());
+	assert_eq!(record.sum(), 9);
+	// Each die finishes its chain before the next begins: the `1` and its
+	// replacements precede the `4` and its replacements.
+	let mut record = record_of(kind(), &[1, 2, 4]);
+	assert_eq!(
+		record.reroll(&mut rng, &Criterion::Outside(2..=2), Some(3)),
+		6
+	);
+	assert_eq!(
+		record.to_string(),
+		"3d[3]: [~1, 2, ~4, ~3, ~3, 3, ~3, ~3, 3]"
+	);
+	let links = record
+		.dice
+		.iter()
+		.map(|die| die.replaces)
+		.collect::<Vec<_>>();
+	assert_eq!(
+		links,
+		[
+			None,
+			None,
+			None,
+			Some(0),
+			Some(3),
+			Some(4),
+			Some(2),
+			Some(6),
+			Some(7)
+		]
+	);
+	// Only the dice still kept are rerolled, and their replacements are kept,
+	// whatever the drops before them.
+	let mut record = record_of(kind(), &[1, 1, 5]);
+	record.drop_lowest(1);
+	assert_eq!(record.reroll(&mut rng, &Criterion::Within(1..=1), None), 1);
+	assert_eq!(record.to_string(), "3d[3]: [~1, ~1, 5, 3]");
+	assert_eq!(record.dropped(), vec![1]);
+	assert_eq!(record.rerolled(), vec![1]);
+	assert_eq!(record.kept(), vec![5, 3]);
+}
+
+/// Test the degenerate rerolls: a limit of zero or less rerolls nothing, an
+/// unlimited reroll that matches every face rolls nothing but crosses out
+/// every matching die, a die without faces and an empty range show only the
+/// face `0`, and a record without dice is unchanged.
+#[test]
+fn test_reroll_degeneracies()
+{
+	let mut rng = StdRng::seed_from_u64(0);
+	let standard = |faces| RollingRecordKind::Standard { count: 3, faces };
+	let everything = Criterion::Outside(RangeInclusive::new(1, 0));
+	for limit in [0, -1, i32::MIN]
+	{
+		let mut record = record_of(standard(6), &[1, 2, 3]);
+		assert_eq!(record.reroll(&mut rng, &everything, Some(limit)), 0);
+		assert_eq!(record.to_string(), "3D6: [1, 2, 3]");
+	}
+	for (kind, results, criterion, expected) in [
+		(
+			standard(1),
+			&[1, 1, 1][..],
+			Criterion::Within(1..=1),
+			"3D1: [~1, ~1, ~1]"
+		),
+		(
+			standard(6),
+			&[1, 6, 3],
+			Criterion::Within(-5..=6),
+			"3D6: [~1, ~6, ~3]"
+		),
+		(
+			standard(6),
+			&[1, 6],
+			Criterion::Outside(7..=9),
+			"3D6: [~1, ~6]"
+		),
+		(
+			standard(6),
+			&[2, 5],
+			Criterion::Among(vec![0, 1, 2, 3, 4, 5, 6, 7]),
+			"3D6: [~2, ~5]"
+		),
+		(
+			standard(0),
+			&[0, 0],
+			Criterion::Within(0..=0),
+			"3D0: [~0, ~0]"
+		),
+		(standard(-1), &[0], Criterion::Among(vec![0]), "3D-1: [~0]"),
+		(
+			RollingRecordKind::Range { start: 4, end: 2 },
+			&[0],
+			Criterion::Within(0..=0),
+			"[4:2]: [~0]"
+		),
+		(
+			RollingRecordKind::Range { start: -2, end: 2 },
+			&[-1],
+			Criterion::Within(-2..=2),
+			"[-2:2]: [~-1]"
+		),
+		(
+			RollingRecordKind::Custom {
+				count: 2,
+				faces: vec![2, 4, 2]
+			},
+			&[4, 2],
+			Criterion::Among(vec![2, 4]),
+			"2d[2, 4, 2]: [~4, ~2]"
+		),
+		(
+			RollingRecordKind::Range {
+				start: i32::MIN,
+				end: i32::MAX
+			},
+			&[7],
+			Criterion::Within(i32::MIN..=i32::MAX),
+			"[-2147483648:2147483647]: [~7]"
+		)
+	]
+	{
+		let mut record = record_of(kind, results);
+		assert_eq!(
+			record.reroll(&mut rng, &criterion, None),
+			0,
+			"{}",
+			expected
+		);
+		assert_eq!(record.to_string(), expected);
+		assert_eq!(record.sum(), 0, "{}", expected);
+	}
+	// A die without faces rolls only zeros, so a limited reroll of its zeros
+	// rolls zeros.
+	let mut record = record_of(standard(0), &[0, 0]);
+	assert_eq!(
+		record.reroll(&mut rng, &Criterion::Within(0..=0), Some(2)),
+		4
+	);
+	assert_eq!(record.kept(), vec![0, 0]);
+	assert_eq!(record.rerolled(), vec![0, 0, 0, 0]);
+	// No dice, and an uninitialized record, have nothing to reroll.
+	for kind in [standard(6), RollingRecordKind::Uninitialized]
+	{
+		let mut record = record_of(kind, &[]);
+		assert_eq!(record.reroll(&mut rng, &everything, None), 0);
+		assert_eq!(record.reroll(&mut rng, &everything, Some(3)), 0);
+		assert!(record.dice.is_empty());
+	}
+}
+
+/// Test, over random records, criteria, and limits, that a reroll keeps its
+/// invariants: it crosses out exactly the dice that it rerolls, only after
+/// they match; every replacement follows the dice already rolled, links to the
+/// die that it replaces, and shows a face of the die; each chain begins at a
+/// die kept and matching when the reroll began, holds at most as many rerolls
+/// as the limit, and ends at a kept die that no longer matches or that
+/// exhausted the limit; the chains follow one another in the order of the dice
+/// that begin them; and the reroll rolls one die per reroll.
+#[test]
+fn test_reroll_invariants()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(1098257109387512);
+	for _ in 0..10_000
+	{
+		let (kind, faces): (_, Vec<i32>) = match rng.random_range(0..4)
+		{
+			0 =>
+			{
+				let faces = rng.random_range(-1..=6);
+				(
+					RollingRecordKind::Standard { count: 0, faces },
+					match faces <= 0
+					{
+						true => vec![0],
+						false => (1..=faces).collect()
+					}
+				)
+			},
+			1 =>
+			{
+				let faces = (0..rng.random_range(1..=4))
+					.map(|_| rng.random_range(-3..=3))
+					.collect::<Vec<_>>();
+				(
+					RollingRecordKind::Custom {
+						count: 0,
+						faces: faces.clone()
+					},
+					faces
+				)
+			},
+			_ =>
+			{
+				let start = rng.random_range(-3..=3);
+				let end = rng.random_range(-3..=3);
+				(
+					RollingRecordKind::Range { start, end },
+					match end < start
+					{
+						true => vec![0],
+						false => (start..=end).collect()
+					}
+				)
+			}
+		};
+		let len = rng.random_range(0..=5);
+		let results = (0..len)
+			.map(|_| faces[rng.random_range(0..faces.len())])
+			.collect::<Vec<_>>();
+		let mut record = record_of(kind, &results);
+		if rng.random_bool(0.5)
+		{
+			record.drop_lowest(rng.random_range(0..=2));
+		}
+		let criterion = match rng.random_range(0..3)
+		{
+			0 =>
+			{
+				let start = rng.random_range(-4..=4);
+				Criterion::within(start, rng.random_range(-4..=4))
+			},
+			1 =>
+			{
+				let start = rng.random_range(-4..=4);
+				Criterion::Outside(start..=rng.random_range(-4..=4))
+			},
+			_ =>
+			{
+				let mut values = (0..rng.random_range(0..=4))
+					.map(|_| rng.random_range(-4..=4))
+					.collect::<Vec<_>>();
+				values.sort();
+				values.dedup();
+				Criterion::Among(values)
+			}
+		};
+		let limit = match rng.random_bool(0.3)
+		{
+			true => None,
+			false => Some(rng.random_range(-1..=3))
+		};
+		let before = record.clone();
+		let rolled = record.reroll(&mut rng, &criterion, limit);
+		let context = format!(
+			"{} reroll {:?} {:?} -> {}",
+			before, criterion, limit, record
+		);
+		let len = before.dice.len();
+		assert_eq!(record.dice.len() - len, rolled as usize, "{}", context);
+		let everything =
+			limit.is_none() && faces.iter().all(|f| criterion.matches(*f));
+		let mut chains = Vec::new();
+		for (index, die) in before.dice.iter().enumerate()
+		{
+			let after = record.dice[index];
+			assert_eq!(after.value, die.value, "{}", context);
+			let starts = die.is_kept() && criterion.matches(die.value);
+			match starts && limit.is_none_or(|limit| limit > 0)
+			{
+				true => assert_eq!(after.fate, Fate::Rerolled, "{}", context),
+				false => assert_eq!(after.fate, die.fate, "{}", context)
+			}
+			if starts && !everything
+			{
+				chains.push(index);
+			}
+		}
+		// Follow each chain from the die that begins it.
+		let mut next = len;
+		for start in chains
+		{
+			let mut current = start;
+			let mut times = 0;
+			while next < record.dice.len()
+				&& record.dice[next].replaces == Some(current)
+			{
+				assert_eq!(
+					record.dice[current].fate,
+					Fate::Rerolled,
+					"{}",
+					context
+				);
+				assert!(
+					criterion.matches(record.dice[current].value),
+					"{}",
+					context
+				);
+				assert!(
+					faces.contains(&record.dice[next].value),
+					"{}",
+					context
+				);
+				current = next;
+				next += 1;
+				times += 1;
+			}
+			let end = record.dice[current];
+			match limit
+			{
+				Some(limit) =>
+				{
+					assert!(times <= limit.max(0) as usize, "{}", context);
+					if times == 0
+					{
+						assert!(limit <= 0, "{}", context);
+					}
+					else
+					{
+						assert!(end.is_kept(), "{}", context);
+						assert!(
+							!criterion.matches(end.value)
+								|| times == limit as usize,
+							"{}",
+							context
+						);
+					}
+				},
+				None =>
+				{
+					assert!(end.is_kept(), "{}", context);
+					assert!(!criterion.matches(end.value), "{}", context);
+				}
+			}
+		}
+		assert_eq!(next, record.dice.len(), "{}", context);
+	}
+}
+
+/// Answer an evaluator for a function that rolls `4D6`, rerolls by the
+/// specified clause, and sums the record.
+///
+/// # Parameters
+/// - `clause`: The predicate and limit of the reroll, as the assembler reads
+///   them.
+///
+/// # Returns
+/// The evaluator.
+fn reroll_evaluator(clause: &str) -> Evaluator
+{
+	Evaluator::new(
+		Assembler::assemble(&format!(
+			"Function({{t}}@0) r#2 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll \
+			 standard dice 4D6\n\t\t⚅0 <- reroll {} from ⚅0\n\t\t@1 <- sum \
+			 rolling record ⚅0\n\t\treturn @1\n",
+			clause
+		))
+		.unwrap()
+	)
+}
+
+/// Test that evaluation rerolls as the instruction directs: it reads the
+/// threshold and limit from their registers, sums the kept dice, counts each
+/// reroll as a die, and stays within the bounds.
+#[test]
+fn test_evaluation_rerolls()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(9810257109825710);
+	for (clause, t) in [
+		("<= @0 up to 2 times", 2),
+		("< @0 unlimited times", 4),
+		("in 2..=@0 up to @0 times", 3),
+		("in [1, 6] unlimited times", 0),
+		("!= @0 up to 1 times", 6),
+		(">= @0 unlimited times", 1)
+	]
+	{
+		let mut evaluator = reroll_evaluator(clause);
+		let bounds = evaluator.bounds_over([Some(t.into())], []).unwrap();
+		assert_eq!(bounds.count, None, "{}", clause);
+		for _ in 0..200
+		{
+			let evaluation = evaluator.evaluate([t], &mut rng).unwrap();
+			let [record] = &evaluation.records[..]
+			else
+			{
+				panic!("expected one record: {:?}", evaluation.records)
+			};
+			assert_eq!(
+				record.kept().len(),
+				match clause
+				{
+					">= @0 unlimited times" => 0,
+					_ => 4
+				},
+				"{}: {}",
+				clause,
+				record
+			);
+			assert_eq!(
+				record.kept().iter().sum::<i32>(),
+				evaluation.result,
+				"{}: {}",
+				clause,
+				record
+			);
+			assert_eq!(evaluation.dice, record.dice.len() as u64, "{}", record);
+			assert!(bounds.value.contains(evaluation.result), "{}", record);
+			assert!(evaluation.dice <= bounds.dice, "{}", record);
+			match clause
+			{
+				"< @0 unlimited times" =>
+				{
+					assert!(record.kept().iter().all(|&v| v >= 4), "{}", record)
+				},
+				"in [1, 6] unlimited times" =>
+				{
+					assert!(
+						record.kept().iter().all(|&v| v != 1 && v != 6),
+						"{}",
+						record
+					)
+				},
+				_ =>
+				{}
+			}
+		}
+	}
+}
+
+/// Test that a metered evaluation charges each reroll as a die, so that a
+/// budget bounds even an unlimited reroll, and refuses the first reroll that
+/// would exceed it, and that metering within a sufficient budget does not
+/// disturb the draws.
+#[test]
+fn test_dice_budget_meters_rerolls()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let seed = 1209857102398571;
+	let mut evaluator = reroll_evaluator("<= @0 unlimited times");
+	for i in 0..100
+	{
+		let unmetered = evaluator
+			.evaluate([5], &mut StdRng::seed_from_u64(seed + i))
+			.unwrap();
+		let dice = unmetered.dice;
+		assert!(dice >= 4);
+		let metered = evaluator
+			.evaluate_metered([5], &mut StdRng::seed_from_u64(seed + i), dice)
+			.unwrap();
+		assert_eq!(metered, unmetered);
+		let mut rng = StdRng::seed_from_u64(seed + i);
+		match dice
+		{
+			// No die rerolled, so one die fewer refuses the roll itself.
+			4 => assert_eq!(
+				evaluator.evaluate_metered([5], &mut rng, dice - 1),
+				Err(EvaluationError::DiceBudgetExhausted {
+					requested: 4,
+					remaining: 3,
+					consumed: 0
+				})
+			),
+			_ => assert_eq!(
+				evaluator.evaluate_metered([5], &mut rng, dice - 1),
+				Err(EvaluationError::DiceBudgetExhausted {
+					requested: 1,
+					remaining: 0,
+					consumed: dice - 1
+				})
+			)
+		}
+	}
+	// A reroll that matches every face rolls nothing, so it costs nothing.
+	let mut evaluator = reroll_evaluator("<= @0 unlimited times");
+	let evaluation = evaluator
+		.evaluate_metered([6], &mut StdRng::seed_from_u64(seed), 4)
+		.unwrap();
+	assert_eq!(evaluation.result, 0);
+	assert_eq!(evaluation.dice, 4);
 }

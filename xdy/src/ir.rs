@@ -8,13 +8,14 @@
 //!
 //! # Instruction set architecture
 //!
-//! The ISA has 17 instructions across six categories:
+//! The ISA has 18 instructions across seven categories:
 //!
 //! | Category | Instructions | Destination | Sources |
 //! |----------|-------------|-------------|---------|
 //! | **Roll** | `RollRange`, `RollStandardDice`, `RollCustomDice` | `⚅N` | addressing modes |
 //! | **Drop** | `DropLowest`, `DropHighest` | `⚅N` | addressing mode |
 //! | **Keep** | `KeepLowest`, `KeepHighest` | `⚅N` | addressing mode |
+//! | **Reroll** | `Reroll` | `⚅N` | predicate, limit |
 //! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
 //! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Neg` | `@N` | addressing modes |
 //! | **Control** | `Return` | — | addressing mode |
@@ -40,6 +41,7 @@ use std::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::Criterion;
 #[cfg(doc)]
 use crate::RollingRecord;
 
@@ -257,10 +259,355 @@ impl Display for KeepHighest
 	}
 }
 
+/// Instruction: Reroll the dice of a rolling record that satisfy a
+/// [predicate](Predicate), each up to a [limit](Limit) of times. The reroll
+/// considers the dice that are still kept when it begins, in the order rolled,
+/// and finishes each die before it begins the next: it crosses out a matching
+/// die, rolls its replacement from the same die, appends the replacement to
+/// the record, linked to the die that it replaces, and repeats with the
+/// replacement while the replacement matches and the limit allows. A limit of
+/// zero or less rerolls nothing. An unlimited reroll whose predicate matches
+/// every face of the die rolls nothing at all, but crosses out every matching
+/// die, so that each contributes zero. A die without faces, or an empty range,
+/// shows only the face `0`.
+///
+/// The operands of the predicate and the limit are read once, before the
+/// first reroll.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Reroll
+{
+	/// The [rolling record](RollingRecord) whose dice to reroll.
+	pub dest: RollingRecordIndex,
+
+	/// The predicate that a die must satisfy to be rerolled.
+	pub predicate: Predicate,
+
+	/// The number of times that each die may be rerolled.
+	pub limit: Limit
+}
+
+impl Reroll
+{
+	/// Answer the operands of the reroll, other than its rolling record: those
+	/// of its predicate, in the order written, and then that of its limit, if
+	/// any.
+	///
+	/// # Returns
+	/// The operands.
+	pub fn operands(&self) -> Vec<AddressingMode>
+	{
+		let mut operands = self.predicate.operands();
+		operands.extend(self.limit.operand());
+		operands
+	}
+
+	/// Answer a copy of the reroll whose rolling record and operands are
+	/// replaced by the specified functions, as when a pass renumbers them.
+	///
+	/// # Parameters
+	/// - `dest`: The replacement of the rolling record.
+	/// - `replace`: The function that replaces each operand.
+	///
+	/// # Returns
+	/// The copy.
+	pub fn map(
+		&self,
+		dest: RollingRecordIndex,
+		mut replace: impl FnMut(AddressingMode) -> AddressingMode
+	) -> Self
+	{
+		Self {
+			dest,
+			predicate: self.predicate.map(&mut replace),
+			limit: self.limit.map(&mut replace)
+		}
+	}
+}
+
+impl Display for Reroll
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(
+			f,
+			"{} <- reroll {} {} from {}",
+			self.dest, self.predicate, self.limit, self.dest
+		)
+	}
+}
+
+/// The predicate of a [reroll](Reroll): the test that a die must pass to be
+/// rerolled, whose thresholds and endpoints are operands, read once, before
+/// the first reroll. Each form keeps the shape in which it was written, so
+/// that a function prints as written; [`resolve`](Self::resolve) reduces it
+/// to the [set of results](Criterion) that it matches.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Predicate
+{
+	/// Matches a result equal to the threshold.
+	Eq(AddressingMode),
+
+	/// Matches a result not equal to the threshold.
+	Ne(AddressingMode),
+
+	/// Matches a result less than the threshold.
+	Lt(AddressingMode),
+
+	/// Matches a result less than or equal to the threshold.
+	Le(AddressingMode),
+
+	/// Matches a result greater than the threshold.
+	Gt(AddressingMode),
+
+	/// Matches a result greater than or equal to the threshold.
+	Ge(AddressingMode),
+
+	/// Matches a result among the listed values, which are literals, so that
+	/// their members are always known. An empty list matches nothing.
+	In(Vec<i32>),
+
+	/// Matches a result within the half-open range `start..end`, which is
+	/// empty if `end` does not exceed `start`.
+	InRange
+	{
+		/// The least result matched.
+		start: AddressingMode,
+
+		/// The least result beyond the range.
+		end: AddressingMode
+	},
+
+	/// Matches a result within the inclusive range `start..=end`, which is
+	/// empty if `end` is less than `start`.
+	InRangeInclusive
+	{
+		/// The least result matched.
+		start: AddressingMode,
+
+		/// The greatest result matched.
+		end: AddressingMode
+	}
+}
+
+impl Predicate
+{
+	/// Answer the operands of the predicate, in the order written.
+	///
+	/// # Returns
+	/// The operands, which are empty for a list.
+	pub fn operands(&self) -> Vec<AddressingMode>
+	{
+		match self
+		{
+			Self::Eq(op)
+			| Self::Ne(op)
+			| Self::Lt(op)
+			| Self::Le(op)
+			| Self::Gt(op)
+			| Self::Ge(op) => vec![*op],
+			Self::In(_) => Vec::new(),
+			Self::InRange { start, end }
+			| Self::InRangeInclusive { start, end } => vec![*start, *end]
+		}
+	}
+
+	/// Answer a copy of the predicate whose operands are replaced by the
+	/// specified function.
+	///
+	/// # Parameters
+	/// - `replace`: The function that replaces each operand.
+	///
+	/// # Returns
+	/// The copy.
+	pub fn map(
+		&self,
+		mut replace: impl FnMut(AddressingMode) -> AddressingMode
+	) -> Self
+	{
+		match self
+		{
+			Self::Eq(op) => Self::Eq(replace(*op)),
+			Self::Ne(op) => Self::Ne(replace(*op)),
+			Self::Lt(op) => Self::Lt(replace(*op)),
+			Self::Le(op) => Self::Le(replace(*op)),
+			Self::Gt(op) => Self::Gt(replace(*op)),
+			Self::Ge(op) => Self::Ge(replace(*op)),
+			Self::In(values) => Self::In(values.clone()),
+			Self::InRange { start, end } => Self::InRange {
+				start: replace(*start),
+				end: replace(*end)
+			},
+			Self::InRangeInclusive { start, end } => Self::InRangeInclusive {
+				start: replace(*start),
+				end: replace(*end)
+			}
+		}
+	}
+
+	/// Resolve the predicate to the set of results that it matches, given the
+	/// values of its operands.
+	///
+	/// # Parameters
+	/// - `value`: The function that answers the value of an operand.
+	///
+	/// # Returns
+	/// The set of results that the predicate matches.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::{AddressingMode, Criterion, Immediate, Predicate};
+	///
+	/// let value = |op: AddressingMode| match op
+	/// {
+	///     AddressingMode::Immediate(Immediate(value)) => value,
+	///     _ => unreachable!()
+	/// };
+	/// let lt = Predicate::Lt(Immediate(3).into()).resolve(value);
+	/// assert_eq!(lt, Criterion::Within(i32::MIN..=2));
+	/// let range = Predicate::InRange {
+	///     start: Immediate(2).into(),
+	///     end: Immediate(2).into()
+	/// };
+	/// assert!(!range.resolve(value).matches(2));
+	/// ```
+	pub fn resolve(&self, value: impl Fn(AddressingMode) -> i32) -> Criterion
+	{
+		let value = |op: &AddressingMode| value(*op) as i64;
+		match self
+		{
+			Self::Eq(op) => Criterion::within(value(op), value(op)),
+			Self::Ne(op) =>
+			{
+				let threshold = value(op) as i32;
+				Criterion::Outside(threshold..=threshold)
+			},
+			Self::Lt(op) => Criterion::within(i32::MIN as i64, value(op) - 1),
+			Self::Le(op) => Criterion::within(i32::MIN as i64, value(op)),
+			Self::Gt(op) => Criterion::within(value(op) + 1, i32::MAX as i64),
+			Self::Ge(op) => Criterion::within(value(op), i32::MAX as i64),
+			Self::In(values) =>
+			{
+				let mut values = values.clone();
+				values.sort_unstable();
+				values.dedup();
+				Criterion::Among(values)
+			},
+			Self::InRange { start, end } =>
+			{
+				Criterion::within(value(start), value(end) - 1)
+			},
+			Self::InRangeInclusive { start, end } =>
+			{
+				Criterion::within(value(start), value(end))
+			},
+		}
+	}
+}
+
+impl Display for Predicate
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		match self
+		{
+			Self::Eq(op) => write!(f, "= {}", op),
+			Self::Ne(op) => write!(f, "!= {}", op),
+			Self::Lt(op) => write!(f, "< {}", op),
+			Self::Le(op) => write!(f, "<= {}", op),
+			Self::Gt(op) => write!(f, "> {}", op),
+			Self::Ge(op) => write!(f, ">= {}", op),
+			Self::In(values) =>
+			{
+				write!(f, "in [")?;
+				for (i, value) in values.iter().enumerate()
+				{
+					if i != 0
+					{
+						write!(f, ", ")?;
+					}
+					write!(f, "{}", value)?;
+				}
+				write!(f, "]")
+			},
+			Self::InRange { start, end } => write!(f, "in {}..{}", start, end),
+			Self::InRangeInclusive { start, end } =>
+			{
+				write!(f, "in {}..={}", start, end)
+			}
+		}
+	}
+}
+
+/// The limit of a [reroll](Reroll): the number of times that each die may be
+/// rerolled.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Limit
+{
+	/// Reroll each die at most this many times, or not at all if the count is
+	/// zero or less.
+	Times(AddressingMode),
+
+	/// Reroll each die until it no longer matches, or not at all if every face
+	/// of the die matches.
+	Unlimited
+}
+
+impl Limit
+{
+	/// Answer the operand of the limit, if any.
+	///
+	/// # Returns
+	/// The count of a [finite](Self::Times) limit, or `None` if the limit is
+	/// [unlimited](Self::Unlimited).
+	pub fn operand(&self) -> Option<AddressingMode>
+	{
+		match self
+		{
+			Self::Times(count) => Some(*count),
+			Self::Unlimited => None
+		}
+	}
+
+	/// Answer a copy of the limit whose operand, if any, is replaced by the
+	/// specified function.
+	///
+	/// # Parameters
+	/// - `replace`: The function that replaces the operand.
+	///
+	/// # Returns
+	/// The copy.
+	pub fn map(
+		&self,
+		mut replace: impl FnMut(AddressingMode) -> AddressingMode
+	) -> Self
+	{
+		match self
+		{
+			Self::Times(count) => Self::Times(replace(*count)),
+			Self::Unlimited => Self::Unlimited
+		}
+	}
+}
+
+impl Display for Limit
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		match self
+		{
+			Self::Times(count) => write!(f, "up to {} times", count),
+			Self::Unlimited => write!(f, "unlimited times")
+		}
+	}
+}
+
 /// Instruction: Compute the result of a [rolling record](RollingRecord),
-/// ignoring any dice marked as dropped by [DropLowest], [DropHighest],
-/// [KeepLowest], or [KeepHighest]. The summation is clamped to the range of an
-/// `i32`.
+/// ignoring any dice crossed out by [DropLowest], [DropHighest],
+/// [KeepLowest], [KeepHighest], or [Reroll]. The summation is clamped to the
+/// range of an `i32`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SumRollingRecord
@@ -510,6 +857,9 @@ pub enum Instruction
 	/// [Keep the highest dice](KeepHighest) of a rolling record.
 	KeepHighest(KeepHighest),
 
+	/// [Reroll the dice](Reroll) of a rolling record that satisfy a predicate.
+	Reroll(Reroll),
+
 	/// [Sum a rolling record](SumRollingRecord).
 	SumRollingRecord(SumRollingRecord),
 
@@ -558,6 +908,7 @@ impl Instruction
 			Self::DropHighest(inst) => Some(inst.dest.into()),
 			Self::KeepLowest(inst) => Some(inst.dest.into()),
 			Self::KeepHighest(inst) => Some(inst.dest.into()),
+			Self::Reroll(inst) => Some(inst.dest.into()),
 			Self::SumRollingRecord(inst) => Some(inst.dest.into()),
 			Self::Add(inst) => Some(inst.dest.into()),
 			Self::Sub(inst) => Some(inst.dest.into()),
@@ -586,6 +937,12 @@ impl Instruction
 			Self::DropHighest(inst) => vec![inst.dest.into(), inst.count],
 			Self::KeepLowest(inst) => vec![inst.dest.into(), inst.count],
 			Self::KeepHighest(inst) => vec![inst.dest.into(), inst.count],
+			Self::Reroll(inst) =>
+			{
+				let mut sources = vec![inst.dest.into()];
+				sources.extend(inst.operands());
+				sources
+			},
 			Self::SumRollingRecord(inst) => vec![inst.src.into()],
 			Self::Add(inst) => vec![inst.op1, inst.op2],
 			Self::Sub(inst) => vec![inst.op1, inst.op2],
@@ -722,6 +1079,30 @@ impl Instruction
 	) -> Self
 	{
 		Self::KeepHighest(KeepHighest { dest, count })
+	}
+
+	/// Create an instruction to reroll the dice of a rolling record that
+	/// satisfy a predicate.
+	///
+	/// # Parameters
+	/// - `dest`: The destination rolling record.
+	/// - `predicate`: The predicate that a die must satisfy to be rerolled.
+	/// - `limit`: The number of times that each die may be rerolled.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn reroll(
+		dest: RollingRecordIndex,
+		predicate: Predicate,
+		limit: Limit
+	) -> Self
+	{
+		Self::Reroll(Reroll {
+			dest,
+			predicate,
+			limit
+		})
 	}
 
 	/// Create an instruction to sum the values in a rolling record.
@@ -915,6 +1296,7 @@ impl Display for Instruction
 			Self::DropHighest(inst) => write!(f, "{}", inst),
 			Self::KeepLowest(inst) => write!(f, "{}", inst),
 			Self::KeepHighest(inst) => write!(f, "{}", inst),
+			Self::Reroll(inst) => write!(f, "{}", inst),
 			Self::SumRollingRecord(inst) => write!(f, "{}", inst),
 			Self::Add(inst) => write!(f, "{}", inst),
 			Self::Sub(inst) => write!(f, "{}", inst),
@@ -962,6 +1344,11 @@ impl From<KeepLowest> for Instruction
 impl From<KeepHighest> for Instruction
 {
 	fn from(inst: KeepHighest) -> Self { Self::KeepHighest(inst) }
+}
+
+impl From<Reroll> for Instruction
+{
+	fn from(inst: Reroll) -> Self { Self::Reroll(inst) }
 }
 
 impl From<SumRollingRecord> for Instruction
@@ -1107,6 +1494,20 @@ impl TryFrom<Instruction> for KeepHighest
 		match inst
 		{
 			Instruction::KeepHighest(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for Reroll
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::Reroll(inst) => Ok(inst),
 			_ => Err(())
 		}
 	}
@@ -1601,6 +2002,15 @@ pub trait InstructionVisitor<E>
 	/// An error if the visitor fails to visit the instruction.
 	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), E>;
 
+	/// Visit a reroll instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), E>;
+
 	/// Visit a sum rolling record instruction.
 	///
 	/// # Parameters
@@ -1735,6 +2145,7 @@ where
 			Instruction::DropHighest(inst) => visitor.visit_drop_highest(inst),
 			Instruction::KeepLowest(inst) => visitor.visit_keep_lowest(inst),
 			Instruction::KeepHighest(inst) => visitor.visit_keep_highest(inst),
+			Instruction::Reroll(inst) => visitor.visit_reroll(inst),
 			Instruction::SumRollingRecord(inst) =>
 			{
 				visitor.visit_sum_rolling_record(inst)
@@ -2036,6 +2447,23 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 			.or_default()
 			.insert(self.pc);
 		self.readers.entry(inst.count).or_default().insert(self.pc);
+		Ok(())
+	}
+
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		for op in inst.operands()
+		{
+			self.readers.entry(op).or_default().insert(self.pc);
+		}
 		Ok(())
 	}
 

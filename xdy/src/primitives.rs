@@ -407,6 +407,146 @@ impl RollingRecord
 		self.drop_lowest(keep_drops(self.kept_count(), 0, 0, count));
 	}
 
+	/// Reroll the dice that are still kept and that the criterion matches, each
+	/// up to `limit` times, or until it no longer matches if `limit` is `None`.
+	/// Consider the dice in the order rolled, and finish each before beginning
+	/// the next: cross out a matching die, roll its replacement from the same
+	/// die, append the replacement, [linked](Die::replaces) to the die that it
+	/// replaces, and repeat with the replacement while it matches and the limit
+	/// allows. A `limit` of zero or less rerolls nothing. If the limit is
+	/// `None` and the criterion matches every face of the die, then roll
+	/// nothing, but cross out every matching die, so that each contributes
+	/// zero. A die without faces, or an empty range, shows only the face `0`.
+	///
+	/// # Type parameters
+	/// - `R`: The type of the pseudo-random number generator.
+	///
+	/// # Parameters
+	/// - `rng`: The pseudo-random number generator.
+	/// - `criterion`: The set of results to reroll.
+	/// - `limit`: The number of times that each die may be rerolled, or `None`
+	///   for no limit.
+	///
+	/// # Returns
+	/// The number of dice rolled, one for each reroll.
+	///
+	/// # Notes
+	/// An unlimited reroll terminates with probability one, but the number of
+	/// dice that it rolls is unbounded: if the criterion matches all but one of
+	/// `n` equally likely faces, each die takes `n` rolls on average. The
+	/// [evaluator](Evaluator) [meters](Evaluator::evaluate_metered) every
+	/// reroll as a die, so that a budget bounds them.
+	///
+	/// # Examples
+	/// Reroll the `1` of `[2, 1, 4]` once, which appends its replacement:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{Criterion, Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 3, faces: 4 },
+	///     dice: [2, 1, 4].into_iter().map(Die::kept).collect()
+	/// };
+	/// let rolled = rolling_record.reroll(&mut rng(), &Criterion::Within(1..=1), Some(1));
+	/// assert_eq!(rolled, 1);
+	/// assert_eq!(rolling_record.dice.len(), 4);
+	/// assert_eq!(rolling_record.dice[3].replaces, Some(1));
+	/// assert!(rolling_record.to_string().starts_with("3D4: [2, ~1, 4, "));
+	/// ```
+	///
+	/// Reroll every die of `3D1` that shows `1`, without limit, which rolls
+	/// nothing, since every face matches:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{Criterion, RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 3, 1);
+	/// let rolled = rolling_record.reroll(&mut rng(), &Criterion::Within(1..=1), None);
+	/// assert_eq!(rolled, 0);
+	/// assert_eq!(rolling_record.to_string(), "3D1: [~1, ~1, ~1]");
+	/// assert_eq!(rolling_record.sum(), 0);
+	/// ```
+	pub fn reroll<R>(
+		&mut self,
+		rng: &mut R,
+		criterion: &Criterion,
+		limit: Option<i32>
+	) -> u64
+	where
+		R: Rng + ?Sized
+	{
+		self.reroll_within(rng, criterion, limit, u64::MAX)
+			.expect("no reroll rolls `u64::MAX` dice")
+	}
+
+	/// Reroll the dice that are still kept and that the criterion matches, as
+	/// [`reroll`](Self::reroll) does, but roll no more than `budget` dice.
+	///
+	/// # Type parameters
+	/// - `R`: The type of the pseudo-random number generator.
+	///
+	/// # Parameters
+	/// - `rng`: The pseudo-random number generator.
+	/// - `criterion`: The set of results to reroll.
+	/// - `limit`: The number of times that each die may be rerolled, or `None`
+	///   for no limit.
+	/// - `budget`: The greatest number of dice that the reroll may roll.
+	///
+	/// # Returns
+	/// The number of dice rolled, or `None` if the reroll needed to roll more
+	/// than `budget` dice, in which case it rolled exactly `budget` dice and
+	/// then stopped, drawing nothing more from the pRNG.
+	pub(crate) fn reroll_within<R>(
+		&mut self,
+		rng: &mut R,
+		criterion: &Criterion,
+		limit: Option<i32>,
+		budget: u64
+	) -> Option<u64>
+	where
+		R: Rng + ?Sized
+	{
+		let matching = self
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|(_, die)| die.is_kept() && criterion.matches(die.value))
+			.map(|(index, _)| index)
+			.collect::<Vec<_>>();
+		if limit.is_none() && self.kind.faces_within(criterion)
+		{
+			// Every face matches, so no reroll could ever stop. Roll nothing,
+			// but cross out every matching die.
+			for index in matching
+			{
+				self.dice[index].fate = Fate::Rerolled;
+			}
+			return Some(0)
+		}
+		let limit = limit.map(|limit| u64::try_from(limit).unwrap_or(0));
+		let mut rolled = 0u64;
+		for index in matching
+		{
+			let mut current = index;
+			let mut times = 0u64;
+			while criterion.matches(self.dice[current].value)
+				&& limit.is_none_or(|limit| times < limit)
+			{
+				if rolled == budget
+				{
+					return None
+				}
+				rolled += 1;
+				times += 1;
+				self.dice[current].fate = Fate::Rerolled;
+				let value = self.kind.roll_die(rng);
+				self.dice.push(Die::replacing(value, current));
+				current = self.dice.len() - 1;
+			}
+		}
+		Some(rolled)
+	}
+
 	/// Answer the results of the dice that are still kept.
 	///
 	/// # Returns
@@ -444,6 +584,19 @@ impl RollingRecord
 		self.dice
 			.iter()
 			.filter(|die| die.fate == Fate::Dropped)
+			.map(|die| die.value)
+			.collect()
+	}
+
+	/// Answer the results of the dice that a reroll crossed out.
+	///
+	/// # Returns
+	/// The rerolled results, in the order rolled.
+	pub fn rerolled(&self) -> Vec<i32>
+	{
+		self.dice
+			.iter()
+			.filter(|die| die.fate == Fate::Rerolled)
 			.map(|die| die.value)
 			.collect()
 	}
@@ -536,6 +689,201 @@ impl RollingRecord
 		for &(_, index) in kept.iter().take(count)
 		{
 			self.dice[index].fate = Fate::Dropped;
+		}
+	}
+}
+
+impl RollingRecordKind<i32>
+{
+	/// Roll one die of the kind, as the roll that filled the record rolled
+	/// each of its dice.
+	///
+	/// # Type parameters
+	/// - `R`: The type of the pseudo-random number generator.
+	///
+	/// # Parameters
+	/// - `rng`: The pseudo-random number generator.
+	///
+	/// # Returns
+	/// The result of the die.
+	///
+	/// # Panics
+	/// If the record is uninitialized, since it has no die.
+	fn roll_die<R>(&self, rng: &mut R) -> i32
+	where
+		R: Rng + ?Sized
+	{
+		match self
+		{
+			RollingRecordKind::Range { start, end } if end < start => 0,
+			RollingRecordKind::Range { start, end } =>
+			{
+				rng.random_range(*start..=*end)
+			},
+			RollingRecordKind::Standard { faces, .. } if *faces <= 0 => 0,
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				rng.random_range(1..=*faces)
+			},
+			RollingRecordKind::Custom { faces, .. } if faces.is_empty() => 0,
+			RollingRecordKind::Custom { faces, .. } =>
+			{
+				faces[rng.random_range(0..faces.len())]
+			},
+			RollingRecordKind::Uninitialized =>
+			{
+				unreachable!("an uninitialized record has no die")
+			}
+		}
+	}
+
+	/// Answer whether the criterion matches every face of the die of the
+	/// kind. A die without faces, or an empty range, shows only the face `0`.
+	///
+	/// # Parameters
+	/// - `criterion`: The criterion.
+	///
+	/// # Returns
+	/// `true` if every face matches, `false` otherwise. An uninitialized
+	/// record has no die, so every face of it matches vacuously.
+	fn faces_within(&self, criterion: &Criterion) -> bool
+	{
+		match self
+		{
+			RollingRecordKind::Range { start, end } if end < start =>
+			{
+				criterion.matches(0)
+			},
+			RollingRecordKind::Range { start, end } =>
+			{
+				criterion.covers(*start..=*end)
+			},
+			RollingRecordKind::Standard { faces, .. } if *faces <= 0 =>
+			{
+				criterion.matches(0)
+			},
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				criterion.covers(1..=*faces)
+			},
+			RollingRecordKind::Custom { faces, .. } if faces.is_empty() =>
+			{
+				criterion.matches(0)
+			},
+			RollingRecordKind::Custom { faces, .. } =>
+			{
+				faces.iter().all(|face| criterion.matches(*face))
+			},
+			RollingRecordKind::Uninitialized => true
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 Criteria.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The set of results that a [reroll](RollingRecord::reroll) rerolls: a
+/// [predicate](crate::Predicate) whose operands are
+/// [resolved](crate::Predicate::resolve) to values.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Criterion
+{
+	/// Matches every result within the inclusive range, or none if the range
+	/// is empty.
+	Within(RangeInclusive<i32>),
+
+	/// Matches every result outside the inclusive range, or every result if
+	/// the range is empty.
+	Outside(RangeInclusive<i32>),
+
+	/// Matches every listed result, which are in ascending order, without
+	/// repetition.
+	Among(Vec<i32>)
+}
+
+impl Criterion
+{
+	/// Answer the criterion that matches every result from `start` to `end`,
+	/// inclusive, of those that fit in an `i32`, or none if there are none.
+	///
+	/// # Parameters
+	/// - `start`: The least result matched.
+	/// - `end`: The greatest result matched.
+	///
+	/// # Returns
+	/// The criterion.
+	pub(crate) fn within(start: i64, end: i64) -> Self
+	{
+		let start = start.max(i32::MIN as i64);
+		let end = end.min(i32::MAX as i64);
+		match start <= end
+		{
+			true => Self::Within(start as i32..=end as i32),
+			// Any empty range will do.
+			false => Self::Within(RangeInclusive::new(1, 0))
+		}
+	}
+
+	/// Answer whether the criterion matches the specified result.
+	///
+	/// # Parameters
+	/// - `value`: The result.
+	///
+	/// # Returns
+	/// `true` if the criterion matches the result, `false` otherwise.
+	///
+	/// # Examples
+	/// ```rust
+	/// use xdy::Criterion;
+	///
+	/// assert!(Criterion::Within(1..=2).matches(2));
+	/// assert!(!Criterion::Outside(1..=2).matches(2));
+	/// assert!(Criterion::Among(vec![1, 3]).matches(3));
+	/// assert!(!Criterion::Within(2..=1).matches(2));
+	/// ```
+	pub fn matches(&self, value: i32) -> bool
+	{
+		match self
+		{
+			Self::Within(range) => range.contains(&value),
+			Self::Outside(range) => !range.contains(&value),
+			Self::Among(values) => values.binary_search(&value).is_ok()
+		}
+	}
+
+	/// Answer whether the criterion matches every result of the specified
+	/// range, in time independent of its width.
+	///
+	/// # Parameters
+	/// - `range`: The range, which is not empty.
+	///
+	/// # Returns
+	/// `true` if the criterion matches every result of the range, `false`
+	/// otherwise.
+	fn covers(&self, range: RangeInclusive<i32>) -> bool
+	{
+		let (start, end) = range.into_inner();
+		match self
+		{
+			Self::Within(within) =>
+			{
+				within.start() <= &start && &end <= within.end()
+			},
+			Self::Outside(outside) =>
+			{
+				outside.is_empty()
+					|| end < *outside.start()
+					|| *outside.end() < start
+			},
+			Self::Among(values) =>
+			{
+				// The values are distinct, so they cover the range exactly if
+				// as many of them lie within it as it has results.
+				let first = values.partition_point(|value| *value < start);
+				let last = values.partition_point(|value| *value <= end);
+				(last - first) as i64 == end as i64 - start as i64 + 1
+			}
 		}
 	}
 }

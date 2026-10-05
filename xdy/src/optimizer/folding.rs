@@ -10,8 +10,8 @@ use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor,
 	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
-	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
-	Sub, SumRollingRecord, ir::Instruction
+	Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
+	RollingRecordIndex, Sub, SumRollingRecord, ir::Instruction
 };
 
 use crate::{
@@ -30,9 +30,9 @@ pub struct ConstantFolder
 	/// The previous version of the function body.
 	previous: Option<Vec<Instruction>>,
 
-	/// The program counters of the drop and keep instructions of the previous
-	/// version of the function body, by the rolling record that they target,
-	/// so that finding the drops and keeps of a roll takes time proportional
+	/// The program counters of the drop, keep, and reroll instructions of the
+	/// previous version of the function body, by the rolling record that they
+	/// target, so that finding the clauses of a roll takes time proportional
 	/// to their number.
 	drops: HashMap<RollingRecordIndex, Vec<usize>>,
 
@@ -79,6 +79,7 @@ impl Optimizer<()> for ConstantFolder
 					Instruction::DropHighest(drop) => drop.dest,
 					Instruction::KeepLowest(keep) => keep.dest,
 					Instruction::KeepHighest(keep) => keep.dest,
+					Instruction::Reroll(reroll) => reroll.dest,
 					_ => continue
 				};
 				self.drops.entry(target).or_default().push(pc);
@@ -397,6 +398,32 @@ impl InstructionVisitor<()> for ConstantFolder
 		}
 	}
 
+	fn visit_reroll(&mut self, reroll: &Reroll) -> Result<(), ()>
+	{
+		// The heavy lifting was already done when the roll instruction was
+		// encountered. We either rewrite the reroll instruction in terms of
+		// the new rolling record or we eliminate it entirely.
+		match self.replacement(reroll.dest)
+		{
+			AddressingMode::Immediate(_) =>
+			{
+				// The rolling record is an immediate value, so the roll must
+				// have been folded away, which it is only if it rolls no dice
+				// or only zeros, which every reroll leaves zero. Eliminate the
+				// reroll instruction.
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// The rolling record is a register, so we need to rewrite the
+				// reroll instruction in terms of the new rolling record.
+				self.emit(reroll.map(dest, |op| self.replacement(op)));
+				Ok(())
+			},
+			_ => unreachable!()
+		}
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		sum: &SumRollingRecord
@@ -575,14 +602,14 @@ impl ConstantFolder
 		*self.replacements.get(&op).unwrap_or(&op)
 	}
 
-	/// Find every drop and keep instruction subsequent to the current program
-	/// counter that targets the given rolling record.
+	/// Find every drop, keep, and reroll instruction subsequent to the current
+	/// program counter that targets the given rolling record.
 	///
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
 	///
 	/// # Returns
-	/// The relevant drop and keep instructions.
+	/// The relevant drop, keep, and reroll instructions.
 	fn find_drop_instructions(
 		&self,
 		dest: RollingRecordIndex
@@ -599,7 +626,9 @@ impl ConstantFolder
 	}
 
 	/// Answer how many of the specified number of dice of a roll remain kept
-	/// after every subsequent drop and keep that targets its rolling record.
+	/// after every subsequent drop and keep that targets its rolling record,
+	/// unless a reroll targets it too, since folding declines to fold rolls
+	/// that are rerolled.
 	/// These apply in order, since a keep counts from the dice still kept,
 	/// and so does not commute with drops or other keeps: a drop of `c` drops
 	/// `c` of the dice still kept, or none if `c` is zero or less, and a keep
@@ -612,7 +641,8 @@ impl ConstantFolder
 	///
 	/// # Returns
 	/// The number of dice kept, which is never negative, or `None` if the
-	/// count of some drop or keep is not constant.
+	/// count of some drop or keep is not constant, or if a reroll targets the
+	/// record.
 	fn kept_dice(&self, dest: RollingRecordIndex, count: i32) -> Option<i32>
 	{
 		self.find_drop_instructions(dest)
@@ -636,7 +666,8 @@ impl ConstantFolder
 	/// - `drop`: A drop or keep instruction.
 	///
 	/// # Returns
-	/// The constant count, or `None` if the count is not constant.
+	/// The constant count, or `None` if the count is not constant, or if the
+	/// instruction is not a drop or keep.
 	fn resolved_count(&self, drop: &Instruction) -> Option<i32>
 	{
 		let count = match drop
@@ -978,6 +1009,7 @@ impl GetConstantOperands<(i32, Option<i32>)> for Instruction
 			{
 				drop.const_ops().map(|count| (count, None))
 			},
+			Instruction::Reroll(_) => None,
 			Instruction::SumRollingRecord(_) => None,
 			Instruction::Add(add) =>
 			{

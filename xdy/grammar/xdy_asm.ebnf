@@ -21,6 +21,7 @@
               |  <drop_highest>
               |  <keep_lowest>
               |  <keep_highest>
+              |  <reroll>
               |  <sum_rolling_record>
               |  <binary_op>
               |  <unary_neg>
@@ -39,6 +40,14 @@
 <keep_lowest> ::= "⚅" <INDEX> "<-" "keep lowest" <value_operand> "from" "⚅" <INDEX>
 
 <keep_highest> ::= "⚅" <INDEX> "<-" "keep highest" <value_operand> "from" "⚅" <INDEX>
+
+<reroll> ::= "⚅" <INDEX> "<-" "reroll" <predicate> <limit> "from" "⚅" <INDEX>
+
+<predicate> ::= <COMPARATOR> <value_operand>
+             |  "in" "[" (<INTEGER> ("," <INTEGER>)*)? "]"
+             |  "in" <value_operand> (".." | "..=") <value_operand>
+
+<limit> ::= "up to" <value_operand> "times" | "unlimited times"
 
 <sum_rolling_record> ::= "@" <INDEX> "<-" "sum rolling record" "⚅" <INDEX>
 
@@ -65,6 +74,8 @@
 <DIGIT> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 
 <BINARY_OP> ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
+
+<COMPARATOR> ::= "=" | "!=" | "<" | "<=" | ">" | ">="
 
 <EOL> ::= "\n" | "\r\n"
 

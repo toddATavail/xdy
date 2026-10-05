@@ -437,6 +437,175 @@ fn test_drops_do_not_combine_across_keeps()
 	assert_eq!(optimized.split_once("body:\n").unwrap().1, body);
 }
 
+/// Assemble a function that has no parameters from the specified body.
+///
+/// # Parameters
+/// - `registers`: The number of registers.
+/// - `records`: The number of rolling records.
+/// - `body`: The instructions, each indented by two tabs and ending with a
+///   newline.
+///
+/// # Returns
+/// The function.
+fn assemble_body(
+	registers: usize,
+	records: usize,
+	body: &str
+) -> crate::Function
+{
+	crate::Assembler::assemble(&format!(
+		"Function() r#{registers} ⚅#{records}\n\textern[]\n\tbody:\n{body}"
+	))
+	.unwrap()
+}
+
+/// Test that neither constant folding nor strength reduction folds a roll
+/// that a reroll targets, even when its dice show only one face, since an
+/// unlimited reroll that matches that face crosses out every die, and that the
+/// rolls that they still fold, which roll no dice or only zeros, sum to zero
+/// whatever their rerolls.
+#[test]
+fn test_rerolls_are_not_folded()
+{
+	for (roll, clauses, expected) in [
+		("standard dice 3D1", &["reroll = 1 unlimited times"][..], 0),
+		("standard dice 3D1", &["reroll = 1 up to 2 times"], 3),
+		("standard dice 3D1", &["reroll != 1 unlimited times"], 3),
+		(
+			"custom dice 3D[5, 5]",
+			&["reroll in [5] unlimited times"],
+			0
+		),
+		("custom dice 3D[5, 5]", &["reroll < 9 up to 1 times"], 15),
+		("range 2:2", &["reroll in 2..=2 unlimited times"], 0),
+		("range 2:2", &["reroll in 2..3 up to 4 times"], 2),
+		(
+			"standard dice 4D1",
+			&["drop lowest 1", "reroll >= 1 unlimited times"],
+			0
+		),
+		(
+			"standard dice 4D1",
+			&["reroll >= 1 unlimited times", "drop lowest 1"],
+			0
+		),
+		(
+			"standard dice 4D1",
+			&["keep highest 2", "reroll = 1 up to 1 times"],
+			2
+		),
+		("standard dice 0D6", &["reroll < 9 unlimited times"], 0),
+		("standard dice 3D0", &["reroll = 0 up to 3 times"], 0),
+		("range 3:1", &["reroll = 0 unlimited times"], 0)
+	]
+	{
+		let clauses = clauses
+			.iter()
+			.map(|clause| format!("\t\t⚅0 <- {clause} from ⚅0\n"))
+			.collect::<String>();
+		let function = assemble_body(
+			1,
+			1,
+			&format!(
+				"\t\t⚅0 <- roll {roll}\n{clauses}\t\t@0 <- sum rolling record \
+				 ⚅0\n\t\treturn @0\n"
+			)
+		);
+		for passes in [
+			Passes::none(),
+			Pass::ConstantFolding.into(),
+			Pass::StrengthReduction.into(),
+			Passes::all()
+		]
+		{
+			let optimized = optimize(function.clone(), passes);
+			assert_eq!(optimized.validate(), Ok(()), "{}", optimized);
+			let result = Evaluator::new(optimized.clone())
+				.evaluate([], &mut StdRng::seed_from_u64(0))
+				.unwrap()
+				.result;
+			assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
+		}
+	}
+}
+
+/// Test that strength reduction never combines two drops of a record across a
+/// reroll of it, since the reroll changes the dice that the later drop sees.
+#[test]
+fn test_drops_do_not_combine_across_rerolls()
+{
+	let body = "\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- reroll < 3 unlimited times from ⚅0
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+";
+	let optimized = optimize(assemble_body(1, 1, body), Passes::all());
+	assert_eq!(optimized.to_string().split_once("body:\n").unwrap().1, body);
+}
+
+/// Test that every pass renames the operands of a reroll, and that dead code
+/// elimination removes a reroll of a record that nothing sums, so that the
+/// optimized function is well formed and evaluates as the original does.
+#[test]
+fn test_optimizer_rewrites_rerolls()
+{
+	let function = crate::Assembler::assemble(
+		"\
+Function({x}@0) r#7 ⚅#2
+\textern[]
+\tbody:
+\t\t@1 <- @0 + 1
+\t\t@2 <- @0 + 1
+\t\t@3 <- @2 * 1
+\t\t@4 <- 2 + 1
+\t\t⚅0 <- roll standard dice 5D6
+\t\t⚅0 <- reroll in @1..=@2 up to @3 times from ⚅0
+\t\t⚅0 <- reroll != @4 up to @4 times from ⚅0
+\t\t@5 <- sum rolling record ⚅0
+\t\t⚅1 <- roll standard dice 2D6
+\t\t⚅1 <- reroll = @1 unlimited times from ⚅1
+\t\t@6 <- @5 + 0
+\t\treturn @6
+"
+	)
+	.unwrap();
+	let optimized = optimize(function.clone(), Passes::all());
+	assert_eq!(optimized.validate(), Ok(()), "{}", optimized);
+	assert_eq!(
+		optimized.to_string(),
+		"\
+Function({x}@0) r#1 ⚅#1
+\textern[]
+\tbody:
+\t\t@0 <- 1 + @0
+\t\t⚅0 <- roll standard dice 5D6
+\t\t⚅0 <- reroll in @0..=@0 up to @0 times from ⚅0
+\t\t⚅0 <- reroll != 3 up to 3 times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+	);
+	// The dead roll follows every live one, so removing it changes no draw.
+	for x in -1..=6
+	{
+		for seed in 0..20
+		{
+			let expected = Evaluator::new(function.clone())
+				.evaluate([x], &mut StdRng::seed_from_u64(seed))
+				.unwrap()
+				.result;
+			let actual = Evaluator::new(optimized.clone())
+				.evaluate([x], &mut StdRng::seed_from_u64(seed))
+				.unwrap()
+				.result;
+			assert_eq!(actual, expected, "x = {}, seed = {}", x, seed);
+		}
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                 Exactness.                                 //
 ////////////////////////////////////////////////////////////////////////////////

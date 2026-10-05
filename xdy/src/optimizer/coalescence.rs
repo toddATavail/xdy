@@ -20,8 +20,8 @@ use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, DependencyAnalyzer, Div,
 	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
 	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, Optimizer, ProgramCounter,
-	RegisterIndex, Return, RollCustomDice, RollRange, RollStandardDice, Sub,
-	SumRollingRecord
+	RegisterIndex, Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
+	Sub, SumRollingRecord
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -268,6 +268,11 @@ impl InstructionVisitor<()> for RegisterCoalescer
 			dest: inst.dest,
 			count: self.color(inst.count)
 		})
+	}
+
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
+	{
+		self.emit(inst.map(inst.dest, |op| self.color(op)))
 	}
 
 	fn visit_sum_rolling_record(

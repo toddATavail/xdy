@@ -3982,3 +3982,43 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 		]
 	})
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                                  Rerolls.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that, until the forward pass weighs rerolls, the estimate prices a
+/// function that rerolls beyond every budget but the unlimited one, and a
+/// build within any lesser budget refuses it, rather than answering a wrong
+/// distribution.
+#[test]
+fn test_rerolls_exceed_every_budget()
+{
+	let function = Assembler::assemble(
+		"\
+Function() r#1 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+	)
+	.unwrap();
+	let evaluator = Evaluator::new(function);
+	let plan = evaluator.plan_distribution([]).unwrap();
+	assert_eq!(plan.estimate().steps, u64::MAX);
+	let budget = Budget {
+		steps: u64::MAX - 1,
+		cells: u64::MAX - 1
+	};
+	assert!(matches!(
+		plan.build(budget, &Unobserved),
+		Err(BuildError::BudgetExhausted {
+			dimension: Dimension::Steps,
+			requested: u64::MAX,
+			..
+		})
+	));
+}

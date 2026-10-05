@@ -10,8 +10,8 @@
 use pretty_assertions::assert_eq;
 
 use crate::{
-	AddressingMode, Assembler, Function, FunctionError, Instruction,
-	RegisterIndex, RollingRecordIndex, compile,
+	AddressingMode, Assembler, Function, FunctionError, Immediate, Instruction,
+	Limit, Predicate, RegisterIndex, RollingRecordIndex, compile,
 	support::{compile_valid, read_compilation_test_cases}
 };
 
@@ -130,6 +130,82 @@ fn malformed() -> Vec<(Function, FunctionError, &'static str)>
 			},
 			FunctionError::UnexpectedRollingRecordOperand { instruction: 2 },
 			"instruction 2: rolling record operand is not permitted here"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::reroll(
+						RollingRecordIndex(0),
+						Predicate::InRange {
+							start: AddressingMode::Register(RegisterIndex(1)),
+							end: AddressingMode::Register(RegisterIndex(5))
+						},
+						Limit::Unlimited
+					)
+				)
+			},
+			FunctionError::RegisterOutOfBounds {
+				index: 5,
+				register_count: 3,
+				instruction: 1
+			},
+			"instruction 1: register @5 exceeds declared register count r#3"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::reroll(
+						RollingRecordIndex(0),
+						Predicate::Eq(AddressingMode::Immediate(Immediate(1))),
+						Limit::Times(AddressingMode::Register(RegisterIndex(
+							7
+						)))
+					)
+				)
+			},
+			FunctionError::RegisterOutOfBounds {
+				index: 7,
+				register_count: 3,
+				instruction: 1
+			},
+			"instruction 1: register @7 exceeds declared register count r#3"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::reroll(
+						RollingRecordIndex(2),
+						Predicate::In(vec![1]),
+						Limit::Unlimited
+					)
+				)
+			},
+			FunctionError::RollingRecordOutOfBounds {
+				index: 2,
+				rolling_record_count: 1,
+				instruction: 1
+			},
+			"instruction 1: rolling record ⚅2 exceeds declared rolling record \
+			 count ⚅#1"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::reroll(
+						RollingRecordIndex(0),
+						Predicate::Ge(AddressingMode::RollingRecord(
+							RollingRecordIndex(0)
+						)),
+						Limit::Unlimited
+					)
+				)
+			},
+			FunctionError::UnexpectedRollingRecordOperand { instruction: 1 },
+			"instruction 1: rolling record operand is not permitted here"
 		),
 		(
 			|f| {
@@ -261,6 +337,37 @@ fn test_serde_round_trip()
 			assert_eq!(actual, function, "{}", source);
 		}
 	}
+}
+
+/// Test that functions that reroll, with every form of predicate and both
+/// kinds of limit, survive the round trip through `serde`.
+#[cfg(feature = "serde")]
+#[test]
+fn test_serde_round_trip_rerolls()
+{
+	let function = Assembler::assemble(
+		"\
+Function({a}@0) r#2 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t⚅0 <- reroll != @0 up to @0 times from ⚅0
+\t\t⚅0 <- reroll < 2 unlimited times from ⚅0
+\t\t⚅0 <- reroll <= 2 unlimited times from ⚅0
+\t\t⚅0 <- reroll > 5 unlimited times from ⚅0
+\t\t⚅0 <- reroll >= 5 unlimited times from ⚅0
+\t\t⚅0 <- reroll in [1, 3] unlimited times from ⚅0
+\t\t⚅0 <- reroll in 1..@0 unlimited times from ⚅0
+\t\t⚅0 <- reroll in -1..=1 unlimited times from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+"
+	)
+	.unwrap();
+	let json = serde_json::to_string(&function).unwrap();
+	let actual: Function = serde_json::from_str(&json).unwrap();
+	assert_eq!(actual, function);
 }
 
 /// Test that deserialization refuses each malformed function, reporting the

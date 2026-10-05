@@ -23,8 +23,8 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	AddressingMode, Assembler, AssemblyError, AssemblyLocation, DropKind,
-	Function, FunctionError, Immediate, Instruction, KeepKind, RegisterIndex,
-	RollingRecordIndex,
+	Function, FunctionError, Immediate, Instruction, KeepKind, Limit,
+	Predicate, RegisterIndex, RollingRecordIndex,
 	support::{compile_valid, read_compilation_test_cases}
 };
 
@@ -513,6 +513,67 @@ Function({k}@0) r#2 ⚅#1
 			AddressingMode::Register(RegisterIndex(0))
 		)
 	);
+	assert_eq!(function.to_string(), text);
+}
+
+/// Rerolls with every form of predicate, both kinds of limit, and immediate,
+/// negative, and register operands, which round-trip through the text.
+#[test]
+fn test_assemble_reroll_clauses()
+{
+	let text = "\
+Function({a}@0, {b}@1) r#3 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t⚅0 <- reroll != @0 up to @1 times from ⚅0
+\t\t⚅0 <- reroll < -2 unlimited times from ⚅0
+\t\t⚅0 <- reroll <= @0 up to 0 times from ⚅0
+\t\t⚅0 <- reroll > 5 up to -1 times from ⚅0
+\t\t⚅0 <- reroll >= @1 unlimited times from ⚅0
+\t\t⚅0 <- reroll in [1, -3, 1] up to 2 times from ⚅0
+\t\t⚅0 <- reroll in [] unlimited times from ⚅0
+\t\t⚅0 <- reroll in -3..@1 up to 1 times from ⚅0
+\t\t⚅0 <- reroll in @0..=-1 unlimited times from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+";
+	let function = Assembler::assemble(text).unwrap();
+	let record = RollingRecordIndex(0);
+	let imm = |value| AddressingMode::Immediate(Immediate(value));
+	let reg = |index| AddressingMode::Register(RegisterIndex(index));
+	let expected = [
+		(Predicate::Eq(imm(1)), Limit::Times(imm(1))),
+		(Predicate::Ne(reg(0)), Limit::Times(reg(1))),
+		(Predicate::Lt(imm(-2)), Limit::Unlimited),
+		(Predicate::Le(reg(0)), Limit::Times(imm(0))),
+		(Predicate::Gt(imm(5)), Limit::Times(imm(-1))),
+		(Predicate::Ge(reg(1)), Limit::Unlimited),
+		(Predicate::In(vec![1, -3, 1]), Limit::Times(imm(2))),
+		(Predicate::In(Vec::new()), Limit::Unlimited),
+		(
+			Predicate::InRange {
+				start: imm(-3),
+				end: reg(1)
+			},
+			Limit::Times(imm(1))
+		),
+		(
+			Predicate::InRangeInclusive {
+				start: reg(0),
+				end: imm(-1)
+			},
+			Limit::Unlimited
+		)
+	];
+	for (i, (predicate, limit)) in expected.into_iter().enumerate()
+	{
+		assert_eq!(
+			function.instructions[i + 1],
+			Instruction::reroll(record, predicate, limit)
+		);
+	}
 	assert_eq!(function.to_string(), text);
 }
 
@@ -1100,6 +1161,85 @@ fn test_reject_keep_highest_source_disagrees_with_destination()
 	assert_eq!(source, 0);
 }
 
+/// A `reroll` instruction whose destination disagrees with its `from ⚅N`
+/// source yields [`AssemblyError::RerollSourceMismatch`], with the mismatched
+/// indices surfaced on the variant.
+#[test]
+fn test_reject_reroll_source_disagrees_with_destination()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅1 <- roll standard dice 3D6\n\t\t⚅1 <- reroll = 1 up to 1 times from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n"
+	);
+	let AssemblyError::RerollSourceMismatch {
+		destination,
+		source,
+		..
+	} = e
+	else
+	{
+		panic!("expected RerollSourceMismatch, got: {:?}", e);
+	};
+	assert_eq!(destination, 1);
+	assert_eq!(source, 0);
+}
+
+/// A rolling record may not serve as a threshold, an endpoint, or a limit of
+/// a reroll, and a list of a reroll holds only literals, so each yields
+/// [`AssemblyError::Syntax`]; and a reroll without a limit, or with a
+/// malformed comparator, does too.
+#[test]
+fn test_reject_malformed_reroll()
+{
+	for clause in [
+		"= ⚅0 up to 1 times",
+		"in ⚅0..2 up to 1 times",
+		"in 1..=⚅0 unlimited times",
+		"= 1 up to ⚅0 times",
+		"in [@0] up to 1 times",
+		"= 1",
+		"== 1 up to 1 times",
+		"in 1...2 up to 1 times",
+		"= 1 up to 1",
+		"= 1 unlimited"
+	]
+	{
+		let text = format!(
+			"Function({{a}}@0) r#2 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅0 <- reroll {} from ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\treturn @1\n",
+			clause
+		);
+		assert!(
+			matches!(assert_rejects(&text), AssemblyError::Syntax { .. }),
+			"{}",
+			clause
+		);
+	}
+}
+
+/// A register out of bounds in the predicate or the limit of a reroll yields
+/// [`FunctionError::RegisterOutOfBounds`].
+#[test]
+fn test_reject_reroll_register_out_of_bounds()
+{
+	for clause in [
+		"= @5 up to 1 times",
+		"in 1..@5 unlimited times",
+		"= 1 up to @5 times"
+	]
+	{
+		let text = format!(
+			"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅0 <- reroll {} from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n",
+			clause
+		);
+		let e = assert_invalid(&text);
+		assert!(
+			matches!(e, FunctionError::RegisterOutOfBounds { index: 5, .. }),
+			"{}: {:?}",
+			clause,
+			e
+		);
+	}
+}
+
 /// Non-whitespace content following the final instruction yields
 /// [`AssemblyError::Syntax`]. The trailing-garbage check catches stray tokens
 /// that might otherwise be silently discarded, which would hide regressions in
@@ -1416,6 +1556,15 @@ fn test_assembly_error_display_and_location()
 			},
 			"assembly error at line 9, column 9 (byte 9): keep highest \
 			 destination ⚅3 disagrees with its `from` source ⚅4"
+		),
+		(
+			AssemblyError::RerollSourceMismatch {
+				destination: 5,
+				source: 6,
+				location: loc(10)
+			},
+			"assembly error at line 10, column 10 (byte 10): reroll \
+			 destination ⚅5 disagrees with its `from` source ⚅6"
 		),
 		(
 			AssemblyError::Invalid {

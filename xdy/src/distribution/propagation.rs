@@ -81,9 +81,9 @@ use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
 	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
 	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod,
-	Mul, Neg, ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord, Weight, add,
-	div, exp, max, r#mod, mul, neg, sub
+	Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	Weight, add, div, exp, max, r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1791,6 +1791,14 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// The keep writes a new value, which no sum has read yet.
 		record.summed = false;
 		Ok(())
+	}
+
+	fn visit_reroll(&mut self, _inst: &Reroll) -> Result<(), Halt>
+	{
+		// The pass does not weigh rerolls yet, so it prices a reroll beyond
+		// every budget, as the estimate does, and refuses it.
+		self.meter.charge(u64::MAX, u64::MAX)?;
+		unimplemented!("the forward pass does not weigh rerolls yet")
 	}
 
 	fn visit_sum_rolling_record(

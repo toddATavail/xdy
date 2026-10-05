@@ -19,6 +19,7 @@ This document covers the internal architecture for contributors and curious powe
 	* [Roll instructions](#roll-instructions)
 	* [Drop instructions](#drop-instructions)
 	* [Keep instructions](#keep-instructions)
+	* [Reroll instructions](#reroll-instructions)
 	* [Reduce instructions](#reduce-instructions)
 	* [Arithmetic instructions](#arithmetic-instructions)
 	* [Control instructions](#control-instructions)
@@ -131,7 +132,7 @@ graph TD
 
 All arithmetic saturates to `i32::MIN`/`i32::MAX`. Division by zero yields zero. `0^0 = 1`. A negative exponent yields zero, except that `1^n = 1` and `(-1)^n = ±1` for every `n`.
 
-`evaluate_metered()` evaluates within a caller-supplied dice budget. The IR never branches or loops, so every cost of evaluation beyond the size of the function is proportional to the dice rolled; each roll instruction charges its count against the budget, and one that would exceed it is refused with `DiceBudgetExhausted` before it draws from the RNG or allocates anything. Within the budget, metering never changes the RNG draws. Every `Evaluation` reports the dice it rolled in `dice`.
+`evaluate_metered()` evaluates within a caller-supplied dice budget. The IR never branches, and loops only to roll dice, as a reroll does, so every cost of evaluation beyond the size of the function is proportional to the dice rolled; each roll instruction charges its count against the budget, and each reroll one die, and a charge that would exceed it is refused with `DiceBudgetExhausted` before it draws from the RNG or allocates anything. Within the budget, metering never changes the RNG draws. Every `Evaluation` reports the dice it rolled in `dice`.
 
 The evaluator also provides `bounds_over()`, which computes static `min`/`max` bounds, (when possible) the total outcome count, and the worst-case number of dice rolled — without requiring an RNG.
 
@@ -174,6 +175,8 @@ The distribution engine computes the exact probability distribution of a dice ex
 * Each arithmetic instruction combines the distributions of its operands pair by pair, through the same primitives that the evaluator uses, so every edge case of saturation and division is inherited rather than rederived.
 * A roll whose count, faces, range endpoints, or drop or keep counts are random fills its record with a weighted mixture of rolls with fixed operands, one for each outcome of its operands.
 * Combining operands pair by pair is exact only if they are independent, which fails only where some random value is read more than once. The pass conditions on such a value, as its plan directs: it splits each of its _worlds_, each a complete state of the pass, into one for each outcome of the value, in which the value is fixed, and later merges them, once one value carries the whole influence of the conditioned one, by mixing that value's distributions over the worlds. The worlds of open splits form a stack, merged last in, first out.
+
+The forward pass does not weigh rerolls yet, so the estimate of a function that rerolls exceeds every budget but the unlimited one, and a build within a lesser budget refuses it.
 
 Where no roll has random operands, every path through the expression, one branch of every range and die, is equally likely, and every outcome weighs the number of paths that reach it. Elsewhere, paths may be unequally likely, as in `(1D3)D3`, and every outcome weighs its probability over a total that is a multiple of the least common multiple of the paths' denominators.
 
@@ -277,11 +280,21 @@ Drops accumulate: each drop instruction marks `K` more results of its direction,
 
 A keep counts from the results that earlier drops and keeps left kept, so, unlike drops, keeps do not commute with drops or with each other: of `4D6`, dropping the lowest and then keeping the lowest 2 keeps the second and third lowest results. A keep only moves the counts of dropped results, so a rolling record shows its keeps as drops.
 
+### Reroll instructions
+
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `Reroll` | `⚅N <- reroll P L from ⚅N` | Reroll each result of rolling record `N` still kept that satisfies predicate `P`, up to limit `L` times |
+
+The predicate `P` is a comparison with a threshold, `= T`, `!= T`, `< T`, `<= T`, `> T`, or `>= T`; a list of literals, `in [v₁, v₂, …]`; or a half-open or inclusive range, `in S..E` or `in S..=E`, which is empty if it is inverted. The limit `L` is `up to K times`, where a `K` of zero or less rerolls nothing, or `unlimited times`. The thresholds, endpoints, and `K` are read once, before the first reroll.
+
+A reroll considers the results still kept when it begins, in the order rolled, and finishes each before it begins the next: it crosses out a matching result, rolls its replacement from the same die, and appends the replacement to the record, linked to the result that it replaces, repeating while the replacement matches and the limit allows. An unlimited reroll whose predicate matches every face of the die rolls nothing, but crosses out every matching result, so that each contributes zero. A die without faces, or an empty range, shows only the face `0`.
+
 ### Reduce instructions
 
 | Instruction | Syntax | Semantics |
 |-------------|--------|-----------|
-| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the results of rolling record `M` that no drop or keep dropped into register `N` (saturating) |
+| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the results of rolling record `M` that no drop, keep, or reroll crossed out into register `N` (saturating) |
 
 ### Arithmetic instructions
 

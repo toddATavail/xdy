@@ -11,7 +11,7 @@ use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	DependencyAnalyzer, Div, DropHighest, DropLowest, Exp, Function,
 	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul,
-	Neg, Optimizer, RegisterIndex, Return, RollCustomDice, RollRange,
+	Neg, Optimizer, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
 	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
 };
 
@@ -185,6 +185,16 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 				dest: self.replacement(keep.dest).try_into().unwrap(),
 				count: self.replacement(keep.count)
 			});
+		}
+		Ok(())
+	}
+
+	fn visit_reroll(&mut self, reroll: &Reroll) -> Result<(), ()>
+	{
+		if self.is_rolling_record_live(reroll.dest)
+		{
+			let dest = self.replacement(reroll.dest).try_into().unwrap();
+			self.emit(reroll.map(dest, |op| self.replacement(op)));
 		}
 		Ok(())
 	}

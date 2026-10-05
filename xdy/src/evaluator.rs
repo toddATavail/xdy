@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg,
+	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
 	RollStandardDice, RollingRecordIndex, SourceSpan, Sub, SumRollingRecord,
 	add, div, exp, max, r#mod, mul, neg, parser::ParseError, roll_custom_dice,
 	roll_range, roll_standard_dice, sub
@@ -38,9 +38,12 @@ use crate::{
 /// [`RollingRecord`] in the frame's rolling record set.
 ///
 /// A die that a drop or keep dropped stays in the record, crossed out, so the
-/// record shows everything that happened to its dice. Only the
-/// [kept](Fate::Kept) dice reach the sum or any later drop or keep, so the
-/// multiset of kept dice decides everything that the record computes.
+/// record shows everything that happened to its dice. So does a die that a
+/// [reroll](crate::Reroll) rerolled, whose replacement follows the dice
+/// already rolled, [linked](Die::replaces) to it, so that each die's chain of
+/// rerolls can be traced. Only the [kept](Fate::Kept) dice reach the sum or
+/// any later drop, keep, or reroll, so the multiset of kept dice decides
+/// everything that the record computes.
 ///
 /// A record prints its kind and then its dice, in the order rolled, each
 /// crossed-out die prefixed with `~`, whatever crossed it out, as in
@@ -73,8 +76,9 @@ impl Display for RollingRecord
 	}
 }
 
-/// A die of a [rolling record](RollingRecord): its result, and its fate. A die
-/// prints as its result, prefixed with `~` if it is crossed out.
+/// A die of a [rolling record](RollingRecord): its result, its fate, and the
+/// die that it replaces, if a reroll rolled it. A die prints as its result,
+/// prefixed with `~` if it is crossed out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Die
@@ -83,7 +87,13 @@ pub struct Die
 	pub value: i32,
 
 	/// Whether the die still counts.
-	pub fate: Fate
+	pub fate: Fate,
+
+	/// The index, among the [dice](RollingRecord::dice) of the record, of the
+	/// die that this die replaces, which a [reroll](Fate::Rerolled) crossed
+	/// out; or `None` if the die was rolled by the roll that filled the
+	/// record.
+	pub replaces: Option<usize>
 }
 
 impl Die
@@ -100,7 +110,28 @@ impl Die
 	{
 		Self {
 			value,
-			fate: Fate::Kept
+			fate: Fate::Kept,
+			replaces: None
+		}
+	}
+
+	/// Answer a freshly rolled die, which is [kept](Fate::Kept), that replaces
+	/// a die that a reroll crossed out.
+	///
+	/// # Parameters
+	/// - `value`: The result of the die.
+	/// - `replaces`: The index, among the dice of the record, of the die that
+	///   it replaces.
+	///
+	/// # Returns
+	/// The kept die.
+	#[inline]
+	pub const fn replacing(value: i32, replaces: usize) -> Self
+	{
+		Self {
+			value,
+			fate: Fate::Kept,
+			replaces: Some(replaces)
 		}
 	}
 
@@ -119,7 +150,7 @@ impl Display for Die
 		match self.fate
 		{
 			Fate::Kept => write!(f, "{}", self.value),
-			Fate::Dropped => write!(f, "~{}", self.value)
+			Fate::Dropped | Fate::Rerolled => write!(f, "~{}", self.value)
 		}
 	}
 }
@@ -130,13 +161,18 @@ impl Display for Die
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Fate
 {
-	/// The die still counts toward the sum of its record, and any later drop
-	/// or keep may cross it out.
+	/// The die still counts toward the sum of its record, and any later drop,
+	/// keep, or reroll may cross it out.
 	#[default]
 	Kept,
 
 	/// A drop or keep crossed out the die, so it no longer counts.
-	Dropped
+	Dropped,
+
+	/// A reroll crossed out the die, so it no longer counts. The reroll
+	/// appended the die's replacement to the record, linked to it, unless
+	/// every face of the die matched an unlimited reroll, which rolls nothing.
+	Rerolled
 }
 
 /// The kind of rolling record.
@@ -319,10 +355,11 @@ pub struct Evaluation
 	/// The rolling records for the dice subexpressions.
 	pub records: Vec<RollingRecord>,
 
-	/// The number of dice rolled, where a range counts as one die. This is
-	/// exactly the consumption charged against the budget of a
-	/// [metered](Evaluator::evaluate_metered) evaluation, so a caller that
-	/// carries one budget across several evaluations can deduct it.
+	/// The number of dice rolled, where a range counts as one die, and each
+	/// reroll as one more. This is exactly the consumption charged against the
+	/// budget of a [metered](Evaluator::evaluate_metered) evaluation, so a
+	/// caller that carries one budget across several evaluations can deduct
+	/// it.
 	#[cfg_attr(feature = "serde", serde(default))]
 	pub dice: u64
 }
@@ -482,10 +519,11 @@ impl Evaluator
 	/// draws anything from the pRNG or allocates anything, and the refusal ends
 	/// the evaluation; there is no partial result.
 	///
-	/// The instructions of a compiled function never branch or loop, so every
-	/// cost of evaluation beyond the size of the function is proportional to
-	/// the dice rolled. Metering the dice therefore meters the whole
-	/// evaluation.
+	/// The instructions of a compiled function never branch, and loop only to
+	/// roll dice, as a reroll does, which charges each die that it rolls, so
+	/// every cost of evaluation beyond the size of the function is
+	/// proportional to the dice rolled. Metering the dice therefore meters the
+	/// whole evaluation.
 	///
 	/// # Parameters
 	/// - `args`: The arguments to the function.
@@ -678,6 +716,37 @@ where
 		let record = self.record_mut(inst.dest);
 		record.keep_highest(count);
 		Ok(())
+	}
+
+	fn visit_reroll(
+		&mut self,
+		inst: &Reroll
+	) -> Result<(), EvaluationError<'static>>
+	{
+		// Read every operand once, before the first reroll.
+		let criterion = inst.predicate.resolve(|op| self.value(op));
+		let limit = match inst.limit
+		{
+			Limit::Times(count) => Some(self.value(count)),
+			Limit::Unlimited => None
+		};
+		// Each reroll rolls one die, which the budget meters before it draws
+		// anything from the pRNG.
+		let record = &mut self.records[inst.dest.0];
+		match record.reroll_within(self.rng, &criterion, limit, self.remaining)
+		{
+			Some(rolled) =>
+			{
+				self.remaining -= rolled;
+				self.consumed = self.consumed.saturating_add(rolled);
+				Ok(())
+			},
+			None => Err(EvaluationError::DiceBudgetExhausted {
+				requested: 1,
+				remaining: 0,
+				consumed: self.consumed.saturating_add(self.remaining)
+			})
+		}
 	}
 
 	fn visit_sum_rolling_record(
@@ -1970,6 +2039,32 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
 	{
 		self.keep(inst.dest, inst.count);
+		Ok(())
+	}
+
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
+	{
+		// A reroll leaves every result within the faces of its die, and every
+		// die still kept, but for an unlimited reroll that matches every face,
+		// which crosses out every die that it matches.
+		let limit = inst.limit.operand().map(|count| self.value(count));
+		let record = self.record_mut(inst.dest);
+		let kept = record.kept;
+		if limit.is_none()
+		{
+			record.kept = (0, kept.max).into();
+		}
+		// Each die still kept may be rerolled up to the limit, and without
+		// limit, any number of times.
+		let rerolls = match limit
+		{
+			Some(limit) => dice(kept.max).saturating_mul(dice(limit.max)),
+			None if kept.max > 0 => u64::MAX,
+			None => 0
+		};
+		self.dice = self.dice.saturating_add(rerolls);
+		// The rerolls make the paths through the roll unequally likely.
+		self.count = None;
 		Ok(())
 	}
 

@@ -60,7 +60,7 @@ use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
 	DropLowest, EvaluationBounds, Evaluator, Exp, Function, Instruction,
 	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
 	RollStandardDice, Sub, SumRollingRecord, evaluator::BoundsEvaluator
 };
 
@@ -1656,6 +1656,19 @@ impl InstructionVisitor<()> for Pricing<'_>
 	fn visit_keep_highest(&mut self, inst: &KeepHighest) -> Result<(), ()>
 	{
 		self.keep(inst.dest.0, inst.count, true);
+		Ok(())
+	}
+
+	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
+	{
+		// The pass does not weigh rerolls yet, so a reroll costs more than any
+		// budget but the unlimited one admits.
+		for op in inst.operands()
+		{
+			self.read(op);
+		}
+		self.tally.charge(u128::MAX, u128::MAX);
+		self.shadow.records[inst.dest.0].summed = false;
 		Ok(())
 	}
 

@@ -15,7 +15,7 @@ use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, Instruction,
 	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Return, RollCustomDice, RollRange,
+	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
 	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
 };
 
@@ -42,16 +42,16 @@ pub struct StrengthReducer
 	/// The next rolling record to allocate.
 	next_rolling_record: RollingRecordIndex,
 
-	/// The rolling records that drop or keep instructions target, relative to
-	/// the original function. A range into one of them must remain a range,
-	/// even if it has only one value, since a drop or keep can remove that
-	/// value.
+	/// The rolling records that drop, keep, or reroll instructions target,
+	/// relative to the original function. A range into one of them must
+	/// remain a range, even if it has only one value, since a drop, keep, or
+	/// reroll can remove that value.
 	dropped: HashSet<RollingRecordIndex>,
 
-	/// The rolling records that keep instructions target, relative to the
-	/// original function. A roll into one of them is never [reduced to its
-	/// count of dice](Self::reduce_to_count), since the reduction accounts for
-	/// drops but not for keeps.
+	/// The rolling records that keep or reroll instructions target, relative
+	/// to the original function. A roll into one of them is never [reduced to
+	/// its count of dice](Self::reduce_to_count), since the reduction accounts
+	/// for drops but not for keeps or rerolls.
 	kept: HashSet<RollingRecordIndex>,
 
 	/// The sole face of each rolling record, relative to the original
@@ -86,6 +86,7 @@ impl Optimizer<()> for StrengthReducer
 					Instruction::DropHighest(drop) => Some(drop.dest),
 					Instruction::KeepLowest(keep) => Some(keep.dest),
 					Instruction::KeepHighest(keep) => Some(keep.dest),
+					Instruction::Reroll(reroll) => Some(reroll.dest),
 					_ => None
 				})
 				.collect();
@@ -96,6 +97,7 @@ impl Optimizer<()> for StrengthReducer
 				{
 					Instruction::KeepLowest(keep) => Some(keep.dest),
 					Instruction::KeepHighest(keep) => Some(keep.dest),
+					Instruction::Reroll(reroll) => Some(reroll.dest),
 					_ => None
 				})
 				.collect();
@@ -425,6 +427,19 @@ impl InstructionVisitor<()> for StrengthReducer
 			dest,
 			count: self.replacement(keep.count)
 		});
+		Ok(())
+	}
+
+	fn visit_reroll(&mut self, reroll: &Reroll) -> Result<(), ()>
+	{
+		// A roll that rerolls is never reduced to a value, so its record
+		// remains a record.
+		let AddressingMode::RollingRecord(dest) = self.replacement(reroll.dest)
+		else
+		{
+			unreachable!("a reroll of a roll reduced to a value")
+		};
+		self.emit(reroll.map(dest, |op| self.replacement(op)));
 		Ok(())
 	}
 
@@ -857,10 +872,10 @@ impl StrengthReducer
 	}
 
 	/// Find the program counter of the last drop instruction that satisfies the
-	/// specified filter, provided that no keep of the specified rolling record
-	/// follows it. Drops of a record commute with one another, but not with
-	/// its keeps, so a drop may combine with a later one only if no keep
-	/// separates them.
+	/// specified filter, provided that no keep or reroll of the specified
+	/// rolling record follows it. Drops of a record commute with one another,
+	/// but not with its keeps or rerolls, so a drop may combine with a later
+	/// one only if no keep or reroll separates them.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record, relative to the optimized function.
@@ -881,7 +896,12 @@ impl StrengthReducer
 				Instruction::KeepLowest(KeepLowest { dest: kept, .. })
 				| Instruction::KeepHighest(KeepHighest {
 					dest: kept, ..
-				}) if *kept == dest => return None,
+				})
+				| Instruction::Reroll(Reroll { dest: kept, .. })
+					if *kept == dest =>
+				{
+					return None
+				},
 				inst if filter(inst) => return Some(pc.into()),
 				_ =>
 				{}

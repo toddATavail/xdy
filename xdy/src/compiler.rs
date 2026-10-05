@@ -1215,6 +1215,14 @@ impl Function
 				check_record(inst.dest, record_seen)?;
 				check_mode(inst.count, register_seen)?;
 			},
+			Instruction::Reroll(inst) =>
+			{
+				check_record(inst.dest, record_seen)?;
+				for op in inst.operands()
+				{
+					check_mode(op, register_seen)?;
+				}
+			},
 			Instruction::SumRollingRecord(inst) =>
 			{
 				check_register(inst.dest, register_seen)?;
