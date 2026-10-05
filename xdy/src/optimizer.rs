@@ -26,7 +26,7 @@ mod dce;
 mod folding;
 mod reduction;
 
-use std::ops::BitOr;
+use std::{collections::HashSet, ops::BitOr};
 
 use coalescence::RegisterCoalescer;
 use commutation::ConstantCommuter;
@@ -35,7 +35,7 @@ use dce::DeadCodeEliminator;
 use folding::ConstantFolder;
 use reduction::StrengthReducer;
 
-use crate::Function;
+use crate::{AddressingMode, Function, Instruction};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Optimizers.                                 //
@@ -49,7 +49,9 @@ pub trait Optimizer<E>
 	/// Optimize a function.
 	///
 	/// # Parameters
-	/// - `function`: The function to optimize.
+	/// - `function`: The function to optimize. The standard optimizer and its
+	///   passes require it to be in [static single assignment
+	///   form](StandardOptimizer#static-single-assignment-form).
 	///
 	/// # Returns
 	/// The optimized function.
@@ -64,11 +66,28 @@ pub trait Optimizer<E>
 /// optimizer continues to apply passes until no further changes are made to the
 /// function.
 ///
+/// # Static single assignment form
+///
+/// Every pass but register coalescence requires the function to be in static
+/// single assignment (SSA) form, as the [compiler](crate::Compiler) emits it:
+///
+/// - No instruction writes a register that holds a parameter or an external
+///   variable, and at most one instruction writes each other register.
+/// - At most one roll writes each rolling record, before any drop, keep, or
+///   reroll of it. Drops, keeps, and rerolls rewrite the record in place, and
+///   are the only exception to single assignment.
+///
+/// Register coalescence breaks SSA form, so it runs last, and a function that
+/// it has coalesced, or a function assembled by hand that reuses a register,
+/// is not fit to optimize again. The passes do not check their input, so
+/// such a function may be miscompiled, or may cause a panic; debug builds
+/// assert the form before the first pass.
+///
 /// # Fixed-point optimization loop
 ///
 /// ```mermaid
 /// graph TD
-///     A["Input Function"] --> B["CSE"]
+///     A["Input Function (SSA)"] --> B["CSE"]
 ///     B --> C["Constant Commuting"]
 ///     C --> D["Constant Folding"]
 ///     D --> E["Strength Reduction"]
@@ -106,6 +125,12 @@ impl Optimizer<()> for StandardOptimizer
 			// No passes to apply; return the function as-is.
 			return Ok(function)
 		}
+		debug_assert!(
+			ssa_violation(&function).is_none(),
+			"the optimizer requires static single assignment form, which \
+			 instruction {} violates:\n{function}",
+			ssa_violation(&function).unwrap_or_default()
+		);
 		let mut previous = function;
 		loop
 		{
@@ -155,6 +180,44 @@ impl Optimizer<()> for StandardOptimizer
 			previous = optimized;
 		}
 	}
+}
+
+/// Answer the first instruction of the function that violates [static single
+/// assignment form](StandardOptimizer#static-single-assignment-form), if any.
+///
+/// # Parameters
+/// - `function`: The function.
+///
+/// # Returns
+/// The index of the first instruction that writes a register that holds a
+/// binding or that an earlier instruction wrote, or that rolls into a rolling
+/// record that an earlier instruction wrote, or `None` if there is none.
+fn ssa_violation(function: &Function) -> Option<usize>
+{
+	let bindings = function.arity() + function.externals.len();
+	let mut registers = HashSet::new();
+	let mut records = HashSet::new();
+	function.instructions.iter().position(|inst| {
+		match inst.destination()
+		{
+			Some(AddressingMode::Register(reg)) =>
+			{
+				reg.0 < bindings || !registers.insert(reg)
+			},
+			Some(AddressingMode::RollingRecord(rec)) =>
+			{
+				let rolls = matches!(
+					inst,
+					Instruction::RollRange(_)
+						| Instruction::RollStandardDice(_)
+						| Instruction::RollCustomDice(_)
+				);
+				// A roll must be the first write of its record.
+				!records.insert(rec) && rolls
+			},
+			Some(AddressingMode::Immediate(_)) | None => false
+		}
+	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////

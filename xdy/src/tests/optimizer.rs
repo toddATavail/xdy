@@ -760,3 +760,99 @@ fn test_strength_reduction_is_exact()
 		assert_exact(source, Passes::all());
 	}
 }
+
+/// Test that, in debug builds, the standard optimizer refuses a function that
+/// is not in static single assignment form, naming the first instruction that
+/// violates it: a register written twice, a register that holds a parameter
+/// or an external variable written, a rolling record rolled twice, and a roll
+/// into a record that a drop already wrote; and that it accepts a drop of a
+/// record never rolled, and every function that the compiler emits.
+#[test]
+#[cfg(debug_assertions)]
+fn test_optimizer_requires_ssa()
+{
+	let function = |params: &str,
+	                externs: &str,
+	                registers: usize,
+	                body: &str| {
+		let records = body.contains('⚅') as usize;
+		crate::Assembler::assemble(&format!(
+				"Function({params}) r#{registers} ⚅#{records}\n\textern[{externs}]\n\tbody:\n{body}"
+			))
+			.unwrap()
+	};
+	let refuses = |function: crate::Function, pc: usize| {
+		let result = std::panic::catch_unwind(|| {
+			optimize(function.clone(), Passes::all())
+		});
+		let panic = result.expect_err("the optimizer accepts the function");
+		let message = panic
+			.downcast_ref::<String>()
+			.expect("the panic carries a message");
+		assert!(
+			message.contains(&format!("which instruction {pc} violates")),
+			"{message}"
+		);
+	};
+	refuses(
+		function(
+			"",
+			"",
+			1,
+			"\t\t@0 <- 1 + 2\n\t\t@0 <- @0 + 3\n\t\treturn @0\n"
+		),
+		1
+	);
+	refuses(
+		function("{x}@0", "", 1, "\t\t@0 <- 1 + 2\n\t\treturn @0\n"),
+		0
+	);
+	refuses(
+		function(
+			"",
+			"{y}@0",
+			2,
+			"\t\t@1 <- @0 + 2\n\t\t@0 <- @1 + 3\n\t\treturn @0\n"
+		),
+		1
+	);
+	refuses(
+		function(
+			"",
+			"",
+			1,
+			"\t\t⚅0 <- roll standard dice 2D6\n\t\t⚅0 <- roll standard dice \
+			 1D4\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n"
+		),
+		1
+	);
+	refuses(
+		function(
+			"",
+			"",
+			1,
+			"\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t⚅0 <- roll range 1:4\n\t\t@0 \
+			 <- sum rolling record ⚅0\n\t\treturn @0\n"
+		),
+		1
+	);
+	// A drop of a record never rolled reads its empty value.
+	optimize(
+		function(
+			"",
+			"",
+			1,
+			"\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t@0 <- sum rolling record \
+			 ⚅0\n\t\treturn @0\n"
+		),
+		Passes::all()
+	);
+	for source in [
+		"{x}: 3D6 drop lowest + {x} * {y}",
+		"{a}@(2D8) + {a}",
+		"4D6 keep highest 3"
+	]
+	{
+		optimize(compile_valid(source), Passes::all());
+	}
+}
