@@ -33,6 +33,21 @@
 //! more than one die at once. On a pool of dice with fixed operands, with or
 //! without drops, the estimate is exact.
 //!
+//! A reroll may leave some setups of a record as they were, cross out the
+//! dice of others, rewrite the law of the dice of others, and pool the
+//! multisets of the dice still kept of others, so the shadow bounds the setups
+//! of a record by [parts](Part), each of one kind. Each reroll resolves its
+//! predicate against the [die](Source) from which it draws, over the bounds of
+//! its operands, or value by value, if they take at most [`LISTED`] joint
+//! values. A rewrite follows the pass charge for charge, so the estimate of a
+//! reroll of dice none of which has been dropped, with fixed operands, is
+//! exact. The cost of a pool turns on how many dice still kept each outcome of
+//! the roll matches, so the estimate groups the multisets of the roll by it,
+//! as [`groups`] does. A split of a record that a later reroll reads keeps the
+//! die from which the reroll draws. Every world of a split of a record is
+//! priced as its costliest, which is loose for a reroll after the split, whose
+//! cost varies with the results that each world fixes.
+//!
 //! One shadow bounds every world by the costliest, which is loose when a
 //! split fixes the operands of later rolls, since each world rolls with its
 //! own. So the shadow runs in [lanes](Lane): at the split of a register, a
@@ -47,21 +62,26 @@
 //! [`u64::MAX`] reports [`u64::MAX`], which no budget but the
 //! [unlimited](super::meter::Budget::UNLIMITED) one admits.
 
-use std::{cmp::Reverse, collections::BTreeSet, f64::consts::LN_2};
+use std::{
+	cmp::Reverse,
+	collections::{BTreeMap, BTreeSet, HashMap},
+	f64::consts::LN_2
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{
 	PropagationError,
-	plan::{Location, Plan, Step}
+	plan::{Location, Plan, Step, rerolled}
 };
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
 	DropLowest, EvaluationBounds, Evaluator, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg, Predicate,
 	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, Sub, SumRollingRecord, evaluator::BoundsEvaluator
+	RollStandardDice, RollingRecordKind, Sub, SumRollingRecord,
+	evaluator::{BoundsEvaluator, Criteria, LeastDice, ResultSet}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,9 +127,9 @@ pub struct Class
 	/// summed by order statistics rather than by convolution.
 	pub drops: bool,
 
-	/// Whether the count, faces, or range endpoints of some roll, or the
-	/// count of some drop or keep, depend on a roll, so that some record holds
-	/// a mixture of setups.
+	/// Whether the count, faces, or range endpoints of some roll, the count
+	/// of some drop or keep, or the threshold, endpoints, or limit of some
+	/// reroll depend on a roll, so that some record holds a mixture of setups.
 	pub dynamic: bool,
 
 	/// Whether some random value fans out, so that the pass splits its worlds
@@ -119,7 +139,12 @@ pub struct Class
 	/// Whether some multiplication, division, remainder, exponentiation, or
 	/// maximum combines two distinct random values, whose pairs the pass
 	/// enumerates.
-	pub pairwise: bool
+	pub pairwise: bool,
+
+	/// Whether some reroll may reroll a die, or cross it out, so that some
+	/// record may hold dice whose law the reroll rewrote, or the multisets of
+	/// the dice that it left, which the pass enumerates.
+	pub rerolls: bool
 }
 
 /// Estimate the cost of the forward pass over the evaluator's function, for
@@ -202,7 +227,17 @@ fn observe(
 		consumed.charge(lane.instruction(inst));
 		for step in plan.steps(ProgramCounter(pc))
 		{
-			consumed.charge(lane.step(step));
+			// A split of a record that a later reroll reads keeps its die.
+			let carried = match step
+			{
+				Step::Split(location) => rerolled(
+					&function.instructions,
+					ProgramCounter(pc),
+					*location
+				),
+				Step::Merge { .. } => false
+			};
+			consumed.charge(lane.step(step, carried));
 			if let Step::Split(location) = step
 			{
 				let depth = depths.next().expect("every split has a depth");
@@ -416,6 +451,7 @@ impl<'f> Lane<'f>
 			shadow: &mut self.shadow,
 			before: &before,
 			after: self.bounds.registers(),
+			rolls: &self.bounds,
 			tally: Tally::default()
 		};
 		inst.visit(&mut pricing).unwrap();
@@ -455,14 +491,28 @@ impl<'f> Lane<'f>
 	///
 	/// # Parameters
 	/// - `step`: The step.
+	/// - `carried`: Whether the step splits a rolling record that a later
+	///   reroll reads before a roll refills it, so that each outcome keeps the
+	///   die from which the reroll draws.
 	///
 	/// # Returns
 	/// The event.
-	fn step(&mut self, step: &Step) -> Event
+	fn step(&mut self, step: &Step, carried: bool) -> Event
 	{
 		let own = match step
 		{
-			Step::Split(location) => self.shadow.split(*location),
+			Step::Split(location) =>
+			{
+				let die = match (carried, location)
+				{
+					(true, Location::RollingRecord(rec)) =>
+					{
+						Source::new(self.bounds.roll(*rec)).cells
+					},
+					_ => 0
+				};
+				self.shadow.split(*location, die)
+			},
 			Step::Merge {
 				split,
 				survivor,
@@ -477,7 +527,7 @@ impl<'f> Lane<'f>
 		let events = fork
 			.children
 			.iter_mut()
-			.map(|(values, child)| (*values, child.step(step)))
+			.map(|(values, child)| (*values, child.step(step, carried)))
 			.collect::<Vec<_>>();
 		let mut combined = fork.combine(&events, Settling::Once);
 		match *step
@@ -645,21 +695,7 @@ impl Fork<'_>
 	/// The bound.
 	fn allot(&self, buckets: impl Iterator<Item = (u128, u128)>) -> u128
 	{
-		let mut buckets = buckets.collect::<Vec<_>>();
-		buckets.sort_unstable_by_key(|&(_, bound)| Reverse(bound));
-		let mut left = self.outcomes;
-		let mut sum = 0u128;
-		for (values, bound) in buckets
-		{
-			let taken = values.min(left);
-			sum = sum.saturating_add(taken.saturating_mul(bound));
-			left -= taken;
-			if left == 0
-			{
-				break
-			}
-		}
-		sum
+		allot(self.outcomes, buckets)
 	}
 
 	/// Combine the events of the children into a bound on the event of the
@@ -707,6 +743,37 @@ impl Fork<'_>
 			worlds: allot(|event| event.worlds)
 		}
 	}
+}
+
+/// Answer a bound on the sum of a quantity over the specified number of
+/// outcomes, given groups of the outcomes, each with the number of its
+/// outcomes and a bound on the quantity for each: the sum over the costliest
+/// groups, each taken as often as it has outcomes, until the outcomes are
+/// taken.
+///
+/// # Parameters
+/// - `outcomes`: The number of outcomes.
+/// - `groups`: The number of outcomes of each group, and its bound.
+///
+/// # Returns
+/// The bound.
+fn allot(outcomes: u128, groups: impl Iterator<Item = (u128, u128)>) -> u128
+{
+	let mut groups = groups.collect::<Vec<_>>();
+	groups.sort_unstable_by_key(|&(_, bound)| Reverse(bound));
+	let mut left = outcomes;
+	let mut sum = 0u128;
+	for (count, bound) in groups
+	{
+		if left == 0
+		{
+			break
+		}
+		let taken = count.min(left);
+		sum = sum.saturating_add(taken.saturating_mul(bound));
+		left -= taken;
+	}
+	sum
 }
 
 /// Answer, for each split of the plan, in order, the most splits of registers
@@ -1133,6 +1200,15 @@ fn width(bounds: EvaluationBounds) -> u128
 	(bounds.max as i64 - bounds.min as i64 + 1).max(1) as u128
 }
 
+/// Answer the greatest number of dice that the specified count rolls.
+///
+/// # Parameters
+/// - `count`: The count.
+///
+/// # Returns
+/// The number of dice, which is zero if the count is never positive.
+fn dice(count: &Operand) -> u128 { count.bounds.max.max(0) as u128 }
+
 /// Answer whether no value of the specified interval saturates: whether it
 /// lies strictly within `i32`, so that the exact results that it bounds were
 /// never clamped.
@@ -1248,6 +1324,10 @@ struct Pricing<'a>
 
 	/// The intervals of the registers after the instruction.
 	after: &'a [EvaluationBounds],
+
+	/// The bounds evaluator after the instruction, which holds the kind of
+	/// the roll that last filled each rolling record.
+	rolls: &'a BoundsEvaluator<'a>,
 
 	/// The tally of the instruction's work in one world.
 	tally: Tally
@@ -1618,7 +1698,12 @@ impl InstructionVisitor<()> for Pricing<'_>
 			count.bounds.max.max(0) as f64 * (raw as f64).log2().max(0.0);
 		let cells = count.support.saturating_mul(1 + die.faces);
 		let record = Record::rolled(Part {
-			kind: Kind::Custom { count, die },
+			kind: Kind::Custom {
+				count,
+				die,
+				laws: 1,
+				exact: true
+			},
 			setups: count.support,
 			cells,
 			dice,
@@ -1655,14 +1740,145 @@ impl InstructionVisitor<()> for Pricing<'_>
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
 	{
-		// The cost model does not price rerolls yet, so a reroll costs more
-		// than any budget but the unlimited one admits.
+		// The pass reads each distinct operand once, and pairs the outcomes
+		// of all of them, each of which resolves the predicate, holding a copy
+		// of a list of literals.
+		let mut read = Vec::<AddressingMode>::new();
+		let (mut outcomes, mut random) = (1u128, false);
 		for op in inst.operands()
 		{
-			self.read(op);
+			if matches!(op, AddressingMode::Register(_)) && read.contains(&op)
+			{
+				continue
+			}
+			read.push(op);
+			let operand = self.read(op);
+			outcomes = outcomes.saturating_mul(operand.support);
+			random |= operand.random;
 		}
-		self.tally.charge(u128::MAX, u128::MAX);
-		self.shadow.records[inst.dest.0].summed = false;
+		self.tally.charge(outcomes, outcomes);
+		let listed = match &inst.predicate
+		{
+			Predicate::In(values) => values.len() as u128,
+			_ => 0
+		};
+		let resolved = outcomes.saturating_mul(1 + listed);
+		self.tally.charge(resolved, resolved);
+		self.shadow.class.dynamic |= random;
+		let before = self.before;
+		let bounds = |op: AddressingMode| match op
+		{
+			AddressingMode::Immediate(value) => value.0.into(),
+			AddressingMode::Register(reg) => before[reg.0],
+			AddressingMode::RollingRecord(_) => unreachable!()
+		};
+		let source = Source::new(self.rolls.roll(inst.dest));
+		let resolution =
+			Resolution::new(inst, bounds, outcomes, source.clone());
+		// Operands of few joint values resolve value by value, exactly.
+		let values = values(&read, before);
+		// Values that match the same faces of the die, with the same limit,
+		// resolve alike, so each resolution counts the values that reach it.
+		let mut resolutions = Vec::<(Resolution, u128)>::new();
+		for values in &values
+		{
+			let value = |op: AddressingMode| match op
+			{
+				AddressingMode::Register(reg) => values
+					.iter()
+					.find(|(other, _)| *other == reg)
+					.map(|(_, value)| (*value).into())
+					.expect("every register is valued"),
+				op => bounds(op)
+			};
+			let resolution = Resolution::new(inst, value, 1, source.clone());
+			match resolutions
+				.iter_mut()
+				.find(|(other, _)| other.alike(&resolution))
+			{
+				Some((_, count)) => *count += 1,
+				None => resolutions.push((resolution, 1))
+			}
+		}
+		let record = &mut self.shadow.records[inst.dest.0];
+		// The mixture charges a step and the cells of a setup for each setup
+		// and outcome, before each setup rerolls in turn.
+		self.tally.charge(
+			record.setups().saturating_mul(outcomes),
+			record.cells().saturating_mul(outcomes)
+		);
+		let mut work = Tally::default();
+		let mut parts = Vec::<Part>::new();
+		let (mut most, mut changed) = (0u128, false);
+		for part in &record.parts
+		{
+			let (each, rerolls) = match resolutions.is_empty()
+			{
+				// Each outcome costs at most what the costliest resolution
+				// does.
+				true =>
+				{
+					let reroll = part.reroll(&resolution, &mut HashMap::new());
+					(reroll.each.times(outcomes), vec![reroll])
+				},
+				// Each outcome is one of the resolutions, of which a setup
+				// meets at most as many as there are outcomes.
+				false =>
+				{
+					let mut groups = HashMap::new();
+					let rerolls = resolutions
+						.iter()
+						.map(|(resolution, count)| {
+							(part.reroll(resolution, &mut groups), *count)
+						})
+						.collect::<Vec<_>>();
+					(
+						costliest(
+							rerolls
+								.iter()
+								.map(|(reroll, count)| (reroll.each, *count)),
+							outcomes
+						),
+						rerolls.into_iter().map(|(reroll, _)| reroll).collect()
+					)
+				}
+			};
+			work = work.beside(each.times(part.setups));
+			// Setups that the reroll leaves as they were, or crosses out, are
+			// the same for every outcome, but each redraw differs.
+			if rerolls.iter().any(|reroll| reroll.unchanged)
+			{
+				absorb(&mut parts, part.clone());
+			}
+			if rerolls.iter().any(|reroll| reroll.crossed)
+			{
+				absorb(
+					&mut parts,
+					Part {
+						lowest: part.results(),
+						..part.clone()
+					}
+				);
+			}
+			for reroll in rerolls
+			{
+				most = most.max(reroll.redrawn);
+				changed |= reroll.crossed || reroll.redrawn > 0;
+				for part in reroll.redraws
+				{
+					absorb(&mut parts, part);
+				}
+			}
+		}
+		self.tally.then(work);
+		record.parts = parts;
+		// The setups that the reroll leaves as they were, or crosses out, merge
+		// across the outcomes of the operands, and weigh their sum.
+		record.weighted |= outcomes > 1;
+		record.summed = false;
+		record.random |= random;
+		self.shadow.class.rerolls |= changed;
+		self.shadow.log += most as f64 * resolution.padding_log();
 		Ok(())
 	}
 
@@ -1862,8 +2078,7 @@ impl Pricing<'_>
 		{
 			// A count of zero or less keeps nothing, so it drops every result
 			// still kept.
-			let kept =
-				(part.results() - part.lowest - part.highest).max(0.into());
+			let kept = part.kept();
 			let dropped = (kept - count.max(0.into())).max(0.into());
 			self.shadow.class.drops |= dropped.max > 0;
 			match highest
@@ -1907,6 +2122,1032 @@ impl Pricing<'_>
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                                  Rerolls.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The die from which the rerolls of a rolling record draw: the die of the
+/// roll that last filled the record, over the bounds of its operands, as
+/// [`Die`](super::record::Die) holds it.
+#[derive(Debug, Clone)]
+struct Source
+{
+	/// The faces that some die of the roll may show, among them `0` for a die
+	/// without faces or an empty range.
+	faces: ResultSet,
+
+	/// The least dice of the roll, every die of which shows every face of one
+	/// of them.
+	least: Vec<LeastDice>,
+
+	/// A bound on the distinct faces of any one die, which the pass lists,
+	/// and which is one for a die without faces.
+	distinct: u128,
+
+	/// The cells that the die occupies beyond the setup that holds it, as
+	/// [`Die::cells`](super::record::Die::cells) counts them: one for each
+	/// distinct face of a custom die.
+	cells: u128,
+
+	/// The least and greatest numbers of branches of a die, as a roll counts
+	/// them.
+	branches: (u128, u128),
+
+	/// Whether the function lists the faces of the die, as it does those of
+	/// a custom die, so that the estimate may list them too.
+	listed: bool,
+
+	/// Whether the operands of the roll are fixed, so that every setup has the
+	/// same die.
+	fixed: bool
+}
+
+impl Source
+{
+	/// Answer the die from which the rerolls of a record draw, given the kind
+	/// of the roll that last filled it.
+	///
+	/// # Parameters
+	/// - `roll`: The kind of the roll, with the bounds of its operands.
+	///
+	/// # Returns
+	/// The die.
+	fn new(roll: &RollingRecordKind<EvaluationBounds>) -> Self
+	{
+		let faces = roll.faces();
+		let least = roll.least_dice();
+		let fixed = |bounds: &EvaluationBounds| bounds.min == bounds.max;
+		let (distinct, cells, branches, listed, fixed) = match roll
+		{
+			RollingRecordKind::Uninitialized => (1, 0, (1, 1), false, true),
+			RollingRecordKind::Range { start, end } =>
+			{
+				// A range that may be empty has one branch, which shows `0`.
+				let widest = width((start.min, end.max).into());
+				let narrowest = match start.max > end.min
+				{
+					true => 1,
+					false => width((start.max, end.min).into())
+				};
+				(
+					widest,
+					0,
+					(narrowest, widest),
+					false,
+					fixed(start) && fixed(end)
+				)
+			},
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				let (least, greatest) =
+					(faces.min.max(1) as u128, faces.max.max(1) as u128);
+				(greatest, 0, (least, greatest), false, fixed(faces))
+			},
+			RollingRecordKind::Custom { faces: listed, .. } =>
+			{
+				let branches = (listed.len() as u128).max(1);
+				(
+					faces.len().max(1),
+					match listed.is_empty()
+					{
+						true => 0,
+						false => faces.len()
+					},
+					(branches, branches),
+					true,
+					true
+				)
+			}
+		};
+		Self {
+			faces,
+			least,
+			distinct,
+			cells,
+			branches,
+			listed,
+			fixed
+		}
+	}
+}
+
+/// A reroll, resolved over the bounds of its operands against the die from
+/// which it draws, as [`redraw`](super::record::redraw) resolves it in each
+/// world.
+#[derive(Debug, Clone)]
+struct Resolution
+{
+	/// The die from which the reroll draws.
+	source: Source,
+
+	/// The criteria to which the predicate may resolve.
+	criteria: Criteria,
+
+	/// The interval of the limit, or `None` for no limit.
+	limit: Option<EvaluationBounds>,
+
+	/// A bound on the joint outcomes of the operands, by which the reroll
+	/// splits each setup.
+	outcomes: u128,
+
+	/// Whether the reroll may leave every die of some setup as it was,
+	/// though some is still kept: whether no face may match, the limit may be
+	/// zero or less, or, with a limit, a die may have one branch.
+	idle: bool,
+
+	/// Whether the reroll may cross out every die still kept, since it has
+	/// no limit and may match every face of some die.
+	cross: bool,
+
+	/// Whether the reroll may redraw the dice still kept.
+	redraw: bool,
+
+	/// The faces that a die that the reroll matched may finally show: every
+	/// face, with a limit, or those that some criterion may not match,
+	/// without.
+	law: ResultSet,
+
+	/// A bound on the length of the law of a die that the reroll matched,
+	/// which also bounds the faces of a die that it rewrote.
+	len: u128,
+
+	/// The shape of a die that the reroll rewrote.
+	die: Die,
+
+	/// Whether the die and the criterion are fixed, and the shape lists the
+	/// faces of the law, so that a die that the reroll matched may finally
+	/// show exactly them.
+	exact: bool
+}
+
+impl Resolution
+{
+	/// Resolve the specified reroll.
+	///
+	/// # Parameters
+	/// - `inst`: The reroll.
+	/// - `bounds`: The function that answers the interval of an operand.
+	/// - `outcomes`: A bound on the joint outcomes of the operands.
+	/// - `source`: The die from which the reroll draws.
+	///
+	/// # Returns
+	/// The resolution.
+	fn new(
+		inst: &Reroll,
+		bounds: impl Fn(AddressingMode) -> EvaluationBounds,
+		outcomes: u128,
+		source: Source
+	) -> Self
+	{
+		let criteria = Criteria::new(&inst.predicate, &bounds);
+		let limit = inst.limit.operand().map(&bounds);
+		let faces = &source.faces;
+		// Some die may have no face that every criterion matches.
+		let miss = !source.least.iter().all(|die| match die
+		{
+			LeastDice::Fixed(faces) => faces.meets(&criteria.certain),
+			LeastDice::Singletons(faces) => faces.is_subset(&criteria.certain)
+		});
+		let matches = faces.meets(&criteria.possible);
+		let (idle, cross, redraw, law) = match limit
+		{
+			Some(limit) => (
+				miss || limit.min <= 0 || source.branches.0 == 1,
+				false,
+				matches && limit.max > 0 && source.branches.1 > 1,
+				faces.clone()
+			),
+			None =>
+			{
+				let law = faces.difference(&criteria.certain);
+				(
+					miss,
+					source.least.iter().any(|die| criteria.may_cover(die)),
+					matches && !law.is_empty(),
+					law
+				)
+			}
+		};
+		let len = law.len().min(source.distinct).max(1);
+		let die = Die::covering(&law, source.listed);
+		let mut resolution = Self {
+			source,
+			criteria,
+			limit,
+			outcomes,
+			idle,
+			cross,
+			redraw,
+			law,
+			len,
+			die,
+			exact: false
+		};
+		resolution.exact = resolution.source.fixed
+			&& resolution.fixed_on(&resolution.source.faces)
+			&& resolution.die.faces == resolution.law.len();
+		resolution
+	}
+
+	/// Answer whether this resolution and another match the same faces of the
+	/// die, with the same limit, so that they reroll alike.
+	///
+	/// # Parameters
+	/// - `other`: The other resolution.
+	///
+	/// # Returns
+	/// `true` if they reroll alike.
+	fn alike(&self, other: &Resolution) -> bool
+	{
+		let faces = &self.source.faces;
+		self.limit == other.limit
+			&& self.criteria.certain.intersection(faces)
+				== other.criteria.certain.intersection(faces)
+			&& self.criteria.possible.intersection(faces)
+				== other.criteria.possible.intersection(faces)
+	}
+
+	/// Answer the most rerolls that a die may need before its last, which the
+	/// redraw charges as steps, since its padding is a power of the branches
+	/// of the die.
+	///
+	/// # Returns
+	/// The number of rerolls.
+	fn powers(&self) -> u128
+	{
+		self.limit.map_or(1, |limit| limit.max.max(1) as u128)
+	}
+
+	/// Answer a bound on the base-two logarithm of the least common multiple
+	/// of the paddings `G` of a die, over every die and every resolution, so
+	/// that the totals of the setups grow by at most its `K`th power, for `K`
+	/// dice still kept: `Fⁿ`, with a limit `n`, for a die of `F` branches, or
+	/// `F − m`, without, for `m` matching branches.
+	///
+	/// # Returns
+	/// The bound.
+	fn padding_log(&self) -> f64
+	{
+		let (least, greatest) = self.source.branches;
+		match self.limit
+		{
+			Some(limit) =>
+			{
+				limit.max.max(0) as f64
+					* lcm_log(greatest, greatest - least + 1)
+			},
+			None =>
+			{
+				// The paddings are all one if the die and the criterion are
+				// fixed.
+				let fixed =
+					self.source.fixed && self.fixed_on(&self.source.faces);
+				let greatest = greatest.saturating_sub(1);
+				lcm_log(greatest, if fixed { 1 } else { greatest })
+			}
+		}
+	}
+
+	/// Answer how many faces of the specified die the reroll may match, and
+	/// how they lie among its faces.
+	///
+	/// # Parameters
+	/// - `faces`: The faces of the die.
+	///
+	/// # Returns
+	/// The number of faces that some criterion may match, and their
+	/// arrangement.
+	fn matching(&self, faces: &ResultSet) -> (u128, Arrangement)
+	{
+		let matching = faces.intersection(&self.criteria.possible);
+		let Some(hull) = matching.hull()
+		else
+		{
+			return (0, Arrangement::Run { below: faces.len() })
+		};
+		let arrangement = match faces.intersection(&ResultSet::from(hull))
+			== matching
+		{
+			true => Arrangement::Run {
+				below: faces
+					.intersection(&ResultSet::interval(
+						i32::MIN as i64,
+						hull.min as i64 - 1
+					))
+					.len()
+			},
+			false => Arrangement::Scattered
+		};
+		(matching.len(), arrangement)
+	}
+
+	/// Answer whether every criterion matches the same faces of the
+	/// specified die, so that the faces that the reroll may match are exactly
+	/// those that it does.
+	///
+	/// # Parameters
+	/// - `faces`: The faces of the die.
+	///
+	/// # Returns
+	/// `true` if the criterion is fixed on the die.
+	fn fixed_on(&self, faces: &ResultSet) -> bool
+	{
+		faces.intersection(&self.criteria.certain)
+			== faces.intersection(&self.criteria.possible)
+	}
+}
+
+/// How the faces that a reroll may match lie among the faces of a die, in
+/// ascending order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Arrangement
+{
+	/// In one run, above the specified number of faces that the reroll does
+	/// not match, and below the rest, as the faces that a comparison or a
+	/// range matches do.
+	Run
+	{
+		/// The number of faces below the run.
+		below: u128
+	},
+
+	/// Otherwise.
+	Scattered
+}
+
+/// The reroll of the setups of one part by one resolution.
+#[derive(Debug)]
+struct Rerolled
+{
+	/// The tally of the reroll of one setup by one outcome of the operands.
+	each: Tally,
+
+	/// Whether the reroll may leave some setup as it was.
+	unchanged: bool,
+
+	/// Whether the reroll may cross out every die still kept of some setup.
+	crossed: bool,
+
+	/// The parts that bound the setups that the reroll redraws.
+	redraws: Vec<Part>,
+
+	/// The most dice still kept that the reroll may redraw, which raise the
+	/// total of a setup by their paddings, or zero.
+	redrawn: u128
+}
+
+impl Part
+{
+	/// Reroll the setups of the part by one resolution, as
+	/// [`Setup::reroll`](super::mixture) does for each setup and each outcome
+	/// of the operands that resolves so.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll.
+	/// - `groups`: The [`groups`] of the multisets of the part, by the faces
+	///   that a reroll may match and their arrangement, and whether it matches
+	///   exactly those, computed so far.
+	///
+	/// # Returns
+	/// The reroll.
+	fn reroll(&self, resolution: &Resolution, groups: &mut Groups) -> Rerolled
+	{
+		let kept = self.kept();
+		if kept.max <= 0
+		{
+			// No setup has a die still kept, so none has anything to reroll.
+			return Rerolled {
+				each: Tally::default(),
+				unchanged: true,
+				crossed: false,
+				redraws: Vec::new(),
+				redrawn: 0
+			}
+		}
+		// Counting the branches of the die takes a step, and one for each face
+		// of a custom die.
+		let mut each = Tally::default();
+		each.charge(1 + resolution.source.cells, 0);
+		let mut redraws = Vec::new();
+		let mut redrawn = 0;
+		if resolution.redraw
+		{
+			// The redraw lists the faces of the die, weighs them, and keeps the
+			// law; the setup keeps a copy of the die.
+			let distinct = resolution.source.distinct;
+			let mut redraw = Tally::default();
+			redraw.charge(
+				distinct
+					.saturating_mul(2)
+					.saturating_add(resolution.powers()),
+				distinct.saturating_mul(2)
+			);
+			redraw.free(distinct);
+			redraw.charge(0, resolution.source.cells);
+			let setups = self.setups.saturating_mul(resolution.outcomes);
+			let mut paths = Tally::default();
+			let undropped = self.lowest.min <= 0 && self.highest.min <= 0;
+			let dropped = self.lowest.max > 0 || self.highest.max > 0;
+			let (rewrite, pool) = match self.kind
+			{
+				// A range has one result, so a drop leaves none to reroll.
+				Kind::Range { .. } => (undropped, false),
+				Kind::Standard { .. } | Kind::Custom { .. } =>
+				{
+					(undropped, dropped)
+				},
+				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
+				Kind::Empty => (false, false)
+			};
+			if rewrite
+			{
+				let (tally, part) = self.rewrite(resolution, setups);
+				let mut path = redraw;
+				path.then(tally);
+				paths = paths.max(path);
+				redraws.push(part);
+			}
+			if pool
+				&& let Some((tally, part)) =
+					self.pool(resolution, setups, groups)
+			{
+				let mut path = redraw;
+				path.then(tally);
+				paths = paths.max(path);
+				redraws.push(part);
+			}
+			each.then(paths);
+			redrawn = kept.max as u128;
+		}
+		Rerolled {
+			each,
+			unchanged: kept.min <= 0 || resolution.idle,
+			crossed: resolution.cross,
+			redraws,
+			redrawn
+		}
+	}
+
+	/// Rewrite the law of the dice of one setup of the part, none of which
+	/// has been dropped, as [`Roll::rewrite`](super::record::Roll::rewrite)
+	/// does.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll.
+	/// - `setups`: A bound on the rewritten setups.
+	///
+	/// # Returns
+	/// The tally of the rewrite, and the part that bounds the rewritten
+	/// setups.
+	fn rewrite(&self, resolution: &Resolution, setups: u128) -> (Tally, Part)
+	{
+		let one = Operand {
+			bounds: 1.into(),
+			support: 1,
+			varied: false,
+			random: false,
+			dense: true
+		};
+		let source = &resolution.source;
+		let (count, faces, laws, (shown, exact)) = match &self.kind
+		{
+			// A range is one die.
+			Kind::Range { .. } => (
+				one,
+				source.distinct,
+				self.setups,
+				(source.faces.clone(), source.fixed)
+			),
+			Kind::Standard {
+				count, faces, dies, ..
+			} => (
+				*count,
+				faces.bounds.max.max(1) as u128,
+				*dies,
+				(source.faces.clone(), source.fixed)
+			),
+			Kind::Custom {
+				count,
+				die,
+				laws,
+				exact
+			} => (*count, die.faces, *laws, (die.set(), *exact)),
+			_ => unreachable!("only a roll of alike dice is rewritten")
+		};
+		// The rewritten dice show exactly the faces of the law if the dice
+		// showed exactly their faces, some of which the reroll matches, and the
+		// law is exact; otherwise they show some of them.
+		let exact = exact
+			&& resolution.exact
+			&& shown.meets(&resolution.criteria.certain);
+		// The faces are listed, and each, with each final result of a matched
+		// die, weighed anew, which leaves the rewritten faces, among those of
+		// the law.
+		let len = resolution.len;
+		let charged = faces.saturating_mul(2).saturating_add(len);
+		let mut tally = Tally::default();
+		tally.charge(charged, charged);
+		tally.keep(charged, len);
+		let part = Part {
+			kind: Kind::Custom {
+				count,
+				die: resolution.die.clone(),
+				laws: laws.saturating_mul(resolution.outcomes).min(setups),
+				exact
+			},
+			setups,
+			cells: setups.saturating_mul(
+				1u128
+					.saturating_add(len)
+					.saturating_add(resolution.source.cells)
+			),
+			dice: setups.saturating_mul(dice(&count)),
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
+	}
+}
+
+/// Answer every joint value of the specified operands, if there are at most
+/// [`LISTED`] of them: each value of each register among them, over its
+/// interval.
+///
+/// # Parameters
+/// - `operands`: The operands, each read once.
+/// - `bounds`: The intervals of the registers.
+///
+/// # Returns
+/// The joint values, each the value of every register among the operands,
+/// or none if there are more than [`LISTED`], or no register.
+fn values(
+	operands: &[AddressingMode],
+	bounds: &[EvaluationBounds]
+) -> Vec<Vec<(RegisterIndex, i32)>>
+{
+	let registers = operands
+		.iter()
+		.filter_map(|op| match op
+		{
+			AddressingMode::Register(reg) => Some(*reg),
+			_ => None
+		})
+		.collect::<Vec<_>>();
+	let joint = registers.iter().fold(1u128, |joint, reg| {
+		joint.saturating_mul(width(bounds[reg.0]))
+	});
+	if registers.is_empty() || joint > LISTED
+	{
+		return Vec::new()
+	}
+	registers.iter().fold(vec![Vec::new()], |values, reg| {
+		let interval = bounds[reg.0];
+		values
+			.into_iter()
+			.flat_map(|values| {
+				(interval.min..=interval.max).map(move |value| {
+					let mut values = values.clone();
+					values.push((*reg, value));
+					values
+				})
+			})
+			.collect()
+	})
+}
+
+/// Answer a tally that bounds the work of any `n` of the specified works,
+/// done one after another, none of which frees what another leaves charged:
+/// the costliest `n` steps and working cells, and the greatest excess of a
+/// peak over its working cells atop them.
+///
+/// # Parameters
+/// - `tallies`: The tallies of the works, each with the number of works that it
+///   bounds.
+/// - `n`: The number of works done.
+///
+/// # Returns
+/// The bounding tally.
+fn costliest(tallies: impl Iterator<Item = (Tally, u128)>, n: u128) -> Tally
+{
+	let tallies = tallies.collect::<Vec<_>>();
+	let top = |quantity: fn(&Tally) -> u128| {
+		allot(
+			n,
+			tallies
+				.iter()
+				.map(|(tally, count)| (*count, quantity(tally)))
+		)
+	};
+	let working = top(|tally| tally.working);
+	let excess = tallies
+		.iter()
+		.map(|(tally, _)| tally.peak - tally.working)
+		.max()
+		.unwrap_or(0);
+	Tally {
+		steps: top(|tally| tally.steps),
+		working,
+		peak: working.saturating_add(excess)
+	}
+}
+
+/// Add a part to the specified parts, merging it with an equal one, as the
+/// mixture merges the setups that coincide.
+///
+/// # Parameters
+/// - `parts`: The parts.
+/// - `part`: The part.
+fn absorb(parts: &mut Vec<Part>, part: Part)
+{
+	// Dice of distinct laws merge, and their laws add up.
+	let alike = |a: &Kind, b: &Kind| match (a, b)
+	{
+		(
+			Kind::Custom {
+				count, die, exact, ..
+			},
+			Kind::Custom {
+				count: other_count,
+				die: other_die,
+				exact: other_exact,
+				..
+			}
+		) => count == other_count && die == other_die && exact == other_exact,
+		(a, b) => a == b
+	};
+	match parts.iter_mut().find(|other| {
+		alike(&other.kind, &part.kind)
+			&& other.lowest == part.lowest
+			&& other.highest == part.highest
+	})
+	{
+		Some(other) =>
+		{
+			if let (
+				Kind::Custom { laws, .. },
+				Kind::Custom {
+					laws: other_laws, ..
+				}
+			) = (&part.kind, &mut other.kind)
+			{
+				*other_laws = other_laws.saturating_add(*laws);
+			}
+			other.setups = other.setups.saturating_add(part.setups);
+			other.cells = other.cells.saturating_add(part.cells);
+			other.dice = other.dice.saturating_add(part.dice);
+		},
+		None => parts.push(part)
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                   Pools.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+impl Part
+{
+	/// Pool the multisets of the dice still kept of one setup of the part,
+	/// as [`Roll::pool`](super::record::Roll::pool) does: enumerate the
+	/// outcomes of the roll, and for each, the multisets of the replacements
+	/// of the `k` dice still kept that the reroll matches, the first time
+	/// that `k` arises, and join each to the survivors, `M(k) · (2 + s)`
+	/// cells and as many steps, plus `L · M(k − 1)` for the results of the
+	/// replacements, where `M(k)` is the number of multisets of `k` faces of
+	/// the law, `L` its length, and `s` the distinct survivors.
+	///
+	/// The cost turns on how many dice still kept of each outcome the reroll
+	/// matches, so the estimate groups the multisets of the roll's results by
+	/// it, as [`groups`] does, and charges the costliest groups, each as often
+	/// as it has multisets, until it has charged every outcome: all of
+	/// them, for dice, which enumerate every multiset, and the few that
+	/// fixed results or a pool hold, for those.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll.
+	/// - `setups`: A bound on the pooled setups.
+	/// - `cache`: The groups of the multisets of the part computed so far.
+	///
+	/// # Returns
+	/// The tally of the pool, and the part that bounds the pooled setups, or
+	/// `None` if no setup that pools keeps a die.
+	fn pool(
+		&self,
+		resolution: &Resolution,
+		setups: u128,
+		cache: &mut Groups
+	) -> Option<(Tally, Part)>
+	{
+		let n = self.results().max.max(0) as u128;
+		let kept = self.kept();
+		let (faces, alike) = match &self.kind
+		{
+			Kind::Custom { die, .. } => (die.set(), true),
+			Kind::Standard { .. } => (resolution.source.faces.clone(), true),
+			_ => (resolution.source.faces.clone(), false)
+		};
+		// A roll of alike dice pools only after a drop.
+		let most = match alike
+		{
+			true => (kept.max as u128).min(n.saturating_sub(1)),
+			false => kept.max as u128
+		};
+		if most == 0
+		{
+			return None
+		}
+		let least = (kept.min.max(1) as u128).min(most);
+		let d = faces.len().max(1);
+		let law = resolution.len;
+		let (r, arrangement) = resolution.matching(&faces);
+		let unmatched =
+			faces.difference(&resolution.criteria.certain).len().min(d);
+		let clamp = |bound: i32| (bound.max(0) as u128).min(n);
+		let window = Window {
+			n,
+			widest: (clamp(self.lowest.min), clamp(self.highest.min)),
+			narrowest: (clamp(self.lowest.max), clamp(self.highest.max)),
+			least,
+			most
+		};
+		let exact = resolution.fixed_on(&faces);
+		let groups =
+			cache.entry((r, arrangement, exact)).or_insert_with(|| {
+				groups(d, r.min(d), arrangement, &window, exact)
+			});
+		// The multisets of `k` faces of the law.
+		let replaced = |k: u128| binomial(k + law - 1, law - 1);
+		// A bound on the cells that join an outcome whose matched dice still
+		// kept number from `lo` to `hi`, and as many steps.
+		let joined = |(lo, hi): (u128, u128)| {
+			let previous = match hi
+			{
+				0 => 0,
+				hi => law.saturating_mul(replaced(hi - 1))
+			};
+			replaced(hi)
+				.saturating_mul(2 + (most - lo).min(unmatched))
+				.saturating_add(previous)
+		};
+		let mut tally = Tally::default();
+		// The outcomes of the roll stay charged, and then the paddings.
+		let (outcomes, cells) = self.enumerate(&mut tally);
+		tally.charge(most + 1, most + 1);
+		// Each outcome charges its distinct results, which, over every
+		// multiset of `n` results of `d` faces, number `d · C(n + d − 2, d −
+		// 1)`, since each face lies in the multisets of the other `n − 1`.
+		let mut lens = outcomes.saturating_mul(cells - 1);
+		if alike
+		{
+			lens = lens.min(d.saturating_mul(binomial(n + d - 2, d - 1)));
+		}
+		tally.charge(lens, lens);
+		let join = allot(
+			outcomes,
+			groups
+				.iter()
+				.map(|group| (group.count, joined(group.matched)))
+		);
+		tally.charge(join, join);
+		// The replacements of each number of matched dice still kept, the
+		// first time that it arises, stay charged.
+		let replacements = |k: u128| {
+			let mut each = Tally::default();
+			each.charge(law, law + 1);
+			multisets(&mut each, k, law);
+			each
+		};
+		let (first, last) =
+			groups
+				.iter()
+				.fold((u128::MAX, 0u128), |(first, last), group| {
+					(first.min(group.matched.0), last.max(group.matched.1))
+				});
+		if first <= last
+		{
+			// Each outcome meets one number, so the outcomes meet at most as
+			// many, the dearest the most.
+			let taken = (last - first + 1).min(outcomes);
+			let listed = taken.min(LISTED);
+			for k in last + 1 - listed..=last
+			{
+				tally.then(replacements(k));
+			}
+			if taken > listed
+			{
+				// The rest are dearest at the most of them.
+				tally.then(replacements(last - listed).times(taken - listed));
+			}
+		}
+		// The pool holds the multisets of the results that the dice still kept
+		// may show.
+		let pooled = allot(
+			outcomes,
+			groups
+				.iter()
+				.map(|group| (group.count, replaced(group.matched.1)))
+		);
+		let results = faces.union(&resolution.law).len().max(1);
+		let multisets =
+			pooled.min(binomial(most + results - 1, results - 1)).max(1);
+		let distinct = most.min(results);
+		let part = Part {
+			kind: Kind::Pool {
+				kept: (least as i32, most as i32).into(),
+				multisets,
+				distinct
+			},
+			setups,
+			cells: setups.saturating_mul(
+				multisets
+					.saturating_mul(distinct + 1)
+					.saturating_add(1)
+					.saturating_add(resolution.source.cells)
+			),
+			dice: 0,
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		Some((tally, part))
+	}
+}
+
+/// The [`groups`] of the multisets of the results of the roll of a
+/// part, by the number of faces that a reroll may match, their arrangement,
+/// and whether it matches exactly those.
+type Groups = HashMap<(u128, Arrangement, bool), Vec<Group>>;
+
+/// The positions of the dice still kept among the sorted results of a roll,
+/// over the drops of its setups.
+#[derive(Debug, Clone, Copy)]
+struct Window
+{
+	/// The number of results, `n`.
+	n: u128,
+
+	/// The fewest lowest and highest results dropped, each at most `n`, which
+	/// keep the most positions.
+	widest: (u128, u128),
+
+	/// The most lowest and highest results dropped, each at most `n`, which
+	/// keep the fewest positions.
+	narrowest: (u128, u128),
+
+	/// The fewest dice still kept of a setup that rerolls, which is positive.
+	least: u128,
+
+	/// The most dice still kept of a setup that rerolls.
+	most: u128
+}
+
+impl Window
+{
+	/// Answer how many of the sorted positions from `start`, of the
+	/// specified number, the specified drops keep.
+	///
+	/// # Parameters
+	/// - `(lowest, highest)`: The lowest and highest results dropped.
+	/// - `start`: The first position.
+	/// - `len`: The number of positions.
+	///
+	/// # Returns
+	/// The number of positions kept.
+	fn overlap(
+		&self,
+		(lowest, highest): (u128, u128),
+		start: u128,
+		len: u128
+	) -> u128
+	{
+		let end = (start + len).min(self.n - highest);
+		end.saturating_sub(start.max(lowest))
+	}
+}
+
+/// A group of the multisets of the results of a roll, whose dice still kept
+/// that a reroll matches number alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Group
+{
+	/// A bound on the number of multisets.
+	count: u128,
+
+	/// The fewest and most dice still kept of each that the reroll matches.
+	matched: (u128, u128)
+}
+
+/// Group the multisets of `n` results of `d` faces, of which a reroll may
+/// match `r`, by the dice still kept that it matches.
+///
+/// Of the multisets, `C(c + r − 1, r − 1) · C(n − c + d − r − 1, d − r − 1)`
+/// hold `c` results that the reroll may match, wherever those faces lie, and
+/// the dice still kept among them number at most `min(c, K)`, and, if the
+/// reroll matches exactly those faces, at least as many as the positions that
+/// the drops cross out cannot hold. If the faces that it may match lie in one
+/// run, above `B` faces and below `A`, then `C(b + B − 1, B − 1)` times as many
+/// hold also `b` results below the run, and the matched results take the
+/// sorted positions from `b` to `b + c`, so the drops decide exactly how many
+/// are kept, if they are fixed and the reroll matches exactly those faces. The
+/// groups of a run of fewer than [`LISTED`] results are weighed by `b` and
+/// `c`; any other by `c`, at most [`LISTED`] values of it one by one, and the
+/// rest in one group, at their costliest.
+///
+/// # Parameters
+/// - `d`: The number of faces, which is positive.
+/// - `r`: The number of faces that the reroll may match, at most `d`.
+/// - `arrangement`: How those faces lie among the faces.
+/// - `window`: The positions of the dice still kept.
+/// - `exact`: Whether the reroll matches exactly those faces.
+///
+/// # Returns
+/// The groups, whose counts sum to at least the number of multisets.
+fn groups(
+	d: u128,
+	r: u128,
+	arrangement: Arrangement,
+	window: &Window,
+	exact: bool
+) -> Vec<Group>
+{
+	let n = window.n;
+	// The multisets of `x` results of `q` faces.
+	let count = |q: u128, x: u128| match q
+	{
+		0 => (x == 0) as u128,
+		q => binomial(x + q - 1, q - 1)
+	};
+	let mut groups = BTreeMap::<(u128, u128), u128>::new();
+	let mut add = |count: u128, matched: (u128, u128)| {
+		if count > 0
+		{
+			let group = groups.entry(matched).or_default();
+			*group = group.saturating_add(count);
+		}
+	};
+	// The fewest matched dice still kept of `c` matched results, wherever
+	// they lie.
+	let fewest = |c: u128| match exact
+	{
+		true => c.saturating_sub(n - window.least),
+		false => 0
+	};
+	match arrangement
+	{
+		Arrangement::Run { below } if n < LISTED =>
+		{
+			let above = d - r - below;
+			let (below, matching, above) = (
+				(0..=n).map(|x| count(below, x)).collect::<Vec<_>>(),
+				(0..=n).map(|x| count(r, x)).collect::<Vec<_>>(),
+				(0..=n).map(|x| count(above, x)).collect::<Vec<_>>()
+			);
+			for b in 0..=n
+			{
+				for c in 0..=n - b
+				{
+					let hi =
+						window.overlap(window.widest, b, c).min(window.most);
+					let lo = match exact
+					{
+						true => window
+							.overlap(window.narrowest, b, c)
+							.max(fewest(c)),
+						false => 0
+					};
+					add(
+						below[b as usize]
+							.saturating_mul(matching[c as usize])
+							.saturating_mul(above[(n - b - c) as usize]),
+						(lo.min(hi), hi)
+					);
+				}
+			}
+		},
+		_ =>
+		{
+			let most = |c: u128| c.min(window.most);
+			let listed = (n + 1).min(LISTED);
+			let mut weighed = 0u128;
+			for c in 0..listed
+			{
+				let multisets = count(r, c).saturating_mul(count(d - r, n - c));
+				weighed = weighed.saturating_add(multisets);
+				add(multisets, (fewest(c).min(most(c)), most(c)));
+			}
+			if listed <= n
+			{
+				// The rest are dearest at the fewest matched dice still kept,
+				// and the most.
+				let rest = count(d, n).saturating_sub(weighed);
+				add(rest, (fewest(listed).min(most(n)), most(n)));
+			}
+		}
+	}
+	groups
+		.into_iter()
+		.map(|(matched, count)| Group { count, matched })
+		.collect()
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                              Splits and merges.                            //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1917,10 +3158,12 @@ impl Shadow
 	///
 	/// # Parameters
 	/// - `location`: The location, which is not the answer.
+	/// - `die`: The cells of the die that each outcome of a rolling record
+	///   keeps, if a later reroll draws from it, or zero.
 	///
 	/// # Returns
 	/// The event.
-	fn split(&mut self, location: Location) -> Event
+	fn split(&mut self, location: Location, die: u128) -> Event
 	{
 		self.class.correlated = true;
 		let worlds = self.worlds();
@@ -1944,8 +3187,9 @@ impl Shadow
 			Location::RollingRecord(rec) =>
 			{
 				let record = &mut self.records[rec.0];
-				let (outcomes, outcome_cells) = record.outcomes(&mut tally);
-				record.fix(outcome_cells);
+				let (outcomes, outcome_cells) =
+					record.outcomes(&mut tally, die);
+				record.fix(outcome_cells, die);
 				(outcomes, outcome_cells)
 			},
 			Location::Answer => unreachable!("no instruction reads the answer")
@@ -2151,6 +3395,11 @@ struct Record
 	/// The parts, which are not empty.
 	parts: Vec<Part>,
 
+	/// Whether some setup may weigh other than one, though the setups number
+	/// one, as when a reroll of random operands leaves a setup as it was for
+	/// each of their outcomes, so that the mixture merges them.
+	weighted: bool,
+
 	/// Whether the record's current value has been summed.
 	summed: bool,
 
@@ -2196,6 +3445,7 @@ impl Default for Record
 				lowest: 0.into(),
 				highest: 0.into()
 			}],
+			weighted: false,
 			summed: false,
 			random: false
 		}
@@ -2216,6 +3466,7 @@ impl Record
 	{
 		Self {
 			parts: vec![part],
+			weighted: false,
 			summed: false,
 			random: true
 		}
@@ -2279,19 +3530,49 @@ enum Kind
 		dies: u128
 	},
 
-	/// Custom dice.
+	/// Custom dice, as a roll fills them, or as a reroll rewrites the law of
+	/// dice none of which has been dropped.
 	Custom
 	{
 		/// The number of dice.
 		count: Operand,
 
-		/// The die.
-		die: Die
+		/// The die, which bounds the faces of every setup's die. A die that a
+		/// reroll rewrote may show fewer faces.
+		die: Die,
+
+		/// A bound on the distinct laws of the setups' dice, which share
+		/// their convolution powers only if they share their law.
+		laws: u128,
+
+		/// Whether every setup's die shows exactly the faces of the die,
+		/// rather than some of them, as a die that a reroll rewrote may.
+		exact: bool
 	},
 
-	/// Results fixed by a split, of at most the specified number of distinct
-	/// results.
-	Results(u128)
+	/// The multisets of the dice still kept that a reroll leaves after a
+	/// drop, or on fixed results, as a [pool](super::record::Roll::Pool).
+	Pool
+	{
+		/// The interval of the number of results of each multiset.
+		kept: EvaluationBounds,
+
+		/// A bound on the multisets of each setup.
+		multisets: u128,
+
+		/// A bound on the distinct results of each multiset.
+		distinct: u128
+	},
+
+	/// Results fixed by a split.
+	Results
+	{
+		/// A bound on the number of distinct results.
+		distinct: u128,
+
+		/// The interval of the number of results.
+		results: EvaluationBounds
+	}
 }
 
 impl Record
@@ -2320,6 +3601,7 @@ impl Record
 	{
 		!self.summed
 			&& (self.setups() > 1
+				|| self.weighted
 				|| self.parts.iter().any(|part| part.kind != Kind::Empty))
 	}
 
@@ -2353,23 +3635,36 @@ impl Record
 	///
 	/// # Parameters
 	/// - `cells`: A bound on the cells of an outcome.
-	fn fix(&mut self, cells: u128)
+	/// - `die`: The cells of the die that the outcome keeps, if a later reroll
+	///   draws from it, or zero.
+	fn fix(&mut self, cells: u128, die: u128)
 	{
-		// The outcome keeps the drops of the setup that it came from.
-		let (lowest, highest) = self.parts[1..].iter().fold(
-			(self.parts[0].lowest, self.parts[0].highest),
-			|(lowest, highest), part| {
-				(hull(lowest, part.lowest), hull(highest, part.highest))
+		// The outcome keeps the results and the drops of the setup that it
+		// came from.
+		let first = &self.parts[0];
+		let (results, lowest, highest) = self.parts[1..].iter().fold(
+			(first.results(), first.lowest, first.highest),
+			|(results, lowest, highest), part| {
+				(
+					hull(results, part.results()),
+					hull(lowest, part.lowest),
+					hull(highest, part.highest)
+				)
 			}
 		);
 		self.parts = vec![Part {
-			kind: Kind::Results(cells - 1),
+			kind: Kind::Results {
+				distinct: cells - 1 - die,
+				results
+			},
 			setups: 1,
 			cells,
 			dice: 0,
 			lowest,
 			highest
 		}];
+		// Each outcome is one setup, of weight one.
+		self.weighted = false;
 		self.summed = false;
 	}
 }
@@ -2391,8 +3686,6 @@ impl Part
 {
 	/// Answer the interval of the number of results of each setup of the part,
 	/// as [`Roll::results`](super::record::Roll) counts them, before any drops.
-	/// Results fixed by a split may number anything, since the shadow keeps
-	/// only the number of their distinct values.
 	///
 	/// # Returns
 	/// The interval of the number of results.
@@ -2406,8 +3699,19 @@ impl Part
 			{
 				count.bounds.max(0.into())
 			},
-			Kind::Results(_) => (0, i32::MAX).into()
+			Kind::Pool { kept, .. } => *kept,
+			Kind::Results { results, .. } => *results
 		}
+	}
+
+	/// Answer the interval of the number of results of each setup of the part
+	/// that no drop has crossed out.
+	///
+	/// # Returns
+	/// The interval of the number of results still kept.
+	fn kept(&self) -> EvaluationBounds
+	{
+		(self.results() - self.lowest - self.highest).max(0.into())
 	}
 
 	/// Answer the least numbers of lowest and highest results dropped, each
@@ -2448,7 +3752,12 @@ impl Part
 					&& count.bounds.max as i64 * faces.bounds.max as i64
 						<= i32::MAX as i64
 			},
-			Kind::Custom { count, die } =>
+			Kind::Custom {
+				count,
+				die,
+				exact: true,
+				..
+			} =>
 			{
 				let largest =
 					die.least.unsigned_abs().max(die.greatest.unsigned_abs());
@@ -2457,7 +3766,11 @@ impl Part
 					&& count.bounds.max as i64 * largest as i64
 						<= i32::MAX as i64
 			},
-			Kind::Empty | Kind::Results(_) => false
+			// A rewritten die may show fewer faces than its die.
+			Kind::Custom { exact: false, .. }
+			| Kind::Pool { .. }
+			| Kind::Empty
+			| Kind::Results { .. } => false
 		}
 	}
 
@@ -2523,10 +3836,12 @@ impl Part
 					},
 				}
 			},
-			Kind::Custom { count, die } if die.contiguous() =>
-			{
-				reached(count, die.least, die.greatest)
-			},
+			Kind::Custom {
+				count,
+				die,
+				exact: true,
+				..
+			} if die.contiguous() => reached(count, die.least, die.greatest),
 			_ => None
 		};
 		reached.is_some_and(|(least, greatest)| {
@@ -2557,8 +3872,9 @@ struct Die
 	/// times the least face plus a multiple of it.
 	step: u128,
 
-	/// The distinct faces, in ascending order, or `None` for a standard die,
-	/// whose faces run from one to [`faces`](Self::faces).
+	/// The distinct faces, in ascending order, or `None` for a die whose
+	/// faces are every value from the least to the greatest, as those of a
+	/// standard die are.
 	values: Option<Vec<i32>>
 }
 
@@ -2571,16 +3887,7 @@ impl Die
 	///
 	/// # Returns
 	/// The shape.
-	fn standard(faces: u128) -> Self
-	{
-		Self {
-			faces,
-			least: 1,
-			greatest: faces as i32,
-			step: 1,
-			values: None
-		}
-	}
+	fn standard(faces: u128) -> Self { Self::run(1, faces as i32) }
 
 	/// Answer the shape of a custom die of the specified distinct faces.
 	///
@@ -2609,6 +3916,71 @@ impl Die
 				}
 			},
 			_ => Self::custom(vec![0])
+		}
+	}
+
+	/// Answer the shape of a die whose faces are every value from `least` to
+	/// `greatest`.
+	///
+	/// # Parameters
+	/// - `least`: The least face.
+	/// - `greatest`: The greatest face, not less than `least`.
+	///
+	/// # Returns
+	/// The shape.
+	fn run(least: i32, greatest: i32) -> Self
+	{
+		Self {
+			faces: (greatest as i64 - least as i64 + 1) as u128,
+			least,
+			greatest,
+			step: 1,
+			values: None
+		}
+	}
+
+	/// Answer the shape of a die whose faces include those of the specified
+	/// set: the set itself, if it is a run or if its faces may be listed, and
+	/// otherwise the run that spans it.
+	///
+	/// # Parameters
+	/// - `set`: The set.
+	/// - `listed`: Whether the function lists the faces, as it does those of a
+	///   custom die, so that the estimate may list them however many there are;
+	///   otherwise it lists at most [`LISTED`] faces.
+	///
+	/// # Returns
+	/// The shape, which has one face, zero, if the set is empty.
+	fn covering(set: &ResultSet, listed: bool) -> Self
+	{
+		match set.intervals()
+		{
+			[] => Self::custom(Vec::new()),
+			[run] => Self::run(run.min, run.max),
+			runs if listed || set.len() <= LISTED => Self::custom(
+				runs.iter().flat_map(|run| run.min..=run.max).collect()
+			),
+			_ =>
+			{
+				let hull = set.hull().expect("the set is not empty");
+				Self::run(hull.min, hull.max)
+			}
+		}
+	}
+
+	/// Answer the faces of the die.
+	///
+	/// # Returns
+	/// The faces.
+	fn set(&self) -> ResultSet
+	{
+		match &self.values
+		{
+			None =>
+			{
+				ResultSet::interval(self.least as i64, self.greatest as i64)
+			},
+			Some(values) => ResultSet::of(values.iter().copied())
 		}
 	}
 
@@ -2805,6 +4177,7 @@ impl Record
 		let total = self.setups();
 		if let [part] = self.parts.as_slice()
 			&& total == 1
+			&& !self.weighted
 		{
 			// A record of one setup of weight one needs no scaling.
 			return part.setup_sum(limit)
@@ -2847,7 +4220,7 @@ impl Part
 	{
 		match &self.kind
 		{
-			Kind::Empty | Kind::Results(_) =>
+			Kind::Empty | Kind::Results { .. } | Kind::Pool { .. } =>
 			{
 				let (mut each, support) = self.setup_sum(limit);
 				// The setup's sum joins the sums.
@@ -2878,10 +4251,23 @@ impl Part
 				tally.charge(1, 1);
 				(tally, 1)
 			},
-			Kind::Results(distinct) =>
+			Kind::Results { distinct, .. } =>
 			{
 				tally.charge(*distinct, 1);
 				(tally, 1)
+			},
+			Kind::Pool {
+				multisets,
+				distinct,
+				..
+			} =>
+			{
+				// Each multiset contributes a sum, a step for each of its
+				// distinct results.
+				tally.charge(multisets.saturating_mul(*distinct), *multisets);
+				let support = (*multisets).min(limit);
+				tally.keep(*multisets, support);
+				(tally, support)
 			},
 			Kind::Range { start, end } =>
 			{
@@ -2902,7 +4288,7 @@ impl Part
 					limit
 				)
 			},
-			Kind::Custom { count, die } => self.dice_sum(count, die, limit)
+			Kind::Custom { count, die, .. } => self.dice_sum(count, die, limit)
 		}
 	}
 
@@ -3018,10 +4404,9 @@ impl Part
 					.collect::<Vec<_>>();
 				(count, dies, *counts)
 			},
-			Kind::Custom { count, die } =>
-			{
-				(count, vec![(die.clone(), 1)], count.support)
-			},
+			Kind::Custom {
+				count, die, laws, ..
+			} => (count, vec![(die.clone(), *laws)], count.support),
 			_ => unreachable!("the record holds dice")
 		};
 		let (lowest, highest) = self.least_drops();
@@ -3739,17 +5124,19 @@ impl Record
 	///
 	/// # Parameters
 	/// - `tally`: The tally, to which the outcomes stay charged.
+	/// - `die`: The cells of the die that each outcome keeps, if a later reroll
+	///   draws from it, or zero.
 	///
 	/// # Returns
 	/// A bound on the number of outcomes, and on the cells of each.
-	fn outcomes(&self, tally: &mut Tally) -> (u128, u128)
+	fn outcomes(&self, tally: &mut Tally, die: u128) -> (u128, u128)
 	{
 		// The denominator, and a step for each setup.
 		tally.charge(self.setups().saturating_mul(2), 0);
 		self.parts
 			.iter()
 			.fold((0u128, 0u128), |(outcomes, cells), part| {
-				let (more, each) = part.outcomes(tally);
+				let (more, each) = part.outcomes(tally, die);
 				(outcomes.saturating_add(more), cells.max(each))
 			})
 	}
@@ -3763,23 +5150,58 @@ impl Part
 	///
 	/// # Parameters
 	/// - `tally`: The tally, to which the outcomes stay charged.
+	/// - `die`: The cells of the die that each outcome keeps, if a later reroll
+	///   draws from it, or zero.
 	///
 	/// # Returns
 	/// A bound on the number of outcomes, and on the cells of each.
-	fn outcomes(&self, tally: &mut Tally) -> (u128, u128)
+	fn outcomes(&self, tally: &mut Tally, die: u128) -> (u128, u128)
 	{
 		let mut each = Tally::default();
-		let (outcomes, cells) = match &self.kind
+		let (outcomes, cells) = self.enumerate(&mut each);
+		// Each outcome moves its cells into the setup that holds it, with a
+		// copy of the die, if it keeps it.
+		each.charge(outcomes, outcomes.saturating_mul(die));
+		tally.then(each.times(self.setups));
+		(
+			outcomes.saturating_mul(self.setups),
+			cells.saturating_add(die)
+		)
+	}
+
+	/// Enumerate the outcomes of the roll of one setup of the part, as
+	/// [`Roll::outcomes`](super::record::Roll::outcomes) does, whatever its
+	/// operands in each world.
+	///
+	/// # Parameters
+	/// - `each`: The tally, to which the outcomes stay charged.
+	///
+	/// # Returns
+	/// A bound on the number of outcomes, and on the cells of each.
+	fn enumerate(&self, each: &mut Tally) -> (u128, u128)
+	{
+		match &self.kind
 		{
 			Kind::Empty =>
 			{
 				each.charge(1, 1);
 				(1, 1)
 			},
-			Kind::Results(distinct) =>
+			Kind::Results { distinct, .. } =>
 			{
 				each.charge(1, distinct + 1);
 				(1, distinct + 1)
+			},
+			Kind::Pool {
+				multisets,
+				distinct,
+				..
+			} =>
+			{
+				// Each multiset becomes fixed results, of as many cells.
+				let cells = distinct.saturating_add(1);
+				each.charge(*multisets, multisets.saturating_mul(cells));
+				(*multisets, cells)
 			},
 			Kind::Range { start, end } =>
 			{
@@ -3794,18 +5216,13 @@ impl Part
 					each.charge(1, 2);
 					(1, 2)
 				},
-				greatest => multisets(
-					&mut each,
-					count,
-					&Die::standard(greatest as u128)
-				)
+				greatest => multisets(each, dice(count), greatest as u128)
 			},
-			Kind::Custom { count, die } => multisets(&mut each, count, die)
-		};
-		// Each outcome moves its cells into the setup that holds it.
-		each.charge(outcomes, 0);
-		tally.then(each.times(self.setups));
-		(outcomes.saturating_mul(self.setups), cells)
+			Kind::Custom { count, die, .. } =>
+			{
+				multisets(each, dice(count), die.faces)
+			},
+		}
 	}
 }
 
@@ -3821,20 +5238,18 @@ impl Part
 ///
 /// # Parameters
 /// - `tally`: The tally, to which the outcomes stay charged.
-/// - `count`: The number of dice.
-/// - `die`: The die.
+/// - `n`: The greatest number of dice.
+/// - `d`: The number of distinct faces of the die, which is positive.
 ///
 /// # Returns
 /// A bound on the number of outcomes, and on the cells of each.
-fn multisets(tally: &mut Tally, count: &Operand, die: &Die) -> (u128, u128)
+fn multisets(tally: &mut Tally, n: u128, d: u128) -> (u128, u128)
 {
-	let n = count.bounds.max.max(0) as u128;
 	if n == 0
 	{
 		tally.charge(1, 1);
 		return (1, 1)
 	}
-	let d = die.faces;
 	tally.charge(d, d);
 	let base = tally.working;
 	tally.charge(1, 1);
@@ -3885,8 +5300,8 @@ mod tests
 	use pretty_assertions::assert_eq;
 
 	use super::{
-		Die, LANES, Lane, Tally, any_power, convolution_power, kept_pairs,
-		observe, order_sum
+		Arrangement, Die, LANES, Lane, Tally, Window, any_power,
+		convolution_power, groups, kept_pairs, observe, order_sum, power_sum
 	};
 	use crate::{
 		Evaluator, Passes,
@@ -4101,6 +5516,255 @@ mod tests
 								kept_pairs(n, (a, b), (c, d)),
 								pairs.len() as u128,
 								"{n}: [{a}, {b}] × [{c}, {d}]"
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/// Answer every multiset of `n` results of the faces `0, …, d - 1`, as the
+	/// number of copies of each face.
+	///
+	/// # Parameters
+	/// - `n`: The number of results.
+	/// - `d`: The number of faces.
+	///
+	/// # Returns
+	/// The multisets.
+	fn compositions(n: usize, d: usize) -> Vec<Vec<usize>>
+	{
+		match d
+		{
+			0 => match n
+			{
+				0 => vec![Vec::new()],
+				_ => Vec::new()
+			},
+			d => (0..=n)
+				.flat_map(|first| {
+					compositions(n - first, d - 1).into_iter().map(
+						move |mut rest| {
+							rest.insert(0, first);
+							rest
+						}
+					)
+				})
+				.collect()
+		}
+	}
+
+	/// Ensure that the groups of the multisets of a roll count every multiset,
+	/// and bracket the dice still kept that a reroll matches, as enumerating
+	/// them finds, for every set of matching faces, whether it lies in a run
+	/// or not, and every interval of drops: exactly, if the faces lie in a
+	/// run, the drops are fixed, and the reroll matches exactly those faces.
+	#[test]
+	fn test_groups()
+	{
+		for d in 1..=5usize
+		{
+			for n in 0..=6usize
+			{
+				let multisets = compositions(n, d);
+				for matching in 0..1u32 << d
+				{
+					let matches = |face: usize| matching & (1 << face) != 0;
+					let r = matching.count_ones() as u128;
+					let faces = (0..d).filter(|&face| matches(face));
+					let arrangement = match (faces.clone().min(), faces.max())
+					{
+						(Some(first), Some(last))
+							if (first..=last).all(matches) =>
+						{
+							Arrangement::Run {
+								below: first as u128
+							}
+						},
+						(None, _) => Arrangement::Run { below: d as u128 },
+						_ => Arrangement::Scattered
+					};
+					for (l1, l2, h1, h2) in [
+						(0, 0, 0, 0),
+						(1, 1, 0, 0),
+						(0, 0, 2, 2),
+						(1, 1, 1, 1),
+						(0, 2, 0, 0),
+						(0, 1, 0, 1)
+					]
+					{
+						if l2 + h2 >= n
+						{
+							continue
+						}
+						// The matched dice still kept of each multiset, for
+						// each pair of drops.
+						let kept = |multiset: &[usize], l: usize, h: usize| {
+							let mut position = 0;
+							let mut k = 0;
+							for (face, &copies) in multiset.iter().enumerate()
+							{
+								for _ in 0..copies
+								{
+									k += (matches(face)
+										&& (l..n - h).contains(&position))
+										as u128;
+									position += 1;
+								}
+							}
+							k
+						};
+						let window = Window {
+							n: n as u128,
+							widest: (l1 as u128, h1 as u128),
+							narrowest: (l2 as u128, h2 as u128),
+							least: (n - l2 - h2) as u128,
+							most: (n - l1 - h1) as u128
+						};
+						let fixed = l1 == l2 && h1 == h2;
+						for exact in [true, false]
+						{
+							let groups = groups(
+								d as u128,
+								r,
+								arrangement,
+								&window,
+								exact
+							);
+							let total = groups
+								.iter()
+								.map(|group| group.count)
+								.sum::<u128>();
+							assert_eq!(total, multisets.len() as u128);
+							for l in l1..=l2
+							{
+								for h in h1..=h2
+								{
+									let ks = multisets
+										.iter()
+										.map(|multiset| kept(multiset, l, h))
+										.collect::<Vec<_>>();
+									for t in 0..=n as u128
+									{
+										let at_least = ks
+											.iter()
+											.filter(|&&k| k >= t)
+											.count()
+											as u128;
+										let at_most = ks
+											.iter()
+											.filter(|&&k| k <= t)
+											.count()
+											as u128;
+										let (above, below) =
+											groups.iter().fold(
+												(0, 0),
+												|(above, below), group| {
+													(
+														above
+															+ (group.matched.1
+																>= t)
+																as u128
+																* group.count,
+														below
+															+ (group.matched.0
+																<= t)
+																as u128
+																* group.count
+													)
+												}
+											);
+										assert!(
+											at_least <= above
+												&& at_most <= below,
+											"{d} faces, {n} results, matching \
+											 {matching:b}, drops ({l}, {h}), \
+											 exact {exact}: {groups:?}"
+										);
+										if exact
+											&& fixed
+											&& matches!(
+												arrangement,
+												Arrangement::Run { .. }
+											)
+										{
+											let exactly = groups
+												.iter()
+												.filter(|group| {
+													group.matched == (t, t)
+												})
+												.map(|group| group.count)
+												.sum::<u128>();
+											assert_eq!(
+												exactly,
+												ks.iter()
+													.filter(|&&k| k == t)
+													.count()
+													as u128,
+												"{d} faces, {n} results, \
+												 matching {matching:b}, drops \
+												 ({l}, {h}): {groups:?}"
+											);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/// Ensure that the sums of dice cost no less, in steps, in cells, or in
+	/// length, for a die whose faces include those of another, whether it lists
+	/// them or spans them, so that a die that a reroll rewrote may be priced by
+	/// one whose faces include its own.
+	#[test]
+	fn test_sums_by_faces()
+	{
+		let universe = [-2, 0, 1, 3, 4, 7];
+		let die = |set: u32| {
+			Die::custom(
+				universe
+					.iter()
+					.enumerate()
+					.filter(|(i, _)| set & (1 << i) != 0)
+					.map(|(_, &face)| face)
+					.collect()
+			)
+		};
+		for fewer in 1..1u32 << universe.len()
+		{
+			let small = die(fewer);
+			let mut larger = (fewer..1 << universe.len())
+				.filter(|more| more & fewer == fewer)
+				.map(die)
+				.collect::<Vec<_>>();
+			larger.push(Die::run(small.least, small.greatest));
+			for large in larger
+			{
+				for n in 1..=6u128
+				{
+					let (power, power_len) = power_sum(&small, n, n, u128::MAX);
+					let (bound, bound_len) = power_sum(&large, n, n, u128::MAX);
+					assert!(
+						power.max(bound) == bound && power_len <= bound_len,
+						"{small:?} ≤ {large:?}, {n} dice: {power:?} > {bound:?}"
+					);
+					for l in 0..n
+					{
+						for h in 0..n - l
+						{
+							let (order, len) =
+								order_sum(&small, n, l, h, u128::MAX);
+							let (bound, bound_len) =
+								order_sum(&large, n, l, h, u128::MAX);
+							assert!(
+								order.max(bound) == bound && len <= bound_len,
+								"{small:?} ≤ {large:?}, {n} dice, ({l}, {h}): \
+								 {order:?} > {bound:?}"
 							);
 						}
 					}

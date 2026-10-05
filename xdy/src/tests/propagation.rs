@@ -2914,6 +2914,50 @@ fn test_classes()
 	{
 		assert_eq!(class(source, args), expected, "{source}");
 	}
+	// A reroll that may change a die rerolls; one that cannot does not.
+	let class = |assembly: &str| {
+		let evaluator = Evaluator::new(Assembler::assemble(assembly).unwrap());
+		estimate(&evaluator, []).unwrap().class
+	};
+	for (assembly, expected) in [
+		(
+			rerolled("roll standard dice 4D6", &["reroll = 1 up to 1 times"]),
+			Class {
+				rerolls: true,
+				..none
+			}
+		),
+		(
+			rerolled("roll standard dice 2D3", &["reroll < 4 unlimited times"]),
+			Class {
+				rerolls: true,
+				..none
+			}
+		),
+		(
+			rerolled("roll standard dice 4D4", &["reroll = 1 up to 0 times"]),
+			none
+		),
+		(
+			rerolled("roll standard dice 4D4", &["reroll = 5 unlimited times"]),
+			none
+		),
+		(
+			rerolled_by(
+				(1, 6),
+				"roll standard dice 4D6",
+				&["reroll <= @0 up to 1 times"]
+			),
+			Class {
+				dynamic: true,
+				rerolls: true,
+				..none
+			}
+		)
+	]
+	{
+		assert_eq!(class(&assembly), expected, "{assembly}");
+	}
 }
 
 /// Ensure that the estimate refuses arguments that disagree with the
@@ -3592,14 +3636,14 @@ fn clause_program() -> impl Strategy<Value = ClauseProgram>
 }
 
 /// Rewrite a function so that it reads its rolling records more than once, as
-/// the compiler never does: right after each roll or drop that `chosen`
-/// selects, sum the record into a fresh register, and add every such register
-/// to the answer.
+/// the compiler never does: right after each roll, drop, or reroll that
+/// `chosen` selects, sum the record into a fresh register, and add every such
+/// register to the answer.
 ///
 /// # Parameters
 /// - `function`: The function.
-/// - `chosen`: Whether to sum after each roll or drop, in order, repeated as
-///   needed, which is not empty.
+/// - `chosen`: Whether to sum after each roll, drop, or reroll, in order,
+///   repeated as needed, which is not empty.
 ///
 /// # Returns
 /// The rewritten function, which is valid if the function is.
@@ -3618,6 +3662,7 @@ pub(super) fn resum(function: Function, chosen: &[bool]) -> Function
 			Instruction::RollCustomDice(inst) => Some(inst.dest),
 			Instruction::DropLowest(inst) => Some(inst.dest),
 			Instruction::DropHighest(inst) => Some(inst.dest),
+			Instruction::Reroll(inst) => Some(inst.dest),
 			Instruction::Return(ret) =>
 			{
 				let mut answer = ret.src;
@@ -3992,31 +4037,285 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 //                                  Rerolls.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Test that, until the cost model prices rerolls, the estimate prices a
-/// function that rerolls beyond every budget but the unlimited one, though the
-/// pass, which charges its work as it goes, answers within the unlimited one.
-#[test]
-fn test_reroll_estimates_exceed_every_budget()
+/// Answer the assembly of a function that rolls `count` standard dice of
+/// `faces` faces into `⚅1`, sums them into `@0`, rolls `roll` into `⚅0`,
+/// applies the specified clauses to it, which may read `@0`, sums it, and
+/// returns the sum.
+///
+/// # Parameters
+/// - `(count, faces)`: The dice of `@0`.
+/// - `roll`: The roll, as in `roll standard dice 3D6`.
+/// - `clauses`: The clauses, each as in `reroll <= @0 up to 1 times`.
+///
+/// # Returns
+/// The assembly.
+fn rerolled_by(
+	(count, faces): (i32, i32),
+	roll: &str,
+	clauses: &[&str]
+) -> String
 {
-	let function = Assembler::assemble(
-		"\
-Function() r#1 ⚅#1
-\textern[]
-\tbody:
-\t\t⚅0 <- roll standard dice 1D6
-\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
-\t\t@0 <- sum rolling record ⚅0
-\t\treturn @0
-"
-	)
+	let mut assembly = format!(
+		"Function() r#2 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅1 <- roll standard \
+		 dice {count}D{faces}\n\t\t@0 <- sum rolling record ⚅1\n\t\t⚅0 <- \
+		 {roll}\n"
+	);
+	for clause in clauses
+	{
+		assembly.push_str(&format!("\t\t⚅0 <- {clause} from ⚅0\n"));
+	}
+	assembly.push_str("\t\t@1 <- sum rolling record ⚅0\n\t\treturn @1\n");
+	assembly
+}
+
+/// Answer the estimate and the usage of the pass over the specified assembly,
+/// optimized or not, after checking that the estimate bounds the usage.
+///
+/// # Parameters
+/// - `assembly`: The assembly of a function without parameters.
+///
+/// # Returns
+/// The estimate and the usage of the function, then of the optimized
+/// function.
+///
+/// # Panics
+/// If the assembly is invalid, the pass refuses the function, or the
+/// estimate does not bound the usage.
+fn estimated_assembly(assembly: &str) -> [(Cost, Usage); 2]
+{
+	let function = Assembler::assemble(assembly).unwrap();
+	[function.clone(), optimize(function, Passes::all())].map(|function| {
+		let evaluator = Evaluator::new(function);
+		let (distribution, usage) =
+			propagate_within(&evaluator, &[], Budget::UNLIMITED).unwrap();
+		let cost = check_estimate(&evaluator, &[], &distribution, usage)
+			.unwrap_or_else(|e| panic!("{assembly}{e}"));
+		(cost, usage)
+	})
+}
+
+/// Ensure that the estimate of a reroll of dice none of which has been
+/// dropped, with fixed operands, is exact, as is that of the pool that it
+/// rewrites, chained, limited or not, of standard or custom dice or a range,
+/// and that the estimate of a reroll after a drop, of random operands, or
+/// after a split on its record, bounds the pass, and stays tight where the
+/// estimate does not price every world as its costliest.
+#[test]
+fn test_reroll_estimates()
+{
+	for (roll, clauses) in [
+		("roll standard dice 1D6", &["reroll = 1 up to 1 times"][..]),
+		("roll standard dice 4D6", &["reroll = 1 up to 1 times"]),
+		("roll standard dice 4D6", &["reroll <= 2 unlimited times"]),
+		(
+			"roll standard dice 10D10",
+			&["reroll in [1, 3] up to 1 times"]
+		),
+		("roll standard dice 100D6", &["reroll = 1 up to 1 times"]),
+		(
+			"roll standard dice 3D6",
+			&["reroll = 1 up to 1 times", "reroll = 6 up to 1 times"]
+		),
+		("roll range 1:20", &["reroll < 5 unlimited times"]),
+		(
+			"roll custom dice 3D[1, 1, 2, 5]",
+			&["reroll = 1 unlimited times"]
+		),
+		(
+			"roll standard dice 4D6",
+			&["reroll = 1 up to 1 times", "drop lowest 1"]
+		),
+		("roll standard dice 4D4", &["reroll = 1 up to 0 times"]),
+		("roll standard dice 2D3", &["reroll < 4 unlimited times"])
+	]
+	{
+		let assembly = rerolled(roll, clauses);
+		for (cost, usage) in estimated_assembly(&assembly)
+		{
+			assert_eq!(
+				(cost.steps, cost.cells, cost.worlds),
+				(usage.steps, usage.cells, usage.worlds),
+				"{assembly}"
+			);
+		}
+	}
+	let within = |assembly: &str, ratio: f64| {
+		for (cost, usage) in estimated_assembly(assembly)
+		{
+			for (estimate, used) in
+				[(cost.steps, usage.steps), (cost.cells, usage.cells)]
+			{
+				assert!(
+					estimate as f64 <= ratio * used.max(1) as f64,
+					"{assembly}{cost:?} is looser than {ratio} × {usage:?}"
+				);
+			}
+		}
+	};
+	for (roll, clauses, ratio) in [
+		// A reroll after a drop pools the multisets of the dice still kept,
+		// bounding the distinct survivors of each.
+		(
+			"roll standard dice 4D6",
+			&["drop lowest 1", "reroll = 1 up to 1 times"][..],
+			1.25
+		),
+		(
+			"roll standard dice 2D20",
+			&["drop lowest 1", "reroll = 1 up to 1 times"],
+			1.25
+		),
+		(
+			"roll standard dice 10D6",
+			&["drop lowest 1", "reroll <= 2 up to 1 times"],
+			1.25
+		),
+		(
+			"roll standard dice 6D6",
+			&["drop highest 2", "reroll = 3 unlimited times"],
+			1.25
+		),
+		(
+			"roll standard dice 5D10",
+			&[
+				"drop lowest 1",
+				"drop highest 1",
+				"reroll >= 9 up to 2 times"
+			],
+			1.25
+		),
+		(
+			"roll standard dice 3D6",
+			&[
+				"drop lowest 1",
+				"reroll = 1 up to 1 times",
+				"reroll = 2 up to 1 times"
+			],
+			1.25
+		),
+		// A law of many faces, with gaps, is priced by the run that spans it.
+		(
+			"roll standard dice 1D1000",
+			&["reroll in 10..=20 unlimited times"],
+			1.25
+		)
+	]
+	{
+		within(&rerolled(roll, clauses), ratio);
+	}
+	// Random operands resolve value by value.
+	for (dice, roll, clauses, ratio) in [
+		(
+			(1, 6),
+			"roll standard dice 4D6",
+			&["reroll <= @0 up to 1 times"][..],
+			1.05
+		),
+		(
+			(1, 3),
+			"roll standard dice 4D6",
+			&["reroll = 1 up to @0 times"],
+			1.05
+		),
+		(
+			(1, 6),
+			"roll standard dice @0D6",
+			&["reroll = 1 up to 1 times"],
+			1.1
+		),
+		(
+			(1, 6),
+			"roll standard dice 3D6",
+			&["reroll <= @0 unlimited times"],
+			1.25
+		),
+		(
+			(1, 2),
+			"roll standard dice 4D6",
+			&["drop lowest @0", "reroll = 1 up to 1 times"],
+			1.75
+		)
+	]
+	{
+		within(&rerolled_by(dice, roll, clauses), ratio);
+	}
+	// A reroll after a split on its record prices every world as its
+	// costliest.
+	for assembly in [
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 1D4\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- reroll <= 2 up \
+		 to 1 times from ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + \
+		 @1\n\t\treturn @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 4D6\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- drop lowest 1 \
+		 from ⚅0\n\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0\n\t\t@1 <- sum \
+		 rolling record ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll custom \
+		 dice 3D[1, 2, 2, 5, 9]\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- \
+		 reroll < 3 unlimited times from ⚅0\n\t\t@1 <- sum rolling record \
+		 ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn @2\n"
+	]
+	{
+		estimated_assembly(assembly);
+	}
+	// A plan builds within its estimate what the pass answers.
+	let function = Assembler::assemble(&rerolled_by(
+		(1, 6),
+		"roll standard dice 4D6",
+		&["drop lowest 1", "reroll <= @0 up to 1 times"]
+	))
 	.unwrap();
 	let evaluator = Evaluator::new(function);
 	let plan = evaluator.plan_distribution([]).unwrap();
-	assert_eq!(plan.estimate().steps, u64::MAX);
+	let cost = plan.estimate();
+	assert_eq!(cost.class.rerolls, true);
+	let budget = Budget {
+		steps: cost.steps,
+		cells: cost.cells
+	};
 	assert_eq!(
-		plan.build(Budget::UNLIMITED, &Unobserved),
-		Ok(weights(&[(1, 1), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7)]))
+		plan.build(budget, &Unobserved),
+		Ok(propagate(&evaluator, []).unwrap())
 	);
+}
+
+/// Ensure that the estimate of a reroll of enormously many dice saturates,
+/// promptly, and exceeds any small budget, whether it rewrites them or pools
+/// them, and however wide its die.
+#[test]
+fn test_saturated_reroll_estimates()
+{
+	for (roll, clauses) in [
+		(
+			"roll standard dice 2147483647D6",
+			&["reroll = 1 up to 1 times"][..]
+		),
+		(
+			"roll standard dice 2147483647D6",
+			&["drop lowest 1", "reroll = 1 up to 1 times"]
+		),
+		(
+			"roll standard dice 2147483647D2147483647",
+			&["drop highest 3", "reroll in 5..=9 unlimited times"]
+		),
+		(
+			"roll standard dice 3D2147483647",
+			&["reroll != 7 up to 2147483647 times"]
+		),
+		(
+			"roll custom dice 2147483647D[1, 5, 9]",
+			&["keep highest 1000", "reroll in [5] unlimited times"]
+		)
+	]
+	{
+		let assembly = rerolled(roll, clauses);
+		let evaluator = Evaluator::new(Assembler::assemble(&assembly).unwrap());
+		let cost = estimate(&evaluator, []).unwrap();
+		assert!(
+			cost.steps > SMALL.steps || cost.cells > SMALL.cells,
+			"{assembly}{cost:?}"
+		);
+	}
 }
 
 /// Answer the assembly of a function that rolls `roll` into `⚅0`, applies the
@@ -4882,6 +5181,44 @@ fn reroll_program() -> impl Strategy<Value = RerollProgram>
 
 proptest! {
 	#![proptest_config(ProptestConfig::with_cases(512))]
+
+	/// The estimate of a function that rerolls bounds what the pass uses,
+	/// optimized or not, and whether or not it sums its records before and
+	/// after some of its rolls, drops, and rerolls, so that a split fixes the
+	/// results that a later reroll reads; the pass succeeds within a budget
+	/// exactly when the budget covers its usage; and it reports its progress
+	/// faithfully.
+	#[test]
+	fn test_reroll_estimates_bound_usage(
+		program in reroll_program(),
+		chosen in prop::collection::vec(any::<bool>(), 1..=4)
+	)
+	{
+		let assembly = program.assembly();
+		let function = Assembler::assemble(&assembly).unwrap();
+		for function in [function.clone(), optimize(function, Passes::all())]
+		{
+			for function in [function.clone(), resum(function, &chosen)]
+			{
+				let evaluator = Evaluator::new(function);
+				let (propagated, usage) =
+					propagate_within(&evaluator, &[], Budget::UNLIMITED)
+						.unwrap();
+				check_exact_budget(&evaluator, &[], &propagated, usage)
+					.map_err(TestCaseError::fail)?;
+				check_estimate(&evaluator, &[], &propagated, usage)
+					.map_err(TestCaseError::fail)?;
+				check_progress(
+					&evaluator,
+					&[],
+					&propagated,
+					usage,
+					PROPERTY_CANCELLATIONS
+				)
+				.map_err(TestCaseError::fail)?;
+			}
+		}
+	}
 
 	/// Rerolls answer the law of their definition, optimized or not, whether
 	/// before or after drops and keeps, of every predicate form, limited or

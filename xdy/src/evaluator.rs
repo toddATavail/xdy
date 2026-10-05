@@ -1562,7 +1562,7 @@ impl RollingRecordKind<EvaluationBounds>
 	/// # Returns
 	/// The faces, which are empty if the record is uninitialized, since it has
 	/// no die.
-	fn faces(&self) -> ResultSet
+	pub(crate) fn faces(&self) -> ResultSet
 	{
 		match self
 		{
@@ -1614,7 +1614,7 @@ impl RollingRecordKind<EvaluationBounds>
 	/// faces and a die without faces are least. A range may hold any one of
 	/// many single values, none of which includes another, so these are least
 	/// together.
-	fn least_dice(&self) -> Vec<LeastDice>
+	pub(crate) fn least_dice(&self) -> Vec<LeastDice>
 	{
 		match self
 		{
@@ -1680,7 +1680,7 @@ impl RollingRecordKind<EvaluationBounds>
 	/// # Returns
 	/// The number of branches and the number of matching branches. A face of
 	/// a custom die counts once for every time that it is listed.
-	fn branches(&self, criterion: &ResultSet) -> (u128, u128)
+	pub(crate) fn branches(&self, criterion: &ResultSet) -> (u128, u128)
 	{
 		let empty = (1, criterion.contains(0) as u128);
 		match self
@@ -1727,7 +1727,7 @@ impl RollingRecordKind<EvaluationBounds>
 /// predicate matches, either of which may have gaps, as `[1, 9]` or `in [2,
 /// 4]` do.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ResultSet(Vec<EvaluationBounds>);
+pub(crate) struct ResultSet(Vec<EvaluationBounds>);
 
 impl ResultSet
 {
@@ -1740,7 +1740,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The requested set.
-	fn interval(min: i64, max: i64) -> Self
+	pub(crate) fn interval(min: i64, max: i64) -> Self
 	{
 		let min = min.max(i32::MIN as i64);
 		let max = max.min(i32::MAX as i64);
@@ -1764,7 +1764,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The requested set.
-	fn of(results: impl IntoIterator<Item = i32>) -> Self
+	pub(crate) fn of(results: impl IntoIterator<Item = i32>) -> Self
 	{
 		Self::covering(results.into_iter().map(EvaluationBounds::from))
 	}
@@ -1803,7 +1803,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The union.
-	fn union(&self, other: &Self) -> Self
+	pub(crate) fn union(&self, other: &Self) -> Self
 	{
 		Self::covering(self.0.iter().chain(&other.0).copied())
 	}
@@ -1815,7 +1815,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The intersection.
-	fn intersection(&self, other: &Self) -> Self
+	pub(crate) fn intersection(&self, other: &Self) -> Self
 	{
 		// Each interval of the intersection lies within one interval of each
 		// set, and no two such intervals are adjacent, so neither are these.
@@ -1867,7 +1867,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The difference.
-	fn difference(&self, other: &Self) -> Self
+	pub(crate) fn difference(&self, other: &Self) -> Self
 	{
 		self.intersection(&other.complement())
 	}
@@ -1877,7 +1877,15 @@ impl ResultSet
 	/// # Returns
 	/// `true` if the receiver has no results, `false` otherwise.
 	#[inline]
-	fn is_empty(&self) -> bool { self.0.is_empty() }
+	pub(crate) fn is_empty(&self) -> bool { self.0.is_empty() }
+
+	/// Answer the disjoint, ascending intervals that cover the set, no two of
+	/// them adjacent.
+	///
+	/// # Returns
+	/// The intervals.
+	#[inline]
+	pub(crate) fn intervals(&self) -> &[EvaluationBounds] { &self.0 }
 
 	/// Answer whether the receiver holds the specified result.
 	///
@@ -1899,7 +1907,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// `true` if the receiver is a subset of `other`, `false` otherwise.
-	fn is_subset(&self, other: &Self) -> bool
+	pub(crate) fn is_subset(&self, other: &Self) -> bool
 	{
 		self.difference(other).is_empty()
 	}
@@ -1911,7 +1919,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// `true` if the sets meet, `false` otherwise.
-	fn meets(&self, other: &Self) -> bool
+	pub(crate) fn meets(&self, other: &Self) -> bool
 	{
 		!self.intersection(other).is_empty()
 	}
@@ -1920,7 +1928,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The number of results.
-	fn len(&self) -> u128
+	pub(crate) fn len(&self) -> u128
 	{
 		self.0
 			.iter()
@@ -1934,7 +1942,7 @@ impl ResultSet
 	///
 	/// # Returns
 	/// The hull, or `None` if the receiver is empty.
-	fn hull(&self) -> Option<EvaluationBounds>
+	pub(crate) fn hull(&self) -> Option<EvaluationBounds>
 	{
 		match (self.0.first(), self.0.last())
 		{
@@ -1946,7 +1954,7 @@ impl ResultSet
 
 /// The [least dice](RollingRecordKind::least_dice) of a rolling record.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LeastDice
+pub(crate) enum LeastDice
 {
 	/// A die with these faces.
 	Fixed(ResultSet),
@@ -1958,13 +1966,13 @@ enum LeastDice
 /// The criteria to which a reroll's [predicate](Predicate) may resolve, over
 /// the bounds of its operands.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Criteria
+pub(crate) struct Criteria
 {
 	/// The results that every criterion matches.
-	certain: ResultSet,
+	pub(crate) certain: ResultSet,
 
 	/// The results that some criterion matches.
-	possible: ResultSet,
+	pub(crate) possible: ResultSet,
 
 	/// The shape of the criteria, which decides which dice some criterion
 	/// matches entirely.
@@ -1998,7 +2006,7 @@ impl Criteria
 	///
 	/// # Returns
 	/// The requested criteria.
-	fn new(
+	pub(crate) fn new(
 		predicate: &Predicate,
 		value: impl Fn(AddressingMode) -> EvaluationBounds
 	) -> Self
@@ -2102,7 +2110,7 @@ impl Criteria
 	/// # Returns
 	/// `true` if some criterion matches every face of such a die, `false`
 	/// otherwise.
-	fn may_cover(&self, dice: &LeastDice) -> bool
+	pub(crate) fn may_cover(&self, dice: &LeastDice) -> bool
 	{
 		match (self.shape, dice)
 		{
@@ -2479,6 +2487,24 @@ impl<'eval> BoundsEvaluator<'eval>
 	fn record(&self, op: RollingRecordIndex) -> &RollingRecordBounds
 	{
 		&self.records[op.0]
+	}
+
+	/// Answer the kind of the roll that last filled the specified rolling
+	/// record, with the bounds of its operands, which describes the die from
+	/// which every reroll of the record draws.
+	///
+	/// # Parameters
+	/// - `op`: The rolling record.
+	///
+	/// # Returns
+	/// The kind.
+	#[inline]
+	pub(crate) fn roll(
+		&self,
+		op: RollingRecordIndex
+	) -> &RollingRecordKind<EvaluationBounds>
+	{
+		&self.record(op).kind
 	}
 
 	/// Obtain the specified rolling record bounds.
