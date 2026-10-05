@@ -22,10 +22,10 @@ use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
 	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, SourceSpan, Sub, SumRollingRecord,
-	add, div, exp, max, r#mod, mul, neg, parser::ParseError, roll_custom_dice,
-	roll_range, roll_standard_dice, sub
+	Predicate, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, SourceSpan, Sub,
+	SumRollingRecord, add, div, exp, max, r#mod, mul, neg, parser::ParseError,
+	roll_custom_dice, roll_range, roll_standard_dice, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1527,7 +1527,13 @@ struct RollingRecordBounds
 	/// itself, rather than the drops at either end, keeps the bounds of a keep
 	/// exact: a keep counts from the dice still kept, so `{x}D6 keep highest
 	/// 2` keeps at most 2 dice, however many it rolls.
-	kept: EvaluationBounds
+	kept: EvaluationBounds,
+
+	/// The results that a die still kept may show, which every roll sets to
+	/// the [faces](RollingRecordKind::faces) of its die, and which an
+	/// unlimited reroll narrows to those that its predicate cannot match, and
+	/// a limited reroll restores, since a replacement may show any face.
+	results: ResultSet
 }
 
 impl RollingRecordKind<EvaluationBounds>
@@ -1548,6 +1554,595 @@ impl RollingRecordKind<EvaluationBounds>
 			_ => None
 		}
 	}
+
+	/// Answer the faces that a die of the record may show, over the bounds of
+	/// its faces or endpoints. A die without faces, or an empty range, shows
+	/// only the face `0`.
+	///
+	/// # Returns
+	/// The faces, which are empty if the record is uninitialized, since it has
+	/// no die.
+	fn faces(&self) -> ResultSet
+	{
+		match self
+		{
+			RollingRecordKind::Uninitialized => ResultSet::default(),
+			RollingRecordKind::Range { start, end } =>
+			{
+				let faces =
+					ResultSet::interval(start.min as i64, end.max as i64);
+				// The range is empty if its start may exceed its end.
+				match start.max > end.min
+				{
+					true => faces.union(&ResultSet::of([0])),
+					false => faces
+				}
+			},
+			RollingRecordKind::Standard { faces: count, .. } =>
+			{
+				let faces = ResultSet::interval(1, count.max as i64);
+				// The die has no faces if its count of faces may be
+				// nonpositive.
+				match count.min <= 0
+				{
+					true => faces.union(&ResultSet::of([0])),
+					false => faces
+				}
+			},
+			RollingRecordKind::Custom { faces, .. } if faces.is_empty() =>
+			{
+				ResultSet::of([0])
+			},
+			RollingRecordKind::Custom { faces, .. } =>
+			{
+				ResultSet::of(faces.iter().copied())
+			},
+		}
+	}
+
+	/// Answer the least dice of the record: the dice, among those that the
+	/// bounds of its faces or endpoints admit, whose faces include no other
+	/// such die's, so that every die of the record shows every face of one of
+	/// them. A predicate matches every face of some die of the record exactly
+	/// when it matches every face of one of these.
+	///
+	/// # Returns
+	/// The least dice, which are none if the record is uninitialized.
+	///
+	/// # Notes
+	/// The dice of a standard roll grow with their faces, so only the fewest
+	/// faces and a die without faces are least. A range may hold any one of
+	/// many single values, none of which includes another, so these are least
+	/// together.
+	fn least_dice(&self) -> Vec<LeastDice>
+	{
+		match self
+		{
+			RollingRecordKind::Uninitialized => Vec::new(),
+			RollingRecordKind::Range { start, end } =>
+			{
+				let mut dice = Vec::new();
+				if start.max > end.min
+				{
+					// The range may be empty.
+					dice.push(LeastDice::Fixed(ResultSet::of([0])));
+				}
+				if start.min <= end.max
+				{
+					dice.push(match start.max >= end.min
+					{
+						// Every value that may both start and end the range is
+						// a range of its own, and every range includes one.
+						true => LeastDice::Singletons(ResultSet::interval(
+							start.min.max(end.min) as i64,
+							start.max.min(end.max) as i64
+						)),
+						// Every range includes the one from the greatest start
+						// to the least end.
+						false => LeastDice::Fixed(ResultSet::interval(
+							start.max as i64,
+							end.min as i64
+						))
+					});
+				}
+				dice
+			},
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				let mut dice = Vec::new();
+				if faces.min <= 0
+				{
+					dice.push(LeastDice::Fixed(ResultSet::of([0])));
+				}
+				if faces.max >= 1
+				{
+					dice.push(LeastDice::Fixed(ResultSet::interval(
+						1,
+						faces.min.max(1) as i64
+					)));
+				}
+				dice
+			},
+			RollingRecordKind::Custom { .. } =>
+			{
+				vec![LeastDice::Fixed(self.faces())]
+			}
+		}
+	}
+
+	/// Answer the branches of one die of the record, as its roll counts them,
+	/// and how many of them show a result that the criterion matches. A die
+	/// without faces, or an empty range, has one branch, which shows `0`.
+	///
+	/// # Parameters
+	/// - `criterion`: The results matched.
+	///
+	/// # Returns
+	/// The number of branches and the number of matching branches. A face of
+	/// a custom die counts once for every time that it is listed.
+	fn branches(&self, criterion: &ResultSet) -> (u128, u128)
+	{
+		let empty = (1, criterion.contains(0) as u128);
+		match self
+		{
+			RollingRecordKind::Uninitialized => (1, 0),
+			RollingRecordKind::Range { start, end } if end.max < start.min =>
+			{
+				empty
+			},
+			RollingRecordKind::Range { start, end } =>
+			{
+				let faces =
+					ResultSet::interval(start.min as i64, end.max as i64);
+				(faces.len(), faces.intersection(criterion).len())
+			},
+			RollingRecordKind::Standard { faces, .. } if faces.max <= 0 =>
+			{
+				empty
+			},
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				let faces = ResultSet::interval(1, faces.max as i64);
+				(faces.len(), faces.intersection(criterion).len())
+			},
+			RollingRecordKind::Custom { faces, .. } if faces.is_empty() =>
+			{
+				empty
+			},
+			RollingRecordKind::Custom { faces, .. } =>
+			{
+				let matching = faces
+					.iter()
+					.filter(|face| criterion.contains(**face))
+					.count();
+				(faces.len() as u128, matching as u128)
+			}
+		}
+	}
+}
+
+/// A set of results, as the disjoint, ascending intervals that cover it, no
+/// two of them adjacent, so that equal sets have equal intervals. The bounds of
+/// a reroll describe with these the faces of a die and the results that a
+/// predicate matches, either of which may have gaps, as `[1, 9]` or `in [2,
+/// 4]` do.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ResultSet(Vec<EvaluationBounds>);
+
+impl ResultSet
+{
+	/// Answer the set of every result from `min` to `max`, inclusive, of
+	/// those that fit in an `i32`, or the empty set if there are none.
+	///
+	/// # Parameters
+	/// - `min`: The least result.
+	/// - `max`: The greatest result.
+	///
+	/// # Returns
+	/// The requested set.
+	fn interval(min: i64, max: i64) -> Self
+	{
+		let min = min.max(i32::MIN as i64);
+		let max = max.min(i32::MAX as i64);
+		match min <= max
+		{
+			true => Self(vec![(min as i32, max as i32).into()]),
+			false => Self::default()
+		}
+	}
+
+	/// Answer the set of every result.
+	///
+	/// # Returns
+	/// The requested set.
+	fn all() -> Self { Self(vec![EvaluationBounds::unconstrained()]) }
+
+	/// Answer the set of the specified results.
+	///
+	/// # Parameters
+	/// - `results`: The results, in any order, with or without repetition.
+	///
+	/// # Returns
+	/// The requested set.
+	fn of(results: impl IntoIterator<Item = i32>) -> Self
+	{
+		Self::covering(results.into_iter().map(EvaluationBounds::from))
+	}
+
+	/// Answer the set of the results within any of the specified intervals.
+	///
+	/// # Parameters
+	/// - `intervals`: The intervals, in any order, which may overlap.
+	///
+	/// # Returns
+	/// The requested set.
+	fn covering(intervals: impl IntoIterator<Item = EvaluationBounds>) -> Self
+	{
+		let mut intervals = intervals.into_iter().collect::<Vec<_>>();
+		intervals.sort_unstable_by_key(|interval| interval.min);
+		let mut set = Vec::<EvaluationBounds>::with_capacity(intervals.len());
+		for interval in intervals
+		{
+			match set.last_mut()
+			{
+				// Merge an interval that overlaps or adjoins the last.
+				Some(last) if interval.min as i64 <= last.max as i64 + 1 =>
+				{
+					last.max = last.max.max(interval.max);
+				},
+				_ => set.push(interval)
+			}
+		}
+		Self(set)
+	}
+
+	/// Answer the union of the receiver and the specified set.
+	///
+	/// # Parameters
+	/// - `other`: The other set.
+	///
+	/// # Returns
+	/// The union.
+	fn union(&self, other: &Self) -> Self
+	{
+		Self::covering(self.0.iter().chain(&other.0).copied())
+	}
+
+	/// Answer the intersection of the receiver and the specified set.
+	///
+	/// # Parameters
+	/// - `other`: The other set.
+	///
+	/// # Returns
+	/// The intersection.
+	fn intersection(&self, other: &Self) -> Self
+	{
+		// Each interval of the intersection lies within one interval of each
+		// set, and no two such intervals are adjacent, so neither are these.
+		let mut set = Vec::new();
+		let (mut i, mut j) = (0, 0);
+		while let (Some(a), Some(b)) = (self.0.get(i), other.0.get(j))
+		{
+			let (min, max) = (a.min.max(b.min), a.max.min(b.max));
+			if min <= max
+			{
+				set.push((min, max).into());
+			}
+			match a.max < b.max
+			{
+				true => i += 1,
+				false => j += 1
+			}
+		}
+		Self(set)
+	}
+
+	/// Answer the complement of the receiver, the results that it lacks.
+	///
+	/// # Returns
+	/// The complement.
+	fn complement(&self) -> Self
+	{
+		let mut set = Vec::new();
+		let mut next = i32::MIN as i64;
+		for interval in &self.0
+		{
+			if next < interval.min as i64
+			{
+				set.push((next as i32, interval.min - 1).into());
+			}
+			next = interval.max as i64 + 1;
+		}
+		if next <= i32::MAX as i64
+		{
+			set.push((next as i32, i32::MAX).into());
+		}
+		Self(set)
+	}
+
+	/// Answer the results of the receiver that the specified set lacks.
+	///
+	/// # Parameters
+	/// - `other`: The other set.
+	///
+	/// # Returns
+	/// The difference.
+	fn difference(&self, other: &Self) -> Self
+	{
+		self.intersection(&other.complement())
+	}
+
+	/// Answer whether the receiver is empty.
+	///
+	/// # Returns
+	/// `true` if the receiver has no results, `false` otherwise.
+	#[inline]
+	fn is_empty(&self) -> bool { self.0.is_empty() }
+
+	/// Answer whether the receiver holds the specified result.
+	///
+	/// # Parameters
+	/// - `result`: The result.
+	///
+	/// # Returns
+	/// `true` if the receiver holds the result, `false` otherwise.
+	fn contains(&self, result: i32) -> bool
+	{
+		self.0.iter().any(|interval| interval.contains(result))
+	}
+
+	/// Answer whether every result of the receiver belongs to the specified
+	/// set.
+	///
+	/// # Parameters
+	/// - `other`: The other set.
+	///
+	/// # Returns
+	/// `true` if the receiver is a subset of `other`, `false` otherwise.
+	fn is_subset(&self, other: &Self) -> bool
+	{
+		self.difference(other).is_empty()
+	}
+
+	/// Answer whether the receiver and the specified set share a result.
+	///
+	/// # Parameters
+	/// - `other`: The other set.
+	///
+	/// # Returns
+	/// `true` if the sets meet, `false` otherwise.
+	fn meets(&self, other: &Self) -> bool
+	{
+		!self.intersection(other).is_empty()
+	}
+
+	/// Answer the number of results of the receiver.
+	///
+	/// # Returns
+	/// The number of results.
+	fn len(&self) -> u128
+	{
+		self.0
+			.iter()
+			.map(|interval| {
+				(interval.max as i64 - interval.min as i64 + 1) as u128
+			})
+			.sum()
+	}
+
+	/// Answer the least interval that covers the receiver.
+	///
+	/// # Returns
+	/// The hull, or `None` if the receiver is empty.
+	fn hull(&self) -> Option<EvaluationBounds>
+	{
+		match (self.0.first(), self.0.last())
+		{
+			(Some(first), Some(last)) => Some((first.min, last.max).into()),
+			_ => None
+		}
+	}
+}
+
+/// The [least dice](RollingRecordKind::least_dice) of a rolling record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LeastDice
+{
+	/// A die with these faces.
+	Fixed(ResultSet),
+
+	/// Every die with a single face among these.
+	Singletons(ResultSet)
+}
+
+/// The criteria to which a reroll's [predicate](Predicate) may resolve, over
+/// the bounds of its operands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Criteria
+{
+	/// The results that every criterion matches.
+	certain: ResultSet,
+
+	/// The results that some criterion matches.
+	possible: ResultSet,
+
+	/// The shape of the criteria, which decides which dice some criterion
+	/// matches entirely.
+	shape: Shape
+}
+
+/// The shape of the [criteria](Criteria) of a predicate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape
+{
+	/// The criteria include the one that matches every possible result, so that
+	/// some criterion matches a set of results exactly when that one does.
+	/// Comparisons by order, lists, and ranges are so shaped, since their
+	/// criteria grow with their operands in one direction.
+	Greatest,
+
+	/// The criteria match the single results within these bounds, one each.
+	Equal(EvaluationBounds),
+
+	/// The criteria match every result but one within these bounds, one each.
+	NotEqual(EvaluationBounds)
+}
+
+impl Criteria
+{
+	/// Answer the criteria to which the specified predicate may resolve.
+	///
+	/// # Parameters
+	/// - `predicate`: The predicate.
+	/// - `value`: The function that answers the bounds of an operand.
+	///
+	/// # Returns
+	/// The requested criteria.
+	fn new(
+		predicate: &Predicate,
+		value: impl Fn(AddressingMode) -> EvaluationBounds
+	) -> Self
+	{
+		let (least, greatest) = (i32::MIN as i64, i32::MAX as i64);
+		let nested = |certain, possible| Self {
+			certain,
+			possible,
+			shape: Shape::Greatest
+		};
+		match predicate
+		{
+			Predicate::Eq(op) =>
+			{
+				let t = value(*op);
+				Self {
+					certain: match t.min == t.max
+					{
+						true => t.into(),
+						false => ResultSet::default()
+					},
+					possible: t.into(),
+					shape: Shape::Equal(t)
+				}
+			},
+			Predicate::Ne(op) =>
+			{
+				let t = value(*op);
+				Self {
+					certain: ResultSet::from(t).complement(),
+					possible: match t.min == t.max
+					{
+						true => ResultSet::from(t).complement(),
+						false => ResultSet::all()
+					},
+					shape: Shape::NotEqual(t)
+				}
+			},
+			Predicate::Lt(op) =>
+			{
+				let t = value(*op);
+				nested(
+					ResultSet::interval(least, t.min as i64 - 1),
+					ResultSet::interval(least, t.max as i64 - 1)
+				)
+			},
+			Predicate::Le(op) =>
+			{
+				let t = value(*op);
+				nested(
+					ResultSet::interval(least, t.min as i64),
+					ResultSet::interval(least, t.max as i64)
+				)
+			},
+			Predicate::Gt(op) =>
+			{
+				let t = value(*op);
+				nested(
+					ResultSet::interval(t.max as i64 + 1, greatest),
+					ResultSet::interval(t.min as i64 + 1, greatest)
+				)
+			},
+			Predicate::Ge(op) =>
+			{
+				let t = value(*op);
+				nested(
+					ResultSet::interval(t.max as i64, greatest),
+					ResultSet::interval(t.min as i64, greatest)
+				)
+			},
+			Predicate::In(values) =>
+			{
+				let values = ResultSet::of(values.iter().copied());
+				nested(values.clone(), values)
+			},
+			Predicate::InRange { start, end } =>
+			{
+				let (start, end) = (value(*start), value(*end));
+				nested(
+					ResultSet::interval(start.max as i64, end.min as i64 - 1),
+					ResultSet::interval(start.min as i64, end.max as i64 - 1)
+				)
+			},
+			Predicate::InRangeInclusive { start, end } =>
+			{
+				let (start, end) = (value(*start), value(*end));
+				nested(
+					ResultSet::interval(start.max as i64, end.min as i64),
+					ResultSet::interval(start.min as i64, end.max as i64)
+				)
+			}
+		}
+	}
+
+	/// Answer whether some criterion matches every face of some die among the
+	/// specified least dice.
+	///
+	/// # Parameters
+	/// - `dice`: The least dice.
+	///
+	/// # Returns
+	/// `true` if some criterion matches every face of such a die, `false`
+	/// otherwise.
+	fn may_cover(&self, dice: &LeastDice) -> bool
+	{
+		match (self.shape, dice)
+		{
+			(Shape::Greatest, LeastDice::Fixed(faces)) =>
+			{
+				faces.is_subset(&self.possible)
+			},
+			// A criterion that matches a single face matches its die entirely,
+			// so some criterion does if some face is possibly matched.
+			(
+				Shape::Greatest | Shape::Equal(_),
+				LeastDice::Singletons(faces)
+			) => faces.meets(&self.possible),
+			// A criterion matches a single result, so it matches a die entirely
+			// only if the die has a single face.
+			(Shape::Equal(_), LeastDice::Fixed(faces)) =>
+			{
+				faces.len() == 1 && faces.is_subset(&self.possible)
+			},
+			// A criterion matches every result but its threshold, so it matches
+			// a die entirely if its threshold is not a face of the die.
+			(Shape::NotEqual(t), LeastDice::Fixed(faces)) =>
+			{
+				!ResultSet::from(t).is_subset(faces)
+			},
+			(Shape::NotEqual(t), LeastDice::Singletons(faces)) =>
+			{
+				let t = ResultSet::from(t);
+				!(t.len() == 1 && *faces == t)
+			}
+		}
+	}
+}
+
+impl From<EvaluationBounds> for ResultSet
+{
+	fn from(bounds: EvaluationBounds) -> Self
+	{
+		Self::interval(bounds.min as i64, bounds.max as i64)
+	}
 }
 
 /// The bounds of a function, as computed by a bounds evaluator.
@@ -1565,6 +2160,19 @@ pub struct Bounds
 	/// i.e., when the count or faces are themselves determined by a range
 	/// or dice expression, or if any binding supplied to
 	/// [`bounds_over`](Evaluator::bounds_over) is not a single value.
+	///
+	/// A [reroll](crate::Reroll) counts its branches as though each die still
+	/// kept rolled in advance every reroll that it might need, which makes
+	/// every path equally likely. A reroll limited to `n` times multiplies the
+	/// count by the branches of its die, raised to `n`, for every die still
+	/// kept, and an unlimited reroll by the branches of its die that its
+	/// predicate does not match, for every die still kept, since the die
+	/// finally shows one of them whether or not it first matched. A reroll
+	/// that cannot happen, because no face matches, the limit is not
+	/// positive, or, without limit, every face matches, counts nothing.
+	/// The count is `None` if the predicate or limit of a reroll, or the
+	/// number of dice still kept that a reroll that can happen rerolls, is
+	/// determined by a range or dice expression.
 	pub count: Option<u128>,
 
 	/// An upper bound on the number of dice that the function may roll over
@@ -1944,6 +2552,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			end: (end.min, end.max).into()
 		};
 		record.kept = 1.into();
+		record.results = record.kind.faces();
 		self.dice = self.dice.saturating_add(1);
 		if self.sum(inst.start) || self.sum(inst.end)
 		{
@@ -1974,6 +2583,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			faces: (faces.min, faces.max).into()
 		};
 		record.kept = count.max(0.into());
+		record.results = record.kind.faces();
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count) || self.sum(inst.faces)
 		{
@@ -2004,6 +2614,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			faces
 		};
 		record.kept = count.max(0.into());
+		record.results = record.kind.faces();
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count)
 		{
@@ -2044,27 +2655,100 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
 	{
-		// A reroll leaves every result within the faces of its die, and every
-		// die still kept, but for an unlimited reroll that matches every face,
-		// which crosses out every die that it matches.
+		let criteria = Criteria::new(&inst.predicate, |op| self.value(op));
 		let limit = inst.limit.operand().map(|count| self.value(count));
-		let record = self.record_mut(inst.dest);
-		let kept = record.kept;
-		if limit.is_none()
+		if inst.operands().into_iter().any(|op| self.sum(op))
 		{
-			record.kept = (0, kept.max).into();
+			// At least one of the operands depends on a previous range or
+			// roll, so disable counting for the remainder of the function.
+			self.count = None;
 		}
-		// Each die still kept may be rerolled up to the limit, and without
-		// limit, any number of times.
+		let record = self.record(inst.dest);
+		let kept = record.kept;
+		let (branches, matching) = record.kind.branches(&criteria.certain);
+		let faces = record.kind.faces();
+		let least_dice = record.kind.least_dice();
+		// A die still kept may be rerolled only if some criterion matches some
+		// result that it may show.
+		let may_match =
+			kept.max > 0 && record.results.meets(&criteria.possible);
+		// Count the branches of each die still kept as though every reroll that
+		// it might need were rolled in advance, which makes every path equally
+		// likely: a limited reroll rolls each die up to the limit more times,
+		// whatever it shows, and an unlimited one rolls each die once more,
+		// from the faces that do not match, since the die finally shows one of
+		// these whether or not it first matched. A reroll that cannot happen,
+		// because no face matches, the limit is not positive, or, without
+		// limit, every face matches, adds no branches.
+		let branches = match limit
+		{
+			Some(limit) if matching > 0 =>
+			{
+				branches.saturating_pow(limit.max.max(0) as u32)
+			},
+			None if 0 < matching && matching < branches => branches - matching,
+			_ => 1
+		};
+		if branches > 1
+		{
+			match kept.min == kept.max
+			{
+				true => self
+					.count_branches(branches.saturating_pow(kept.max as u32)),
+				// The number of dice rerolled depends on a previous range or
+				// roll, so the paths through them are unequally likely.
+				false => self.count = None
+			}
+		}
+		// Bound the dice still kept and their results.
+		let record = self.record_mut(inst.dest);
 		let rerolls = match limit
 		{
-			Some(limit) => dice(kept.max).saturating_mul(dice(limit.max)),
-			None if kept.max > 0 => u64::MAX,
-			None => 0
+			Some(limit) => match may_match && limit.max > 0
+			{
+				// A replacement may show any face of the die, and may match
+				// again once the limit is spent. Each die still kept may be
+				// rerolled up to the limit.
+				true =>
+				{
+					record.results = faces;
+					dice(kept.max).saturating_mul(dice(limit.max))
+				},
+				false => 0
+			},
+			None =>
+			{
+				// Without limit, a die finally shows a face that no criterion
+				// matches, if there is one; if every face matches, the reroll
+				// crosses out every die still kept instead, rolling nothing.
+				let rest = faces.difference(&criteria.certain);
+				if rest.is_empty()
+				{
+					record.kept = 0.into();
+				}
+				else if least_dice.iter().any(|die| criteria.may_cover(die))
+				{
+					record.kept = (0, kept.max).into();
+				}
+				match may_match
+				{
+					true =>
+					{
+						// A die may be rerolled any number of times, unless
+						// every face matches.
+						let rerolls = match rest.is_empty()
+						{
+							true => 0,
+							false => u64::MAX
+						};
+						record.results = rest;
+						rerolls
+					},
+					false => 0
+				}
+			}
 		};
 		self.dice = self.dice.saturating_add(rerolls);
-		// The rerolls make the paths through the roll unequally likely.
-		self.count = None;
 		Ok(())
 	}
 
@@ -2082,45 +2766,13 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			self.set_sum(inst.dest, false);
 			return Ok(())
 		}
-		let kept = record.kept;
-		let sum = match record.kind
+		// Each die still kept shows one of the results that the record admits,
+		// among them `0` for a die without faces or an empty range. No result
+		// is admitted only if a reroll crossed out every die.
+		let sum = match record.results.hull()
 		{
-			RollingRecordKind::Uninitialized => unreachable!(),
-			RollingRecordKind::Range { start, end } =>
-			{
-				match end.max < start.min
-				{
-					// Take care to normalize an empty range to 0.
-					true => 0.into(),
-					false => match start.max > end.min
-					{
-						false => kept * (start.min, end.max).into(),
-						true =>
-						{
-							// The upper bound of the start is less than the
-							// lower bound of the end, so there's an overlap.
-							// Overlap can lead to degenerate ranges, so make
-							// sure to include 0 in the bounds.
-							let range: EvaluationBounds =
-								(start.min, end.max).into();
-							kept * range.union(Some(0.into())).unwrap()
-						}
-					}
-				}
-			},
-			RollingRecordKind::Standard { faces, .. } =>
-			{
-				// Faces might be negative. Each standard die represents a range
-				// of faces in `[1, faces]`. Given both facts, clamp the minimum
-				// to `[0, 1]`.
-				kept * (faces.min.clamp(0, 1), faces.max.max(0)).into()
-			},
-			RollingRecordKind::Custom { ref faces, .. } =>
-			{
-				// Oddly, this is simplest, since we can just grab the edges of
-				// the sorted faces.
-				kept * (faces[0], faces[faces.len() - 1]).into()
-			}
+			Some(results) => record.kept * results,
+			None => 0.into()
 		};
 		self.set_register(inst.dest, sum);
 		// Mark the register as having been produced by a sum operation. We have

@@ -11,9 +11,9 @@ use pretty_assertions::assert_eq;
 use rand::{Rng as _, RngExt as _, SeedableRng, rngs::StdRng};
 
 use crate::{
-	AddressingMode, Assembler, Budget, Criterion, Die, EvaluationError,
-	Evaluator, Fate, Immediate, Passes, Predicate, RollingRecord,
-	RollingRecordKind, Unobserved,
+	AddressingMode, Assembler, Budget, Criterion, Die, EvaluationBounds,
+	EvaluationError, Evaluator, Fate, Immediate, Passes, Predicate,
+	RegisterIndex, RollingRecord, RollingRecordKind, Unobserved,
 	support::{
 		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
 	}
@@ -1383,25 +1383,26 @@ fn reroll_evaluator(clause: &str) -> Evaluator
 
 /// Test that evaluation rerolls as the instruction directs: it reads the
 /// threshold and limit from their registers, sums the kept dice, counts each
-/// reroll as a die, and stays within the bounds.
+/// reroll as a die, and stays within the bounds, whose count of outcomes
+/// counts every reroll that each die might need.
 #[test]
 fn test_evaluation_rerolls()
 {
 	// The seed is arbitrary, chosen by smashing the keyboard. This is to
 	// ensure that the test cases are deterministic.
 	let mut rng = StdRng::seed_from_u64(9810257109825710);
-	for (clause, t) in [
-		("<= @0 up to 2 times", 2),
-		("< @0 unlimited times", 4),
-		("in 2..=@0 up to @0 times", 3),
-		("in [1, 6] unlimited times", 0),
-		("!= @0 up to 1 times", 6),
-		(">= @0 unlimited times", 1)
+	for (clause, t, count) in [
+		("<= @0 up to 2 times", 2, 6u128.pow(4 + 2 * 4)),
+		("< @0 unlimited times", 4, 6u128.pow(4) * 3u128.pow(4)),
+		("in 2..=@0 up to @0 times", 3, 6u128.pow(4 + 3 * 4)),
+		("in [1, 6] unlimited times", 0, 6u128.pow(4) * 4u128.pow(4)),
+		("!= @0 up to 1 times", 6, 6u128.pow(4 + 4)),
+		(">= @0 unlimited times", 1, 6u128.pow(4))
 	]
 	{
 		let mut evaluator = reroll_evaluator(clause);
 		let bounds = evaluator.bounds_over([Some(t.into())], []).unwrap();
-		assert_eq!(bounds.count, None, "{}", clause);
+		assert_eq!(bounds.count, Some(count), "{}", clause);
 		for _ in 0..200
 		{
 			let evaluation = evaluator.evaluate([t], &mut rng).unwrap();
@@ -1503,4 +1504,445 @@ fn test_dice_budget_meters_rerolls()
 		.unwrap();
 	assert_eq!(evaluation.result, 0);
 	assert_eq!(evaluation.dice, 4);
+}
+
+/// Answer every nonempty interval whose endpoints lie within the specified
+/// range.
+///
+/// # Parameters
+/// - `range`: The range of endpoints.
+///
+/// # Returns
+/// The intervals.
+fn intervals(range: RangeInclusive<i32>) -> Vec<EvaluationBounds>
+{
+	range
+		.clone()
+		.flat_map(|min| (min..=*range.end()).map(move |max| (min, max).into()))
+		.collect()
+}
+
+/// Answer the faces of a die of the exhaustive reroll bounds grid and the
+/// number of dice that it rolls, given the values of its parameters, as the
+/// evaluator rolls them. A die without faces, or an empty range, shows only the
+/// face `0`.
+///
+/// # Parameters
+/// - `die`: The index of the die among those of the grid: `2D@2`, `@2:@3`, or
+///   `2D[-1, 1, 1, 3]`.
+/// - `c`: The value of `@2`.
+/// - `d`: The value of `@3`.
+///
+/// # Returns
+/// The faces and the number of dice.
+fn grid_faces(die: usize, c: i32, d: i32) -> (Vec<i32>, i32)
+{
+	match die
+	{
+		0 if c <= 0 => (vec![0], 2),
+		0 => ((1..=c).collect(), 2),
+		1 if d < c => (vec![0], 1),
+		1 => ((c..=d).collect(), 1),
+		_ => (vec![-1, 1, 1, 3], 2)
+	}
+}
+
+/// Test that the bounds of the sum of a rerolled record are exact over an
+/// exhaustive grid of dice, predicates, limits, and intervals of their
+/// operands, against the brute-force extrema of every assignment of their
+/// operands. A limited reroll leaves its dice showing any face of the die, and
+/// an unlimited one any face that the predicate does not match, or crosses out
+/// every die if it matches every face.
+#[test]
+fn test_reroll_bounds_exhaustive()
+{
+	let dice = [
+		("roll standard dice 2D@2", 1),
+		("roll range @2:@3", 2),
+		("roll custom dice 2D[-1, 1, 1, 3]", 0)
+	];
+	let (a, b) = (
+		AddressingMode::from(RegisterIndex(0)),
+		AddressingMode::from(RegisterIndex(1))
+	);
+	let predicates = [
+		Predicate::Eq(a),
+		Predicate::Ne(a),
+		Predicate::Lt(a),
+		Predicate::Le(a),
+		Predicate::Gt(a),
+		Predicate::Ge(a),
+		Predicate::In(vec![]),
+		Predicate::In(vec![3, -1, 1]),
+		Predicate::In(vec![0, 2, 3]),
+		Predicate::InRange { start: a, end: b },
+		Predicate::InRangeInclusive { start: a, end: b }
+	];
+	for (die, (roll, die_params)) in dice.iter().enumerate()
+	{
+		for predicate in &predicates
+		{
+			for limit in ["up to 1 times", "unlimited times"]
+			{
+				let function = Assembler::assemble(&format!(
+					"Function({{a}}@0, {{b}}@1, {{c}}@2, {{d}}@3) r#5 ⚅#1\n\
+					 \textern[]\n\tbody:\n\t\t⚅0 <- {}\n\t\t⚅0 <- reroll {} {} \
+					 from ⚅0\n\t\t@4 <- sum rolling record ⚅0\n\t\treturn @4\n",
+					roll, predicate, limit
+				))
+				.unwrap();
+				let evaluator = Evaluator::new(function);
+				let fixed = vec![EvaluationBounds::from(0)];
+				let pred_intervals = match predicate.operands().len()
+				{
+					0 => vec![fixed.clone(), fixed.clone()],
+					1 => vec![intervals(-1..=4), fixed.clone()],
+					_ => vec![intervals(0..=3), intervals(0..=3)]
+				};
+				let die_intervals = match die_params
+				{
+					0 => vec![fixed.clone(), fixed.clone()],
+					1 => vec![intervals(-1..=3), fixed.clone()],
+					_ => vec![intervals(-1..=2), intervals(-1..=2)]
+				};
+				for i0 in &pred_intervals[0]
+				{
+					for i1 in &pred_intervals[1]
+					{
+						for i2 in &die_intervals[0]
+						{
+							for i3 in &die_intervals[1]
+							{
+								let bounds = evaluator
+									.bounds_over(
+										[*i0, *i1, *i2, *i3].map(Some),
+										[]
+									)
+									.unwrap();
+								let mut truth: Option<(i32, i32)> = None;
+								for v0 in i0.min..=i0.max
+								{
+									for v1 in i1.min..=i1.max
+									{
+										let criterion =
+											predicate.resolve(|op| match op
+											{
+												op if op == a => v0,
+												_ => v1
+											});
+										for v2 in i2.min..=i2.max
+										{
+											for v3 in i3.min..=i3.max
+											{
+												let (faces, count) =
+													grid_faces(die, v2, v3);
+												let rest = faces
+													.iter()
+													.copied()
+													.filter(|face| {
+														limit
+															!= "unlimited times"
+															|| !criterion
+																.matches(*face)
+													})
+													.collect::<Vec<_>>();
+												let sum = match (
+													rest.iter().min(),
+													rest.iter().max()
+												)
+												{
+													(Some(min), Some(max)) => (
+														count * min,
+														count * max
+													),
+													_ => (0, 0)
+												};
+												truth = Some(match truth
+												{
+													Some((min, max)) => (
+														min.min(sum.0),
+														max.max(sum.1)
+													),
+													None => sum
+												});
+											}
+										}
+									}
+								}
+								assert_eq!(
+									bounds.value,
+									truth.unwrap().into(),
+									"{} reroll {} {} over {:?}",
+									roll,
+									predicate,
+									limit,
+									[i0, i1, i2, i3]
+								);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+/// Answer the bounds of the specified assembled body, which takes no
+/// parameters and returns `@0`.
+///
+/// # Parameters
+/// - `body`: The instructions, one per line.
+///
+/// # Returns
+/// The bounds.
+fn body_bounds(body: &str) -> crate::Bounds
+{
+	// Count the registers and records up to the greatest index of each.
+	let count = |sigil: char| {
+		body.split(sigil)
+			.skip(1)
+			.filter_map(|rest| {
+				let digits = rest
+					.chars()
+					.take_while(char::is_ascii_digit)
+					.collect::<String>();
+				digits.parse::<usize>().ok()
+			})
+			.max()
+			.map_or(0, |index| index + 1)
+	};
+	let (registers, records) = (count('@'), count('⚅'));
+	let text = format!(
+		"Function() r#{} ⚅#{}\n\textern[]\n\tbody:\n{}",
+		registers,
+		records,
+		body.lines()
+			.map(|line| format!("\t\t{}\n", line.trim()))
+			.collect::<String>()
+	);
+	Evaluator::new(Assembler::assemble(&text).unwrap())
+		.bounds_over([], [])
+		.unwrap()
+}
+
+/// Test that the bounds of a reroll chained with drops, keeps, and other
+/// rerolls are exact: an unlimited reroll narrows the results of the dice
+/// still kept, a limited reroll that may match restores the faces of the die,
+/// and a reroll that cannot match changes nothing.
+#[test]
+fn test_reroll_bounds_chains()
+{
+	for (body, value) in [
+		// A later limited reroll may roll a 1 again.
+		(
+			"⚅0 <- roll standard dice 1D6
+			⚅0 <- reroll = 1 unlimited times from ⚅0
+			⚅0 <- reroll = 6 up to 1 times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(1, 6)
+		),
+		// No die still kept shows a 1, so the second reroll cannot happen.
+		(
+			"⚅0 <- roll standard dice 1D6
+			⚅0 <- reroll = 1 unlimited times from ⚅0
+			⚅0 <- reroll = 1 up to 1 times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(2, 6)
+		),
+		(
+			"⚅0 <- roll standard dice 1D6
+			⚅0 <- reroll <= 2 unlimited times from ⚅0
+			⚅0 <- reroll = 6 unlimited times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(1, 5)
+		),
+		(
+			"⚅0 <- roll standard dice 4D6
+			⚅0 <- drop lowest 1 from ⚅0
+			⚅0 <- reroll <= 2 unlimited times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(9, 18)
+		),
+		(
+			"⚅0 <- roll standard dice 4D6
+			⚅0 <- keep highest 2 from ⚅0
+			⚅0 <- reroll >= 1 unlimited times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(0, 0)
+		),
+		(
+			"⚅0 <- roll custom dice 2D[1, 9]
+			⚅0 <- reroll = 1 unlimited times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0",
+			(18, 18)
+		),
+		// The range may be empty, showing 0, which the reroll matches.
+		(
+			"⚅0 <- roll standard dice 1D3
+			@0 <- sum rolling record ⚅0
+			⚅1 <- roll range 2:@0
+			⚅1 <- reroll in 0..2 unlimited times from ⚅1
+			@1 <- sum rolling record ⚅1
+			return @1",
+			(0, 3)
+		)
+	]
+	{
+		assert_eq!(body_bounds(body).value, value.into(), "{}", body);
+	}
+}
+
+/// Test that the bounds count every reroll that each die still kept might
+/// need, as though it were rolled in advance: a limited reroll multiplies the
+/// outcomes by the faces of the die, raised to the limit, for every die still
+/// kept, and an unlimited one by the faces that it does not match; that a
+/// reroll that cannot happen counts nothing; and that a reroll by a random
+/// operand, or of a random number of dice, counts nothing at all.
+#[test]
+fn test_reroll_bounds_count()
+{
+	let reroll = |roll: &str, clause: &str| {
+		body_bounds(&format!(
+			"⚅0 <- roll {}\n⚅0 <- reroll {} from ⚅0\n@0 <- sum rolling record \
+			 ⚅0\nreturn @0",
+			roll, clause
+		))
+		.count
+	};
+	for (roll, clause, count) in [
+		(
+			"standard dice 2D6",
+			"= 1 up to 2 times",
+			Some(6u128.pow(2 + 2 * 2))
+		),
+		("standard dice 2D6", "= 1 unlimited times", Some(36 * 25)),
+		(
+			"standard dice 2D6",
+			"in [1, 2, 7] unlimited times",
+			Some(36 * 16)
+		),
+		// Every face matches, so nothing is rolled.
+		("standard dice 2D6", ">= 1 unlimited times", Some(36)),
+		// Every face matches, but the limit rolls each die again regardless.
+		("standard dice 2D6", ">= 1 up to 1 times", Some(36 * 36)),
+		// No face matches.
+		("standard dice 2D6", "= 7 up to 3 times", Some(36)),
+		("standard dice 2D6", "in 4..4 unlimited times", Some(36)),
+		("standard dice 2D6", "in 5..=2 up to 1 times", Some(36)),
+		// The limit is not positive.
+		("standard dice 2D6", "= 1 up to 0 times", Some(36)),
+		("standard dice 2D6", "= 1 up to -1 times", Some(36)),
+		// A face of a custom die counts once for every time that it is listed.
+		("custom dice 2D[1, 1, 2]", "= 1 unlimited times", Some(9)),
+		(
+			"custom dice 2D[1, 1, 2]",
+			"= 2 unlimited times",
+			Some(9 * 4)
+		),
+		("custom dice 2D[1, 1, 2]", "= 1 up to 1 times", Some(9 * 9)),
+		// A die without faces, or an empty range, shows only `0`.
+		("standard dice 2D0", "= 0 up to 1 times", Some(1)),
+		("standard dice 2D0", "= 0 unlimited times", Some(1)),
+		("range 3:1", "= 0 up to 2 times", Some(1)),
+		("range 1:3", "= 2 unlimited times", Some(6)),
+		("range 1:3", "!= 2 up to 1 times", Some(9))
+	]
+	{
+		assert_eq!(reroll(roll, clause), count, "{} reroll {}", roll, clause);
+	}
+	// A reroll counts the dice still kept.
+	assert_eq!(
+		body_bounds(
+			"⚅0 <- roll standard dice 3D6
+			⚅0 <- keep highest 1 from ⚅0
+			⚅0 <- reroll = 1 up to 1 times from ⚅0
+			@0 <- sum rolling record ⚅0
+			return @0"
+		)
+		.count,
+		Some(6u128.pow(3 + 1))
+	);
+	// A random threshold, endpoint, or limit counts nothing.
+	for clause in [
+		"< @0 up to 1 times",
+		"in 1..@0 unlimited times",
+		"= 1 up to @0 times"
+	]
+	{
+		assert_eq!(
+			body_bounds(&format!(
+				"⚅0 <- roll standard dice 1D3
+				@0 <- sum rolling record ⚅0
+				⚅1 <- roll standard dice 2D6
+				⚅1 <- reroll {} from ⚅1
+				@1 <- sum rolling record ⚅1
+				return @1",
+				clause
+			))
+			.count,
+			None,
+			"{}",
+			clause
+		);
+	}
+	// A random number of dice still kept counts nothing, unless the reroll
+	// cannot happen, whence it counts the same whatever the number.
+	for (clause, count) in [
+		("= 1 up to 1 times", None),
+		("= 7 up to 1 times", Some(3 * 6u128.pow(4)))
+	]
+	{
+		assert_eq!(
+			body_bounds(&format!(
+				"⚅0 <- roll standard dice 1D3
+				@0 <- sum rolling record ⚅0
+				⚅1 <- roll standard dice 4D6
+				⚅1 <- drop lowest @0 from ⚅1
+				⚅1 <- reroll {} from ⚅1
+				@1 <- sum rolling record ⚅1
+				return @1",
+				clause
+			))
+			.count,
+			count,
+			"{}",
+			clause
+		);
+	}
+}
+
+/// Test that the bounds of the dice rolled count every reroll that each die
+/// still kept may need: none for a reroll that cannot match, as many as the
+/// limit for each die for a limited reroll, and without bound for an unlimited
+/// reroll that may roll, but none for one that matches every face.
+#[test]
+fn test_reroll_bounds_dice()
+{
+	for (clause, dice) in [
+		("= 1 up to 3 times", 4 + 4 * 3),
+		("= 1 up to 0 times", 4),
+		("= 7 up to 3 times", 4),
+		("= 7 unlimited times", 4),
+		("= 1 unlimited times", u64::MAX),
+		(">= 1 unlimited times", 4)
+	]
+	{
+		assert_eq!(
+			body_bounds(&format!(
+				"⚅0 <- roll standard dice 4D6\n⚅0 <- reroll {} from ⚅0\n@0 <- \
+				 sum rolling record ⚅0\nreturn @0",
+				clause
+			))
+			.dice,
+			dice,
+			"{}",
+			clause
+		);
+	}
 }

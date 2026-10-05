@@ -290,6 +290,8 @@ The predicate `P` is a comparison with a threshold, `= T`, `!= T`, `< T`, `<= T`
 
 A reroll considers the results still kept when it begins, in the order rolled, and finishes each before it begins the next: it crosses out a matching result, rolls its replacement from the same die, and appends the replacement to the record, linked to the result that it replaces, repeating while the replacement matches and the limit allows. An unlimited reroll whose predicate matches every face of the die rolls nothing, but crosses out every matching result, so that each contributes zero. A die without faces, or an empty range, shows only the face `0`.
 
+The bounds of a reroll are exact: an unlimited reroll narrows the results still kept to the faces that its predicate cannot match, over the bounds of its thresholds and endpoints, and may cross out every die only if its predicate may match every face. The count of outcomes counts each reroll as though each die still kept rolled in advance every reroll that it might need, so that every path is equally likely: a reroll limited to `K` times multiplies it by the branches of the die raised to `K`, and an unlimited reroll by the branches that its predicate does not match, both once for every die still kept, and a reroll that cannot happen leaves it unchanged.
+
 ### Reduce instructions
 
 | Instruction | Syntax | Semantics |
