@@ -68,6 +68,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -143,6 +147,10 @@
           },
           {
             "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -227,6 +235,10 @@
           },
           {
             "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -378,6 +390,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -456,6 +472,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -497,6 +517,10 @@
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -558,6 +582,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           }
@@ -577,6 +605,34 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "eq",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
             "named": true
           },
           {
@@ -656,6 +712,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -731,6 +791,10 @@
           },
           {
             "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -819,6 +883,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -838,6 +906,34 @@
         "types": [
           {
             "type": "parameters",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "ge",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
             "named": true
           }
         ]
@@ -913,11 +1009,159 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
           {
             "type": "sub",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "gt",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "in_list",
+    "named": true,
+    "fields": {
+      "value": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "in_range",
+    "named": true,
+    "fields": {
+      "end": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      },
+      "start": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "in_range_inclusive",
+    "named": true,
+    "fields": {
+      "end": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      },
+      "start": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
             "named": true
           },
           {
@@ -954,6 +1198,10 @@
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -1015,6 +1263,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           }
@@ -1034,6 +1286,62 @@
           },
           {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "le",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "lt",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
             "named": true
           },
           {
@@ -1113,6 +1421,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1188,6 +1500,10 @@
           },
           {
             "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -1275,6 +1591,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1353,11 +1673,43 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
           {
             "type": "sub",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "ne",
+    "named": true,
+    "fields": {
+      "threshold": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
             "named": true
           },
           {
@@ -1434,6 +1786,10 @@
           },
           {
             "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
             "named": true
           },
           {
@@ -1553,6 +1909,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1631,6 +1991,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1640,6 +2004,102 @@
           },
           {
             "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "reroll",
+    "named": true,
+    "fields": {
+      "dice": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "reroll",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          }
+        ]
+      },
+      "limit": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "times",
+            "named": true
+          },
+          {
+            "type": "unlimited",
+            "named": true
+          }
+        ]
+      },
+      "predicate": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "eq",
+            "named": true
+          },
+          {
+            "type": "ge",
+            "named": true
+          },
+          {
+            "type": "gt",
+            "named": true
+          },
+          {
+            "type": "in_list",
+            "named": true
+          },
+          {
+            "type": "in_range",
+            "named": true
+          },
+          {
+            "type": "in_range_inclusive",
+            "named": true
+          },
+          {
+            "type": "le",
+            "named": true
+          },
+          {
+            "type": "lt",
+            "named": true
+          },
+          {
+            "type": "ne",
             "named": true
           }
         ]
@@ -1765,6 +2225,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1843,6 +2307,10 @@
             "named": true
           },
           {
+            "type": "reroll",
+            "named": true
+          },
+          {
             "type": "standard_dice",
             "named": true
           },
@@ -1859,6 +2327,39 @@
     }
   },
   {
+    "type": "times",
+    "named": true,
+    "fields": {
+      "count": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "unlimited",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "variable",
     "named": true,
     "fields": {
@@ -1873,6 +2374,10 @@
         ]
       }
     }
+  },
+  {
+    "type": "!=",
+    "named": false
   },
   {
     "type": "%",
@@ -1899,7 +2404,35 @@
     "named": false
   },
   {
+    "type": "..",
+    "named": false
+  },
+  {
+    "type": "..=",
+    "named": false
+  },
+  {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "<=",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": ">=",
     "named": false
   },
   {
@@ -1935,6 +2468,10 @@
     "named": true
   },
   {
+    "type": "in",
+    "named": false
+  },
+  {
     "type": "integer",
     "named": true
   },
@@ -1944,6 +2481,38 @@
   },
   {
     "type": "lowest",
+    "named": false
+  },
+  {
+    "type": "reroll",
+    "named": false
+  },
+  {
+    "type": "time",
+    "named": false
+  },
+  {
+    "type": "times",
+    "named": false
+  },
+  {
+    "type": "unlimited",
+    "named": false
+  },
+  {
+    "type": "∞",
+    "named": false
+  },
+  {
+    "type": "≠",
+    "named": false
+  },
+  {
+    "type": "≤",
+    "named": false
+  },
+  {
+    "type": "≥",
     "named": false
   }
 ]

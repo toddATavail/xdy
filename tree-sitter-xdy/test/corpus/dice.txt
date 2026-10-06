@@ -449,3 +449,928 @@ No Direction: 3D6 keep
 3D6 keep
 
 ---
+
+==========================
+Reroll: 1D6 reroll = 1
+==========================
+
+1D6 reroll = 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll != 1
+==========================
+
+1D6 reroll != 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ne
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll ≠ 1
+==========================
+
+1D6 reroll ≠ 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ne
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll < 1
+==========================
+
+1D6 reroll < 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(lt
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll <= 1
+==========================
+
+1D6 reroll <= 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll ≤ 1
+==========================
+
+1D6 reroll ≤ 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll > 1
+==========================
+
+1D6 reroll > 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(gt
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll >= 1
+==========================
+
+1D6 reroll >= 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))))
+
+==========================
+Reroll: 1D6 reroll ≥ 1
+==========================
+
+1D6 reroll ≥ 1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))))
+
+==================================
+Reroll: 1D6 reroll=1 (no spaces)
+==================================
+
+1D6 reroll=1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))))
+
+===========================================================
+Reroll: 3D[-2, -1, 0, 1] reroll = -1 (negative threshold)
+===========================================================
+
+3D[-2, -1, 0, 1] reroll = -1
+
+---
+
+(function
+	(reroll
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)
+				(integer)))
+		(eq
+			(integer))))
+
+==========================
+Reroll: 2D8 reroll > {x}
+==========================
+
+2D8 reroll > {x}
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(gt
+			(variable
+				(identifier)))))
+
+================================
+Reroll: 2D8 reroll < {x}@(1D4)
+================================
+
+2D8 reroll < {x}@(1D4)
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(lt
+			(binding
+				(identifier)
+				(standard_dice
+					(constant)
+					(integer))))))
+
+===============================
+Reroll: 2D8 reroll >= (1 + 2)
+===============================
+
+2D8 reroll >= (1 + 2)
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(group
+				(add
+					(constant)
+					(constant))))))
+
+===========================
+Reroll: 1D20 reroll in []
+===========================
+
+1D20 reroll in []
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list)))
+
+============================
+Reroll: 1D20 reroll in [1]
+============================
+
+1D20 reroll in [1]
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list
+			(integer))))
+
+========================================
+Reroll: 1D[-1, 0, 1] reroll in [-1, 1]
+========================================
+
+1D[-1, 0, 1] reroll in [-1, 1]
+
+---
+
+(function
+	(reroll
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)))
+		(in_list
+			(integer)
+			(integer))))
+
+===========================================
+Reroll: 1D20 reroll in[1,2,3] (no spaces)
+===========================================
+
+1D20 reroll in[1,2,3]
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list
+			(integer)
+			(integer)
+			(integer))))
+
+=============================
+Reroll: 1D20 reroll in 1..3
+=============================
+
+1D20 reroll in 1..3
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range
+			(integer)
+			(integer))))
+
+==============================
+Reroll: 1D20 reroll in 1..=3
+==============================
+
+1D20 reroll in 1..=3
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+=========================================
+Reroll: 1D20 reroll in1..=3 (no spaces)
+=========================================
+
+1D20 reroll in1..=3
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+===========================================================
+Reroll: 3D[-2, -1, 0, 1] reroll in -2..0 (negative start)
+===========================================================
+
+3D[-2, -1, 0, 1] reroll in -2..0
+
+---
+
+(function
+	(reroll
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)
+				(integer)))
+		(in_range
+			(integer)
+			(integer))))
+
+====================================================
+Reroll: 3D6 reroll in -3..=-1 (negative endpoints)
+====================================================
+
+3D6 reroll in -3..=-1
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+=======================================
+Reroll: 1D20 reroll in {a}..({b} + 1)
+=======================================
+
+1D20 reroll in {a}..({b} + 1)
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range
+			(variable
+				(identifier))
+			(group
+				(add
+					(variable
+						(identifier))
+					(constant))))))
+
+======================================
+Reroll: 1D20 reroll in 1..={x}@(1D6)
+======================================
+
+1D20 reroll in 1..={x}@(1D6)
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(binding
+				(identifier)
+				(standard_dice
+					(constant)
+					(integer))))))
+
+================================
+Reroll: 2D8 reroll >= 5 1 time
+================================
+
+2D8 reroll >= 5 1 time
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))
+		(times
+			(constant))))
+
+=================================
+Reroll: 2D8 reroll <= 2 3 times
+=================================
+
+2D8 reroll <= 2 3 times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))
+		(times
+			(constant))))
+
+================================
+Reroll: 2D8 reroll <= 2 3 time
+================================
+
+2D8 reroll <= 2 3 time
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))
+		(times
+			(constant))))
+
+==================================
+Reroll: 2D8 reroll = 1 {n} times
+==================================
+
+2D8 reroll = 1 {n} times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(variable
+				(identifier)))))
+
+======================================
+Reroll: 2D8 reroll = 1 (1 + 2) times
+======================================
+
+2D8 reroll = 1 (1 + 2) times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(group
+				(add
+					(constant)
+					(constant))))))
+
+=============================================
+Reroll: 2D8 reroll = 1 (-1) times (grouped)
+=============================================
+
+2D8 reroll = 1 (-1) times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(group
+				(neg
+					(constant))))))
+
+========================================
+Reroll: 1D6 reroll = 1 unlimited times
+========================================
+
+1D6 reroll = 1 unlimited times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+================================
+Reroll: 1D6 reroll = 1 ∞ times
+================================
+
+1D6 reroll = 1 ∞ times
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+===============================
+Reroll: 1D6 reroll = 1 ∞ time
+===============================
+
+1D6 reroll = 1 ∞ time
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+=========================================
+Reroll: 1D6 reroll in [] unlimited time
+=========================================
+
+1D6 reroll in [] unlimited time
+
+---
+
+(function
+	(reroll
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list)
+		(unlimited)))
+
+====================================
+Reroll: 4D6 drop lowest reroll = 1
+====================================
+
+4D6 drop lowest reroll = 1
+
+---
+
+(function
+	(reroll
+		(drop_lowest
+			(standard_dice
+				(constant)
+				(integer)))
+		(eq
+			(integer))))
+
+====================================
+Reroll: 4D6 reroll = 1 drop lowest
+====================================
+
+4D6 reroll = 1 drop lowest
+
+---
+
+(function
+	(drop_lowest
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))))
+
+===============================================
+Reroll: 4D6 reroll = 1 2 times keep highest 3
+===============================================
+
+4D6 reroll = 1 2 times keep highest 3
+
+---
+
+(function
+	(keep_highest
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer))
+			(times
+				(constant)))
+		(constant)))
+
+====================================================
+Reroll: 4D6 keep highest 3 reroll in 1..=2 ∞ times
+====================================================
+
+4D6 keep highest 3 reroll in 1..=2 ∞ times
+
+---
+
+(function
+	(reroll
+		(keep_highest
+			(standard_dice
+				(constant)
+				(integer))
+			(constant))
+		(in_range_inclusive
+			(integer)
+			(integer))
+		(unlimited)))
+
+========================================================
+Reroll: 4D6 reroll = 1 reroll = 2 1 time reroll in [3]
+========================================================
+
+4D6 reroll = 1 reroll = 2 1 time reroll in [3]
+
+---
+
+(function
+	(reroll
+		(reroll
+			(reroll
+				(standard_dice
+					(constant)
+					(integer))
+				(eq
+					(integer)))
+			(eq
+				(integer))
+			(times
+				(constant)))
+		(in_list
+			(integer))))
+
+====================================================
+Reroll: 4D6 reroll = 1 -1 (subtraction, not count)
+====================================================
+
+4D6 reroll = 1 -1
+
+---
+
+(function
+	(sub
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))
+		(constant)))
+
+==================================================
+Reroll: 4D6 reroll = 1 2 times - 1 (subtraction)
+==================================================
+
+4D6 reroll = 1 2 times - 1
+
+---
+
+(function
+	(sub
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer))
+			(times
+				(constant)))
+		(constant)))
+
+==================================================
+Reroll: -1D6 reroll = 1 (negation of the reroll)
+==================================================
+
+-1D6 reroll = 1
+
+---
+
+(function
+	(neg
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))))
+
+====================================
+Reroll: (1D6 reroll = 1)D6 (count)
+====================================
+
+(1D6 reroll = 1)D6
+
+---
+
+(function
+	(standard_dice
+		(group
+			(reroll
+				(standard_dice
+					(constant)
+					(integer))
+				(eq
+					(integer))))
+		(integer)))
+
+================================
+Misplaced Reroll: 3 reroll = 1
+:error
+================================
+
+3 reroll = 1
+
+---
+
+==========================
+No Predicate: 3D6 reroll
+:error
+==========================
+
+3D6 reroll
+
+---
+
+============================
+No Threshold: 3D6 reroll =
+:error
+============================
+
+3D6 reroll =
+
+---
+
+=======================================
+Threshold Not Faces: 3D6 reroll = 1D6
+:error
+=======================================
+
+3D6 reroll = 1D6
+
+---
+
+======================================
+No Range Operator: 3D6 reroll in 1 3
+:error
+======================================
+
+3D6 reroll in 1 3
+
+---
+
+=================================
+No Range End: 3D6 reroll in 1..
+:error
+=================================
+
+3D6 reroll in 1..
+
+---
+
+====================================
+No Range Start: 3D6 reroll in ..=3
+:error
+====================================
+
+3D6 reroll in ..=3
+
+---
+
+====================================
+Range of List: 3D6 reroll in [1:3]
+:error
+====================================
+
+3D6 reroll in [1:3]
+
+---
+
+========================================
+List of Variables: 3D6 reroll in [{x}]
+:error
+========================================
+
+3D6 reroll in [{x}]
+
+---
+
+============================
+No Times: 3D6 reroll = 1 2
+:error
+============================
+
+3D6 reroll = 1 2
+
+---
+
+================================
+No Count: 3D6 reroll = 1 times
+:error
+================================
+
+3D6 reroll = 1 times
+
+---
+
+====================================
+No Count: 3D6 reroll in 1..3 times
+:error
+====================================
+
+3D6 reroll in 1..3 times
+
+---
+
+====================================
+No Times: 3D6 reroll = 1 unlimited
+:error
+====================================
+
+3D6 reroll = 1 unlimited
+
+---
+
+==================================
+Run-on Keyword: 3D6 rerolled = 1
+:error
+==================================
+
+3D6 rerolled = 1
+
+---
+
+=========================================
+Run-on Keyword: 3D6 reroll = 1 2 timesx
+:error
+=========================================
+
+3D6 reroll = 1 2 timesx
+
+---

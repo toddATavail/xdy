@@ -32,7 +32,7 @@
 
 <range> ::= "[" <expression> ":" <expression> "]"
 
-<dice> ::= <base_dice> (<drop_clause> | <keep_clause>)*
+<dice> ::= <base_dice> (<drop_clause> | <keep_clause> | <reroll_clause>)*
 
 <base_dice> ::= <dice_count> <D_OPERATOR> <standard_faces> | <dice_count> <D_OPERATOR> <custom_faces>
 
@@ -45,6 +45,16 @@
 <drop_clause> ::= "drop" "lowest" <drop_expression>? | "drop" "highest" <drop_expression>?
 
 <keep_clause> ::= "keep" "lowest" <drop_expression>? | "keep" "highest" <drop_expression>?
+
+<reroll_clause> ::= "reroll" <predicate> <limit>?
+
+<predicate> ::= <comparator> <standard_faces> | "in" "[" (<INTEGER> ("," <INTEGER>)*)? "]" | "in" <standard_faces> ".." <standard_faces> | "in" <standard_faces> "..=" <standard_faces>
+
+<comparator> ::= "=" | "!=" | "≠" | "<" | "<=" | "≤" | ">" | ">=" | "≥"
+
+<limit> ::= <drop_expression> <times> | "unlimited" <times> | "∞" <times>
+
+<times> ::= "time" | "times"
 
 <drop_expression> ::= <CONSTANT> | <variable> | <binding> | <group>
 

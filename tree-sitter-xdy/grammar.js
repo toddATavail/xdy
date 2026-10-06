@@ -84,6 +84,7 @@ module.exports = grammar({
         $.drop_highest,
         $.keep_lowest,
         $.keep_highest,
+        $.reroll,
       ),
 
     // A standard dice expression, i.e., the faces of the dice are numbered
@@ -165,7 +166,102 @@ module.exports = grammar({
         ),
       ),
 
-    // An expression that represents the number of dice to drop or keep.
+    // A dice expression that rerolls each of the dice that the clauses before
+    // it left kept that matches its predicate, once, or as many times as its
+    // limit says.
+    reroll: ($) =>
+      prec.left(
+        5,
+        seq(
+          field("dice", $._dice),
+          "reroll",
+          field("predicate", $._predicate),
+          field("limit", optional($._limit)),
+        ),
+      ),
+
+    // The predicate of a reroll, which decides which results it rerolls.
+    _predicate: ($) =>
+      choice(
+        $.eq,
+        $.ne,
+        $.lt,
+        $.le,
+        $.gt,
+        $.ge,
+        $.in_list,
+        $.in_range,
+        $.in_range_inclusive,
+      ),
+
+    // A predicate that matches a result equal to its threshold.
+    eq: ($) => seq("=", field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result unequal to its threshold.
+    ne: ($) => seq(choice("!=", "≠"), field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result less than its threshold.
+    lt: ($) => seq("<", field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result less than or equal to its threshold.
+    le: ($) => seq(choice("<=", "≤"), field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result greater than its threshold.
+    gt: ($) => seq(">", field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result greater than or equal to its
+    // threshold.
+    ge: ($) => seq(choice(">=", "≥"), field("threshold", $._standard_faces)),
+
+    // A predicate that matches a result among its literals, of which there may
+    // be none.
+    in_list: ($) =>
+      seq(
+        "in",
+        "[",
+        optional(
+          seq(
+            field("value", $.integer),
+            repeat(seq(",", field("value", $.integer))),
+          ),
+        ),
+        "]",
+      ),
+
+    // A predicate that matches a result within the half-open range
+    // `start..end`, which is empty if its end does not exceed its start.
+    in_range: ($) =>
+      seq(
+        "in",
+        field("start", $._standard_faces),
+        "..",
+        field("end", $._standard_faces),
+      ),
+
+    // A predicate that matches a result within the inclusive range
+    // `start..=end`, which is empty if its end is less than its start.
+    in_range_inclusive: ($) =>
+      seq(
+        "in",
+        field("start", $._standard_faces),
+        "..=",
+        field("end", $._standard_faces),
+      ),
+
+    // The limit of a reroll, which bounds how many times it rerolls each die.
+    _limit: ($) => choice($.times, $.unlimited),
+
+    // A limit that rerolls each die at most N times. `time` and `times` read
+    // alike.
+    times: ($) =>
+      seq(field("count", $._drop_expression), choice("time", "times")),
+
+    // A limit that rerolls each die until it no longer matches. `∞` and
+    // `unlimited` read alike, as do `time` and `times`.
+    unlimited: ($) => seq(choice("unlimited", "∞"), choice("time", "times")),
+
+    // An expression that represents the number of dice to drop or keep, or the
+    // number of times to reroll each die.
     _drop_expression: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // An arithmetic expression.
