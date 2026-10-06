@@ -20,8 +20,8 @@ use crate::{
 	Parser,
 	parser::{
 		FailureSite, PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME,
-		PLACEHOLDER_OPERAND, Recovery, Repair, Site, bare_word, is_token_space,
-		steps, unclosed_name_ends
+		PLACEHOLDER_OPERAND, PLACEHOLDER_THRESHOLD, Recovery, Repair, Site,
+		bare_word, is_token_space, steps, unclosed_name_ends
 	}
 };
 
@@ -109,10 +109,13 @@ impl<'src> Recovery<'src> for Canonical<'src>
 		// At a goal or faces, read a bare word as a variable, unless it
 		// follows the `-` that begins the faces; after the comma of a formal
 		// parameter, read it as the parameter.
+		let signed = self.source[..at].trim_end().ends_with('-');
 		let variable = match site.site
 		{
+			// The faces of dice, or an operand of a reroll, may begin with a
+			// `-`, as its sign.
+			Site::Faces | Site::Goal { operand: true, .. } => !signed,
 			Site::Goal { .. } | Site::ParameterName => true,
-			Site::Faces => !self.source[..at].trim_end().ends_with('-'),
 			_ => false
 		};
 		let start = at + self.source[at..].len()
@@ -131,6 +134,11 @@ impl<'src> Recovery<'src> for Canonical<'src>
 		}
 		match site.site
 		{
+			// The operand of a reroll is the constant that begins at its sign.
+			Site::Goal { operand: true, .. } if signed =>
+			{
+				self.insert(at, PLACEHOLDER_OPERAND.to_string())
+			},
 			Site::Goal { .. } =>
 			{
 				self.insert(at, format!(" {}", PLACEHOLDER_OPERAND))
@@ -186,6 +194,17 @@ impl<'src> Recovery<'src> for Canonical<'src>
 					true => self.insert(count_end, format!("{faces} ")),
 					false => self.insert(count_end, faces)
 				}
+			},
+			// Separate the supplied tokens from those after them, lest they run
+			// together, as `= 12` would for `= 1` before `2 times`.
+			Site::Predicate =>
+			{
+				self.insert(at, format!("= {} ", PLACEHOLDER_THRESHOLD))
+			},
+			Site::RangeOperator => self.insert(at, "..="),
+			Site::Times { singular } =>
+			{
+				self.insert(at, if singular { " time " } else { " times " })
 			},
 			Site::TrailingInput =>
 			{
@@ -271,6 +290,29 @@ fn test_canonical_repairs()
 			"1 + 2 keep lowest drop highest",
 			"1 + 2D6 keep lowest drop highest"
 		),
+		("3d6 reroll", "3d6 reroll= 1 "),
+		("3d6 reroll 2 times", "3d6 reroll = 1 2 times"),
+		("3d6 reroll + 1", "3d6 reroll = 1 + 1"),
+		("3d6 reroll =", "3d6 reroll = 0"),
+		("3d6 reroll ≤ + 1", "3d6 reroll ≤  0+ 1"),
+		("3d6 reroll < -", "3d6 reroll < -0"),
+		("3d6 reroll < x", "3d6 reroll < {x}"),
+		("3d6 reroll in", "3d6 reroll in 0..= 0"),
+		("3d6 reroll in ..3", "3d6 reroll in  0..3"),
+		("3d6 reroll in 1 3", "3d6 reroll in 1 ..=3"),
+		("3d6 reroll in 1..", "3d6 reroll in 1.. 0"),
+		("3d6 reroll in -..2", "3d6 reroll in -0..2"),
+		("3d6 reroll in [1, 2", "3d6 reroll in [1, 2]"),
+		("3d6 reroll = 1 2", "3d6 reroll = 1 2 times "),
+		("3d6 reroll = 1 1", "3d6 reroll = 1 1 time "),
+		("3d6 reroll = 1 ∞", "3d6 reroll = 1 ∞ times "),
+		(
+			"3d6 reroll = 1 unlimited + 1",
+			"3d6 reroll = 1 unlimited  times + 1"
+		),
+		("3 reroll = 1", "3D6 reroll = 1"),
+		("-3 reroll in [1]", "-3D6 reroll in [1]"),
+		("(2 reroll ≥ 2", "(2D6 reroll ≥ 2)"),
 		("3d-", "3d-6"),
 		("3d-^2", "3d-6^2"),
 		("3dx", "3d{x}"),
@@ -392,6 +434,62 @@ fn test_declining_dice_operator_continues()
 	});
 	assert_eq!(recovered.as_deref(), Some("(3D6 keep lowest) + 1"));
 	assert_eq!(sites.len(), 1);
+}
+
+/// Ensure that a reroll clause after a dice count offers a repair at
+/// [`Site::DiceOperator`] as a keep clause does, and that declining it does
+/// not end recovery.
+#[test]
+fn test_declining_dice_operator_continues_reroll()
+{
+	let (recovered, sites) = recover("3 reroll = 1", |site| match site.site
+	{
+		Site::DiceOperator => Repair::Stop,
+		_ => Repair::Fix
+	});
+	assert_eq!(recovered.as_deref(), Some("3"));
+	assert_eq!(
+		sites.iter().map(|site| site.site).collect::<Vec<_>>(),
+		[Site::DiceOperator, Site::TrailingInput]
+	);
+	assert_eq!(sites[0].position(), 2);
+	let (recovered, sites) =
+		recover("(3 reroll = 1) + 1", |site| match site.site
+		{
+			Site::DiceOperator => Repair::Fix,
+			_ => Repair::Stop
+		});
+	assert_eq!(recovered.as_deref(), Some("(3D6 reroll = 1) + 1"));
+	assert_eq!(sites.len(), 1);
+}
+
+/// Ensure that a goal that fails at an operand of the predicate of a reroll
+/// clause says so, and that every other goal does not.
+#[test]
+fn test_goal_of_reroll_operand()
+{
+	for (source, operand) in [
+		("3d6 reroll =", true),
+		("3d6 reroll ≤ -", true),
+		("3d6 reroll in", true),
+		("3d6 reroll in 1..", true),
+		("3d6 reroll = (", false),
+		("3d6 reroll = 1 (", false),
+		("3d6 drop lowest (", false),
+		("1 +", false)
+	]
+	{
+		let (_, sites) = recover(source, |_| Repair::Fix);
+		let goals = sites
+			.iter()
+			.filter_map(|site| match site.site
+			{
+				Site::Goal { operand, .. } => Some(operand),
+				_ => None
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(goals.first(), Some(&operand), "{source:?}");
+	}
 }
 
 /// Ensure that a [skip](Repair::Skip) discards closing delimiters at the start
@@ -620,6 +718,31 @@ pub(super) const FAMILIES: &[Family] = &[
 	Family {
 		name: "misplaced keeps",
 		source: |n| format!("1{}", " + 3 keep lowest".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing reroll predicates",
+		source: |n| format!("3d6{}", " reroll".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing reroll thresholds",
+		source: |n| format!("1{}", " + 3d6 reroll ≤".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing range operators",
+		source: |n| format!("3d6{}", " reroll in 1 2".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing times",
+		source: |n| format!("3d6{}", " reroll = 1 2".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "misplaced rerolls",
+		source: |n| format!("1{}", " + 3 reroll = 1".repeat(n)),
 		repairs: |n| n
 	},
 	Family {

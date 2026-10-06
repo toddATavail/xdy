@@ -3910,9 +3910,9 @@ fn static_expression() -> impl Strategy<Value = String>
 	})
 }
 
-/// Answer a strategy that generates dice whose counts, faces, drops, and keeps
-/// are fixed, with custom faces that often reach the extremes of [`i32`], so
-/// that their sums saturate.
+/// Answer a strategy that generates dice whose counts, faces, drops, keeps,
+/// and rerolls are fixed, with custom faces that often reach the extremes of
+/// [`i32`], so that their sums saturate.
 ///
 /// # Returns
 /// The strategy.
@@ -3940,31 +3940,77 @@ fn static_dice() -> impl Strategy<Value = String>
 	];
 	// A drop expression never begins with `-`, so a negative constant must be
 	// grouped.
-	let drop = static_operand().prop_map(|drop| {
-		if drop.starts_with('-')
-		{
-			format!("({})", drop)
-		}
-		else
-		{
-			drop
-		}
-	});
+	let drop = static_operand()
+		.prop_map(|drop| {
+			if drop.starts_with('-')
+			{
+				format!("({})", drop)
+			}
+			else
+			{
+				drop
+			}
+		})
+		.boxed();
 	let clause = (
 		select(&["drop", "keep"][..]),
 		select(&["lowest", "highest"][..]),
-		option::of(drop)
+		option::of(drop.clone())
 	)
 		.prop_map(|(verb, direction, drop)| match drop
 		{
 			Some(drop) => format!(" {} {} {}", verb, direction, drop),
 			None => format!(" {} {}", verb, direction)
 		});
+	let clause = prop_oneof![
+		2 => clause,
+		1 => source_reroll(static_operand().boxed(), drop)
+	];
 	(static_operand(), faces, prop::collection::vec(clause, 0..3)).prop_map(
 		|(count, faces, clauses)| {
 			format!("{}D{}{}", count, faces, clauses.concat())
 		}
 	)
+}
+
+/// Answer a strategy that generates reroll clauses of every form of predicate
+/// and limit, whose thresholds and endpoints, which may be negative constants,
+/// and counts, which never begin with `-`, come from the specified strategies.
+///
+/// # Parameters
+/// - `operand`: The strategy for thresholds and endpoints.
+/// - `count`: The strategy for the counts of limits.
+///
+/// # Returns
+/// The strategy.
+fn source_reroll(
+	operand: BoxedStrategy<String>,
+	count: BoxedStrategy<String>
+) -> impl Strategy<Value = String>
+{
+	let comparator =
+		select(&["=", "!=", "≠", "<", "<=", "≤", ">", ">=", "≥"][..]);
+	let predicate = prop_oneof![
+		(comparator, operand.clone()).prop_map(|(comparator, threshold)| {
+			format!("{} {}", comparator, threshold)
+		}),
+		prop::collection::vec(-2i32..=6, 0..4).prop_map(|values| {
+			let values = values.iter().map(i32::to_string).collect::<Vec<_>>();
+			format!("in [{}]", values.join(", "))
+		}),
+		(operand.clone(), select(&["..", "..="][..]), operand).prop_map(
+			|(start, operator, end)| format!("in {}{}{}", start, operator, end)
+		)
+	];
+	let limit = prop_oneof![
+		(count, select(&["time", "times"][..]))
+			.prop_map(|(count, word)| format!(" {} {}", count, word)),
+		select(&["∞ times", "unlimited times"][..])
+			.prop_map(|limit| format!(" {}", limit))
+	];
+	(predicate, option::of(limit)).prop_map(|(predicate, limit)| {
+		format!(" reroll {}{}", predicate, limit.unwrap_or_default())
+	})
 }
 
 /// Answer a strategy that generates fixed operands: small constants and
@@ -3992,8 +4038,9 @@ fn dynamic_program() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates dynamic expressions: [static
-/// expressions](static_expression), within dice whose counts, faces, and drop
-/// and keep counts, and ranges whose endpoints, may be random.
+/// expressions](static_expression), within dice whose counts, faces, drop and
+/// keep counts, and reroll thresholds, endpoints, and counts, and ranges whose
+/// endpoints, may be random.
 ///
 /// # Returns
 /// The strategy.
@@ -4022,6 +4069,14 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 			.prop_map(|(verb, direction, drop)| {
 				format!(" {} {} ({})", verb, direction, drop)
 			});
+		let count = operand
+			.clone()
+			.prop_map(|count| format!("({})", count))
+			.boxed();
+		let clause = prop_oneof![
+			2 => clause,
+			1 => source_reroll(operand.clone().boxed(), count)
+		];
 		prop_oneof![
 			3 => (operand.clone(), faces, prop::collection::vec(clause, 0..3))
 				.prop_map(|(count, faces, clauses)| {

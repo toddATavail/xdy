@@ -220,7 +220,8 @@ impl Display for Variable<'_>
 ///   lexical order.
 /// - A binding expression evaluates to the bound value, so it can appear
 ///   anywhere a [variable reference](Variable) is legal — as a primary, a dice
-///   count, standard faces, or the count of a drop or keep clause.
+///   count, standard faces, the count of a drop or keep clause, or the
+///   threshold, an endpoint, or the count of a reroll clause.
 ///
 /// Collision, rebinding, and use-before-bind errors are reported by the
 /// [`Validator`](crate::Validator).

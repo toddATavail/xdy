@@ -766,3 +766,234 @@ Function() r#1 ⚅#1
 		⚅0 <- keep lowest 2 from ⚅0
 		@0 <- sum rolling record ⚅0
 		return @0
+
+3D6 reroll = 1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll != 1 2 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll != 1 up to 2 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll ≠ 6 1 time
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll != 6 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll < 3
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll < 3 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll <= 2 ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll <= 2 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll > 5 unlimited times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll > 5 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll ≥ 5 3 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll >= 5 up to 3 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[-1, 0, 1] reroll in [-1, 1]
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 3D[-1, 0, 1]
+		⚅0 <- reroll in [-1, 1] up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll in [] ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll in [] unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[-3, -2, -1, 0] reroll in -3..-1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 3D[-3, -2, -1, 0]
+		⚅0 <- reroll in -3..-1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll in 1..=2 2 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll in 1..=2 up to 2 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: 3D6 reroll in 1..={x} ∞ times
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll in 1..=@0 unlimited times from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+{n}: 4D6 reroll in ({n} - 1)..=({n} + 1) {n} times
+=
+Function({n}@0) r#4 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		@1 <- @0 - 1
+		@2 <- @0 + 1
+		⚅0 <- reroll in @1..=@2 up to @0 times from ⚅0
+		@3 <- sum rolling record ⚅0
+		return @3
+
+3D6 reroll = (1D4) 1 time
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅1 <- roll standard dice 1D4
+		@0 <- sum rolling record ⚅1
+		⚅0 <- reroll = @0 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+3D6 reroll ≤ {a}@(2) + {a}
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll <= 2 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + 2
+		return @1
+
+4D6 drop lowest reroll = 1 keep highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 reroll = 1 drop lowest
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		⚅0 <- drop lowest 1 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+4D6 keep highest 3 reroll < 3 ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- keep highest 3 from ⚅0
+		⚅0 <- reroll < 3 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+2D6 reroll = 1 reroll = 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D6
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		⚅0 <- reroll = 2 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D1 reroll = 1 ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D1
+		⚅0 <- reroll = 1 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll = 1 0 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll = 1 up to 0 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 reroll = 1 - 1
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 - 1
+		return @1

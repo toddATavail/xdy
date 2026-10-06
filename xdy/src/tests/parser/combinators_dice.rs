@@ -3,7 +3,7 @@
 //! Herein are the test cases for the [`dice`] combinator and its
 //! sub-combinators: [`standard_dice`], [`custom_dice`], [`dice_count`],
 //! [`standard_faces`], [`custom_faces`], [`drop_lowest`], [`drop_highest`],
-//! [`keep_lowest`], [`keep_highest`], and [`drop_expression`].
+//! [`keep_lowest`], [`keep_highest`], [`reroll`], and [`drop_expression`].
 
 use crate::{
 	ast::*,
@@ -1173,6 +1173,237 @@ fn test_keep_lowest_and_highest()
 				input
 			);
 		}
+	}
+}
+
+/// Ensure that [`dice`] reads reroll clauses: every comparator, in ASCII and
+/// in Unicode, with literal, negative, named, bound, and computed thresholds;
+/// lists, empty or not, of negative literals too; half-open and inclusive
+/// ranges, with endpoints of every kind; limits of `time` or `times`, and of
+/// `∞` or `unlimited`; with and without whitespace between their tokens; and
+/// chained with drops, keeps, and other rerolls in any order.
+#[test]
+fn test_dice_reroll_clauses()
+{
+	for (input, rendering, s_expr) in [
+		(
+			"3d6 reroll = 1",
+			"3D6 reroll = 1",
+			"(reroll (standard-dice 3 6) (eq 1))"
+		),
+		(
+			"3d6 reroll=1",
+			"3D6 reroll = 1",
+			"(reroll (standard-dice 3 6) (eq 1))"
+		),
+		(
+			"3d6 reroll != 1 2 times",
+			"3D6 reroll ≠ 1 2 times",
+			"(reroll (standard-dice 3 6) (ne 1) (times 2))"
+		),
+		(
+			"3d6 reroll ≠ -1 1 time",
+			"3D6 reroll ≠ -1 1 time",
+			"(reroll (standard-dice 3 6) (ne -1) (times 1))"
+		),
+		(
+			"3d6 reroll < 3 1 times",
+			"3D6 reroll < 3 1 time",
+			"(reroll (standard-dice 3 6) (lt 3) (times 1))"
+		),
+		(
+			"3d6 reroll <= 2 ∞ times",
+			"3D6 reroll ≤ 2 ∞ times",
+			"(reroll (standard-dice 3 6) (le 2) (unlimited))"
+		),
+		(
+			"3d6 reroll ≤ {x} unlimited time",
+			"3D6 reroll ≤ {x} ∞ times",
+			"(reroll (standard-dice 3 6) (le {x}) (unlimited))"
+		),
+		(
+			"3d6 reroll > 5 {n} times",
+			"3D6 reroll > 5 {n} times",
+			"(reroll (standard-dice 3 6) (gt 5) (times {n}))"
+		),
+		(
+			"3d6 reroll >= (1+1) 2 time",
+			"3D6 reroll ≥ (1 + 1) 2 times",
+			"(reroll (standard-dice 3 6) (ge (group (add 1 1))) (times 2))"
+		),
+		(
+			"3d6 reroll ≥ {a}@(6)",
+			"3D6 reroll ≥ {a}@(6)",
+			"(reroll (standard-dice 3 6) (ge (binding {a} 6)))"
+		),
+		(
+			"3d[-1,0,1] reroll in [-1, 1]",
+			"3D[-1, 0, 1] reroll in [-1, 1]",
+			"(reroll (custom-dice 3 [-1 0 1]) (in [-1 1]))"
+		),
+		(
+			"3d6 reroll in []",
+			"3D6 reroll in []",
+			"(reroll (standard-dice 3 6) (in []))"
+		),
+		(
+			"3d6 reroll in[1,2] unlimited times",
+			"3D6 reroll in [1, 2] ∞ times",
+			"(reroll (standard-dice 3 6) (in [1 2]) (unlimited))"
+		),
+		(
+			"3d[-3,-2,-1] reroll in -3..-1",
+			"3D[-3, -2, -1] reroll in -3..-1",
+			"(reroll (custom-dice 3 [-3 -2 -1]) (in-range -3 -1))"
+		),
+		(
+			"3d6 reroll in 1..=2 2 times",
+			"3D6 reroll in 1..=2 2 times",
+			"(reroll (standard-dice 3 6) (in-range-inclusive 1 2) (times 2))"
+		),
+		(
+			"3d6 reroll in1..={x}",
+			"3D6 reroll in 1..={x}",
+			"(reroll (standard-dice 3 6) (in-range-inclusive 1 {x}))"
+		),
+		(
+			"3d6 reroll in ({x}-1)..=({x}+1) ({x}) times",
+			"3D6 reroll in ({x} - 1)..=({x} + 1) ({x}) times",
+			"(reroll (standard-dice 3 6) (in-range-inclusive (group (sub {x} \
+			 1)) (group (add {x} 1))) (times (group {x})))"
+		),
+		(
+			"4d6 drop lowest reroll = 1 keep highest 2",
+			"4D6 drop lowest reroll = 1 keep highest 2",
+			"(keep-highest (reroll (drop-lowest (standard-dice 4 6)) (eq 1)) 2)"
+		),
+		(
+			"4d6 reroll = 1 reroll = 2 1 time drop highest",
+			"4D6 reroll = 1 reroll = 2 1 time drop highest",
+			"(drop-highest (reroll (reroll (standard-dice 4 6) (eq 1)) (eq 2) \
+			 (times 1)))"
+		),
+		(
+			"3d6\nreroll\t=\n1\n2\ntimes",
+			"3D6 reroll = 1 2 times",
+			"(reroll (standard-dice 3 6) (eq 1) (times 2))"
+		)
+	]
+	{
+		let (residue, result) = dice(Span::new(input))
+			.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		assert_eq!(result.to_string(), rendering, "{input:?}");
+		let source = format!("(function [{{a}}] {s_expr})");
+		let expected = crate::s_expr::read_s_expr(&source).unwrap();
+		let Expression::Dice(expected) = &expected.body
+		else
+		{
+			unreachable!()
+		};
+		assert!(
+			result.untethered() == expected.untethered(),
+			"AST mismatch for {input:?}"
+		);
+	}
+	for input in [
+		"reroll = 1",
+		"3d6 reroll",
+		"3d6 reroll 1",
+		"3d6 reroll == 1",
+		"3d6 reroll = -{x}",
+		"3d6 reroll = 1 2",
+		"3d6 reroll = 1 2 timesx",
+		"3d6 reroll = 1 ∞",
+		"3d6 reroll in",
+		"3d6 reroll in 1 3",
+		"3d6 reroll in 1..",
+		"3d6 reroll in [{x}]",
+		"3d6 reroll in [1, 2",
+		"3 reroll = 1"
+	]
+	{
+		let result = dice(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+	// A count never begins with `-`, so a `-` after a predicate is
+	// subtraction, and a word that begins with `reroll` is no reroll.
+	for (input, rendering, residue) in [
+		("3d6 reroll = 1 -1", "3D6 reroll = 1", " -1"),
+		("3d6 reroll = 1 + 1", "3D6 reroll = 1", " + 1"),
+		("3d6 rerolled", "3D6", " rerolled")
+	]
+	{
+		let (rest, result) = dice(Span::new(input)).unwrap();
+		assert_eq!(result.to_string(), rendering, "{input:?}");
+		assert_eq!(*rest.fragment(), residue, "{input:?}");
+	}
+}
+
+/// Ensure that [`reroll`] reads a reroll clause alone, and rejects anything
+/// else.
+#[test]
+fn test_reroll()
+{
+	for (input, predicate, limit) in [
+		("reroll = 1", "(eq 1)", ""),
+		("reroll≤-2 3 times", "(le -2)", " (times 3)"),
+		("reroll in [] ∞ time", "(in [])", " (unlimited)"),
+		("reroll in {x}..2", "(in-range {x} 2)", ""),
+		(
+			"reroll  in  1 ..= 2  {n}  time",
+			"(in-range-inclusive 1 2)",
+			" (times {n})"
+		)
+	]
+	{
+		let (residue, (actual_predicate, actual_limit)) =
+			reroll(Span::new(input))
+				.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		let source = format!(
+			"(function [] (reroll (standard-dice 1 6) {predicate}{limit}))"
+		);
+		let expected = crate::s_expr::read_s_expr(&source).unwrap();
+		let Expression::Dice(DiceExpression::Reroll(expected)) = &expected.body
+		else
+		{
+			unreachable!()
+		};
+		assert_eq!(
+			actual_predicate.map(|operand| operand.untethered()),
+			expected.predicate.map(|operand| operand.untethered()),
+			"{input:?}"
+		);
+		assert_eq!(
+			actual_limit.map(|limit| limit.map(|count| count.untethered())),
+			expected
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|count| count.untethered())),
+			"{input:?}"
+		);
+	}
+	for input in [
+		"",
+		" reroll = 1",
+		"rerolled = 1",
+		"reroll",
+		"reroll in",
+		"drop lowest",
+		"3d6 reroll = 1"
+	]
+	{
+		let result = reroll(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
 	}
 }
 

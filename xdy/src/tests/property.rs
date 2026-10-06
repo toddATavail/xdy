@@ -665,8 +665,9 @@ fn expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates dice expressions, whose operands come
-/// from the specified strategy, with drop and keep clauses in any order. Any
-/// clause may lack a drop expression.
+/// from the specified strategy, with drop, keep, and reroll clauses in any
+/// order. Any drop or keep clause may lack a drop expression, and any reroll
+/// clause its limit.
 ///
 /// # Parameters
 /// - `inner`: The strategy for nested expressions.
@@ -684,26 +685,29 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 	];
 	// A drop expression never begins with `-`, so a negative constant must be
 	// grouped.
-	let drop = atom(inner.clone()).prop_map(|drop| {
-		if drop.starts_with('-')
-		{
-			format!("({})", drop)
-		}
-		else
-		{
-			drop
-		}
-	});
+	let drop = atom(inner.clone())
+		.prop_map(|drop| {
+			if drop.starts_with('-')
+			{
+				format!("({})", drop)
+			}
+			else
+			{
+				drop
+			}
+		})
+		.boxed();
 	let clause = (
 		select(&["drop", "keep"][..]),
 		select(&["lowest", "highest"][..]),
-		option::of(drop)
+		option::of(drop.clone())
 	)
 		.prop_map(|(verb, direction, drop)| match drop
 		{
 			Some(drop) => format!(" {} {} {}", verb, direction, drop),
 			None => format!(" {} {}", verb, direction)
 		});
+	let clause = prop_oneof![2 => clause, 1 => reroll(inner.clone(), drop)];
 	(
 		atom(inner),
 		select(&["d", "D"][..]),
@@ -713,6 +717,53 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 		.prop_map(|(count, operator, faces, clauses)| {
 			format!("{}{}{}{}", count, operator, faces, clauses.concat())
 		})
+}
+
+/// Answer a strategy that generates reroll clauses, whose thresholds and
+/// endpoints, which may be negative constants, come from the specified
+/// strategy, of every form of predicate and limit.
+///
+/// # Parameters
+/// - `inner`: The strategy for nested expressions.
+/// - `count`: The strategy for the counts of limits, which never begin with
+///   `-`.
+///
+/// # Returns
+/// The strategy.
+fn reroll(
+	inner: BoxedStrategy<String>,
+	count: impl Strategy<Value = String> + 'static
+) -> impl Strategy<Value = String>
+{
+	let comparator =
+		select(&["=", "!=", "≠", "<", "<=", "≤", ">", ">=", "≥"][..]);
+	let predicate = prop_oneof![
+		(comparator, atom(inner.clone())).prop_map(
+			|(comparator, threshold)| {
+				format!("{} {}", comparator, threshold)
+			}
+		),
+		prop::collection::vec(-3i32..=20, 0..4).prop_map(|values| {
+			let values = values.iter().map(i32::to_string).collect::<Vec<_>>();
+			format!("in [{}]", values.join(", "))
+		}),
+		(atom(inner.clone()), select(&["..", "..="][..]), atom(inner))
+			.prop_map(|(start, operator, end)| {
+				format!("in {}{}{}", start, operator, end)
+			})
+	];
+	let limit = prop_oneof![
+		(count, select(&["time", "times"][..]))
+			.prop_map(|(count, word)| format!(" {} {}", count, word)),
+		(
+			select(&["∞", "unlimited"][..]),
+			select(&["time", "times"][..])
+		)
+			.prop_map(|(keyword, word)| format!(" {} {}", keyword, word))
+	];
+	(predicate, option::of(limit)).prop_map(|(predicate, limit)| {
+		format!(" reroll {}{}", predicate, limit.unwrap_or_default())
+	})
 }
 
 /// Answer a strategy that generates the operands that the grammar admits as

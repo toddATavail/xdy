@@ -432,11 +432,13 @@ fn validator_visitor_accepts_every_node_type()
 {
 	// Build an AST that exercises every node type the visitor can encounter:
 	// Group, Constant, Variable, Binding, Range, StandardDice, CustomDice,
-	// DropLowest, DropHighest, Add, Sub, Mul, Div, Mod, Exp, and Neg. The
-	// enclosing function is semantically clean, so the walk returns `Ok(())`.
+	// DropLowest, DropHighest, KeepLowest, KeepHighest, Reroll, Add, Sub, Mul,
+	// Div, Mod, Exp, and Neg. The enclosing function is semantically clean, so
+	// the walk returns `Ok(())`.
 	let ast = Parser::parse(
 		"{x}: [1:{x}] + (1D6 - 1D[1,2,3]) * 2D6 drop lowest / \
-		 3D8 drop highest + -1 ^ 2 % {y}@(1)"
+		 3D8 drop highest + -1 ^ 2 % {y}@(1) + 4D6 keep lowest 3 keep highest \
+		 reroll in {x}..={y} {y} times"
 	)
 	.unwrap();
 	let mut validator = Validator::new();

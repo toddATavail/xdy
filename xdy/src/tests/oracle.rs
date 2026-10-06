@@ -61,8 +61,8 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
-	Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
+	Unobserved, Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
@@ -481,6 +481,31 @@ fn test_oracle_distribution_corpus()
 		let case = format!("case {}: {source} {args:?} {externs:?}", index + 1);
 		// Compile exactly as the distribution tests do.
 		let function = optimize(compile_valid(source), Passes::all());
+		// The oracle does not read reroll instructions yet, so record a case
+		// that still rerolls after optimization as the corpus has it,
+		// unchecked.
+		if function
+			.instructions
+			.iter()
+			.any(|inst| matches!(inst, Instruction::Reroll(_)))
+		{
+			let expected = Distribution::from_weights(
+				expected
+					.iter()
+					.map(|&(outcome, count)| (outcome, Weight::from(count)))
+			)
+			.unwrap();
+			report_case(
+				&mut report,
+				previous,
+				source,
+				args,
+				externs,
+				&expected
+			);
+			previous = Some(source);
+			continue;
+		}
 		let actual =
 			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
 				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));

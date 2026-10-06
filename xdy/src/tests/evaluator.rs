@@ -108,7 +108,8 @@ fn test_evaluation()
 					.join(", ")
 			);
 			// Ensure that none of the die rolls are outside the expected
-			// bounds.
+			// bounds. A reroll appends each replacement to the dice that the
+			// roll rolled, so count only the latter.
 			for record in result.records
 			{
 				match record.kind
@@ -117,7 +118,11 @@ fn test_evaluation()
 					RollingRecordKind::Range { start, end } =>
 					{
 						assert_eq!(
-							record.dice.len(),
+							record
+								.dice
+								.iter()
+								.filter(|die| die.replaces.is_none())
+								.count(),
 							1,
 							"case {}: {}: wrong number of results",
 							index + 1,
@@ -152,7 +157,11 @@ fn test_evaluation()
 					RollingRecordKind::Standard { count, faces } =>
 					{
 						assert_eq!(
-							record.dice.len(),
+							record
+								.dice
+								.iter()
+								.filter(|die| die.replaces.is_none())
+								.count(),
 							count.max(0) as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,
@@ -184,7 +193,11 @@ fn test_evaluation()
 					RollingRecordKind::Custom { count, faces } =>
 					{
 						assert_eq!(
-							record.dice.len(),
+							record
+								.dice
+								.iter()
+								.filter(|die| die.replaces.is_none())
+								.count(),
 							count as usize,
 							"case {}: {}: wrong number of results",
 							index + 1,

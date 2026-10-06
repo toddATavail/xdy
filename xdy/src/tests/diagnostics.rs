@@ -42,6 +42,16 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 		DiagnosticKind::MisplacedDropClause => "MisplacedDropClause",
 		DiagnosticKind::IncompleteKeepClause => "IncompleteKeepClause",
 		DiagnosticKind::MisplacedKeepClause => "MisplacedKeepClause",
+		DiagnosticKind::MisplacedRerollClause => "MisplacedRerollClause",
+		DiagnosticKind::MissingRerollPredicate => "MissingRerollPredicate",
+		DiagnosticKind::MissingRerollThreshold => "MissingRerollThreshold",
+		DiagnosticKind::MissingRerollRangeStart => "MissingRerollRangeStart",
+		DiagnosticKind::MissingRerollRangeOperator =>
+		{
+			"MissingRerollRangeOperator"
+		},
+		DiagnosticKind::MissingRerollRangeEnd => "MissingRerollRangeEnd",
+		DiagnosticKind::MissingRerollTimes => "MissingRerollTimes",
 		DiagnosticKind::IncompleteParameterDefinition =>
 		{
 			"IncompleteParameterDefinition"
@@ -489,6 +499,14 @@ fn test_valid_programs_produce_no_diagnostics()
 		"5D10 drop lowest keep highest 3 drop highest",
 		"4D6 keep highest 3 - 1",
 		"4d6 keeplowest",
+		"3D6 reroll = 1",
+		"3d6 reroll=1 - 1",
+		"4D6 reroll ≤ 2 ∞ times",
+		"4D6 reroll <= {x} unlimited time",
+		"4D6 reroll in [1, 2] 2 times",
+		"4D6 reroll in []",
+		"4D[-2, -1, 0, 1] reroll in -1..={x} {n} times",
+		"4D6 drop lowest reroll != 1 keep highest 3",
 		"1D6 + 1D8 + 1D10",
 	];
 	for source in &valid
@@ -700,6 +718,11 @@ fn test_diagnose_stray_whitespace()
 			"4d6 keep\u{2003}highest\u{a0}3",
 			"4d6 keep highest 3",
 			vec![(8, 11), (18, 20)]
+		),
+		(
+			"4d6 reroll\u{a0}≤ 2\u{2003}∞ times",
+			"4d6 reroll ≤ 2 ∞ times",
+			vec![(10, 12), (17, 20)]
 		),
 		("{x},\u{b}{y}: {x}", "{x}, {y}: {x}", vec![(4, 5)]),
 		("{x}@\u{a0}(1)", "{x}@ (1)", vec![(4, 6)])
@@ -1035,6 +1058,36 @@ fn test_diagnose_deep_keep_expression()
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_diagnose_deep_mixed_clauses() { diagnose_deep(Nesting::MixedClauses) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of reroll thresholds on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_reroll_threshold()
+{
+	diagnose_deep(Nesting::RerollThreshold)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of the ends of reroll ranges on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_reroll_range_end()
+{
+	diagnose_deep(Nesting::RerollRangeEnd)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of reroll counts on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_reroll_count() { diagnose_deep(Nesting::RerollCount) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep stack of reroll clauses of every form, among drops, on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_reroll_clauses() { diagnose_deep(Nesting::RerollClauses) }
 
 /// On a small stack, [diagnose](diagnostics::diagnose) a binding that collides
 /// with a parameter, a duplicate binding, and a use before binding, each

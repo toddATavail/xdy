@@ -390,6 +390,16 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		},
 		DROP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		KEEP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
+		REROLL_PREDICATE_CONTEXT => &[
+			"`=`", "`!=`", "`≠`", "`<`", "`<=`", "`≤`", "`>`", "`>=`", "`≥`",
+			"`in`"
+		],
+		REROLL_THRESHOLD_CONTEXT => &["`{`", "`(`", "integer"],
+		REROLL_RANGE_START_CONTEXT => &["`[`", "`{`", "`(`", "integer"],
+		REROLL_RANGE_OPERATOR_CONTEXT => &["`..`", "`..=`"],
+		REROLL_RANGE_END_CONTEXT => &["`{`", "`(`", "integer"],
+		REROLL_COUNT_CONTEXT => &["`{`", "`(`", "integer"],
+		REROLL_TIMES_CONTEXT => &["`time`", "`times`"],
 		unexpected =>
 		{
 			unreachable!("unexpected context classifier: {}", unexpected)
@@ -485,3 +495,28 @@ pub(crate) const DROP_DIRECTION_CONTEXT: &str = "drop direction";
 
 /// Context classifier for a missing keep direction (`lowest` or `highest`).
 pub(crate) const KEEP_DIRECTION_CONTEXT: &str = "keep direction";
+
+/// Context classifier for a missing reroll predicate: a comparator, or `in`.
+pub(crate) const REROLL_PREDICATE_CONTEXT: &str = "reroll predicate";
+
+/// Context classifier for the threshold of a comparison of a reroll.
+pub(crate) const REROLL_THRESHOLD_CONTEXT: &str = "reroll threshold";
+
+/// Context classifier for what follows the `in` of a reroll: a list, or the
+/// start of a range.
+pub(crate) const REROLL_RANGE_START_CONTEXT: &str = "reroll range start";
+
+/// Context classifier for a missing range operator (`..` or `..=`) of a
+/// reroll.
+pub(crate) const REROLL_RANGE_OPERATOR_CONTEXT: &str = "reroll range operator";
+
+/// Context classifier for the end of a range of a reroll.
+pub(crate) const REROLL_RANGE_END_CONTEXT: &str = "reroll range end";
+
+/// Context classifier for the count of the limit of a reroll, a drop
+/// expression.
+pub(crate) const REROLL_COUNT_CONTEXT: &str = "reroll count";
+
+/// Context classifier for a missing `time` or `times` after the count of a
+/// reroll, or after `∞` or `unlimited`.
+pub(crate) const REROLL_TIMES_CONTEXT: &str = "reroll times";

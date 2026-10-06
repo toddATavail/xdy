@@ -345,6 +345,89 @@ fn test_keep_clause_spans()
 	}
 }
 
+/// A [`Reroll`] extends its span from the start of the inner dice through its
+/// limit, or through its predicate if it has none, while the inner dice retains
+/// its pre-clause span; its threshold, endpoints, and count span themselves,
+/// and the comparators and `∞` that precede them span several bytes.
+#[test]
+fn test_reroll_clause_spans()
+{
+	// `DiceExpression` implements `Drop`, so clone the clause out of it.
+	let reroll = |input| match &dice(Span::new(input)).unwrap().1
+	{
+		DiceExpression::Reroll(reroll) => reroll.clone(),
+		other => panic!("expected Reroll, got {:?}", other)
+	};
+	let clause = reroll("3D6 reroll = 1");
+	assert_eq!(clause.span, span(0, 14));
+	assert_eq!(clause.dice.span(), span(0, 3));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(13, 14)]
+	);
+	assert!(clause.limit.is_none());
+	let clause = reroll("3D6 reroll ≤ -2 3 times");
+	assert_eq!(clause.span, span(0, 25));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(15, 17)]
+	);
+	let Some(Limit::Times(count)) = &clause.limit
+	else
+	{
+		panic!("expected a count, got {:?}", clause.limit)
+	};
+	assert_eq!(count.span(), span(18, 19));
+	let clause = reroll("3D6 reroll in 1..={x} ∞ times");
+	assert_eq!(clause.span, span(0, 31));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(14, 15), span(18, 21)]
+	);
+	assert_eq!(clause.limit, Some(Limit::Unlimited));
+	let clause = reroll("3D6 reroll in [1, 2]");
+	assert_eq!(clause.span, span(0, 20));
+	// The clause ends before a `-`, which is subtraction.
+	let (rest, result) = dice(Span::new("3D6 reroll = 1 -1")).unwrap();
+	assert_eq!(result.span(), span(0, 14));
+	assert_eq!(*rest.fragment(), " -1");
+}
+
+/// A reroll clause, chained with a keep clause, produces nested wrappers, each
+/// with a span extending through its own clause.
+#[test]
+fn test_stacked_reroll_clauses_span()
+{
+	let (_, result) =
+		dice(Span::new("4D6 reroll = 1 keep highest 2 reroll < 2 1 time"))
+			.unwrap();
+	let DiceExpression::Reroll(outer) = &result
+	else
+	{
+		panic!("expected Reroll, got {:?}", result)
+	};
+	assert_eq!(outer.span, span(0, 47));
+	let DiceExpression::KeepHighest(middle) = outer.dice.as_ref()
+	else
+	{
+		panic!("expected KeepHighest, got {:?}", outer.dice)
+	};
+	assert_eq!(middle.span, span(0, 29));
+	assert_eq!(middle.dice.span(), span(0, 14));
+}
+
 /// Mixed drop and keep clauses produce nested wrappers, each with a span
 /// extending through its own clause.
 #[test]

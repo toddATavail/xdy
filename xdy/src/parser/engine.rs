@@ -56,8 +56,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
-		Range, StandardDice, Sub, Variable
+		Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
+		Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
 	},
 	span::{SourceSpan, Spanned}
 };
@@ -70,10 +70,14 @@ use super::{
 	FUNCTION_BODY_CONTEXT, FUNCTION_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
 	KEEP_DIRECTION_CONTEXT, KEEP_EXPRESSION_CONTEXT, NEXT_PARAMETER_CONTEXT,
 	NomErrorKind, PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT,
-	RANGE_END_CONTEXT, RANGE_START_CONTEXT, RIGHT_OPERAND_CONTEXT,
-	STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT, begins_verb, braced_name,
-	canonical_name, constant, custom_faces, d_operator, identifier, integer,
-	is_token_space, name_space0, negative_constant, parameter, parameters
+	RANGE_END_CONTEXT, RANGE_START_CONTEXT, REROLL_COUNT_CONTEXT,
+	REROLL_PREDICATE_CONTEXT, REROLL_RANGE_END_CONTEXT,
+	REROLL_RANGE_OPERATOR_CONTEXT, REROLL_RANGE_START_CONTEXT,
+	REROLL_THRESHOLD_CONTEXT, REROLL_TIMES_CONTEXT, RIGHT_OPERAND_CONTEXT,
+	RerollParts, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT,
+	begins_misplaced_clause, braced_name, canonical_name, constant,
+	custom_faces, d_operator, identifier, integer, is_token_space, keyword,
+	name_space0, negative_constant, parameter, parameters
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -132,13 +136,15 @@ pub(crate) enum Goal
 
 	/// [`dice_count`](super::dice_count) or
 	/// [`drop_expression`](super::drop_expression), which are identical, and
-	/// whose constant is unsigned, producing [`Value::Expression`]. The count
-	/// of a keep clause is a drop expression too.
+	/// whose constant is unsigned, producing [`Value::Expression`]. The counts
+	/// of keep clauses and of the limits of reroll clauses are drop
+	/// expressions too.
 	Atom,
 
 	/// [`standard_faces`](super::standard_faces), which is [`Goal::Atom`] but
 	/// with a signed [integer] in place of the constant, producing
-	/// [`Value::Expression`].
+	/// [`Value::Expression`]. The thresholds and endpoints of the predicates
+	/// of reroll clauses are standard faces too.
 	Faces,
 
 	/// [`drop_lowest`](super::drop_lowest), producing [`Value::Drop`].
@@ -151,7 +157,10 @@ pub(crate) enum Goal
 	KeepLowest,
 
 	/// [`keep_highest`](super::keep_highest), producing [`Value::Drop`].
-	KeepHighest
+	KeepHighest,
+
+	/// [`reroll`](super::reroll), producing [`Value::Reroll`].
+	Reroll
 }
 
 /// The value produced by a [goal](Goal).
@@ -186,7 +195,17 @@ pub(super) enum Value<'src>
 	CustomDice(CustomDice<'src>),
 
 	/// The optional drop expression of a drop or keep clause, i.e., its count.
-	Drop(Option<Box<Expression<'src>>>)
+	Drop(Option<Box<Expression<'src>>>),
+
+	/// The predicate and the optional limit of a reroll clause.
+	Reroll
+	{
+		/// The predicate.
+		predicate: Predicate<Box<Expression<'src>>>,
+
+		/// The limit, if any.
+		limit: Option<Limit<Box<Expression<'src>>>>
+	}
 }
 
 impl<'src> Value<'src>
@@ -333,6 +352,22 @@ impl<'src> Value<'src>
 		{
 			Value::Drop(drop) => drop,
 			value => unreachable!("expected a drop expression: {:?}", value)
+		}
+	}
+
+	/// Answer the predicate and the optional limit of a reroll clause.
+	///
+	/// # Returns
+	/// The predicate and the limit.
+	///
+	/// # Panics
+	/// If the receiver is not a [reroll clause](Value::Reroll).
+	pub(super) fn into_reroll(self) -> RerollParts<'src>
+	{
+		match self
+		{
+			Value::Reroll { predicate, limit } => (predicate, limit),
+			value => unreachable!("expected a reroll clause: {:?}", value)
 		}
 	}
 }
@@ -530,6 +565,57 @@ impl ClauseKind
 					span
 				})
 			},
+		}
+	}
+}
+
+/// The comparator of the predicate of a reroll clause.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Comparison
+{
+	/// `=`.
+	Eq,
+
+	/// `!=` or `≠`.
+	Ne,
+
+	/// `<`.
+	Lt,
+
+	/// `<=` or `≤`.
+	Le,
+
+	/// `>`.
+	Gt,
+
+	/// `>=` or `≥`.
+	Ge
+}
+
+impl Comparison
+{
+	/// Build a predicate that compares a result with a threshold by this
+	/// comparator.
+	///
+	/// # Parameters
+	/// - `threshold`: The threshold.
+	///
+	/// # Returns
+	/// The predicate.
+	fn predicate<'src>(
+		self,
+		threshold: Expression<'src>
+	) -> Predicate<Box<Expression<'src>>>
+	{
+		let threshold = Box::new(threshold);
+		match self
+		{
+			Comparison::Eq => Predicate::Eq(threshold),
+			Comparison::Ne => Predicate::Ne(threshold),
+			Comparison::Lt => Predicate::Lt(threshold),
+			Comparison::Le => Predicate::Le(threshold),
+			Comparison::Gt => Predicate::Gt(threshold),
+			Comparison::Ge => Predicate::Ge(threshold)
 		}
 	}
 }
@@ -734,7 +820,36 @@ enum Frame<'src>
 
 		/// The input of the drop expression.
 		input: Span<'src>
-	}
+	},
+
+	/// A reroll clause of [`Goal::Dice`], [`Goal::PrimaryDice`], or
+	/// [`Goal::Reroll`], awaiting the threshold of a comparison, or the start
+	/// of a range. It carries the [clause](Payload::Reroll).
+	RerollFirst
+	{
+		/// The comparator, or `None` if the predicate is a range.
+		comparison: Option<Comparison>,
+
+		/// The input of the threshold or the start.
+		input: Span<'src>
+	},
+
+	/// A reroll clause, awaiting the end of a range. It carries the
+	/// [clause](Payload::Reroll), which holds the start of the range.
+	RerollEnd
+	{
+		/// Whether the range is inclusive, `..=`, rather than half-open, `..`.
+		inclusive: bool,
+
+		/// The input of the end.
+		input: Span<'src>
+	},
+
+	/// A reroll clause, awaiting the optional count of its limit. It holds the
+	/// input of the count, and carries the [clause](Payload::Reroll), which
+	/// holds the predicate and the input after it, where the clause ends if it
+	/// has no limit.
+	RerollCount(Span<'src>)
 }
 
 // A frame is at most as large as a span and an offset, and a tag.
@@ -759,7 +874,10 @@ impl Frame<'_>
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
 			| Frame::StandardFaces(_)
-			| Frame::DropExpression { .. } => true,
+			| Frame::DropExpression { .. }
+			| Frame::RerollFirst { .. }
+			| Frame::RerollEnd { .. }
+			| Frame::RerollCount(_) => true,
 			Frame::UnaryExponent { merged, .. } => *merged,
 			Frame::BinaryFirst(_)
 			| Frame::UnaryNegation(_)
@@ -837,7 +955,31 @@ enum Payload<'src>
 
 	/// The input after the direction of [`Frame::DropExpression`], where the
 	/// clause ends if it has no drop expression.
-	Rest(Span<'src>)
+	Rest(Span<'src>),
+
+	/// The parts of the reroll clause of [`Frame::RerollFirst`],
+	/// [`Frame::RerollEnd`], or [`Frame::RerollCount`] read so far. They are
+	/// boxed, lest they enlarge every payload.
+	Reroll(Box<RerollClause<'src>>)
+}
+
+/// The parts of a reroll clause read so far, which the frames of the clause
+/// [carry](Payload::Reroll) in turn.
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text being parsed.
+struct RerollClause<'src>
+{
+	/// The dice expression that the clause modifies, or `None` if the clause
+	/// is parsed alone, as [`Goal::Reroll`].
+	dice: Option<DiceExpression<'src>>,
+
+	/// The start of a range, once read, which [`Frame::RerollEnd`] holds.
+	start: Option<Expression<'src>>,
+
+	/// The predicate, and the input after it, where the clause ends if it has
+	/// no limit, once read, which [`Frame::RerollCount`] holds.
+	predicate: Option<(Predicate<Box<Expression<'src>>>, Span<'src>)>
 }
 
 impl<'src> Payload<'src>
@@ -936,6 +1078,22 @@ impl<'src> Payload<'src>
 		{
 			Payload::Rest(rest) => rest,
 			_ => unreachable!("the payload is not the rest of a drop")
+		}
+	}
+
+	/// Answer the parts of a reroll clause read so far.
+	///
+	/// # Returns
+	/// The parts.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Reroll`].
+	fn into_reroll(self) -> Box<RerollClause<'src>>
+	{
+		match self
+		{
+			Payload::Reroll(clause) => clause,
+			_ => unreachable!("the payload is not a reroll clause")
 		}
 	}
 }
@@ -1131,7 +1289,8 @@ impl<'src> std::ops::Index<usize> for Stack<'src>
 ///     Binding --> AddSub
 ///     PrimaryDice & Dice & StandardDice & CustomDice --> Atom
 ///     DropLowest & DropHighest & KeepLowest & KeepHighest --> Atom
-///     Atom --> Binding & Group
+///     Dice & PrimaryDice & Reroll --> Faces & Atom
+///     Faces & Atom --> Binding & Group
 /// ```
 ///
 /// # Parameters
@@ -1360,7 +1519,8 @@ fn start<'src, R: Recovery<'src>>(
 		Goal::DropLowest => start_drop(input, ClauseKind::DropLowest, stack),
 		Goal::DropHighest => start_drop(input, ClauseKind::DropHighest, stack),
 		Goal::KeepLowest => start_drop(input, ClauseKind::KeepLowest, stack),
-		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack)
+		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack),
+		Goal::Reroll => start_reroll(input, stack, rec)
 	}
 }
 
@@ -1481,6 +1641,21 @@ fn resume<'src, R: Recovery<'src>>(
 		{
 			let rest = stack.pop_payload().into_rest();
 			resume_drop_expression(kind, rest, input, outcome)
+		},
+		Frame::RerollFirst { comparison, input } =>
+		{
+			let clause = stack.pop_payload().into_reroll();
+			resume_reroll_first(clause, comparison, input, outcome, stack, rec)
+		},
+		Frame::RerollEnd { inclusive, input } =>
+		{
+			let clause = stack.pop_payload().into_reroll();
+			resume_reroll_end(clause, inclusive, input, outcome, stack, rec)
+		},
+		Frame::RerollCount(input) =>
+		{
+			let clause = stack.pop_payload().into_reroll();
+			resume_reroll_count(*clause, input, outcome, stack, rec)
 		}
 	}
 }
@@ -2871,13 +3046,13 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 		},
 		Err(e) if primary =>
 		{
-			// A keep clause after the dice count follows no dice expression.
-			// A fix supplies the dice operator and faces just after the
-			// count, and the clause then modifies the dice expression. If the
-			// policy declines, the expression ends at the dice count, as in
-			// the ordinary parse.
+			// A keep or reroll clause after the dice count follows no dice
+			// expression. A fix supplies the dice operator and faces just
+			// after the count, and the clause then modifies the dice
+			// expression. If the policy declines, the expression ends at the
+			// dice count, as in the ordinary parse.
 			if rec.recovering()
-				&& begins_verb(skip_whitespace(rest).fragment(), "keep")
+				&& begins_misplaced_clause(skip_whitespace(rest).fragment())
 				&& rec.offer(Site::DiceOperator, cut_error(e), stack)
 			{
 				let at = rest.location_offset();
@@ -3008,16 +3183,18 @@ fn standard_dice<'src>(
 }
 
 /// Continue [`Goal::Dice`] or [`Goal::PrimaryDice`] after the dice expression
-/// so far, as `fold_many0(alt((drop_clause, keep_clause)))`. If a drop or keep
-/// clause follows, parse its direction and call its drop expression;
-/// otherwise, finish with the dice expression so far.
+/// so far, as `fold_many0(alt((reroll_clause, drop_clause, keep_clause)))`. If
+/// a reroll clause follows, parse its predicate; see [`reroll_predicate`]. If a
+/// drop or keep clause follows, parse its direction and call its drop
+/// expression. Otherwise, finish with the dice expression so far.
 ///
 /// A drop clause is `multispace0`, then `tag("drop")`, then
 /// `cut(preceded(multispace0, context(DROP_DIRECTION_CONTEXT,
 /// alt((tag("lowest"), tag("highest"))))))`, then `opt(preceded(multispace0,
 /// context(DROP_EXPRESSION_CONTEXT, drop_expression)))`. A keep clause is the
 /// same, but with `tag("keep")`, [`KEEP_DIRECTION_CONTEXT`], and
-/// [`KEEP_EXPRESSION_CONTEXT`].
+/// [`KEEP_EXPRESSION_CONTEXT`]. A reroll clause is `multispace0`, then the
+/// [keyword] `reroll`, and then its predicate and its limit.
 ///
 /// # Parameters
 /// - `dice`: The dice expression so far.
@@ -3034,6 +3211,17 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
+	let reroll: IResult<Span, Span, ParseError> =
+		preceded(multispace0, keyword("reroll")).parse_complete(rest);
+	if let Ok((after_keyword, _)) = reroll
+	{
+		let clause = RerollClause {
+			dice: Some(dice),
+			start: None,
+			predicate: None
+		};
+		return reroll_predicate(Box::new(clause), after_keyword, stack, rec);
+	}
 	let keyword: IResult<Span, bool, ParseError> = preceded(
 		multispace0,
 		alt((map(tag("drop"), |_| false), map(tag("keep"), |_| true)))
@@ -3161,6 +3349,523 @@ fn finish_drop_clause<'src, R: Recovery<'src>>(
 		end: rest.location_offset()
 	};
 	dice_continue(kind.build(dice, drop, span), rest, stack, rec)
+}
+
+/// Continue a reroll clause after its `reroll`, by parsing its predicate.
+///
+/// The predicate is `preceded(multispace0, alt((comparison, list, range)))`:
+///
+/// - A comparison is a comparator, `=`, `!=` or `≠`, `<`, `<=` or `≤`, `>`, or
+///   `>=` or `≥`, then `cut(preceded(multispace0,
+///   context(REROLL_THRESHOLD_CONTEXT, standard_faces)))`.
+/// - A list is the [keyword] `in`, then `[`, then `separated_list0(comma,
+///   integer)`, then [a closing bracket](close). Its values are literals, and
+///   it may be empty.
+/// - A range is the [keyword] `in`, then `cut(preceded(multispace0,
+///   context(REROLL_RANGE_START_CONTEXT, standard_faces)))`, then
+///   `cut(preceded(multispace0, context(REROLL_RANGE_OPERATOR_CONTEXT,
+///   alt((tag("..="), tag(".."))))))`, then `cut(preceded(multispace0,
+///   context(REROLL_RANGE_END_CONTEXT, standard_faces)))`.
+///
+/// The predicate itself is cut, under [`REROLL_PREDICATE_CONTEXT`], since
+/// nothing else may follow `reroll`. The limit follows; see [`reroll_limit`].
+///
+/// # Parameters
+/// - `clause`: The parts of the clause read so far.
+/// - `after_keyword`: The input after the `reroll`.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn reroll_predicate<'src, R: Recovery<'src>>(
+	clause: Box<RerollClause<'src>>,
+	after_keyword: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let comparator: IResult<Span, Comparison, ParseError> = preceded(
+		multispace0,
+		alt((
+			map(alt((tag("<="), tag("≤"))), |_| Comparison::Le),
+			map(tag("<"), |_| Comparison::Lt),
+			map(alt((tag(">="), tag("≥"))), |_| Comparison::Ge),
+			map(tag(">"), |_| Comparison::Gt),
+			map(alt((tag("!="), tag("≠"))), |_| Comparison::Ne),
+			map(tag("="), |_| Comparison::Eq)
+		))
+	)
+	.parse_complete(after_keyword);
+	if let Ok((after, comparison)) = comparator
+	{
+		let input = skip_whitespace(after);
+		return call_with(
+			stack,
+			Frame::RerollFirst {
+				comparison: Some(comparison),
+				input
+			},
+			Payload::Reroll(clause),
+			Goal::Faces,
+			input
+		);
+	}
+	let within: IResult<Span, Span, ParseError> =
+		preceded(multispace0, keyword("in")).parse_complete(after_keyword);
+	if let Ok((after, _)) = within
+	{
+		let input = skip_whitespace(after);
+		if input.fragment().starts_with('[')
+		{
+			return match reroll_values(input, stack, rec)
+			{
+				Ok((rest, values)) => reroll_limit(
+					clause,
+					Predicate::In(values),
+					rest,
+					stack,
+					rec
+				),
+				Err(e) => fail(e)
+			};
+		}
+		return call_with(
+			stack,
+			Frame::RerollFirst {
+				comparison: None,
+				input
+			},
+			Payload::Reroll(clause),
+			Goal::Faces,
+			input
+		);
+	}
+	// Nothing else may follow `reroll`. The repair supplies the commonest
+	// predicate, `= 1`.
+	let at = skip_whitespace(after_keyword);
+	let e = nom::Err::Failure(ParseError::add_context(
+		at,
+		REROLL_PREDICATE_CONTEXT,
+		ParseError::from_error_kind(at, ErrorKind::Tag)
+	));
+	match rec.repair(Site::Predicate, e, stack)
+	{
+		Ok(at) =>
+		{
+			let position = at.location_offset();
+			let threshold = Expression::Constant(Constant {
+				value: PLACEHOLDER_THRESHOLD,
+				span: SourceSpan {
+					start: position,
+					end: position
+				}
+			});
+			let predicate = Comparison::Eq.predicate(threshold);
+			reroll_limit(clause, predicate, at, stack, rec)
+		},
+		Err(e) => fail(e)
+	}
+}
+
+/// Parse the list of a reroll clause, `[`, then `separated_list0(
+/// preceded(multispace0, char(',')), preceded(multispace0,
+/// context(CONSTANT_CONTEXT, integer)))`, then [a closing bracket](close),
+/// whose absence a repair may supply.
+///
+/// # Parameters
+/// - `input`: The input of the list, which begins with `[`.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The input after the list, and its values.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the list could not be parsed, or repaired.
+fn reroll_values<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> IResult<Span<'src>, Vec<i32>, ParseError<'src>>
+{
+	let opener = input.location_offset();
+	let (after, _) = char('[').parse_complete(input)?;
+	let (after, values) = separated_list0(
+		preceded(multispace0, char(',')),
+		preceded(
+			multispace0,
+			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
+		)
+	)
+	.parse_complete(after)?;
+	let rest = match close(']', CLOSING_BRACKET_CONTEXT, after)
+	{
+		Ok(rest) => rest,
+		Err(e) =>
+		{
+			let site = Site::Closer {
+				opener,
+				closer: ']'
+			};
+			rec.repair(site, e, stack)?
+		}
+	};
+	Ok((rest, values))
+}
+
+/// Resume a reroll clause with the outcome of the threshold of a comparison,
+/// or of the start of a range, after which the range continues with its
+/// operator and its end.
+///
+/// # Parameters
+/// - `clause`: The parts of the clause read so far.
+/// - `comparison`: The comparator, or `None` if the predicate is a range.
+/// - `input`: The input of the threshold or the start.
+/// - `outcome`: The outcome of the threshold or the start.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn resume_reroll_first<'src, R: Recovery<'src>>(
+	mut clause: Box<RerollClause<'src>>,
+	comparison: Option<Comparison>,
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let label = first_context(comparison);
+	let (rest, first) = match outcome
+	{
+		Ok((rest, first)) => (rest, first.into_expression()),
+		Err(e) => return fail(cut_error(with_context(input, label, e)))
+	};
+	if let Some(comparison) = comparison
+	{
+		let predicate = comparison.predicate(first);
+		return reroll_limit(clause, predicate, rest, stack, rec);
+	}
+	let operator: IResult<Span, bool, ParseError> = cut(preceded(
+		multispace0,
+		context(
+			REROLL_RANGE_OPERATOR_CONTEXT,
+			alt((map(tag("..="), |_| true), map(tag(".."), |_| false)))
+		)
+	))
+	.parse_complete(rest);
+	// The repair supplies the inclusive operator, `..=`, since the author of
+	// two endpoints most likely means to include both.
+	let (after, inclusive) = match operator
+	{
+		Ok(parsed) => parsed,
+		Err(e) => match rec.repair(Site::RangeOperator, e, stack)
+		{
+			Ok(at) => (at, true),
+			Err(e) => return fail(e)
+		}
+	};
+	clause.start = Some(first);
+	let input = skip_whitespace(after);
+	call_with(
+		stack,
+		Frame::RerollEnd { inclusive, input },
+		Payload::Reroll(clause),
+		Goal::Faces,
+		input
+	)
+}
+
+/// Answer the context classifier of the first operand of a predicate.
+///
+/// # Parameters
+/// - `comparison`: The comparator, or `None` if the predicate is a range.
+///
+/// # Returns
+/// [`REROLL_THRESHOLD_CONTEXT`] for the threshold of a comparison, or
+/// [`REROLL_RANGE_START_CONTEXT`] for the start of a range.
+const fn first_context(comparison: Option<Comparison>) -> &'static str
+{
+	match comparison
+	{
+		Some(_) => REROLL_THRESHOLD_CONTEXT,
+		None => REROLL_RANGE_START_CONTEXT
+	}
+}
+
+/// Resume a reroll clause with the outcome of the end of a range.
+///
+/// # Parameters
+/// - `clause`: The parts of the clause read so far, among them the start of the
+///   range.
+/// - `inclusive`: Whether the range is inclusive.
+/// - `input`: The input of the end.
+/// - `outcome`: The outcome of the end.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn resume_reroll_end<'src, R: Recovery<'src>>(
+	mut clause: Box<RerollClause<'src>>,
+	inclusive: bool,
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let (rest, end) = match outcome
+	{
+		Ok((rest, end)) => (rest, Box::new(end.into_expression())),
+		Err(e) =>
+		{
+			return fail(cut_error(with_context(
+				input,
+				REROLL_RANGE_END_CONTEXT,
+				e
+			)));
+		}
+	};
+	let start = Box::new(clause.start.take().expect("a range has a start"));
+	let predicate = if inclusive
+	{
+		Predicate::InRangeInclusive { start, end }
+	}
+	else
+	{
+		Predicate::InRange { start, end }
+	};
+	reroll_limit(clause, predicate, rest, stack, rec)
+}
+
+/// Continue a reroll clause after its predicate, by parsing its optional
+/// limit: `opt(alt((unlimited, count)))`, where `unlimited` is
+/// `preceded(multispace0, alt((keyword("unlimited"), tag("∞"))))`, then
+/// [times], and `count` is `preceded(multispace0, context(REROLL_COUNT_CONTEXT,
+/// drop_expression))`, then [times]. A count never begins with `-`, so after a
+/// predicate, a `-` is subtraction, as after a drop clause; see
+/// [`begins_with_minus`].
+///
+/// # Parameters
+/// - `clause`: The parts of the clause read so far.
+/// - `predicate`: The predicate.
+/// - `rest`: The input after the predicate, where the clause ends if it has no
+///   limit.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn reroll_limit<'src, R: Recovery<'src>>(
+	mut clause: Box<RerollClause<'src>>,
+	predicate: Predicate<Box<Expression<'src>>>,
+	rest: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let unlimited: IResult<Span, Span, ParseError> =
+		preceded(multispace0, alt((keyword("unlimited"), tag("∞"))))
+			.parse_complete(rest);
+	if let Ok((after, _)) = unlimited
+	{
+		return match times(after, false, stack, rec)
+		{
+			Ok(after) => finish_reroll(
+				clause.dice,
+				predicate,
+				Some(Limit::Unlimited),
+				after,
+				stack,
+				rec
+			),
+			Err(e) => fail(e)
+		};
+	}
+	let input = skip_whitespace(rest);
+	if begins_with_minus(input)
+	{
+		return finish_reroll(clause.dice, predicate, None, rest, stack, rec);
+	}
+	clause.predicate = Some((predicate, rest));
+	call_with(
+		stack,
+		Frame::RerollCount(input),
+		Payload::Reroll(clause),
+		Goal::Atom,
+		input
+	)
+}
+
+/// Resume a reroll clause with the outcome of the optional count of its limit.
+///
+/// # Parameters
+/// - `clause`: The parts of the clause read so far, among them the predicate.
+/// - `input`: The input of the count.
+/// - `outcome`: The outcome of the count.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn resume_reroll_count<'src, R: Recovery<'src>>(
+	clause: RerollClause<'src>,
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let RerollClause {
+		dice, predicate, ..
+	} = clause;
+	let (predicate, rest) = predicate.expect("a limit follows a predicate");
+	match with_context_on_error(input, REROLL_COUNT_CONTEXT, outcome)
+	{
+		Ok((after, count)) =>
+		{
+			let count = count.into_expression();
+			let singular = matches!(
+				count,
+				Expression::Constant(Constant { value: 1, .. })
+			);
+			match times(after, singular, stack, rec)
+			{
+				Ok(after) => finish_reroll(
+					dice,
+					predicate,
+					Some(Limit::Times(Box::new(count))),
+					after,
+					stack,
+					rec
+				),
+				Err(e) => fail(e)
+			}
+		},
+		// `opt` rewinds after a recoverable error, and discards it.
+		Err(nom::Err::Error(_)) =>
+		{
+			finish_reroll(dice, predicate, None, rest, stack, rec)
+		},
+		Err(e) => fail(e)
+	}
+}
+
+/// Parse the `time` or `times` that follows the count of a limit, or `∞` or
+/// `unlimited`, as `cut(preceded(multispace0, context(REROLL_TIMES_CONTEXT,
+/// alt((keyword("times"), keyword("time"))))))`, whose absence a repair may
+/// supply.
+///
+/// # Parameters
+/// - `input`: The input after the count, `∞`, or `unlimited`.
+/// - `singular`: Whether the count is the constant `1`, after which a repair
+///   supplies `time` rather than `times`.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The input after the `time` or `times`.
+///
+/// # Errors
+/// * [`Failure`](nom::Err::Failure) if it is missing, and not repaired.
+fn times<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	singular: bool,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
+{
+	let parsed: IResult<Span, Span, ParseError> = cut(preceded(
+		multispace0,
+		context(
+			REROLL_TIMES_CONTEXT,
+			alt((keyword("times"), keyword("time")))
+		)
+	))
+	.parse_complete(input);
+	match parsed
+	{
+		Ok((after, _)) => Ok(after),
+		Err(e) => rec.repair(Site::Times { singular }, e, stack)
+	}
+}
+
+/// Finish a reroll clause: as a clause of [`Goal::Dice`] or
+/// [`Goal::PrimaryDice`], whose dice expression it modifies, after which look
+/// for another clause; or as [`Goal::Reroll`].
+///
+/// # Parameters
+/// - `dice`: The dice expression that the clause modifies, or `None` if the
+///   clause is parsed alone, as [`Goal::Reroll`].
+/// - `predicate`: The predicate.
+/// - `limit`: The limit, if any.
+/// - `rest`: The input after the clause.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn finish_reroll<'src, R: Recovery<'src>>(
+	dice: Option<DiceExpression<'src>>,
+	predicate: Predicate<Box<Expression<'src>>>,
+	limit: Option<Limit<Box<Expression<'src>>>>,
+	rest: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let Some(dice) = dice
+	else
+	{
+		return succeed(rest, Value::Reroll { predicate, limit });
+	};
+	let span = SourceSpan {
+		start: dice.span().start,
+		end: rest.location_offset()
+	};
+	let reroll = DiceExpression::Reroll(Reroll {
+		dice: Box::new(dice),
+		predicate,
+		limit,
+		span
+	});
+	dice_continue(reroll, rest, stack, rec)
+}
+
+/// Start [`Goal::Reroll`]: the [keyword] `reroll`, then the predicate and the
+/// limit of a reroll clause, as [`reroll_predicate`] describes.
+///
+/// # Parameters
+/// - `input`: The input of the production.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn start_reroll<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let reroll: IResult<Span, Span, ParseError> =
+		keyword("reroll").parse_complete(input);
+	match reroll
+	{
+		Ok((after_keyword, _)) =>
+		{
+			let clause = RerollClause {
+				dice: None,
+				start: None,
+				predicate: None
+			};
+			reroll_predicate(Box::new(clause), after_keyword, stack, rec)
+		},
+		Err(e) => fail(e)
+	}
 }
 
 /// Resume [`Goal::StandardDice`] with the outcome of the dice count.
@@ -3380,6 +4085,11 @@ pub(crate) const PLACEHOLDER_FACES: i32 = 6;
 /// faces lack their first face.
 pub(crate) const PLACEHOLDER_FACE: i32 = 0;
 
+/// The threshold of the predicate, `=`, that a [repair](Repair::Fix) supplies
+/// wherever a reroll clause lacks its predicate, since a reroll most often
+/// rerolls ones.
+pub(crate) const PLACEHOLDER_THRESHOLD: i32 = 1;
+
 /// The name that a [repair](Repair::Fix) supplies wherever a variable or a
 /// formal parameter lacks its name.
 pub(crate) const PLACEHOLDER_NAME: &str = "x";
@@ -3451,13 +4161,17 @@ pub(crate) enum Repair
 	/// | [`Site::FaceValue`]   | a face, [`PLACEHOLDER_FACE`]              |
 	/// | [`Site::Direction`]   | `lowest` after `drop`, `highest` after `keep` |
 	/// | [`Site::DiceOperator`] | a dice operator and standard faces, [`PLACEHOLDER_FACES`] |
+	/// | [`Site::Predicate`]   | `=` and a threshold, [`PLACEHOLDER_THRESHOLD`] |
+	/// | [`Site::RangeOperator`] | `..=`                                   |
+	/// | [`Site::Times`]       | `time` after the count `1`, and `times` otherwise |
 	/// | [`Site::TrailingInput`] | nothing: the trailing input is discarded |
 	///
 	/// At [`Site::Goal`], the edit must separate the operand from a `-` just
 	/// before it, e.g., by a space: in the source, `-0` is a constant, which a
 	/// production that the parse has already finished might have read. At
-	/// [`Site::Faces`], it must not, since the faces are the constant that
-	/// begins at such a `-`. At [`Site::LeadingComma`], which has no fix, this
+	/// [`Site::Faces`], or at a [`Site::Goal`] of an operand of a reroll, it
+	/// must not, since the faces or the operand are the constant that begins
+	/// at such a `-`. At [`Site::LeadingComma`], which has no fix, this
 	/// is the same as [`Stop`](Repair::Stop).
 	Fix,
 
@@ -3470,8 +4184,9 @@ pub(crate) enum Repair
 	/// the body of a function without formal parameters, if a `,` or `:`
 	/// follows the identifier, the engine parses the function again instead,
 	/// reading it as the first formal parameter, e.g., `x` in `x, y: 1`. At
-	/// [`Site::Faces`], the identifier must begin the faces, e.g., not follow
-	/// a `-`. At [`Site::ParameterName`], the identifier begins after any
+	/// [`Site::Faces`], or at a [`Site::Goal`] of an operand of a reroll, the
+	/// identifier must begin the faces or the operand, e.g., not follow a
+	/// `-`. At [`Site::ParameterName`], the identifier begins after any
 	/// [whitespace between tokens](crate::parser::is_token_space) after the
 	/// comma, and is the name of the next formal parameter, e.g., `y` in `{x},
 	/// y: 1`. Elsewhere, or otherwise, this is the same as
@@ -3561,7 +4276,13 @@ pub(crate) enum Site
 
 		/// The byte offset of the `[` of the range, if the failure lies in
 		/// the end of a range.
-		range: Option<usize>
+		range: Option<usize>,
+
+		/// Whether the failure lies in an operand of the predicate of a
+		/// reroll clause, a threshold or an endpoint, whose literal is signed,
+		/// as that of [standard faces](Goal::Faces) is, so that a `-` just
+		/// before the failure is its sign.
+		operand: bool
 	},
 
 	/// A comma after a formal parameter is not followed by another.
@@ -3619,17 +4340,35 @@ pub(crate) enum Site
 		keep: bool
 	},
 
-	/// A keep clause follows a dice count without a dice operator and faces
-	/// between them, e.g., `3 keep lowest`, so the clause follows no dice
-	/// expression. Only a [recovering](Recovery::ENABLED) parse looks for
-	/// this failure, since the ordinary parse ends the expression at the dice
-	/// count, and fails later, wherever the clause stands, e.g., as trailing
-	/// input, or before a missing `)`. A misplaced drop clause needs no such
-	/// site, since the `d` of `drop` reads as a dice operator, whose faces
-	/// then fail at [`Site::Faces`]. The [position](FailureSite::position) of
-	/// the failure is that of the `keep`. Since the ordinary parse does not
-	/// fail here, [declining](Repair::Stop) the repair does not end recovery.
+	/// A keep or reroll clause follows a dice count without a dice operator
+	/// and faces between them, e.g., `3 keep lowest` or `3 reroll = 1`, so the
+	/// clause follows no dice expression. Only a
+	/// [recovering](Recovery::ENABLED) parse looks for this failure, since the
+	/// ordinary parse ends the expression at the dice count, and fails later,
+	/// wherever the clause stands, e.g., as trailing input, or before a missing
+	/// `)`. A misplaced drop clause needs no such site, since the `d` of `drop`
+	/// reads as a dice operator, whose faces then fail at [`Site::Faces`]. The
+	/// [position](FailureSite::position) of the failure is that of the verb,
+	/// `keep` or `reroll`. Since the ordinary parse does not fail here,
+	/// [declining](Repair::Stop) the repair does not end recovery.
 	DiceOperator,
+
+	/// The predicate of a reroll clause is missing after its `reroll`: neither
+	/// a comparator nor `in` follows it.
+	Predicate,
+
+	/// The range operator, `..` or `..=`, is missing after the start of the
+	/// range of a reroll clause.
+	RangeOperator,
+
+	/// The `time` or `times` is missing after the count of the limit of a
+	/// reroll clause, or after its `∞` or `unlimited`.
+	Times
+	{
+		/// Whether the count is the constant `1`, after which a repair
+		/// supplies `time` rather than `times`.
+		singular: bool
+	},
 
 	/// A complete function is followed by input that is not whitespace.
 	TrailingInput
@@ -3716,9 +4455,12 @@ impl Role
 			| Frame::PrimaryGroup(_)
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
-			| Frame::DropExpression { .. } => Role::Catch,
+			| Frame::DropExpression { .. }
+			| Frame::RerollCount(_) => Role::Catch,
 			Frame::BinaryRight { .. }
 			| Frame::ExponentPower(_)
+			| Frame::RerollFirst { .. }
+			| Frame::RerollEnd { .. }
 			| Frame::GroupExpression { .. }
 			| Frame::BindingExpression { .. }
 			| Frame::RangeStart { .. }
@@ -3992,8 +4734,16 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 			Frame::RangeEnd { start, .. } => Some(*start),
 			_ => None
 		};
+		let operand = matches!(
+			stack[anchor],
+			Frame::RerollFirst { .. } | Frame::RerollEnd { .. }
+		);
 		let site = FailureSite {
-			site: Site::Goal { goal, range },
+			site: Site::Goal {
+				goal,
+				range,
+				operand
+			},
 			error: settle(e.clone(), stack, self.root)
 		};
 		let at = site.position();
@@ -4432,7 +5182,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		let after = rest.fragment().trim_start_matches(is_token_space);
 		if rest.location_offset() != at
 			|| after.starts_with(['d', 'D', '^'])
-			|| begins_verb(after, "keep")
+			|| begins_misplaced_clause(after)
 		{
 			return None;
 		}
@@ -4610,6 +5360,18 @@ fn unwind<'src>(
 		{
 			with_context(*input, kind.count_context(), e)
 		},
+		Frame::RerollFirst { comparison, input } =>
+		{
+			cut_error(with_context(*input, first_context(*comparison), e))
+		},
+		Frame::RerollEnd { input, .. } =>
+		{
+			cut_error(with_context(*input, REROLL_RANGE_END_CONTEXT, e))
+		},
+		Frame::RerollCount(input) =>
+		{
+			with_context(*input, REROLL_COUNT_CONTEXT, e)
+		},
 	}
 }
 
@@ -4678,11 +5440,11 @@ fn literal<'src>(
 
 /// Parse a negative constant, as [`negative_constant`], but read an
 /// [overlaid](Overlay::Constant) constant after the `-`. While recovering,
-/// decline a negative constant that a keep clause follows, as
+/// decline a negative constant that a keep or reroll clause follows, as
 /// [`negative_constant`] declines one that a dice operator follows, so that
-/// the constant is read as a dice count, and the keep clause offers a repair
-/// at [`Site::DiceOperator`], e.g., `-3D6 keep lowest` for `-3 keep lowest`.
-/// The input fails in the ordinary parse anyway, so only the error differs.
+/// the constant is read as a dice count, and the clause offers a repair at
+/// [`Site::DiceOperator`], e.g., `-3D6 keep lowest` for `-3 keep lowest`. The
+/// input fails in the ordinary parse anyway, so only the error differs.
 ///
 /// # Parameters
 /// - `input`: The input.
@@ -4708,7 +5470,9 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 	{
 		Ok((rest, _))
 			if rec.recovering()
-				&& begins_verb(skip_whitespace(rest).fragment(), "keep") =>
+				&& begins_misplaced_clause(
+					skip_whitespace(rest).fragment()
+				) =>
 		{
 			Err(nom::Err::Error(ParseError::from_error_kind(
 				input,
@@ -5117,13 +5881,14 @@ fn skip_whitespace(input: Span<'_>) -> Span<'_>
 }
 
 /// Answer whether the input begins with `-`. After the direction of a drop or
-/// keep clause, this precludes a count, which never begins with `-`, so after
-/// a clause, a `-` is always subtraction: `4D6 drop lowest -1` is `(4D6 drop
-/// lowest) - 1`. A count of zero or less drops nothing, or keeps nothing, so
-/// reading `-1` as the count would quietly discard the clause, or every die,
-/// which is never what the author meant. A negative count must be grouped, as
-/// in `4D6 drop lowest (-1)`, or bound to a variable. The [constant] of a count
-/// is unsigned anyway, but the count is optional, so the clause ends before the
+/// keep clause, or the predicate of a reroll clause, this precludes a count,
+/// which never begins with `-`, so after a clause, a `-` is always
+/// subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) - 1`. A count of
+/// zero or less drops nothing, keeps nothing, or rerolls nothing, so reading
+/// `-1` as the count would quietly discard the clause, or every die, which is
+/// never what the author meant. A negative count must be grouped, as in `4D6
+/// drop lowest (-1)`, or bound to a variable. The [constant] of a count is
+/// unsigned anyway, but the count is optional, so the clause ends before the
 /// `-`, rather than the engine trying, and perhaps [repairing](Repair), a count
 /// there.
 ///

@@ -121,6 +121,28 @@ fn test_parse_deep_keep_expression() { parse_deep(Nesting::KeepExpression) }
 #[ignore = "stress: run with just stress"]
 fn test_parse_deep_mixed_clauses() { parse_deep(Nesting::MixedClauses) }
 
+/// Ensure that a deep chain of reroll thresholds parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_reroll_threshold() { parse_deep(Nesting::RerollThreshold) }
+
+/// Ensure that a deep chain of the ends of reroll ranges parses on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_reroll_range_end() { parse_deep(Nesting::RerollRangeEnd) }
+
+/// Ensure that a deep chain of reroll counts parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_reroll_count() { parse_deep(Nesting::RerollCount) }
+
+/// Ensure that a deep stack of reroll clauses of every form, among drops,
+/// parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_reroll_clauses() { parse_deep(Nesting::RerollClauses) }
+
 /// Ensure that a deep mixture of every nesting construct parses on a small
 /// stack.
 #[test]

@@ -57,6 +57,7 @@ pub(super) const TOKENS: &[&str] = &[
 	"{weapon: 2/3}",
 	"{1d6 drop lowest}",
 	"{2d20 keep highest}",
+	"{3d6 reroll ≤ 2}",
 	"{Ω-(1)}",
 	"{a\u{202E}b}",
 	"{a}@(",
@@ -67,7 +68,14 @@ pub(super) const TOKENS: &[&str] = &[
 	"drop",
 	"keep",
 	"lowest",
-	"highest"
+	"highest",
+	"reroll",
+	"=",
+	"≤",
+	"in",
+	"..=",
+	"times",
+	"∞"
 ];
 
 /// The number of random strings of [tokens](TOKENS) in the corpus.

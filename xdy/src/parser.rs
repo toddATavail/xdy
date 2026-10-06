@@ -21,13 +21,19 @@
 //! variable       ::= name
 //! binding        ::= name '@' '(' expression ')'
 //! range          ::= '[' expression ':' expression ']'
-//! dice           ::= base_dice (drop_clause | keep_clause)*
+//! dice           ::= base_dice (drop_clause | keep_clause | reroll_clause)*
 //! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
 //! dice_count     ::= CONSTANT | variable | binding | group
 //! standard_faces ::= INTEGER | variable | binding | group
 //! custom_faces   ::= '[' INTEGER (',' INTEGER)* ']'
 //! drop_clause    ::= 'drop' ('lowest' | 'highest') drop_expression?
 //! keep_clause    ::= 'keep' ('lowest' | 'highest') drop_expression?
+//! reroll_clause  ::= 'reroll' predicate limit?
+//! predicate      ::= comparator standard_faces
+//!                  | 'in' '[' (INTEGER (',' INTEGER)*)? ']'
+//!                  | 'in' standard_faces ('..' | '..=') standard_faces
+//! comparator     ::= '=' | '!=' | '≠' | '<' | '<=' | '≤' | '>' | '>=' | '≥'
+//! limit          ::= (drop_expression | 'unlimited' | '∞') ('time' | 'times')
 //! drop_expression::= CONSTANT | variable | binding | group
 //! CONSTANT       ::= DIGIT+
 //! INTEGER        ::= '-'? DIGIT+
@@ -46,22 +52,38 @@
 //! and `1D[-1, 0, 1]`, where nothing but a face may follow. Each combinator
 //! accepts just what its rule does, so [`constant`], [`primary`],
 //! [`dice_count`], and [`dice`] reject `-3`, while [`integer`] and
-//! [`standard_faces`] accept it. In particular, a drop expression, which is
-//! the count of a drop or keep clause, never begins with `-`, so after a
-//! clause, a `-` is subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) -
-//! 1`. A count of zero or less drops nothing, or keeps nothing, so no one
-//! means to write a negative count, but one may be grouped, as in `4D6 drop
-//! lowest (-1)`.
+//! [`standard_faces`] accept it, as do the thresholds and endpoints of the
+//! predicates of rerolls, since custom dice may have negative faces, e.g.,
+//! `3D[-2, -1, 0, 1] reroll in -2..0`. In particular, a drop expression, which
+//! is the count of a drop or keep clause, or of the limit of a reroll clause,
+//! never begins with `-`, so after a clause, a `-` is subtraction: `4D6 drop
+//! lowest -1` is `(4D6 drop lowest) - 1`, and `4D6 reroll = 1 -1` is `(4D6
+//! reroll = 1) - 1`. A count of zero or less drops nothing, keeps nothing, or
+//! rerolls nothing, so no one means to write a negative count, but one may be
+//! grouped, as in `4D6 drop lowest (-1)`.
 //!
 //! The clauses of a dice expression apply in the order written. A keep counts
 //! from the dice that the clauses before it left kept, so `4D6 drop lowest
-//! keep highest 2` keeps the highest 2 of the 3 dice that the drop left.
+//! keep highest 2` keeps the highest 2 of the 3 dice that the drop left, and a
+//! reroll rerolls only those dice, so `4D6 drop lowest reroll = 1` rerolls the
+//! ones among the 3 dice that the drop left.
+//!
+//! A reroll clause rerolls each die that matches its predicate once, or as many
+//! times as its limit says: `n time` or `n times`, which read alike, or `∞
+//! times` or `unlimited times`, until the die no longer matches. Its threshold
+//! or the endpoints of its range are each evaluated once, before any reroll,
+//! and a list holds literals only. A range `start..end` is half-open, and
+//! `start..=end` inclusive; either is empty if its end precedes its start. The
+//! comparators `!=`, `<=`, and `>=` may also be written `≠`, `≤`, and `≥`.
 //!
 //! Tokens may be separated by spaces, horizontal tabs, line feeds, and carriage
 //! returns, but by no other whitespace; the [doctor](crate::diagnostics)
 //! replaces stray whitespace between tokens, such as U+00A0 NO-BREAK SPACE,
-//! with a space. The keywords `drop`, `keep`, `lowest`, and `highest` are
-//! lowercase, but the dice operator may be `d` or `D`.
+//! with a space. The keywords `drop`, `keep`, `lowest`, `highest`, `reroll`,
+//! `in`, `time`, `times`, and `unlimited` are lowercase, but the dice operator
+//! may be `d` or `D`. The keywords of a reroll clause are contextual: each must
+//! not run into a word after it, so `rerolled` is not `reroll` and `ed`, but
+//! it may abut a digit or a symbol, as in `reroll=1` or `in1..3`.
 //!
 //! Every name is braced, whether it names a parameter, a variable, or a
 //! binding, so no name can run into the text around it. A lone braced name
@@ -100,11 +122,13 @@ mod engine;
 mod errors;
 
 pub use combinators::*;
-pub(crate) use engine::{FailureSite, Recovery, Repair, Site};
+pub(crate) use engine::{
+	FailureSite, PLACEHOLDER_OPERAND, PLACEHOLDER_THRESHOLD, Recovery, Repair,
+	Site
+};
 #[cfg(test)]
 pub(crate) use engine::{
-	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, PLACEHOLDER_OPERAND,
-	steps
+	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, steps
 };
 pub use errors::*;
 

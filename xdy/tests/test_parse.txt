@@ -537,3 +537,96 @@
 2D20 keep highest + 5
 =
 (function [] (add (keep-highest (standard-dice 2 20)) 5))
+
+3D6 reroll = 1
+=
+(function [] (reroll (standard-dice 3 6) (eq 1)))
+
+3D6 reroll != 1 2 times
+=
+(function [] (reroll (standard-dice 3 6) (ne 1) (times 2)))
+
+3D6 reroll ≠ 6 1 time
+=
+(function [] (reroll (standard-dice 3 6) (ne 6) (times 1)))
+
+3D6 reroll < 3
+=
+(function [] (reroll (standard-dice 3 6) (lt 3)))
+
+3D6 reroll <= 2 ∞ times
+=
+(function [] (reroll (standard-dice 3 6) (le 2) (unlimited)))
+
+3D6 reroll > 5 unlimited times
+=
+(function [] (reroll (standard-dice 3 6) (gt 5) (unlimited)))
+
+3D6 reroll ≥ 5 3 times
+=
+(function [] (reroll (standard-dice 3 6) (ge 5) (times 3)))
+
+3D[-1, 0, 1] reroll in [-1, 1]
+=
+(function [] (reroll (custom-dice 3 [-1 0 1]) (in [-1 1])))
+
+3D6 reroll in [] ∞ times
+=
+(function [] (reroll (standard-dice 3 6) (in []) (unlimited)))
+
+3D[-3, -2, -1, 0] reroll in -3..-1
+=
+(function [] (reroll (custom-dice 3 [-3 -2 -1 0]) (in-range -3 -1)))
+
+3D6 reroll in 1..=2 2 times
+=
+(function [] (reroll (standard-dice 3 6) (in-range-inclusive 1 2) (times 2)))
+
+{x}: 3D6 reroll in 1..={x} ∞ times
+=
+(function [{x}]
+	(reroll (standard-dice 3 6) (in-range-inclusive 1 {x}) (unlimited)))
+
+{n}: 4D6 reroll in ({n} - 1)..=({n} + 1) {n} times
+=
+(function [{n}]
+	(reroll
+		(standard-dice 4 6)
+		(in-range-inclusive (sub {n} 1) (add {n} 1))
+		(times {n})))
+
+3D6 reroll = (1D4) 1 time
+=
+(function [] (reroll (standard-dice 3 6) (eq (standard-dice 1 4)) (times 1)))
+
+3D6 reroll ≤ {a}@(2) + {a}
+=
+(function [] (add (reroll (standard-dice 3 6) (le (binding {a} 2))) {a}))
+
+4D6 drop lowest reroll = 1 keep highest 2
+=
+(function [] (keep-highest (reroll (drop-lowest (standard-dice 4 6)) (eq 1)) 2))
+
+4D6 reroll = 1 drop lowest
+=
+(function [] (drop-lowest (reroll (standard-dice 4 6) (eq 1))))
+
+4D6 keep highest 3 reroll < 3 ∞ times
+=
+(function [] (reroll (keep-highest (standard-dice 4 6) 3) (lt 3) (unlimited)))
+
+2D6 reroll = 1 reroll = 2
+=
+(function [] (reroll (reroll (standard-dice 2 6) (eq 1)) (eq 2)))
+
+3D1 reroll = 1 ∞ times
+=
+(function [] (reroll (standard-dice 3 1) (eq 1) (unlimited)))
+
+3D6 reroll = 1 0 times
+=
+(function [] (reroll (standard-dice 3 6) (eq 1) (times 0)))
+
+3D6 reroll = 1 - 1
+=
+(function [] (sub (reroll (standard-dice 3 6) (eq 1)) 1))

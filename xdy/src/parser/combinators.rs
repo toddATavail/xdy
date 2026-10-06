@@ -34,7 +34,7 @@ use nom_locate::LocatedSpan;
 use crate::{
 	ast::{
 		Binding, Constant, CustomDice, DiceExpression, Expression, Function,
-		Group, Parameter, Range, StandardDice, Variable
+		Group, Limit, Parameter, Predicate, Range, StandardDice, Variable
 	},
 	parser::NomErrorKind,
 	span::SourceSpan
@@ -675,6 +675,52 @@ pub fn keep_highest(
 	run(Goal::KeepHighest, input).map(|(rest, value)| (rest, value.into_drop()))
 }
 
+/// The predicate and the optional limit of a reroll clause, as [`reroll`]
+/// parses them.
+pub type RerollParts<'src> = (
+	Predicate<Box<Expression<'src>>>,
+	Option<Limit<Box<Expression<'src>>>>
+);
+
+/// Parse a reroll clause, without leading whitespace: `reroll`, then a
+/// predicate, then an optional limit. The predicate is a comparator (`=`,
+/// `!=` or `≠`, `<`, `<=` or `≤`, `>`, or `>=` or `≥`) and a threshold, `in`
+/// and a list of literals, which may be empty, or `in` and a half-open range,
+/// `start..end`, or an inclusive range, `start..=end`. The threshold and the
+/// endpoints are [standard faces](standard_faces), so they may be negative
+/// literals. The limit is a [drop expression](drop_expression), the count,
+/// then `time` or `times`, or `∞` or `unlimited`, then `time` or `times`; a
+/// clause without one rerolls each die at most once.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed predicate, and the limit, or `None` if the clause has none.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+///
+/// # Examples
+/// ```rust
+/// use xdy::{
+///     ast::{Limit, Predicate},
+///     parser::{Span, reroll}
+/// };
+///
+/// let (rest, (predicate, limit)) =
+///     reroll(Span::new("reroll in 1..=2 ∞ times")).unwrap();
+/// assert!(rest.fragment().is_empty());
+/// assert!(matches!(predicate, Predicate::InRangeInclusive { .. }));
+/// assert_eq!(limit, Some(Limit::Unlimited));
+/// ```
+pub fn reroll(
+	input: Span<'_>
+) -> IResult<Span<'_>, RerollParts<'_>, ParseError<'_>>
+{
+	run(Goal::Reroll, input).map(|(rest, value)| (rest, value.into_reroll()))
+}
+
 /// Parse a drop expression, without leading whitespace: the count of a drop
 /// or keep clause. A drop expression never begins with `-`, so a negative
 /// count must be grouped, as in `(-1)`.
@@ -1008,6 +1054,67 @@ pub(crate) fn begins_verb(text: &str, verb: &str) -> bool
 				.next()
 				.is_none_or(|c| c.is_whitespace() || !is_bare_word_continue(c))
 	})
+}
+
+/// Answer whether text begins with a keyword, e.g., `reroll`, `in`, `time`,
+/// or `unlimited`, rather than with a word that begins with the keyword, e.g.,
+/// `rerolled` or `inside`: the keyword must not be followed by a character
+/// that can [start](is_bare_word_start) a [bare word](bare_word). It may be
+/// followed by a digit, e.g., `in1..3`.
+///
+/// # Parameters
+/// - `text`: The text.
+/// - `word`: The keyword.
+///
+/// # Returns
+/// `true` if `text` begins with the keyword, `false` otherwise.
+pub(crate) fn begins_keyword(text: &str, word: &str) -> bool
+{
+	text.strip_prefix(word).is_some_and(|after| {
+		after.chars().next().is_none_or(|c| !is_bare_word_start(c))
+	})
+}
+
+/// Answer a parser of a keyword, without leading whitespace, as
+/// [`begins_keyword`] recognizes it.
+///
+/// # Parameters
+/// - `word`: The keyword.
+///
+/// # Returns
+/// The parser, which answers the keyword, and fails recoverably if the input
+/// does not begin with it.
+pub(crate) fn keyword<'src>(
+	word: &'static str
+) -> impl FnMut(Span<'src>) -> IResult<Span<'src>, Span<'src>, ParseError<'src>>
+{
+	move |input: Span<'src>| {
+		if begins_keyword(input.fragment(), word)
+		{
+			Ok(input.take_split(word.len()))
+		}
+		else
+		{
+			Err(nom::Err::Error(ParseError::from_error_kind(
+				input,
+				ErrorKind::Tag
+			)))
+		}
+	}
+}
+
+/// Answer whether text begins with the verb of a clause that cannot follow a
+/// dice count, `keep` or `reroll`, as [`begins_verb`] recognizes it. Unlike
+/// the `d` of `drop`, neither reads as a dice operator.
+///
+/// # Parameters
+/// - `text`: The text.
+///
+/// # Returns
+/// `true` if `text` begins with `keep` or `reroll`, `false` otherwise.
+pub(crate) fn begins_misplaced_clause(text: &str) -> bool
+{
+	begins_verb(text, "keep") || begins_verb(text, "reroll")
 }
 
 /// The characters before which the name of an unclosed variable may

@@ -116,6 +116,28 @@ fn test_read_deep_keep_expression() { read_deep(Nesting::KeepExpression) }
 #[ignore = "stress: run with just stress"]
 fn test_read_deep_mixed_clauses() { read_deep(Nesting::MixedClauses) }
 
+/// Ensure that a deep chain of reroll thresholds reads on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_reroll_threshold() { read_deep(Nesting::RerollThreshold) }
+
+/// Ensure that a deep chain of the ends of reroll ranges reads on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_reroll_range_end() { read_deep(Nesting::RerollRangeEnd) }
+
+/// Ensure that a deep chain of reroll counts reads on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_reroll_count() { read_deep(Nesting::RerollCount) }
+
+/// Ensure that a deep stack of reroll clauses of every form, among drops, reads
+/// on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_reroll_clauses() { read_deep(Nesting::RerollClauses) }
+
 /// Ensure that a deep mixture of every nesting construct reads on a small
 /// stack.
 #[test]

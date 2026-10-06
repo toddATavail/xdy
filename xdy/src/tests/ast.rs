@@ -226,6 +226,12 @@ fn test_equality_distinguishes()
 			"4D6 drop lowest keep highest 2",
 			"4D6 keep highest 2 drop lowest"
 		),
+		("4D6 reroll = 1", "4D6 reroll ≠ 1"),
+		("4D6 reroll = 1", "4D6 reroll = 1 1 time"),
+		("4D6 reroll = 1 2 times", "4D6 reroll = 1 ∞ times"),
+		("4D6 reroll in [1]", "4D6 reroll in [1, 2]"),
+		("4D6 reroll in 1..2", "4D6 reroll in 1..=2"),
+		("4D6 reroll = 1 drop lowest", "4D6 drop lowest reroll = 1"),
 		("{x}: {x}", "{y}: {y}"),
 		("-(1)", "-(2)")
 	];
@@ -338,9 +344,9 @@ fn test_rerolls_are_distinct()
 /// predicate and limit: `≠`, `≤`, and `≥` for their comparators, `time` for a
 /// literal count of one only, `∞` for an unlimited limit, and a negative
 /// constant count grouped, as for drops, though a negative threshold or
-/// endpoint is not; chained with drops and keeps in either order; and that the
-/// S-expressions of their trees, on one line or wrapped onto many, read back
-/// to the same trees.
+/// endpoint is not; chained with drops and keeps in either order; that the
+/// renderings parse back to the same trees; and that the S-expressions of the
+/// trees, on one line or wrapped onto many, read back to the same trees.
 #[test]
 fn test_display_reroll_clauses()
 {
@@ -409,6 +415,13 @@ fn test_display_reroll_clauses()
 		let options =
 			SExpressibleOptions::new(0, 4, usize::MAX).with_groups(true);
 		assert_eq!(function.to_s_expr(options), s_expr);
+		// The rendering parses back to the same tree, whose negative constant
+		// count is grouped, so compare without groups.
+		let reparsed = Parser::parse(expected).unwrap();
+		assert_eq!(
+			reparsed.to_s_expr(SExpressibleOptions::default()),
+			function.to_s_expr(SExpressibleOptions::default())
+		);
 		for soft_limit in [0, 20, 40]
 		{
 			let options =
@@ -501,7 +514,8 @@ fn test_display_groups_negative_drop_count()
 fn test_hash_agrees_with_equality()
 {
 	let source = "{x}: 8D8 drop lowest (2) keep highest 5 drop highest \
-	              {a}@({x}) keep lowest + [1:6] ^ -(3)";
+	              {a}@({x}) keep lowest reroll in -1..={a} {a} times + \
+	              [1:6] ^ -(3)";
 	let first = Parser::parse(source).unwrap();
 	let second = Parser::parse(source).unwrap();
 	assert!(first == second);
@@ -647,6 +661,30 @@ fn test_deep_keep_expression()
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_deep_mixed_clauses() { exercise_on_small_stack(Nesting::MixedClauses) }
+
+/// Ensure that a deep chain of reroll thresholds survives every trait on a
+/// small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_reroll_threshold()
+{
+	exercise_on_small_stack(Nesting::RerollThreshold)
+}
+
+/// Ensure that a deep chain of the ends of reroll ranges survives every trait
+/// on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_reroll_range_end()
+{
+	exercise_on_small_stack(Nesting::RerollRangeEnd)
+}
+
+/// Ensure that a deep chain of reroll counts survives every trait on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_reroll_count() { exercise_on_small_stack(Nesting::RerollCount) }
 
 /// Ensure that a deep stack of reroll clauses, of every form, among drops,
 /// survives every trait on a small stack.
@@ -876,6 +914,15 @@ pub(super) enum Nesting
 	/// kind](mixed_clauses) whose leaf count is `e`.
 	MixedClauses,
 
+	/// `1D6 reroll ≤ (e)`.
+	RerollThreshold,
+
+	/// `1D6 reroll in 1..(e)`.
+	RerollRangeEnd,
+
+	/// `1D6 reroll = 1 (e) times`.
+	RerollCount,
+
 	/// `1D6 drop lowest reroll in (e)..=6 ∞ times`: a reroll clause atop a
 	/// drop clause. Nested alone, this produces a single chain of [reroll
 	/// clauses of every form](reroll_clauses), among drops, whose leaf count is
@@ -889,7 +936,7 @@ pub(super) enum Nesting
 impl Nesting
 {
 	/// The constructs through which [`Mixed`](Self::Mixed) rotates.
-	pub(super) const ROTATION: [Nesting; 18] = [
+	pub(super) const ROTATION: [Nesting; 22] = [
 		Nesting::Group,
 		Nesting::Binding,
 		Nesting::RangeStart,
@@ -907,7 +954,11 @@ impl Nesting
 		Nesting::DropExpression,
 		Nesting::DropClauses,
 		Nesting::KeepExpression,
-		Nesting::MixedClauses
+		Nesting::MixedClauses,
+		Nesting::RerollThreshold,
+		Nesting::RerollRangeEnd,
+		Nesting::RerollCount,
+		Nesting::RerollClauses
 	];
 
 	/// Answer whether nesting this way introduces [bindings](Binding). Every
@@ -1080,6 +1131,9 @@ pub(super) fn nest_parsable(
 			| Nesting::DropClauses
 			| Nesting::KeepExpression
 			| Nesting::MixedClauses
+			| Nesting::RerollThreshold
+			| Nesting::RerollRangeEnd
+			| Nesting::RerollCount
 			| Nesting::RerollClauses => !atomic,
 			Nesting::Negation => matches!(expression, Expression::Constant(_)),
 			Nesting::Multiplication | Nesting::Division | Nesting::Modulo =>
@@ -1266,6 +1320,36 @@ fn wrap(nesting: Nesting, inner: Expression<'static>) -> Expression<'static>
 					span
 				})),
 				keep: None,
+				span
+			}))
+		},
+		Nesting::RerollThreshold =>
+		{
+			Expression::Dice(DiceExpression::Reroll(Reroll {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::Le(inner),
+				limit: None,
+				span
+			}))
+		},
+		Nesting::RerollRangeEnd =>
+		{
+			Expression::Dice(DiceExpression::Reroll(Reroll {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::InRange {
+					start: Box::new(constant(1)),
+					end: inner
+				},
+				limit: None,
+				span
+			}))
+		},
+		Nesting::RerollCount =>
+		{
+			Expression::Dice(DiceExpression::Reroll(Reroll {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::Eq(Box::new(constant(1))),
+				limit: Some(Limit::Times(inner)),
 				span
 			}))
 		},

@@ -3521,3 +3521,109 @@ value ∈ [2, 8], count = 256, dice = 4
 =
 externs: k=5
 value ∈ [4, 16], count = 256, dice = 4
+
+1D6 reroll = 1
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+1D6 reroll = 1 ∞ times
+=
+value ∈ [2, 6], count = 30, dice = 18446744073709551615
+
+1D6 reroll < 3 2 times
+=
+value ∈ [1, 6], count = 216, dice = 3
+
+1D6 reroll ≠ 6 1 time
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+1D6 reroll ≥ 5 ∞ times
+=
+value ∈ [1, 4], count = 24, dice = 18446744073709551615
+
+1D6 reroll > 4
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+1D6 reroll <= 2 unlimited times
+=
+value ∈ [3, 6], count = 24, dice = 18446744073709551615
+
+1D[-1, 0, 1] reroll in [-1, 1]
+=
+value ∈ [-1, 1], count = 9, dice = 2
+
+1D[-2, -1, 0, 1] reroll in -2..0 ∞ times
+=
+value ∈ [0, 1], count = 8, dice = 18446744073709551615
+
+1D6 reroll in 2..=5
+=
+value ∈ [1, 6], count = 36, dice = 2
+
+1D6 reroll in [] ∞ times
+=
+value ∈ [1, 6], count = 6, dice = 1
+
+2D1 reroll = 1 ∞ times
+=
+value ∈ [0, 0], count = 1, dice = 2
+
+2D6 reroll = 1
+=
+value ∈ [2, 12], count = 1296, dice = 4
+
+3D4 reroll = 1 drop lowest
+=
+value ∈ [2, 8], count = 4096, dice = 6
+
+3D4 drop lowest reroll = 1
+=
+value ∈ [2, 8], count = 1024, dice = 5
+
+3D4 keep highest 2 reroll < 3 ∞ times
+=
+value ∈ [6, 8], count = 256, dice = 18446744073709551615
+
+{x}: 2D6 reroll ≤ {x}
+=
+args: 1
+value ∈ [2, 12], count = 1296, dice = 4
+=
+args: 3
+value ∈ [2, 12], count = 1296, dice = 4
+=
+args: 6
+value ∈ [2, 12], count = 1296, dice = 4
+
+1D6 reroll = (1D2)
+=
+value ∈ [1, 6], count = None, dice = 3
+
+{n}: 1D6 reroll = 1 {n} times
+=
+args: 0
+value ∈ [1, 6], count = 6, dice = 1
+=
+args: 2
+value ∈ [1, 6], count = 216, dice = 3
+=
+args: -1
+value ∈ [1, 6], count = 6, dice = 1
+
+1D6 reroll in (1D2)..=(1D3)
+=
+value ∈ [1, 6], count = None, dice = 4
+
+1D6 reroll = 1 reroll = 2
+=
+value ∈ [1, 6], count = 216, dice = 3
+
+{x}: 1D[-3, -2, -1, 0, 1] reroll in -3..={x} ∞ times
+=
+args: -1
+value ∈ [0, 1], count = 10, dice = 18446744073709551615
+=
+args: 1
+value ∈ [0, 0], count = 5, dice = 1
