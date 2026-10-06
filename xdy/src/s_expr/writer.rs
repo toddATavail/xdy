@@ -2,7 +2,7 @@
 //!
 //! Herein is the engine behind the [`SExpressible`] implementations of the AST.
 //! Each AST type describes its S-expression form as a [`Shape`] — a leaf, a
-//! keyword form of one or two subexpressions, a binding, or a function —
+//! keyword form of up to three parts, a binding, or a function —
 //! through its [`Shaped`] implementation, which is the only statement of that
 //! form. The engine walks the shapes with explicit stacks, so its stack depth
 //! is constant however deep the tree.
@@ -29,8 +29,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
-		Range, StandardDice, Sub, Variable
+		Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
+		Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
 	},
 	span::SourceSpan
 };
@@ -50,8 +50,10 @@ pub(super) enum Shape<'a>
 	/// A variable reference, which cannot be split.
 	Variable(&'a Variable<'a>),
 
-	/// `(keyword child)`, preceded by the span prefix of `span`.
-	Pair
+	/// `(keyword part…)`, preceded by the span prefix of `span`, unless the
+	/// span is [synthetic](SourceSpan::SYNTHETIC), as it is for the predicate
+	/// and the limit of a reroll, which are not AST nodes.
+	Form
 	{
 		/// The span of the node.
 		span: SourceSpan,
@@ -59,24 +61,9 @@ pub(super) enum Shape<'a>
 		/// The keyword.
 		keyword: &'static str,
 
-		/// The subexpression.
-		child: Child<'a>
-	},
-
-	/// `(keyword first second)`, preceded by the span prefix of `span`.
-	Triple
-	{
-		/// The span of the node.
-		span: SourceSpan,
-
-		/// The keyword.
-		keyword: &'static str,
-
-		/// The first subexpression.
-		first: Child<'a>,
-
-		/// The second part: a subexpression, or the faces of a custom die.
-		second: Part<'a>
+		/// The parts, of which there are at most three. Every absent part
+		/// follows every present one.
+		parts: [Option<Part<'a>>; 3]
 	},
 
 	/// `(binding name expression)`, preceded by the span prefix of `span`, with
@@ -121,17 +108,23 @@ pub(super) enum Child<'a>
 	Expression(&'a Expression<'a>),
 
 	/// A dice expression.
-	Dice(&'a DiceExpression<'a>)
+	Dice(&'a DiceExpression<'a>),
+
+	/// The predicate of a reroll.
+	Predicate(&'a Predicate<Box<Expression<'a>>>),
+
+	/// The limit of a reroll.
+	Limit(&'a Limit<Box<Expression<'a>>>)
 }
 
-/// The second part of a [triple](Shape::Triple).
+/// A part of a [form](Shape::Form).
 #[derive(Copy, Clone)]
 pub(super) enum Part<'a>
 {
 	/// A subexpression.
 	Child(Child<'a>),
 
-	/// The faces of a custom die.
+	/// The faces of a custom die, or the values of a list predicate.
 	Faces(&'a [i32])
 }
 
@@ -164,7 +157,9 @@ impl<'a> Child<'a>
 		let shape = match self
 		{
 			Child::Expression(expression) => expression.shape(options),
-			Child::Dice(dice) => dice.shape(options)
+			Child::Dice(dice) => dice.shape(options),
+			Child::Predicate(predicate) => predicate_shape(predicate),
+			Child::Limit(limit) => limit_shape(limit)
 		};
 		resolve(shape, options)
 	}
@@ -207,29 +202,26 @@ impl<'a> Shape<'a>
 		{
 			Shape::Constant(constant) => constant.size_s_expr(options),
 			Shape::Variable(variable) => variable.size_s_expr(options),
-			// Account for two parentheses, the keyword, and one interposing
-			// space.
-			Shape::Pair { span, keyword, .. } =>
-			{
-				span_prefix_size(span, options) + 3 + keyword.len()
-			},
-			// Account for two parentheses, the keyword, two interposing
-			// spaces, and the faces of a custom die.
-			Shape::Triple {
+			// Account for two parentheses, the keyword, an interposing space
+			// before each part, and any faces.
+			Shape::Form {
 				span,
 				keyword,
-				second,
-				..
+				parts
 			} =>
 			{
 				span_prefix_size(span, options)
-					+ 4
+					+ 2
 					+ keyword.len()
-					+ match second
-					{
-						Part::Child(_) => 0,
-						Part::Faces(faces) => faces.size_s_expr(options)
-					}
+					+ parts
+						.iter()
+						.flatten()
+						.map(|part| match part
+						{
+							Part::Child(_) => 1,
+							Part::Faces(faces) => 1 + faces.size_s_expr(options)
+						})
+						.sum::<usize>()
 			},
 			// Account for two parentheses, the keyword `binding`, two
 			// interposing spaces, and the bound name with its span prefix.
@@ -267,32 +259,39 @@ impl<'a> Shape<'a>
 	/// Answer the subexpressions of the form, in order.
 	///
 	/// # Returns
-	/// The subexpressions, of which there are at most two.
-	fn children(&self) -> [Option<Child<'a>>; 2]
+	/// The subexpressions, of which there are at most three. Every absent
+	/// subexpression follows every present one.
+	fn children(&self) -> [Option<Child<'a>>; 3]
 	{
 		match *self
 		{
-			Shape::Constant(_) | Shape::Variable(_) => [None, None],
-			Shape::Pair { child, .. } => [Some(child), None],
-			Shape::Triple { first, second, .. } => [
-				Some(first),
-				match second
+			Shape::Constant(_) | Shape::Variable(_) => [None, None, None],
+			Shape::Form { parts, .. } =>
+			{
+				let mut children = [None; 3];
+				for (slot, child) in children.iter_mut().zip(
+					parts.into_iter().flatten().filter_map(|part| match part
+					{
+						Part::Child(child) => Some(child),
+						Part::Faces(_) => None
+					})
+				)
 				{
-					Part::Child(child) => Some(child),
-					Part::Faces(_) => None
+					*slot = Some(child);
 				}
-			],
+				children
+			},
 			Shape::Binding { expression, .. } =>
 			{
-				[Some(Child::Expression(expression)), None]
+				[Some(Child::Expression(expression)), None, None]
 			},
 			Shape::Function { body, .. } =>
 			{
-				[Some(Child::Expression(body)), None]
+				[Some(Child::Expression(body)), None, None]
 			},
 			Shape::Transparent(expression) =>
 			{
-				[Some(Child::Expression(expression)), None]
+				[Some(Child::Expression(expression)), None, None]
 			},
 		}
 	}
@@ -381,8 +380,7 @@ fn sizes(root: Shape<'_>, options: SExpressibleOptions) -> Vec<usize>
 				tasks.push(SizeTask::Exit { index, parent });
 				// Schedule the subexpressions in reverse, so that they are
 				// entered, and therefore indexed, in order.
-				let [first, second] = shape.children();
-				for child in [second, first].into_iter().flatten()
+				for child in shape.children().into_iter().rev().flatten()
 				{
 					tasks.push(SizeTask::Enter {
 						shape: child.shape(options),
@@ -599,99 +597,58 @@ impl<'a> Writer<'a, '_>
 			{
 				variable.write_s_expr(self.f, remaining_space, options)
 			},
-			Shape::Pair {
+			Shape::Form {
 				span,
 				keyword,
-				child
+				parts
 			} =>
 			{
 				let (remaining_space, size) =
 					self.begin_form(span, keyword, remaining_space, size)?;
 				// We need enough space for ourselves plus the trailing
 				// parentheses of enclosing expressions, of which there are as
-				// many as the indentation level.
+				// many as the indentation level. If the whole form fits, then
+				// use an effectively infinite value for the remaining space of
+				// its parts. Each part follows a separator: a space if the form
+				// fits, or else a line break.
 				let (remaining_space, indent) =
 					match layout(remaining_space, size, options)
 					{
-						Layout::Inline =>
-						{
-							self.f.write_str(" ")?;
-							(usize::MAX, indent)
-						},
+						Layout::Inline => (usize::MAX, None),
 						Layout::Wrapped(options) =>
 						{
-							write_newline(self.f, options.indent)?;
-							(options.available_space(), options.indent)
-						}
-					};
-				self.schedule(
-					[
-						Item::Child {
-							child,
-							remaining_space,
-							indent
+							(options.available_space(), Some(options.indent))
 						},
-						Item::Text(")")
-					]
-					.into_iter()
-				);
-				Ok(())
-			},
-			Shape::Triple {
-				span,
-				keyword,
-				first,
-				second
-			} =>
-			{
-				let (remaining_space, size) =
-					self.begin_form(span, keyword, remaining_space, size)?;
-				let (remaining_space, indent, separator) =
-					match layout(remaining_space, size, options)
-					{
-						Layout::Inline =>
-						{
-							// We know that the whole expression fits, so use an
-							// effectively infinite value for the remaining
-							// space of the subexpressions.
-							self.f.write_str(" ")?;
-							(usize::MAX, indent, Item::Text(" "))
-						},
-						Layout::Wrapped(options) =>
-						{
-							write_newline(self.f, options.indent)?;
-							(
-								options.available_space(),
-								options.indent,
-								Item::Newline(options.indent)
-							)
-						}
 					};
-				let second = match second
+				let separator = || match indent
 				{
-					Part::Child(child) => Item::Child {
-						child,
-						remaining_space,
-						indent
-					},
-					Part::Faces(faces) => Item::Faces {
-						faces,
-						remaining_space,
-						indent
-					}
+					None => Item::Text(" "),
+					Some(indent) => Item::Newline(indent)
 				};
+				let indent = indent.unwrap_or(options.indent);
 				self.schedule(
-					[
-						Item::Child {
-							child: first,
-							remaining_space,
-							indent
-						},
-						separator,
-						second,
-						Item::Text(")")
-					]
-					.into_iter()
+					parts
+						.into_iter()
+						.flatten()
+						.flat_map(|part| {
+							[
+								separator(),
+								match part
+								{
+									Part::Child(child) => Item::Child {
+										child,
+										remaining_space,
+										indent
+									},
+									Part::Faces(faces) => Item::Faces {
+										faces,
+										remaining_space,
+										indent
+									}
+								}
+							]
+						})
+						.chain([Item::Text(")")])
 				);
 				Ok(())
 			},
@@ -772,8 +729,8 @@ impl<'a> Writer<'a, '_>
 		}
 	}
 
-	/// Write the span prefix, the open parenthesis, and the keyword of a pair
-	/// or triple.
+	/// Write the span prefix, the open parenthesis, and the keyword of a
+	/// [form](Shape::Form).
 	///
 	/// # Parameters
 	/// - `span`: The span of the form.
@@ -1002,11 +959,14 @@ impl Shaped for CustomDice<'_>
 {
 	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
 	{
-		Shape::Triple {
+		Shape::Form {
 			span: self.span,
 			keyword: "custom-dice",
-			first: Child::Expression(&self.count),
-			second: Part::Faces(&self.faces)
+			parts: [
+				Some(Part::Child(Child::Expression(&self.count))),
+				Some(Part::Faces(&self.faces)),
+				None
+			]
 		}
 	}
 }
@@ -1043,6 +1003,24 @@ impl Shaped for KeepHighest<'_>
 	}
 }
 
+impl Shaped for Reroll<'_>
+{
+	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
+	{
+		Shape::Form {
+			span: self.span,
+			keyword: "reroll",
+			parts: [
+				Some(Part::Child(Child::Dice(&self.dice))),
+				Some(Part::Child(Child::Predicate(&self.predicate))),
+				self.limit
+					.as_ref()
+					.map(|limit| Part::Child(Child::Limit(limit)))
+			]
+		}
+	}
+}
+
 impl Shaped for DiceExpression<'_>
 {
 	fn shape<'a>(&'a self, options: SExpressibleOptions) -> Shape<'a>
@@ -1056,7 +1034,8 @@ impl Shaped for DiceExpression<'_>
 			DiceExpression::DropLowest(clause) => clause.shape(options),
 			DiceExpression::DropHighest(clause) => clause.shape(options),
 			DiceExpression::KeepLowest(clause) => clause.shape(options),
-			DiceExpression::KeepHighest(clause) => clause.shape(options)
+			DiceExpression::KeepHighest(clause) => clause.shape(options),
+			DiceExpression::Reroll(clause) => clause.shape(options)
 		}
 	}
 }
@@ -1152,10 +1131,10 @@ fn pair<'a>(
 	child: Child<'a>
 ) -> Shape<'a>
 {
-	Shape::Pair {
+	Shape::Form {
 		span,
 		keyword,
-		child
+		parts: [Some(Part::Child(child)), None, None]
 	}
 }
 
@@ -1176,16 +1155,19 @@ fn triple<'a>(
 	second: &'a Expression<'a>
 ) -> Shape<'a>
 {
-	Shape::Triple {
+	Shape::Form {
 		span,
 		keyword,
-		first: Child::Expression(first),
-		second: Part::Child(Child::Expression(second))
+		parts: [
+			Some(Part::Child(Child::Expression(first))),
+			Some(Part::Child(Child::Expression(second))),
+			None
+		]
 	}
 }
 
-/// Answer the shape of a drop or keep clause: a triple if it has a count, or a
-/// pair if not.
+/// Answer the shape of a drop or keep clause: a form of the dice and the count,
+/// or of the dice alone if the clause has no count.
 ///
 /// # Parameters
 /// - `span`: The span of the clause.
@@ -1202,14 +1184,78 @@ fn clause<'a>(
 	count: Option<&'a Expression<'a>>
 ) -> Shape<'a>
 {
-	match count
+	Shape::Form {
+		span,
+		keyword,
+		parts: [
+			Some(Part::Child(Child::Dice(dice))),
+			count.map(|count| Part::Child(Child::Expression(count))),
+			None
+		]
+	}
+}
+
+/// Answer the shape of the predicate of a reroll: `(eq t)`, `(ne t)`, `(lt t)`,
+/// `(le t)`, `(gt t)`, or `(ge t)` for a comparison with a threshold,
+/// `(in [values])` for a list, and `(in-range start end)` or
+/// `(in-range-inclusive start end)` for a range. A predicate is not an AST
+/// node, so it has no span.
+///
+/// # Parameters
+/// - `predicate`: The predicate.
+///
+/// # Returns
+/// The shape.
+fn predicate_shape<'a>(
+	predicate: &'a Predicate<Box<Expression<'a>>>
+) -> Shape<'a>
+{
+	let span = SourceSpan::SYNTHETIC;
+	let threshold = |keyword, threshold: &'a Expression<'a>| {
+		pair(span, keyword, Child::Expression(threshold))
+	};
+	match predicate
 	{
-		Some(count) => Shape::Triple {
+		Predicate::Eq(t) => threshold("eq", t),
+		Predicate::Ne(t) => threshold("ne", t),
+		Predicate::Lt(t) => threshold("lt", t),
+		Predicate::Le(t) => threshold("le", t),
+		Predicate::Gt(t) => threshold("gt", t),
+		Predicate::Ge(t) => threshold("ge", t),
+		Predicate::In(values) => Shape::Form {
 			span,
-			keyword,
-			first: Child::Dice(dice),
-			second: Part::Child(Child::Expression(count))
+			keyword: "in",
+			parts: [Some(Part::Faces(values)), None, None]
 		},
-		None => pair(span, keyword, Child::Dice(dice))
+		Predicate::InRange { start, end } =>
+		{
+			triple(span, "in-range", start, end)
+		},
+		Predicate::InRangeInclusive { start, end } =>
+		{
+			triple(span, "in-range-inclusive", start, end)
+		},
+	}
+}
+
+/// Answer the shape of the limit of a reroll: `(times n)` for a finite limit,
+/// or `(unlimited)`. A limit is not an AST node, so it has no span.
+///
+/// # Parameters
+/// - `limit`: The limit.
+///
+/// # Returns
+/// The shape.
+fn limit_shape<'a>(limit: &'a Limit<Box<Expression<'a>>>) -> Shape<'a>
+{
+	let span = SourceSpan::SYNTHETIC;
+	match limit
+	{
+		Limit::Times(count) => pair(span, "times", Child::Expression(count)),
+		Limit::Unlimited => Shape::Form {
+			span,
+			keyword: "unlimited",
+			parts: [None, None, None]
+		}
 	}
 }

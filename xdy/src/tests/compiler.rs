@@ -132,6 +132,98 @@ fn test_compile_keep_clauses()
 	}
 }
 
+/// Ensure that the compiler emits a reroll instruction for each reroll clause,
+/// in order with the drops and keeps, with a limit of 1 when the clause gives
+/// none; that it computes the operands of the predicate and the limit after
+/// the dice that they reroll, in the order written, and before the reroll, each
+/// once; and that it discovers the external variables among them.
+#[test]
+fn test_compile_reroll_clauses()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (reroll (standard-dice 3 6) (eq 1)))",
+			"\
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (reroll (standard-dice 3 6) (le (standard-dice 1 4)) \
+			 (unlimited)))",
+			"\
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅1 <- roll standard dice 1D4
+\t\t@0 <- sum rolling record ⚅1
+\t\t⚅0 <- reroll <= @0 unlimited times from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+"
+		),
+		(
+			"(function [{n}] (reroll (custom-dice 4 [-1 0 1]) (in-range \
+			 (neg 1) (group (add {n} 1))) (times {n})))",
+			"\
+\t\t⚅0 <- roll custom dice 4D[-1, 0, 1]
+\t\t@1 <- @0 + 1
+\t\t⚅0 <- reroll in -1..@1 up to @0 times from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+"
+		),
+		(
+			"(function [] (reroll (standard-dice 2 6) (in-range-inclusive {x} \
+			 {y}) (times 2)))",
+			"\
+\t\t⚅0 <- roll standard dice 2D6
+\t\t⚅0 <- reroll in @0..=@1 up to 2 times from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+"
+		),
+		(
+			"(function [] (keep-highest (reroll (drop-lowest (standard-dice 4 6)) \
+			 (in [1 2])) 3))",
+			"\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- reroll in [1, 2] up to 1 times from ⚅0
+\t\t⚅0 <- keep highest 3 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (reroll (reroll (standard-dice 4 6) (ne 6)) (in []) \
+			 (unlimited)))",
+			"\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- reroll != 6 up to 1 times from ⚅0
+\t\t⚅0 <- reroll in [] unlimited times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let function = Compiler::compile(&ast).to_string();
+		assert_eq!(function.split_once("body:\n").unwrap().1, expected);
+	}
+	let ast = crate::s_expr::read_s_expr(
+		"(function [] (reroll (standard-dice 2 6) (in-range-inclusive {x} {y}) \
+		 (times 2)))"
+	)
+	.unwrap();
+	let function = Compiler::compile(&ast);
+	assert_eq!(
+		function.to_string().lines().nth(1).map(str::trim),
+		Some("extern[{x}@0, {y}@1]")
+	);
+}
+
 /// Ensure that the compiler survives a deep chain of every nesting construct
 /// on a small stack, and still discovers the external variable that follows
 /// the chain.

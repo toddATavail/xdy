@@ -11,7 +11,7 @@
 
 use super::{
 	ASTVisitor, Add, ArithmeticExpression, DiceExpression, Div, Exp,
-	Expression, Mod, Mul, Sub
+	Expression, Mod, Mul, Predicate, Sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -144,7 +144,24 @@ impl<'a, 'src> Walk<'a, 'src>
 			DiceExpression::DropLowest(clause) => (&clause.dice, &clause.drop),
 			DiceExpression::DropHighest(clause) => (&clause.dice, &clause.drop),
 			DiceExpression::KeepLowest(clause) => (&clause.dice, &clause.keep),
-			DiceExpression::KeepHighest(clause) => (&clause.dice, &clause.keep)
+			DiceExpression::KeepHighest(clause) => (&clause.dice, &clause.keep),
+			DiceExpression::Reroll(clause) =>
+			{
+				if let Some(count) =
+					clause.limit.as_ref().and_then(|limit| limit.operand())
+				{
+					self.expression(count);
+				}
+				// A predicate has at most two operands.
+				let mut operands = clause.predicate.operands();
+				let (first, second) = (operands.next(), operands.next());
+				for operand in [second, first].into_iter().flatten()
+				{
+					self.expression(operand);
+				}
+				self.stack.push(Event::Enter(Node::Dice(&clause.dice)));
+				return
+			}
 		};
 		if let Some(count) = count
 		{
@@ -303,6 +320,7 @@ fn enter_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 		{
 			visitor.enter_keep_highest(clause)
 		},
+		DiceExpression::Reroll(clause) => visitor.enter_reroll(clause)
 	}
 }
 
@@ -450,6 +468,16 @@ fn leave_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 			let keep = clause.keep.as_ref().map(|_| pop(outputs));
 			let dice = pop(outputs);
 			visitor.visit_keep_highest(clause, dice, keep)
+		},
+		DiceExpression::Reroll(clause) =>
+		{
+			let limit = clause
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|_| pop(outputs)));
+			let predicate = pop_predicate(&clause.predicate, outputs);
+			let dice = pop(outputs);
+			visitor.visit_reroll(clause, dice, predicate, limit)
 		}
 	}
 }
@@ -510,6 +538,37 @@ fn pop<T>(outputs: &mut Vec<T>) -> T
 	outputs
 		.pop()
 		.expect("a child's output must precede its parent's visit")
+}
+
+/// Pop the outputs of the operands of a predicate.
+///
+/// # Parameters
+/// - `predicate`: The predicate.
+/// - `outputs`: The outputs of finished children, those of the operands atop,
+///   in order.
+///
+/// # Returns
+/// A predicate of the same form, holding the outputs of its operands.
+///
+/// # Panics
+/// If the stack holds fewer outputs than the predicate has operands; see
+/// [`pop`].
+fn pop_predicate<T, U>(
+	predicate: &Predicate<T>,
+	outputs: &mut Vec<U>
+) -> Predicate<U>
+{
+	let count = predicate.operands().count();
+	let first = outputs
+		.len()
+		.checked_sub(count)
+		.expect("a child's output must precede its parent's visit");
+	let mut operands = outputs.drain(first..);
+	predicate.map(|_| {
+		operands
+			.next()
+			.expect("a predicate has as many outputs as operands")
+	})
 }
 
 /// Pop the outputs of two finished children.

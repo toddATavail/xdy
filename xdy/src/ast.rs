@@ -489,6 +489,247 @@ impl Display for KeepHighest<'_>
 	}
 }
 
+/// A reroll expression, which rerolls each of the dice that the earlier clauses
+/// of its dice expression left kept, and that satisfy its predicate, up to its
+/// limit of times. A reroll crosses out the die that it rerolls, and appends
+/// the replacement to the rolling record.
+///
+/// The operands of the predicate and the limit are each evaluated once, in the
+/// order written, after the dice and before any reroll.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Reroll<'src>
+{
+	/// The dice expression.
+	pub dice: Box<DiceExpression<'src>>,
+
+	/// The predicate that a die must satisfy to be rerolled.
+	pub predicate: Predicate<Box<Expression<'src>>>,
+
+	/// The number of times that each die may be rerolled. Defaults to once.
+	pub limit: Option<Limit<Box<Expression<'src>>>>,
+
+	/// The span of the reroll expression, from the dice expression through the
+	/// limit (or the predicate if no limit is given).
+	pub span: SourceSpan
+}
+
+impl Display for Reroll<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		display::render(self, f)
+	}
+}
+
+/// The predicate of a [reroll](Reroll): the test that a die must pass to be
+/// rerolled. It mirrors the [predicate](crate::Predicate) of the reroll
+/// instruction, but holds operands of any type, so that the same shape serves
+/// both the AST, whose operands are [expressions](Expression), and the
+/// [visitor](ASTVisitor), whose operands are the outputs of those expressions.
+///
+/// # Type parameters
+/// - `T`: The type of the operands: the thresholds and the endpoints of the
+///   ranges.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Predicate<T>
+{
+	/// Matches a result equal to the threshold, written `= t`.
+	Eq(T),
+
+	/// Matches a result not equal to the threshold, written `≠ t` or `!= t`.
+	Ne(T),
+
+	/// Matches a result less than the threshold, written `< t`.
+	Lt(T),
+
+	/// Matches a result less than or equal to the threshold, written `≤ t` or
+	/// `<= t`.
+	Le(T),
+
+	/// Matches a result greater than the threshold, written `> t`.
+	Gt(T),
+
+	/// Matches a result greater than or equal to the threshold, written `≥ t`
+	/// or `>= t`.
+	Ge(T),
+
+	/// Matches a result among the listed values, written `in [a, b, …]`. The
+	/// values are literals, so that their members are always known. An empty
+	/// list matches nothing.
+	In(Vec<i32>),
+
+	/// Matches a result within the half-open range `start..end`, written
+	/// `in start..end`, which is empty if `end` does not exceed `start`.
+	InRange
+	{
+		/// The least result matched.
+		start: T,
+
+		/// The least result beyond the range.
+		end: T
+	},
+
+	/// Matches a result within the inclusive range `start..=end`, written
+	/// `in start..=end`, which is empty if `end` is less than `start`.
+	InRangeInclusive
+	{
+		/// The least result matched.
+		start: T,
+
+		/// The greatest result matched.
+		end: T
+	}
+}
+
+impl<T> Predicate<T>
+{
+	/// Answer the operands of the predicate, in the order written.
+	///
+	/// # Returns
+	/// The operands, of which there are none for a list, two for a range, and
+	/// one otherwise.
+	pub fn operands(&self) -> impl Iterator<Item = &T>
+	{
+		match self
+		{
+			Self::Eq(threshold)
+			| Self::Ne(threshold)
+			| Self::Lt(threshold)
+			| Self::Le(threshold)
+			| Self::Gt(threshold)
+			| Self::Ge(threshold) => [Some(threshold), None],
+			Self::In(_) => [None, None],
+			Self::InRange { start, end }
+			| Self::InRangeInclusive { start, end } => [Some(start), Some(end)]
+		}
+		.into_iter()
+		.flatten()
+	}
+
+	/// Take the operands of the predicate, in the order written.
+	///
+	/// # Returns
+	/// The operands, of which there are none for a list, two for a range, and
+	/// one otherwise.
+	pub fn into_operands(self) -> impl Iterator<Item = T>
+	{
+		match self
+		{
+			Self::Eq(threshold)
+			| Self::Ne(threshold)
+			| Self::Lt(threshold)
+			| Self::Le(threshold)
+			| Self::Gt(threshold)
+			| Self::Ge(threshold) => [Some(threshold), None],
+			Self::In(_) => [None, None],
+			Self::InRange { start, end }
+			| Self::InRangeInclusive { start, end } => [Some(start), Some(end)]
+		}
+		.into_iter()
+		.flatten()
+	}
+
+	/// Answer a predicate of the same form, whose operands are replaced by the
+	/// specified function. A list keeps a copy of its values.
+	///
+	/// # Type parameters
+	/// - `U`: The type of the replacement operands.
+	///
+	/// # Parameters
+	/// - `replace`: The function that replaces each operand. It is called once
+	///   per operand, in the order written.
+	///
+	/// # Returns
+	/// The new predicate.
+	pub fn map<'s, U>(
+		&'s self,
+		mut replace: impl FnMut(&'s T) -> U
+	) -> Predicate<U>
+	{
+		match self
+		{
+			Self::Eq(threshold) => Predicate::Eq(replace(threshold)),
+			Self::Ne(threshold) => Predicate::Ne(replace(threshold)),
+			Self::Lt(threshold) => Predicate::Lt(replace(threshold)),
+			Self::Le(threshold) => Predicate::Le(replace(threshold)),
+			Self::Gt(threshold) => Predicate::Gt(replace(threshold)),
+			Self::Ge(threshold) => Predicate::Ge(replace(threshold)),
+			Self::In(values) => Predicate::In(values.clone()),
+			Self::InRange { start, end } =>
+			{
+				let start = replace(start);
+				Predicate::InRange {
+					start,
+					end: replace(end)
+				}
+			},
+			Self::InRangeInclusive { start, end } =>
+			{
+				let start = replace(start);
+				Predicate::InRangeInclusive {
+					start,
+					end: replace(end)
+				}
+			}
+		}
+	}
+}
+
+/// The limit of a [reroll](Reroll): the number of times that each die may be
+/// rerolled. It mirrors the [limit](crate::Limit) of the reroll instruction,
+/// but holds an operand of any type, as [`Predicate`] does.
+///
+/// # Type parameters
+/// - `T`: The type of the count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Limit<T>
+{
+	/// Reroll each die at most this many times, written `n time` or
+	/// `n times`, or not at all if the count is zero or less.
+	Times(T),
+
+	/// Reroll each die until it no longer matches, written `∞ times` or
+	/// `unlimited times`, or not at all if every face of the die matches.
+	Unlimited
+}
+
+impl<T> Limit<T>
+{
+	/// Answer the operand of the limit, if any.
+	///
+	/// # Returns
+	/// The count of a [finite](Self::Times) limit, or `None` if the limit is
+	/// [unlimited](Self::Unlimited).
+	pub fn operand(&self) -> Option<&T>
+	{
+		match self
+		{
+			Self::Times(count) => Some(count),
+			Self::Unlimited => None
+		}
+	}
+
+	/// Answer a limit of the same form, whose operand, if any, is replaced by
+	/// the specified function.
+	///
+	/// # Type parameters
+	/// - `U`: The type of the replacement operand.
+	///
+	/// # Parameters
+	/// - `replace`: The function that replaces the operand.
+	///
+	/// # Returns
+	/// The new limit.
+	pub fn map<'s, U>(&'s self, replace: impl FnOnce(&'s T) -> U) -> Limit<U>
+	{
+		match self
+		{
+			Self::Times(count) => Limit::Times(replace(count)),
+			Self::Unlimited => Limit::Unlimited
+		}
+	}
+}
+
 /// A dice expression.
 pub enum DiceExpression<'src>
 {
@@ -508,7 +749,10 @@ pub enum DiceExpression<'src>
 	KeepLowest(KeepLowest<'src>),
 
 	/// A keep-highest expression.
-	KeepHighest(KeepHighest<'src>)
+	KeepHighest(KeepHighest<'src>),
+
+	/// A reroll expression.
+	Reroll(Reroll<'src>)
 }
 
 impl<'src> DiceExpression<'src>
@@ -722,9 +966,9 @@ impl Display for Neg<'_>
 /// 3. [`visit_expression`](Self::visit_expression), if the node fills a slot of
 ///    type [`Expression`], i.e., if it is not the [`DiceExpression`] beneath a
 ///    [drop-lowest](DropLowest), [drop-highest](DropHighest),
-///    [keep-lowest](KeepLowest), or [keep-highest](KeepHighest) expression. The
-///    hook receives the node's output and may replace it. By default, it
-///    returns the output unchanged.
+///    [keep-lowest](KeepLowest), [keep-highest](KeepHighest), or
+///    [reroll](Reroll) expression. The hook receives the node's output and may
+///    replace it. By default, it returns the output unchanged.
 ///
 /// The enum types ([`Expression`], [`DiceExpression`],
 /// [`ArithmeticExpression`]) are not visited directly; the driver visits the
@@ -796,8 +1040,9 @@ impl Display for Neg<'_>
 ///     Parser,
 ///     ast::{
 ///         ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-///         DropLowest, Exp, Function, Group, KeepHighest, KeepLowest, Mod,
-///         Mul, Neg, Range, StandardDice, Sub, Variable
+///         DropLowest, Exp, Function, Group, KeepHighest, KeepLowest, Limit,
+///         Mod, Mul, Neg, Predicate, Range, Reroll, StandardDice, Sub,
+///         Variable
 ///     }
 /// };
 ///
@@ -837,6 +1082,18 @@ impl Display for Neg<'_>
 ///     fn visit_keep_highest(
 ///         &mut self, _: &'a KeepHighest<'src>, dice: usize, keep: Option<usize>
 ///     ) -> Result<usize, Infallible> { Ok(dice + keep.unwrap_or(0)) }
+///     fn visit_reroll(
+///         &mut self,
+///         _: &'a Reroll<'src>,
+///         dice: usize,
+///         predicate: Predicate<usize>,
+///         limit: Option<Limit<usize>>
+///     ) -> Result<usize, Infallible>
+///     {
+///         Ok(dice
+///             + predicate.operands().sum::<usize>()
+///             + limit.as_ref().and_then(Limit::operand).unwrap_or(&0))
+///     }
 ///     fn visit_add(&mut self, _: &'a Add<'src>, left: usize, right: usize)
 ///         -> Result<usize, Infallible> { Ok(left + right) }
 ///     fn visit_sub(&mut self, _: &'a Sub<'src>, left: usize, right: usize)
@@ -970,6 +1227,16 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	fn enter_keep_highest(
 		&mut self,
 		_node: &'a KeepHighest<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter a [reroll](Reroll) expression, before its dice, the operands of
+	/// its predicate, and its limit.
+	fn enter_reroll(
+		&mut self,
+		_node: &'a Reroll<'src>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -1163,6 +1430,23 @@ pub trait ASTVisitor<'a, 'src: 'a>
 		keep: Option<Self::Output>
 	) -> Result<Self::Output, Self::Error>;
 
+	/// Visit a [reroll](Reroll) expression, after its dice, the operands of its
+	/// predicate, and its limit.
+	///
+	/// # Parameters
+	/// - `node`: The reroll expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `predicate`: The predicate, holding the outputs of its operands.
+	/// - `limit`: The limit, holding the output of its count, if the expression
+	///   has one.
+	fn visit_reroll(
+		&mut self,
+		node: &'a Reroll<'src>,
+		dice: Self::Output,
+		predicate: Predicate<Self::Output>,
+		limit: Option<Limit<Self::Output>>
+	) -> Result<Self::Output, Self::Error>;
+
 	/// Visit an [addition](Add) expression, after its operands.
 	///
 	/// # Parameters
@@ -1256,9 +1540,9 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	/// [`Expression`], after the `visit_*` method of the node inside it.
 	/// Every node but the [`DiceExpression`] beneath a
 	/// [drop-lowest](DropLowest), [drop-highest](DropHighest),
-	/// [keep-lowest](KeepLowest), or [keep-highest](KeepHighest) expression
-	/// fills such a slot, as does the root of a walk that starts at an
-	/// [`Expression`] or a [`Function`].
+	/// [keep-lowest](KeepLowest), [keep-highest](KeepHighest), or
+	/// [reroll](Reroll) expression fills such a slot, as does the root of a
+	/// walk that starts at an [`Expression`] or a [`Function`].
 	///
 	/// # Parameters
 	/// - `node`: The expression.
@@ -1547,6 +1831,24 @@ impl Spanned for KeepHighest<'_>
 	}
 }
 
+impl Spanned for Reroll<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Reroll {
+			dice: Box::new(self.dice.untethered()),
+			predicate: self.predicate.map(|t| Box::new(t.untethered())),
+			limit: self
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|n| Box::new(n.untethered()))),
+			span: SourceSpan::default()
+		}
+	}
+}
+
 impl Spanned for DiceExpression<'_>
 {
 	fn span(&self) -> SourceSpan
@@ -1558,7 +1860,8 @@ impl Spanned for DiceExpression<'_>
 			DiceExpression::DropLowest(d) => d.span(),
 			DiceExpression::DropHighest(d) => d.span(),
 			DiceExpression::KeepLowest(d) => d.span(),
-			DiceExpression::KeepHighest(d) => d.span()
+			DiceExpression::KeepHighest(d) => d.span(),
+			DiceExpression::Reroll(d) => d.span()
 		}
 	}
 

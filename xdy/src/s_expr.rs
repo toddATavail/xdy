@@ -26,7 +26,7 @@ use crate::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
 		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
-		Range, StandardDice, Sub, Variable
+		Range, Reroll, StandardDice, Sub, Variable
 	},
 	parser::is_canonical_name,
 	span::SourceSpan
@@ -951,6 +951,24 @@ impl SExpressible for KeepHighest<'_>
 	}
 }
 
+impl SExpressible for Reroll<'_>
+{
+	fn write_s_expr(
+		&self,
+		f: &mut dyn Write,
+		remaining_space: usize,
+		options: SExpressibleOptions
+	) -> fmt::Result
+	{
+		writer::write(self, f, remaining_space, options)
+	}
+
+	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
+	{
+		writer::size(self, options)
+	}
+}
+
 impl SExpressible for DiceExpression<'_>
 {
 	fn write_s_expr(
@@ -1382,7 +1400,8 @@ pub enum SExprError
 	},
 
 	/// The first argument to `(drop-lowest …)`, `(drop-highest …)`,
-	/// `(keep-lowest …)`, or `(keep-highest …)` was not a dice expression.
+	/// `(keep-lowest …)`, `(keep-highest …)`, or `(reroll …)` was not a dice
+	/// expression.
 	ExpectedDiceExpression
 	{
 		/// The source position at which the non-dice form was read.
@@ -1409,6 +1428,29 @@ pub enum SExprError
 
 	/// A compound form opened with an unrecognized keyword.
 	UnknownKeyword
+	{
+		/// The offending keyword.
+		keyword: String,
+
+		/// The source position of the offending keyword.
+		location: SExprLocation
+	},
+
+	/// The predicate of a `(reroll …)` opened with a keyword other than `eq`,
+	/// `ne`, `lt`, `le`, `gt`, `ge`, `in`, `in-range`, or
+	/// `in-range-inclusive`.
+	UnknownPredicate
+	{
+		/// The offending keyword.
+		keyword: String,
+
+		/// The source position of the offending keyword.
+		location: SExprLocation
+	},
+
+	/// The limit of a `(reroll …)` opened with a keyword other than `times` or
+	/// `unlimited`.
+	UnknownLimit
 	{
 		/// The offending keyword.
 		keyword: String,
@@ -1461,6 +1503,8 @@ impl SExprError
 			| Self::ExpectedTopLevelFunction { location, .. }
 			| Self::NestedFunctionKeyword { location }
 			| Self::UnknownKeyword { location, .. }
+			| Self::UnknownPredicate { location, .. }
+			| Self::UnknownLimit { location, .. }
 			| Self::ExpectedExpression { location }
 			| Self::TrailingInput { location, .. } => *location
 		}
@@ -1542,7 +1586,7 @@ impl Display for SExprError
 			Self::ExpectedDiceExpression { .. } => write!(
 				f,
 				"expected dice expression as first argument to \
-				 drop-lowest/drop-highest/keep-lowest/keep-highest"
+				 drop-lowest/drop-highest/keep-lowest/keep-highest/reroll"
 			),
 			Self::ExpectedTopLevelFunction { found, .. } =>
 			{
@@ -1555,6 +1599,14 @@ impl Display for SExprError
 			Self::UnknownKeyword { keyword, .. } =>
 			{
 				write!(f, "unknown keyword '{}'", keyword)
+			},
+			Self::UnknownPredicate { keyword, .. } =>
+			{
+				write!(f, "unknown reroll predicate '{}'", keyword)
+			},
+			Self::UnknownLimit { keyword, .. } =>
+			{
+				write!(f, "unknown reroll limit '{}'", keyword)
 			},
 			Self::ExpectedExpression { .. } =>
 			{
@@ -2023,8 +2075,35 @@ pub(crate) fn read_params<'src>(
 /// - [`SExprError::FacelessCustomDice`] if the list contains no faces.
 pub(crate) fn read_faces(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
 {
+	let (cur, faces) = read_values(input)?;
+	if faces.is_empty()
+	{
+		Err(nom::Err::Failure(SExprError::FacelessCustomDice {
+			location: SExprLocation::of(cur)
+		}))
+	}
+	else
+	{
+		Ok((cur, faces))
+	}
+}
+
+/// Read a list of integers: `[` integer* `]`, as the values of a list
+/// predicate, which may be empty, or the faces of a custom die, which may not.
+///
+/// # Parameters
+/// - `input`: The input text to read from.
+///
+/// # Returns
+/// A pair of the remaining input and the parsed list of values.
+///
+/// # Errors
+/// - [`SExprError`] if the opening `[`, the closing `]`, or any integer is
+///   malformed.
+pub(crate) fn read_values(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
+{
 	let (input, _) = expect_char('[')(input)?;
-	let mut faces = Vec::new();
+	let mut values = Vec::new();
 	let mut cur = input;
 	loop
 	{
@@ -2039,19 +2118,10 @@ pub(crate) fn read_faces(input: Span<'_>) -> SExprResult<'_, Vec<i32>>
 			_ =>
 			{
 				let (next, value) = read_integer(next)?;
-				faces.push(value);
+				values.push(value);
 				cur = next;
 			}
 		}
 	}
-	if faces.is_empty()
-	{
-		Err(nom::Err::Failure(SExprError::FacelessCustomDice {
-			location: SExprLocation::of(cur)
-		}))
-	}
-	else
-	{
-		Ok((cur, faces))
-	}
+	Ok((cur, values))
 }

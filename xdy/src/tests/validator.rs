@@ -475,6 +475,47 @@ fn validator_checks_keep_clauses()
 	);
 }
 
+/// The [`Validator`] walks the dice and the operands of reroll clauses, in
+/// source order: a binding may serve as a threshold, an endpoint, or a count,
+/// and a later reference, even within the same clause, sees it, but a
+/// reference within a reroll precedes a binding that follows it, even within
+/// the same clause.
+#[test]
+fn validator_checks_reroll_clauses()
+{
+	for s_expr in [
+		"(function [] (add (reroll (standard-dice 4 6) (eq (binding {a} 2))) \
+		 {a}))",
+		"(function [] (reroll (standard-dice 4 6) (in-range-inclusive (binding \
+		 {a} 1) {a}) (times {a})))",
+		"(function [] (reroll (standard-dice (binding {a} 4) 6) (ge {a}) \
+		 (unlimited)))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(Validator::validate(&ast), Ok(()), "{s_expr}");
+	}
+	for s_expr in [
+		"(function [] (add (reroll (standard-dice 4 6) (lt {a})) (binding {a} \
+		 2)))",
+		"(function [] (reroll (standard-dice 4 6) (in-range {a} (binding {a} \
+		 3))))",
+		"(function [] (reroll (standard-dice 4 6) (eq {a}) (times (binding {a} \
+		 2))))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert!(
+			matches!(
+				Validator::validate(&ast),
+				Err(CompilationError::UseBeforeBind { name, .. }) if name == "a"
+			),
+			"{s_expr}: {:?}",
+			Validator::validate(&ast)
+		);
+	}
+}
+
 /// Driving the [`Validator`] through the [`ASTVisitor`](crate::ast::ASTVisitor)
 /// trait performs every check, not just the check of the parameters.
 #[test]

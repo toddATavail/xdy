@@ -28,7 +28,7 @@ use std::{
 
 use super::{
 	Add, ArithmeticExpression, Constant, DiceExpression, Div, Exp, Expression,
-	Mod, Mul, Sub, Variable
+	Limit, Mod, Mul, Predicate, Reroll, Sub, Variable
 };
 use crate::span::SourceSpan;
 
@@ -90,7 +90,7 @@ pub(super) enum Leaf<'a, 'src>
 	/// A variable reference.
 	Variable(&'a Variable<'src>),
 
-	/// The faces of a custom die.
+	/// The faces of a custom die, or the values of a list predicate.
 	Faces(&'a [i32])
 }
 
@@ -362,13 +362,14 @@ impl<'a, 'src> Events<'a, 'src>
 				"keep",
 				&clause.keep,
 				clause.span
-			)
+			),
+			DiceExpression::Reroll(clause) => return self.expand_reroll(clause)
 		};
 		// Schedule the parts in reverse, since each goes atop its successor.
 		self.schedule(&[field("span"), self::span(span), close(), close()]);
 		match count
 		{
-			None => self.schedule(&[Item::Event(Event::Unit("None"))]),
+			None => self.schedule(&[unit("None")]),
 			Some(count) =>
 			{
 				self.schedule(&[tuple("Some"), expression_node(count), close()])
@@ -380,6 +381,90 @@ impl<'a, 'src> Events<'a, 'src>
 			field("dice"),
 			dice_node(dice),
 			field(count_field)
+		]);
+	}
+}
+
+impl<'a, 'src> Events<'a, 'src>
+{
+	/// Expand a [`DiceExpression::Reroll`].
+	///
+	/// # Parameters
+	/// - `reroll`: The reroll expression.
+	fn expand_reroll(&mut self, reroll: &'a Reroll<'src>)
+	{
+		// Schedule the parts in reverse, since each goes atop its successor.
+		self.schedule(&[field("span"), span(reroll.span), close(), close()]);
+		match &reroll.limit
+		{
+			None => self.schedule(&[unit("None")]),
+			Some(Limit::Times(count)) => self.schedule(&[
+				tuple("Some"),
+				tuple("Times"),
+				expression_node(count),
+				close(),
+				close()
+			]),
+			Some(Limit::Unlimited) =>
+			{
+				self.schedule(&[tuple("Some"), unit("Unlimited"), close()])
+			},
+		}
+		self.schedule(&[field("limit")]);
+		match &reroll.predicate
+		{
+			Predicate::Eq(threshold)
+			| Predicate::Ne(threshold)
+			| Predicate::Lt(threshold)
+			| Predicate::Le(threshold)
+			| Predicate::Gt(threshold)
+			| Predicate::Ge(threshold) =>
+			{
+				let name = match reroll.predicate
+				{
+					Predicate::Eq(_) => "Eq",
+					Predicate::Ne(_) => "Ne",
+					Predicate::Lt(_) => "Lt",
+					Predicate::Le(_) => "Le",
+					Predicate::Gt(_) => "Gt",
+					Predicate::Ge(_) => "Ge",
+					_ => unreachable!()
+				};
+				self.schedule(&[
+					tuple(name),
+					expression_node(threshold),
+					close()
+				])
+			},
+			Predicate::In(values) => self.schedule(&[
+				tuple("In"),
+				leaf(Leaf::Faces(values)),
+				close()
+			]),
+			Predicate::InRange { start, end }
+			| Predicate::InRangeInclusive { start, end } =>
+			{
+				let name = match reroll.predicate
+				{
+					Predicate::InRange { .. } => "InRange",
+					_ => "InRangeInclusive"
+				};
+				self.schedule(&[
+					structure(name),
+					field("start"),
+					expression_node(start),
+					field("end"),
+					expression_node(end),
+					close()
+				])
+			}
+		}
+		self.schedule(&[
+			tuple("Reroll"),
+			structure("Reroll"),
+			field("dice"),
+			dice_node(&reroll.dice),
+			field("predicate")
 		]);
 	}
 }
@@ -435,6 +520,18 @@ fn tuple<'a, 'src>(name: &'static str) -> Item<'a, 'src>
 fn field<'a, 'src>(name: &'static str) -> Item<'a, 'src>
 {
 	Item::Event(Event::Field(name))
+}
+
+/// Answer an item for a unit value.
+///
+/// # Parameters
+/// - `name`: The name of the value.
+///
+/// # Returns
+/// The item.
+fn unit<'a, 'src>(name: &'static str) -> Item<'a, 'src>
+{
+	Item::Event(Event::Unit(name))
 }
 
 /// Answer an item that closes a struct or tuple.

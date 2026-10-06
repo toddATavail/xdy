@@ -26,7 +26,8 @@ use std::{
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
 	Div, DropHighest, DropLowest, Exp, Expression, Group, KeepHighest,
-	KeepLowest, Mod, Mul, Neg, Range, StandardDice, Sub, Variable,
+	KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll, StandardDice,
+	Sub, Variable,
 	traversal::{self, Node}
 };
 use crate::span::SourceSpan;
@@ -370,6 +371,22 @@ impl<'a, 'src> Cloner<'a, 'src>
 					self.tasks.push(Task::Expression(count));
 				}
 				self.tasks.push(Task::Dice(dice));
+			},
+			DiceExpression::Reroll(clause) =>
+			{
+				if let Some(count) =
+					clause.limit.as_ref().and_then(|limit| limit.operand())
+				{
+					self.tasks.push(Task::Expression(count));
+				}
+				// A predicate has at most two operands.
+				let mut operands = clause.predicate.operands();
+				let (first, second) = (operands.next(), operands.next());
+				for operand in [second, first].into_iter().flatten()
+				{
+					self.tasks.push(Task::Expression(operand));
+				}
+				self.tasks.push(Task::Dice(&clause.dice));
 			}
 		}
 	}
@@ -557,6 +574,19 @@ impl<'a, 'src> Cloner<'a, 'src>
 					keep,
 					span: self.span(clause.span)
 				})
+			},
+			DiceExpression::Reroll(clause) =>
+			{
+				let limit = clause.limit.as_ref().map(|limit| {
+					limit.map(|_| Box::new(self.pop_expression()))
+				});
+				let predicate = self.pop_predicate(&clause.predicate);
+				DiceExpression::Reroll(Reroll {
+					dice: Box::new(self.pop_dice()),
+					predicate,
+					limit,
+					span: self.span(clause.span)
+				})
 			}
 		}
 	}
@@ -589,6 +619,38 @@ impl<'a, 'src> Cloner<'a, 'src>
 		let second = self.pop_expression();
 		let first = self.pop_expression();
 		(Box::new(first), Box::new(second))
+	}
+
+	/// Pop the copies of the operands of a predicate.
+	///
+	/// # Parameters
+	/// - `predicate`: The original predicate.
+	///
+	/// # Returns
+	/// The copy of the predicate.
+	///
+	/// # Panics
+	/// If there are fewer copies than the predicate has operands, which would
+	/// be a bug in the cloner.
+	fn pop_predicate(
+		&mut self,
+		predicate: &'a Predicate<Box<Expression<'src>>>
+	) -> Predicate<Box<Expression<'src>>>
+	{
+		let count = predicate.operands().count();
+		let first = self
+			.expressions
+			.len()
+			.checked_sub(count)
+			.expect("the child must be cloned before its parent");
+		let mut operands = self.expressions.drain(first..);
+		predicate.map(|_| {
+			Box::new(
+				operands
+					.next()
+					.expect("a predicate has as many copies as operands")
+			)
+		})
 	}
 
 	/// Pop the copy of a dice expression.
@@ -712,8 +774,8 @@ fn detach_children<'src>(
 }
 
 /// Detach the children of a dice expression, leaving it shallow: dropping it
-/// no longer drops any expression with children, or any stack of drop and keep
-/// clauses.
+/// no longer drops any expression with children, or any stack of drop, keep,
+/// and reroll clauses.
 ///
 /// # Parameters
 /// - `dice`: The dice expression.
@@ -731,6 +793,52 @@ fn detach_dice_children<'src>(
 			detach(&mut standard.faces, orphans);
 		},
 		DiceExpression::Custom(custom) => detach(&mut custom.count, orphans),
+		DiceExpression::DropLowest(_)
+		| DiceExpression::DropHighest(_)
+		| DiceExpression::KeepLowest(_)
+		| DiceExpression::KeepHighest(_)
+		| DiceExpression::Reroll(_) =>
+		{
+			let dice = detach_clause_operands(dice, orphans)
+				.expect("a clause has dice beneath it");
+			match *dice
+			{
+				// The dice beneath are a leaf, so detaching their children
+				// recurses no further.
+				DiceExpression::Standard(_) | DiceExpression::Custom(_) =>
+				{
+					detach_dice_children(dice, orphans)
+				},
+				DiceExpression::DropLowest(_)
+				| DiceExpression::DropHighest(_)
+				| DiceExpression::KeepLowest(_)
+				| DiceExpression::KeepHighest(_)
+				| DiceExpression::Reroll(_) => promote_leaf(dice, orphans)
+			}
+		}
+	}
+}
+
+/// Detach the operands of a clause — the count of a drop or keep, or the
+/// operands of the predicate and the limit of a reroll — leaving the clause
+/// with nothing to drop but the dice beneath it. A reroll keeps an empty list
+/// as its predicate, and no limit, so dropping either does nothing.
+///
+/// # Parameters
+/// - `clause`: The clause.
+/// - `orphans`: The detached expressions, to which to add the operands.
+///
+/// # Returns
+/// The dice beneath the clause, or `None` if the receiver is a leaf, i.e., not
+/// a clause, in which case nothing is detached.
+fn detach_clause_operands<'c, 'src>(
+	clause: &'c mut DiceExpression<'src>,
+	orphans: &mut Vec<Expression<'src>>
+) -> Option<&'c mut DiceExpression<'src>>
+{
+	let (dice, count) = match clause
+	{
+		DiceExpression::Standard(_) | DiceExpression::Custom(_) => return None,
 		DiceExpression::DropLowest(DropLowest {
 			dice, drop: count, ..
 		})
@@ -742,33 +850,38 @@ fn detach_dice_children<'src>(
 		})
 		| DiceExpression::KeepHighest(KeepHighest {
 			dice, keep: count, ..
+		}) => (dice, count.take()),
+		DiceExpression::Reroll(Reroll {
+			dice,
+			predicate,
+			limit,
+			..
 		}) =>
 		{
-			if let Some(count) = count.take()
+			// An empty list allocates nothing, so it costs nothing to put in
+			// the place of the predicate.
+			let predicate = mem::replace(predicate, Predicate::In(Vec::new()));
+			orphans.extend(predicate.into_operands().map(|operand| *operand));
+			let count = match limit.take()
 			{
-				orphans.push(*count);
-			}
-			match **dice
-			{
-				// The dice beneath are a leaf, so detaching their children
-				// recurses no further.
-				DiceExpression::Standard(_) | DiceExpression::Custom(_) =>
-				{
-					detach_dice_children(dice, orphans)
-				},
-				DiceExpression::DropLowest(_)
-				| DiceExpression::DropHighest(_)
-				| DiceExpression::KeepLowest(_)
-				| DiceExpression::KeepHighest(_) => promote_leaf(dice, orphans)
-			}
+				Some(Limit::Times(count)) => Some(count),
+				Some(Limit::Unlimited) | None => None
+			};
+			(dice, count)
 		}
+	};
+	if let Some(count) = count
+	{
+		orphans.push(*count);
 	}
+	Some(&mut **dice)
 }
 
-/// Replace a stack of drop and keep clauses with the leaf dice expression at
-/// its bottom, dropping the clauses between without recursion and without
-/// allocation. The counts of the clauses, and the children of the leaf, join
-/// the orphans.
+/// Replace a stack of drop, keep, and reroll clauses with the leaf dice
+/// expression at its bottom, dropping the clauses between without recursion
+/// and without allocation. The operands of the clauses — the counts of drops
+/// and keeps, and the operands of the predicates and limits of rerolls — and
+/// the children of the leaf join the orphans.
 ///
 /// ```mermaid
 /// flowchart LR
@@ -785,7 +898,7 @@ fn detach_dice_children<'src>(
 ///
 /// # Parameters
 /// - `slot`: The top of the stack of clauses, which the leaf replaces.
-/// - `orphans`: The detached expressions, to which to add the counts of the
+/// - `orphans`: The detached expressions, to which to add the operands of the
 ///   clauses and the children of the leaf.
 ///
 /// # Safety
@@ -794,9 +907,10 @@ fn detach_dice_children<'src>(
 /// owns a [`Box`]; nor destructure one, since [`DiceExpression`] implements
 /// [`Drop`]. So this function works in two phases:
 ///
-/// 1. The safe phase walks down the stack, detaching the count of every clause
-///    and the children of the leaf, so that nothing left in the stack has a
-///    [`Drop`] that does any work.
+/// 1. The safe phase walks down the stack, detaching the operands of every
+///    clause and the children of the leaf, so that nothing left in the stack
+///    has a [`Drop`] that does any work. A reroll is left with an empty list,
+///    which owns no allocation, as its predicate, and no limit.
 /// 2. The unsafe phase moves the top clause out of `slot` with [`ptr::read`],
 ///    leaving `slot` logically uninitialized. It then dismantles each clause in
 ///    turn: moving the clause out of its [`Box`] frees the box, and reading the
@@ -806,56 +920,31 @@ fn detach_dice_children<'src>(
 ///
 /// Every value is thus owned exactly once throughout, and the only window in
 /// which `slot` is uninitialized contains nothing that can unwind: moves,
-/// matches, deallocations, and drops of `None`. So no panic can expose the
-/// uninitialized `slot` to a second drop. The test suite checks this code
-/// under Miri; see `tests::ast`.
+/// matches, deallocations, and drops of `None` and of empty lists. So no panic
+/// can expose the uninitialized `slot` to a second drop. The test suite checks
+/// this code under Miri; see `tests::ast`.
 #[cfg_attr(doc, aquamarine::aquamarine)]
 fn promote_leaf<'src>(
 	slot: &mut DiceExpression<'src>,
 	orphans: &mut Vec<Expression<'src>>
 )
 {
-	// Phase 1: Detach the count of every clause, and the children of the leaf.
+	// Phase 1: Detach the operands of every clause, and the children of the
+	// leaf.
 	let mut cursor = &mut *slot;
-	loop
+	while matches!(
+		cursor,
+		DiceExpression::DropLowest(_)
+			| DiceExpression::DropHighest(_)
+			| DiceExpression::KeepLowest(_)
+			| DiceExpression::KeepHighest(_)
+			| DiceExpression::Reroll(_)
+	)
 	{
-		match cursor
-		{
-			DiceExpression::DropLowest(DropLowest {
-				dice,
-				drop: count,
-				..
-			})
-			| DiceExpression::DropHighest(DropHighest {
-				dice,
-				drop: count,
-				..
-			})
-			| DiceExpression::KeepLowest(KeepLowest {
-				dice,
-				keep: count,
-				..
-			})
-			| DiceExpression::KeepHighest(KeepHighest {
-				dice,
-				keep: count,
-				..
-			}) =>
-			{
-				if let Some(count) = count.take()
-				{
-					orphans.push(*count);
-				}
-				cursor = &mut **dice;
-			},
-			leaf
-			@ (DiceExpression::Standard(_) | DiceExpression::Custom(_)) =>
-			{
-				detach_dice_children(leaf, orphans);
-				break
-			}
-		}
+		cursor = detach_clause_operands(cursor, orphans)
+			.expect("a clause has dice beneath it");
 	}
+	detach_dice_children(cursor, orphans);
 	// Phase 2: Replace the stack with its leaf. Nothing here may unwind.
 	// SAFETY: `slot` is valid for reads. Ownership of its value moves to
 	// `clause`, and `slot` is not used again until the `ptr::write` below
@@ -904,6 +993,18 @@ fn promote_leaf<'src>(
 				let KeepHighest {
 					dice,
 					keep: _,
+					span: _
+				} = unsafe { ptr::read(payload) };
+				dice
+			},
+			DiceExpression::Reroll(payload) =>
+			{
+				// SAFETY: As above, since Phase 1 replaced `predicate` with an
+				// empty list, which owns no allocation, and emptied `limit`.
+				let Reroll {
+					dice,
+					predicate: _,
+					limit: _,
 					span: _
 				} = unsafe { ptr::read(payload) };
 				dice

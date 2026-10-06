@@ -9,7 +9,10 @@
 //!
 //! [`SExprError`]: crate::s_expr::SExprError
 
-use crate::s_expr::*;
+use crate::{
+	ast::{DiceExpression, Expression, Limit, Predicate},
+	s_expr::*
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                      S-expression reader error tests.                      //
@@ -319,6 +322,211 @@ fn test_reader_rejects_non_dice_child_of_keep()
 		"expected dice expression",
 		26
 	);
+}
+
+/// The same type-check fires for `reroll`, with the offset at the
+/// pre-whitespace cursor position.
+#[test]
+fn test_reader_rejects_non_dice_child_of_reroll()
+{
+	assert_reader_error(
+		"(function [] (reroll 5 (eq 1)))",
+		"expected dice expression",
+		20
+	);
+	assert_reader_error(
+		"(function [] (reroll (add 1 2) (in [1])))",
+		"expected dice expression",
+		20
+	);
+}
+
+/// The predicate of a `reroll` must open with a known keyword, which the error
+/// names and locates.
+#[test]
+fn test_reader_rejects_unknown_reroll_predicate()
+{
+	for (input, keyword) in [
+		(
+			"(function [] (reroll (standard-dice 1 6) (add 1 2)))",
+			"add"
+		),
+		("(function [] (reroll (standard-dice 1 6) (= 1)))", "="),
+		(
+			"(function [] (reroll (standard-dice 1 6) (times 1)))",
+			"times"
+		)
+	]
+	{
+		let offset = input.rfind(keyword).unwrap();
+		assert_reader_error(
+			input,
+			&format!("unknown reroll predicate '{}'", keyword),
+			offset
+		);
+		assert!(matches!(
+			read_s_expr(input),
+			Err(SExprError::UnknownPredicate { .. })
+		));
+	}
+}
+
+/// The limit of a `reroll` must open with `times` or `unlimited`, which the
+/// error names and locates.
+#[test]
+fn test_reader_rejects_unknown_reroll_limit()
+{
+	for (input, keyword) in [
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1) (forever)))",
+			"forever"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1) (eq 2)))",
+			"eq 2"
+		)
+	]
+	{
+		let offset = input.rfind(keyword).unwrap();
+		let keyword = keyword.split(' ').next().unwrap();
+		assert_reader_error(
+			input,
+			&format!("unknown reroll limit '{}'", keyword),
+			offset
+		);
+		assert!(matches!(
+			read_s_expr(input),
+			Err(SExprError::UnknownLimit { .. })
+		));
+	}
+}
+
+/// A malformed predicate or limit of a `reroll` is rejected where it goes
+/// wrong: a missing or bare predicate, a missing operand, a surplus operand, a
+/// list of something other than integers, and a surplus limit.
+#[test]
+fn test_reader_rejects_malformed_reroll()
+{
+	for (input, message, at) in [
+		(
+			"(function [] (reroll (standard-dice 1 6)))",
+			"expected '(', found ')'",
+			"))"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) eq 1))",
+			"expected '(', found 'e'",
+			"eq"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq)))",
+			"expected '{', found ')'",
+			")))"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (in-range 1)))",
+			"expected '{', found ')'",
+			")))"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1 2)))",
+			"expected ')', found '2'",
+			"2)"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (in [a])))",
+			"invalid integer 'a'",
+			"a]"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (in 1)))",
+			"expected '[', found '1'",
+			"1)"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1) (times)))",
+			"expected '{', found ')'",
+			")))"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1) (unlimited 1)))",
+			"expected ')', found '1'",
+			"1)))"
+		),
+		(
+			"(function [] (reroll (standard-dice 1 6) (eq 1) (times 1) (times \
+			 2)))",
+			"expected ')', found '('",
+			"(times 2"
+		)
+	]
+	{
+		assert_reader_error(input, message, input.rfind(at).unwrap());
+	}
+}
+
+/// The spans of the operands of a `reroll` are checked as the children of the
+/// reroll, whose predicate and limit have no spans of their own: each operand
+/// must lie within the reroll, and follow the dice and the operands before it.
+#[test]
+fn test_reader_checks_spans_of_reroll_operands()
+{
+	let ast = read_s_expr(
+		"^[0 40] (function [] ^[0 40] (reroll ^[0 3] (standard-dice ^[0 1] 3 \
+		 ^[2 3] 6) (in-range-inclusive ^[14 15] 1 ^[18 19] 2) (times ^[20 21] \
+		 3)))"
+	)
+	.unwrap();
+	let Expression::Dice(DiceExpression::Reroll(reroll)) = &ast.body
+	else
+	{
+		panic!("expected a reroll, got {:?}", ast.body)
+	};
+	let span = |start, end| crate::span::SourceSpan { start, end };
+	let Predicate::InRangeInclusive { start, end } = &reroll.predicate
+	else
+	{
+		panic!("expected an inclusive range, got {:?}", reroll.predicate)
+	};
+	assert_eq!(crate::span::Spanned::span(&**start), span(14, 15));
+	assert_eq!(crate::span::Spanned::span(&**end), span(18, 19));
+	let Some(Limit::Times(count)) = &reroll.limit
+	else
+	{
+		panic!("expected a count, got {:?}", reroll.limit)
+	};
+	assert_eq!(crate::span::Spanned::span(&**count), span(20, 21));
+	for (input, expected) in [
+		(
+			"^[0 20] (function [] ^[0 20] (reroll ^[5 8] (standard-dice 3 6) \
+			 (eq ^[0 1] 1)))",
+			"overlaps or precedes prior sibling"
+		),
+		(
+			"^[0 20] (function [] ^[0 20] (reroll ^[0 3] (standard-dice 3 6) \
+			 (in-range ^[10 11] 1 ^[5 6] 2)))",
+			"overlaps or precedes prior sibling"
+		),
+		(
+			"^[0 20] (function [] ^[0 20] (reroll ^[0 3] (standard-dice 3 6) \
+			 (eq ^[10 11] 1) (times ^[8 9] 2)))",
+			"overlaps or precedes prior sibling"
+		),
+		(
+			"^[0 20] (function [] ^[0 20] (reroll ^[0 3] (standard-dice 3 6) \
+			 (eq 1) (times ^[30 31] 2)))",
+			"escapes parent span"
+		)
+	]
+	{
+		let err = read_s_expr(input).expect_err("expected a span failure");
+		assert!(
+			err.to_string().contains(expected),
+			"input {:?}: message was {:?}",
+			input,
+			err.to_string()
+		);
+	}
 }
 
 /// A `^[start end]` span prefix with `start > end` is rejected. The error

@@ -102,6 +102,58 @@ fn test_visitor_order_keeps()
 	);
 }
 
+/// Ensure that a walk enters and visits reroll clauses as it does drop and keep
+/// clauses, in order with them, the outer clause first, then its dice, then the
+/// operands of its predicate in the order written, and then its count; that it
+/// hands [`visit_reroll`](ASTVisitor::visit_reroll) the outputs of those
+/// operands in the shape of the predicate and the limit; and that it does not
+/// finish the dice beneath a reroll clause with
+/// [`visit_expression`](ASTVisitor::visit_expression).
+#[test]
+fn test_visitor_order_rerolls()
+{
+	let ast = crate::s_expr::read_s_expr(
+		"(function [{x}] (add (reroll (keep-highest (reroll (reroll \
+		 (standard-dice 5 6) (eq 1)) (in-range-inclusive (neg 2) {x}) (times \
+		 3)) 4) (in [1 2]) (unlimited)) (reroll (custom-dice 2 [-1 1]) (in-range \
+		 {x} 7) (unlimited))))"
+	)
+	.unwrap();
+	let mut tracer = Tracer::default();
+	let output = ast.accept(&mut tracer).unwrap();
+	assert_eq!(
+		output,
+		"fn <<<5>D<6> reroll = <1> reroll in <-<2>>..=<{x}> <3> times keep \
+		 highest <4> reroll in [1, 2] ∞ times> + <<2>D[-1, 1] reroll in \
+		 <{x}>..<7> ∞ times>>"
+	);
+	assert_eq!(
+		tracer.entered,
+		[
+			"function",
+			"add",
+			"reroll",
+			"keep_highest",
+			"reroll",
+			"reroll",
+			"standard_dice",
+			"constant",
+			"constant",
+			"constant",
+			"neg",
+			"constant",
+			"variable",
+			"constant",
+			"constant",
+			"reroll",
+			"custom_dice",
+			"constant",
+			"variable",
+			"constant"
+		]
+	);
+}
+
 /// Ensure that a walk from a [`DiceExpression`] or an
 /// [`ArithmeticExpression`] does not finish its root with
 /// [`visit_expression`](ASTVisitor::visit_expression), since neither fills a
@@ -276,6 +328,58 @@ impl Tracer
 		})
 	}
 
+	/// Record a `visit_*` call and render a reroll clause.
+	///
+	/// # Parameters
+	/// - `dice`: The output of the dice.
+	/// - `predicate`: The predicate, holding the outputs of its operands.
+	/// - `limit`: The limit, holding the output of its count, if any.
+	///
+	/// # Returns
+	/// The rendering.
+	///
+	/// # Errors
+	/// The name of the call, if it is the one at which to fail.
+	fn reroll(
+		&mut self,
+		dice: String,
+		predicate: Predicate<String>,
+		limit: Option<Limit<String>>
+	) -> Result<String, &'static str>
+	{
+		self.call("visit reroll")?;
+		let predicate = match predicate
+		{
+			Predicate::Eq(t) => format!("= {}", t),
+			Predicate::Ne(t) => format!("≠ {}", t),
+			Predicate::Lt(t) => format!("< {}", t),
+			Predicate::Le(t) => format!("≤ {}", t),
+			Predicate::Gt(t) => format!("> {}", t),
+			Predicate::Ge(t) => format!("≥ {}", t),
+			Predicate::In(values) =>
+			{
+				let values =
+					values.iter().map(i32::to_string).collect::<Vec<_>>();
+				format!("in [{}]", values.join(", "))
+			},
+			Predicate::InRange { start, end } =>
+			{
+				format!("in {}..{}", start, end)
+			},
+			Predicate::InRangeInclusive { start, end } =>
+			{
+				format!("in {}..={}", start, end)
+			}
+		};
+		let limit = match limit
+		{
+			None => String::new(),
+			Some(Limit::Times(count)) => format!(" {} times", count),
+			Some(Limit::Unlimited) => " ∞ times".to_string()
+		};
+		Ok(format!("{} reroll {}{}", dice, predicate, limit))
+	}
+
 	/// Record a `visit_*` call and render a binary operation.
 	///
 	/// # Parameters
@@ -395,6 +499,14 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	) -> Result<(), Self::Error>
 	{
 		self.enter("keep_highest", "enter keep_highest")
+	}
+
+	fn enter_reroll(
+		&mut self,
+		_node: &'a Reroll<'src>
+	) -> Result<(), Self::Error>
+	{
+		self.enter("reroll", "enter reroll")
 	}
 
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), Self::Error>
@@ -550,6 +662,17 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	) -> Result<String, Self::Error>
 	{
 		self.clause("visit keep_highest", "keep highest", dice, keep)
+	}
+
+	fn visit_reroll(
+		&mut self,
+		_node: &'a Reroll<'src>,
+		dice: String,
+		predicate: Predicate<String>,
+		limit: Option<Limit<String>>
+	) -> Result<String, Self::Error>
+	{
+		self.reroll(dice, predicate, limit)
 	}
 
 	fn visit_add(
@@ -754,6 +877,11 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 		self.enter()
 	}
 
+	fn enter_reroll(&mut self, _node: &'a Reroll<'src>) -> Result<(), ()>
+	{
+		self.enter()
+	}
+
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), ()>
 	{
 		self.enter()
@@ -894,6 +1022,19 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 	) -> Result<usize, ()>
 	{
 		self.visit(&[dice, keep.unwrap_or(0)])
+	}
+
+	fn visit_reroll(
+		&mut self,
+		_node: &'a Reroll<'src>,
+		dice: usize,
+		predicate: Predicate<usize>,
+		limit: Option<Limit<usize>>
+	) -> Result<usize, ()>
+	{
+		let operands = predicate.operands().sum::<usize>();
+		let count = limit.as_ref().and_then(Limit::operand).unwrap_or(&0);
+		self.visit(&[dice, operands, *count])
 	}
 
 	fn visit_add(

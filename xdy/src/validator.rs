@@ -38,8 +38,8 @@ use crate::{
 	CompilationError, SourceSpan,
 	ast::{
 		self, ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-		DropLowest, Exp, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Range,
-		StandardDice, Sub, Variable
+		DropLowest, Exp, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
+		Predicate, Range, Reroll, StandardDice, Sub, Variable
 	}
 };
 
@@ -339,6 +339,17 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Validator<'a, 'src>
 		_node: &'a KeepHighest<'src>,
 		_dice: (),
 		_keep: Option<()>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	fn visit_reroll(
+		&mut self,
+		_node: &'a Reroll<'src>,
+		_dice: (),
+		_predicate: Predicate<()>,
+		_limit: Option<Limit<()>>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())

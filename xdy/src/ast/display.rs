@@ -22,8 +22,8 @@ use std::fmt::{self, Formatter};
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
 	Div, DropHighest, DropLowest, Exp, Expression, Function, Group,
-	KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter, Range, StandardDice,
-	Sub, Variable
+	KeepHighest, KeepLowest, Limit, Mod, Mul, Neg, Parameter, Predicate, Range,
+	Reroll, StandardDice, Sub, Variable
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -394,6 +394,125 @@ fn schedule_clause<'a>(
 	schedule(stack, &[Piece::Dice(dice), Piece::Text(keywords)]);
 }
 
+impl Render for Reroll<'_>
+{
+	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
+	{
+		// Schedule the parts in reverse, since each goes atop its successor.
+		match self.limit.as_ref().map(|limit| limit.map(|count| &**count))
+		{
+			// A count of 1, and only that, reads as a single time.
+			Some(Limit::Times(
+				count @ Expression::Constant(Constant { value: 1, .. })
+			)) => schedule(
+				stack,
+				&[
+					Piece::Text(" "),
+					Piece::Expression(count),
+					Piece::Text(" time")
+				]
+			),
+			// The count of a clause never begins with `-`, so a negative
+			// constant, which only a tree that was not parsed can hold here,
+			// renders grouped, lest it read back as a subtraction.
+			Some(Limit::Times(
+				count @ Expression::Constant(Constant { value: ..=-1, .. })
+			)) => schedule(
+				stack,
+				&[
+					Piece::Text(" ("),
+					Piece::Expression(count),
+					Piece::Text(") times")
+				]
+			),
+			Some(Limit::Times(count)) => schedule(
+				stack,
+				&[
+					Piece::Text(" "),
+					Piece::Expression(count),
+					Piece::Text(" times")
+				]
+			),
+			Some(Limit::Unlimited) => stack.push(Piece::Text(" ∞ times")),
+			None =>
+			{}
+		}
+		match &self.predicate
+		{
+			Predicate::Eq(threshold) =>
+			{
+				schedule_threshold(stack, "=", threshold)
+			},
+			Predicate::Ne(threshold) =>
+			{
+				schedule_threshold(stack, "≠", threshold)
+			},
+			Predicate::Lt(threshold) =>
+			{
+				schedule_threshold(stack, "<", threshold)
+			},
+			Predicate::Le(threshold) =>
+			{
+				schedule_threshold(stack, "≤", threshold)
+			},
+			Predicate::Gt(threshold) =>
+			{
+				schedule_threshold(stack, ">", threshold)
+			},
+			Predicate::Ge(threshold) =>
+			{
+				schedule_threshold(stack, "≥", threshold)
+			},
+			Predicate::In(values) => schedule(
+				stack,
+				&[Piece::Text(" in ["), Piece::Faces(values), Piece::Text("]")]
+			),
+			Predicate::InRange { start, end } => schedule(
+				stack,
+				&[
+					Piece::Text(" in "),
+					Piece::Expression(start),
+					Piece::Text(".."),
+					Piece::Expression(end)
+				]
+			),
+			Predicate::InRangeInclusive { start, end } => schedule(
+				stack,
+				&[
+					Piece::Text(" in "),
+					Piece::Expression(start),
+					Piece::Text("..="),
+					Piece::Expression(end)
+				]
+			)
+		}
+		schedule(stack, &[Piece::Dice(&self.dice), Piece::Text(" reroll")]);
+	}
+}
+
+/// Schedule the pieces of a comparison with a threshold.
+///
+/// # Parameters
+/// - `stack`: The pending pieces, the next of which is on top.
+/// - `comparator`: The comparator.
+/// - `threshold`: The threshold.
+fn schedule_threshold<'a>(
+	stack: &mut Vec<Piece<'a>>,
+	comparator: &'static str,
+	threshold: &'a Expression<'a>
+)
+{
+	schedule(
+		stack,
+		&[
+			Piece::Text(" "),
+			Piece::Text(comparator),
+			Piece::Text(" "),
+			Piece::Expression(threshold)
+		]
+	);
+}
+
 impl Render for DiceExpression<'_>
 {
 	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
@@ -405,7 +524,8 @@ impl Render for DiceExpression<'_>
 			DiceExpression::DropLowest(clause) => clause.schedule(stack),
 			DiceExpression::DropHighest(clause) => clause.schedule(stack),
 			DiceExpression::KeepLowest(clause) => clause.schedule(stack),
-			DiceExpression::KeepHighest(clause) => clause.schedule(stack)
+			DiceExpression::KeepHighest(clause) => clause.schedule(stack),
+			DiceExpression::Reroll(clause) => clause.schedule(stack)
 		}
 	}
 }

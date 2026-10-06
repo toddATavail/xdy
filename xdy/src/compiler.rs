@@ -50,8 +50,8 @@ use crate::{
 	StandardOptimizer, Validator,
 	ast::{self, ASTVisitor, Binding, Constant, Event, Expression, Node, Walk},
 	ir::{
-		AddressingMode, Immediate, Instruction, RegisterIndex,
-		RollingRecordIndex
+		AddressingMode, Immediate, Instruction, Limit, Predicate,
+		RegisterIndex, RollingRecordIndex
 	},
 	parser::{ParseError, is_canonical_name}
 };
@@ -778,6 +778,45 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 		Ok(record.into())
 	}
 
+	fn visit_reroll(
+		&mut self,
+		_node: &'a ast::Reroll<'src>,
+		dice: AddressingMode,
+		predicate: ast::Predicate<AddressingMode>,
+		limit: Option<ast::Limit<AddressingMode>>
+	) -> Result<AddressingMode, Infallible>
+	{
+		let record: RollingRecordIndex = dice
+			.try_into()
+			.expect("dice visitor must return RollingRecord");
+		let predicate = match predicate
+		{
+			ast::Predicate::Eq(threshold) => Predicate::Eq(threshold),
+			ast::Predicate::Ne(threshold) => Predicate::Ne(threshold),
+			ast::Predicate::Lt(threshold) => Predicate::Lt(threshold),
+			ast::Predicate::Le(threshold) => Predicate::Le(threshold),
+			ast::Predicate::Gt(threshold) => Predicate::Gt(threshold),
+			ast::Predicate::Ge(threshold) => Predicate::Ge(threshold),
+			ast::Predicate::In(values) => Predicate::In(values),
+			ast::Predicate::InRange { start, end } =>
+			{
+				Predicate::InRange { start, end }
+			},
+			ast::Predicate::InRangeInclusive { start, end } =>
+			{
+				Predicate::InRangeInclusive { start, end }
+			},
+		};
+		let limit = match limit
+		{
+			Some(ast::Limit::Times(count)) => Limit::Times(count),
+			Some(ast::Limit::Unlimited) => Limit::Unlimited,
+			None => Limit::Times(Immediate(1).into())
+		};
+		self.emit(Instruction::reroll(record, predicate, limit));
+		Ok(record.into())
+	}
+
 	fn visit_add(
 		&mut self,
 		_node: &'a ast::Add<'src>,
@@ -864,9 +903,9 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 	{
 		// Every expression slot consumes an integer, so reduce an unsummed
 		// rolling record to its sum at once, before any sibling is compiled.
-		// Only the dice beneath a drop or keep clause, which is not an
-		// expression slot, keeps its rolling record, for the clause to operate
-		// upon.
+		// Only the dice beneath a drop, keep, or reroll clause, which is not
+		// an expression slot, keeps its rolling record, for the clause to
+		// operate upon.
 		match output
 		{
 			AddressingMode::RollingRecord(record) =>
@@ -993,8 +1032,9 @@ impl Function
 	/// 4. Every [`RollCustomDice`](crate::RollCustomDice) has at least one
 	///    face.
 	/// 5. No operand is a rolling record: rolling records appear only as the
-	///    destinations of rolls, drops, and keeps, the sources of drops and
-	///    keeps, and the sources of [sums](crate::SumRollingRecord).
+	///    destinations of rolls, drops, keeps, and rerolls, the sources of
+	///    drops, keeps, and rerolls, and the sources of
+	///    [sums](crate::SumRollingRecord).
 	/// 6. The last instruction is a [`Return`](crate::Return), and it is the
 	///    only one. Nothing may follow a return, since the answer of the
 	///    function is its one return.
@@ -1414,8 +1454,9 @@ pub enum FunctionError
 
 	/// An operand is an [`AddressingMode::RollingRecord`], which the
 	/// [`Evaluator`](crate::Evaluator) cannot read as a value. Rolling records
-	/// appear only as the destinations of rolls, drops, and keeps, the sources
-	/// of drops and keeps, and the sources of [sums](crate::SumRollingRecord).
+	/// appear only as the destinations of rolls, drops, keeps, and rerolls, the
+	/// sources of drops, keeps, and rerolls, and the sources of
+	/// [sums](crate::SumRollingRecord).
 	UnexpectedRollingRecordOperand
 	{
 		/// The index of the offending instruction.
