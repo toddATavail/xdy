@@ -14,13 +14,16 @@ use std::{
 };
 
 use pretty_assertions::{assert_eq, assert_ne};
+use rand::{SeedableRng, rngs::StdRng};
 
 use super::{
 	ast::{Nesting, nest_function},
 	recovery::SCALE
 };
 use crate::{
-	Compiler, Passes, compile, compile_unoptimized,
+	Compiler, Evaluator, Passes, SourceSpan, Validator,
+	ast::{self, Constant, Direction, Expression, Extremum},
+	compile, compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack, on_small_stack_within, optimize,
 		read_compilation_test_cases
@@ -222,6 +225,161 @@ fn test_compile_reroll_clauses()
 		function.to_string().lines().nth(1).map(str::trim),
 		Some("extern[{x}@0, {y}@1]")
 	);
+}
+
+/// Ensure that the compiler computes the arguments of an extremum in the order
+/// written, each once, and then chains `max` or `min` over their values from
+/// left to right; that it discovers the external variables among them in the
+/// order written; and that the functions that it compiles evaluate to the
+/// greatest or the least of the arguments, with every roll in the records, in
+/// the order written.
+#[test]
+fn test_compile_extrema()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (highest (standard-dice 1 20) (standard-dice 1 20) \
+			 (standard-dice 1 20)))",
+			"\
+\t\t⚅0 <- roll standard dice 1D20
+\t\t@0 <- sum rolling record ⚅0
+\t\t⚅1 <- roll standard dice 1D20
+\t\t@1 <- sum rolling record ⚅1
+\t\t⚅2 <- roll standard dice 1D20
+\t\t@2 <- sum rolling record ⚅2
+\t\t@3 <- @0 max @1
+\t\t@4 <- @3 max @2
+\t\treturn @4
+"
+		),
+		(
+			"(function [{POW}] (lowest (mul {POW} 5) 99))",
+			"\
+\t\t@1 <- @0 * 5
+\t\t@2 <- @1 min 99
+\t\treturn @2
+"
+		),
+		(
+			"(function [] (highest 3 5))",
+			"\
+\t\t@0 <- 3 max 5
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (lowest {y} (highest {x} {y}) {z}))",
+			"\
+\t\t@3 <- @1 max @0
+\t\t@4 <- @0 min @3
+\t\t@5 <- @4 min @2
+\t\treturn @5
+"
+		),
+		(
+			"(function [] (drop-lowest (standard-dice 4 6) (group (lowest {x} \
+			 2))))",
+			"\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t@1 <- @0 min 2
+\t\t⚅0 <- drop lowest @1 from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+"
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let function = Compiler::compile(&ast).to_string();
+		assert_eq!(function.split_once("body:\n").unwrap().1, expected);
+	}
+	let ast = crate::s_expr::read_s_expr(
+		"(function [] (lowest {y} (highest {x} {y}) {z}))"
+	)
+	.unwrap();
+	assert_eq!(
+		Compiler::compile(&ast)
+			.to_string()
+			.lines()
+			.nth(1)
+			.map(str::trim),
+		Some("extern[{y}@0, {x}@1, {z}@2]")
+	);
+	for (s_expr, result, records) in [
+		("(function [] (highest 3 5 4))", 5, &[][..]),
+		("(function [] (lowest 3 5 4))", 3, &[][..]),
+		(
+			"(function [] (highest (custom-dice 1 [4]) (custom-dice 2 [-1]) \
+			 (custom-dice 1 [9])))",
+			9,
+			&["1d[4]: [4]", "2d[-1]: [-1, -1]", "1d[9]: [9]"][..]
+		),
+		(
+			"(function [] (lowest (custom-dice 1 [4]) (custom-dice 2 [-1]) \
+			 (custom-dice 1 [9])))",
+			-2,
+			&["1d[4]: [4]", "2d[-1]: [-1, -1]", "1d[9]: [9]"][..]
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let mut evaluator = Evaluator::new(Compiler::compile(&ast));
+		let evaluation = evaluator
+			.evaluate([], &mut StdRng::seed_from_u64(0))
+			.unwrap();
+		assert_eq!(evaluation.result, result, "{}", s_expr);
+		assert_eq!(
+			evaluation
+				.records
+				.iter()
+				.map(ToString::to_string)
+				.collect::<Vec<_>>(),
+			records,
+			"{}",
+			s_expr
+		);
+	}
+}
+
+/// Ensure that the compiler accepts an extremum built with fewer than two
+/// arguments, which neither the parser nor the S-expression reader admits: an
+/// extremum of one argument has the value of that argument, and an extremum of
+/// none has the identity of its direction.
+#[test]
+fn test_compile_extrema_of_fewer_than_two()
+{
+	let span = SourceSpan::SYNTHETIC;
+	for (direction, arguments, expected) in [
+		(Direction::Highest, vec![7], 7),
+		(Direction::Lowest, vec![7], 7),
+		(Direction::Highest, vec![], i32::MIN),
+		(Direction::Lowest, vec![], i32::MAX)
+	]
+	{
+		let ast = ast::Function {
+			parameters: None,
+			body: Expression::Extremum(Extremum {
+				direction,
+				arguments: arguments
+					.into_iter()
+					.map(|value| Expression::Constant(Constant { value, span }))
+					.collect(),
+				span
+			}),
+			span
+		};
+		Validator::validate(&ast).unwrap();
+		let function = Compiler::compile(&ast);
+		assert_eq!(
+			function.to_string().split_once("body:\n").unwrap().1,
+			format!("\t\treturn {}\n", expected)
+		);
+		let mut evaluator = Evaluator::new(function);
+		let evaluation = evaluator
+			.evaluate([], &mut StdRng::seed_from_u64(0))
+			.unwrap();
+		assert_eq!(evaluation.result, expected);
+	}
 }
 
 /// Ensure that the compiler survives a deep chain of every nesting construct

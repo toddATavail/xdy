@@ -10,7 +10,7 @@
 //! [`SExprError`]: crate::s_expr::SExprError
 
 use crate::{
-	ast::{DiceExpression, Expression, Limit, Predicate},
+	ast::{DiceExpression, Direction, Expression, Limit, Predicate},
 	s_expr::*
 };
 
@@ -515,6 +515,85 @@ fn test_reader_checks_spans_of_reroll_operands()
 		(
 			"^[0 20] (function [] ^[0 20] (reroll ^[0 3] (standard-dice 3 6) \
 			 (eq 1) (times ^[30 31] 2)))",
+			"escapes parent span"
+		)
+	]
+	{
+		let err = read_s_expr(input).expect_err("expected a span failure");
+		assert!(
+			err.to_string().contains(expected),
+			"input {:?}: message was {:?}",
+			input,
+			err.to_string()
+		);
+	}
+}
+
+/// An extremum takes two or more arguments, so one that closes after fewer is
+/// rejected where its next argument should be, as any form that lacks an
+/// operand is; one that never closes is rejected at the end of the input; and
+/// each argument must be an expression.
+#[test]
+fn test_reader_rejects_malformed_extremum()
+{
+	for (input, message, at) in [
+		("(function [] (highest))", "expected '{', found ')'", "))"),
+		("(function [] (lowest 1))", "expected '{', found ')'", "))"),
+		(
+			"(function [] (highest 1 [2]))",
+			"expected '{', found '['",
+			"[2]"
+		),
+		("(function [] (lowest 1 2", "expected expression", "")
+	]
+	{
+		let offset = match at
+		{
+			"" => input.len(),
+			at => input.rfind(at).unwrap()
+		};
+		assert_reader_error(input, message, offset);
+	}
+}
+
+/// The spans of the arguments of an extremum are checked as its children: each
+/// argument must lie within the extremum, and follow the argument before it.
+#[test]
+fn test_reader_checks_spans_of_extremum_arguments()
+{
+	let ast = read_s_expr(
+		"^[0 16] (function [] ^[0 16] (highest ^[8 9] 1 ^[11 12] 2 ^[14 15] 3))"
+	)
+	.unwrap();
+	let Expression::Extremum(extremum) = &ast.body
+	else
+	{
+		panic!("expected an extremum, got {:?}", ast.body)
+	};
+	assert_eq!(extremum.direction, Direction::Highest);
+	assert_eq!(
+		extremum
+			.arguments
+			.iter()
+			.map(|argument| {
+				let span = crate::span::Spanned::span(argument);
+				(span.start, span.end)
+			})
+			.collect::<Vec<_>>(),
+		[(8, 9), (11, 12), (14, 15)]
+	);
+	for (input, expected) in [
+		(
+			"^[0 16] (function [] ^[0 16] (lowest ^[8 9] 1 ^[5 6] 2))",
+			"overlaps or precedes prior sibling"
+		),
+		(
+			"^[0 16] (function [] ^[0 16] (lowest ^[8 9] 1 ^[11 12] 2 ^[10 11] \
+			 3))",
+			"overlaps or precedes prior sibling"
+		),
+		(
+			"^[0 16] (function [] ^[0 16] (lowest ^[8 9] 1 ^[11 20] 2))",
 			"escapes parent span"
 		)
 	]

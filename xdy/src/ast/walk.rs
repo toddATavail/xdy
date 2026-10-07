@@ -108,6 +108,13 @@ impl<'a, 'src> Walk<'a, 'src>
 					self.expression(&range.end);
 					self.expression(&range.start);
 				},
+				Expression::Extremum(extremum) =>
+				{
+					for argument in extremum.arguments.iter().rev()
+					{
+						self.expression(argument);
+					}
+				},
 				Expression::Dice(dice) => self.schedule_dice_children(dice),
 				Expression::Arithmetic(arithmetic) =>
 				{
@@ -279,6 +286,7 @@ fn enter<'a, 'src, V: ASTVisitor<'a, 'src>>(
 			Expression::Variable(variable) => visitor.enter_variable(variable),
 			Expression::Binding(binding) => visitor.enter_binding(binding),
 			Expression::Range(range) => visitor.enter_range(range),
+			Expression::Extremum(extremum) => visitor.enter_extremum(extremum),
 			Expression::Dice(dice) => enter_dice(dice, visitor),
 			Expression::Arithmetic(arithmetic) =>
 			{
@@ -397,6 +405,11 @@ fn leave<'a, 'src, V: ASTVisitor<'a, 'src>>(
 				{
 					let (start, end) = pop_pair(outputs);
 					visitor.visit_range(range, start, end)
+				},
+				Expression::Extremum(extremum) =>
+				{
+					let arguments = pop_many(outputs, extremum.arguments.len());
+					visitor.visit_extremum(extremum, arguments)
 				},
 				Expression::Dice(dice) => leave_dice(dice, visitor, outputs),
 				Expression::Arithmetic(arithmetic) =>
@@ -538,6 +551,26 @@ fn pop<T>(outputs: &mut Vec<T>) -> T
 	outputs
 		.pop()
 		.expect("a child's output must precede its parent's visit")
+}
+
+/// Pop the outputs of the specified number of finished children.
+///
+/// # Parameters
+/// - `outputs`: The outputs of finished children.
+/// - `count`: The number of outputs to pop.
+///
+/// # Returns
+/// The outputs, in order.
+///
+/// # Panics
+/// If the stack holds fewer than `count` outputs; see [`pop`].
+fn pop_many<T>(outputs: &mut Vec<T>, count: usize) -> Vec<T>
+{
+	let first = outputs
+		.len()
+		.checked_sub(count)
+		.expect("a child's output must precede its parent's visit");
+	outputs.split_off(first)
 }
 
 /// Pop the outputs of the operands of a predicate.

@@ -154,6 +154,64 @@ fn test_visitor_order_rerolls()
 	);
 }
 
+/// Ensure that a walk enters an extremum before its arguments, enters and
+/// visits the arguments in the order written, hands
+/// [`visit_extremum`](ASTVisitor::visit_extremum) their outputs in that order,
+/// and finishes the extremum and each argument with
+/// [`visit_expression`](ASTVisitor::visit_expression), wherever the extremum
+/// appears; and that an extremum built without arguments hands it none.
+#[test]
+fn test_visitor_order_extrema()
+{
+	let ast = crate::s_expr::read_s_expr(
+		"(function [{x}] (add (highest 1 (lowest {x} (standard-dice 2 6)) (neg \
+		 3)) (drop-lowest (standard-dice 4 6) (group (highest 1 2)))))"
+	)
+	.unwrap();
+	let mut tracer = Tracer::default();
+	let output = ast.accept(&mut tracer).unwrap();
+	assert_eq!(
+		output,
+		"fn <<highest(<1>, <lowest(<{x}>, <<2>D<6>>)>, <-<3>>)> + <<4>D<6> drop \
+		 lowest <(<highest(<1>, <2>)>)>>>"
+	);
+	assert_eq!(
+		tracer.entered,
+		[
+			"function",
+			"add",
+			"extremum",
+			"constant",
+			"extremum",
+			"variable",
+			"standard_dice",
+			"constant",
+			"constant",
+			"neg",
+			"constant",
+			"drop_lowest",
+			"standard_dice",
+			"constant",
+			"constant",
+			"group",
+			"extremum",
+			"constant",
+			"constant"
+		]
+	);
+	let empty = Expression::Extremum(Extremum {
+		direction: Direction::Lowest,
+		arguments: Vec::new(),
+		span: Default::default()
+	});
+	let mut tracer = Tracer::default();
+	assert_eq!(empty.accept(&mut tracer).unwrap(), "<lowest()>");
+	assert_eq!(
+		tracer.calls,
+		["enter extremum", "visit extremum", "visit expression"]
+	);
+}
+
 /// Ensure that a walk from a [`DiceExpression`] or an
 /// [`ArithmeticExpression`] does not finish its root with
 /// [`visit_expression`](ASTVisitor::visit_expression), since neither fills a
@@ -380,6 +438,32 @@ impl Tracer
 		Ok(format!("{} reroll {}{}", dice, predicate, limit))
 	}
 
+	/// Record a `visit_*` call and render an extremum.
+	///
+	/// # Parameters
+	/// - `node`: The extremum.
+	/// - `arguments`: The outputs of the arguments.
+	///
+	/// # Returns
+	/// The rendering.
+	///
+	/// # Errors
+	/// The name of the call, if it is the one at which to fail.
+	fn extremum(
+		&mut self,
+		node: &Extremum<'_>,
+		arguments: Vec<String>
+	) -> Result<String, &'static str>
+	{
+		self.call("visit extremum")?;
+		let keyword = match node.direction
+		{
+			Direction::Highest => "highest",
+			Direction::Lowest => "lowest"
+		};
+		Ok(format!("{}({})", keyword, arguments.join(", ")))
+	}
+
 	/// Record a `visit_*` call and render a binary operation.
 	///
 	/// # Parameters
@@ -451,6 +535,14 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	-> Result<(), Self::Error>
 	{
 		self.enter("range", "enter range")
+	}
+
+	fn enter_extremum(
+		&mut self,
+		_node: &'a Extremum<'src>
+	) -> Result<(), Self::Error>
+	{
+		self.enter("extremum", "enter extremum")
 	}
 
 	fn enter_standard_dice(
@@ -601,6 +693,15 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	{
 		self.call("visit range")?;
 		Ok(format!("[{}:{}]", start, end))
+	}
+
+	fn visit_extremum(
+		&mut self,
+		node: &'a Extremum<'src>,
+		arguments: Vec<String>
+	) -> Result<String, Self::Error>
+	{
+		self.extremum(node, arguments)
 	}
 
 	fn visit_standard_dice(
@@ -829,6 +930,11 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 		self.enter()
 	}
 
+	fn enter_extremum(&mut self, _node: &'a Extremum<'src>) -> Result<(), ()>
+	{
+		self.enter()
+	}
+
 	fn enter_standard_dice(
 		&mut self,
 		_node: &'a StandardDice<'src>
@@ -963,6 +1069,15 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 	) -> Result<usize, ()>
 	{
 		self.visit(&[start, end])
+	}
+
+	fn visit_extremum(
+		&mut self,
+		_node: &'a Extremum<'src>,
+		arguments: Vec<usize>
+	) -> Result<usize, ()>
+	{
+		self.visit(&arguments)
 	}
 
 	fn visit_standard_dice(

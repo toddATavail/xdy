@@ -16,10 +16,10 @@
 //!   and only if their streams are.
 //! - [`hash`] hashes the stream, which is therefore consistent with [`eq`].
 //!
-//! The recursive fields of every AST type are either [`Expression`]s or
-//! [`DiceExpression`]s, so these two types are the only [nodes](Node); the
-//! struct and enum types between them are expanded inline. The other AST types
-//! derive their traits, which bottom out here after a single level.
+//! The recursive fields of every AST type are [`Expression`]s, lists of them,
+//! or [`DiceExpression`]s, so these two types are the only [nodes](Node); the
+//! struct, enum, and list types between them are expanded inline. The other AST
+//! types derive their traits, which bottom out here after a single level.
 
 use std::{
 	fmt::{self, Debug, Formatter, Write},
@@ -27,8 +27,8 @@ use std::{
 };
 
 use super::{
-	Add, ArithmeticExpression, Constant, DiceExpression, Div, Exp, Expression,
-	Limit, Mod, Mul, Predicate, Reroll, Sub, Variable
+	Add, ArithmeticExpression, Constant, DiceExpression, Direction, Div, Exp,
+	Expression, Extremum, Limit, Mod, Mul, Predicate, Reroll, Sub, Variable
 };
 use crate::span::SourceSpan;
 
@@ -60,6 +60,10 @@ pub(super) enum Event<'a, 'src>
 	/// [`Close`](Self::Close) ends it.
 	Tuple(&'static str),
 
+	/// Open a list, e.g., `[…]`. Its elements follow, and a
+	/// [`Close`](Self::Close) ends it.
+	List,
+
 	/// Name the next field of the innermost struct.
 	Field(&'static str),
 
@@ -70,7 +74,7 @@ pub(super) enum Event<'a, 'src>
 	/// A unit value, e.g., `None`.
 	Unit(&'static str),
 
-	/// Close the innermost struct or tuple.
+	/// Close the innermost struct, tuple, or list.
 	Close
 }
 
@@ -227,6 +231,7 @@ impl<'a, 'src> Events<'a, 'src>
 				close(),
 				close()
 			]),
+			Expression::Extremum(extremum) => self.expand_extremum(extremum),
 			Expression::Dice(dice) =>
 			{
 				self.schedule(&[tuple("Dice"), dice_node(dice), close()])
@@ -236,6 +241,36 @@ impl<'a, 'src> Events<'a, 'src>
 				self.expand_arithmetic(arithmetic)
 			},
 		}
+	}
+
+	/// Expand an [`Expression::Extremum`].
+	///
+	/// # Parameters
+	/// - `extremum`: The extremum.
+	fn expand_extremum(&mut self, extremum: &'a Extremum<'src>)
+	{
+		// Schedule the parts in reverse, since each goes atop its successor.
+		self.schedule(&[
+			close(),
+			field("span"),
+			span(extremum.span),
+			close(),
+			close()
+		]);
+		self.stack
+			.extend(extremum.arguments.iter().rev().map(expression_node));
+		self.schedule(&[
+			tuple("Extremum"),
+			structure("Extremum"),
+			field("direction"),
+			unit(match extremum.direction
+			{
+				Direction::Highest => "Highest",
+				Direction::Lowest => "Lowest"
+			}),
+			field("arguments"),
+			list()
+		]);
 	}
 
 	/// Expand an [`Expression::Arithmetic`].
@@ -510,6 +545,12 @@ fn tuple<'a, 'src>(name: &'static str) -> Item<'a, 'src>
 	Item::Event(Event::Tuple(name))
 }
 
+/// Answer an item that opens a list.
+///
+/// # Returns
+/// The item.
+fn list<'a, 'src>() -> Item<'a, 'src> { Item::Event(Event::List) }
+
 /// Answer an item that names a field.
 ///
 /// # Parameters
@@ -534,7 +575,7 @@ fn unit<'a, 'src>(name: &'static str) -> Item<'a, 'src>
 	Item::Event(Event::Unit(name))
 }
 
-/// Answer an item that closes a struct or tuple.
+/// Answer an item that closes a struct, tuple, or list.
 ///
 /// # Returns
 /// The item.
@@ -622,7 +663,21 @@ pub(super) fn debug(root: Node<'_, '_>, f: &mut Formatter<'_>) -> fmt::Result
 				begin_value(f, &mut open, pretty)?;
 				f.write_str(name)?;
 				open.push(Container {
-					is_struct: matches!(event, Event::Struct(_)),
+					kind: match event
+					{
+						Event::Struct(_) => Kind::Struct,
+						_ => Kind::Tuple
+					},
+					has_fields: false
+				});
+			},
+			Event::List =>
+			{
+				// A list opens even if it has no elements, unlike a tuple.
+				begin_value(f, &mut open, pretty)?;
+				f.write_str("[")?;
+				open.push(Container {
+					kind: Kind::List,
 					has_fields: false
 				});
 			},
@@ -676,21 +731,26 @@ pub(super) fn debug(root: Node<'_, '_>, f: &mut Formatter<'_>) -> fmt::Result
 			},
 			Event::Close =>
 			{
-				let container = open
-					.pop()
-					.expect("a close must match an open struct or tuple");
+				let container = open.pop().expect(
+					"a close must match an open struct, tuple, or list"
+				);
 				if container.has_fields
 				{
 					if pretty
 					{
 						indent(f, open.len())?;
 					}
-					f.write_str(match (container.is_struct, pretty)
+					f.write_str(match (container.kind, pretty)
 					{
-						(true, true) => "}",
-						(true, false) => " }",
-						(false, _) => ")"
+						(Kind::Struct, true) => "}",
+						(Kind::Struct, false) => " }",
+						(Kind::Tuple, _) => ")",
+						(Kind::List, _) => "]"
 					})?;
+				}
+				else if container.kind == Kind::List
+				{
+					f.write_str("]")?;
 				}
 				end_value(f, &open, pretty)?;
 			}
@@ -699,19 +759,35 @@ pub(super) fn debug(root: Node<'_, '_>, f: &mut Formatter<'_>) -> fmt::Result
 	Ok(())
 }
 
-/// A struct or tuple that [`debug`] has opened but not yet closed.
+/// A struct, tuple, or list that [`debug`] has opened but not yet closed.
 struct Container
 {
-	/// Whether the container is a struct, rather than a tuple.
-	is_struct: bool,
+	/// The kind of the container.
+	kind: Kind,
 
-	/// Whether the container has rendered any fields yet.
+	/// Whether the container has rendered any fields, or for a list, any
+	/// elements, yet.
 	has_fields: bool
 }
 
+/// The kind of a [`Container`].
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Kind
+{
+	/// A struct, whose fields are named.
+	Struct,
+
+	/// A tuple, whose fields are not.
+	Tuple,
+
+	/// A list of elements.
+	List
+}
+
 /// Begin rendering a value. A value inside a tuple is a new field of that
-/// tuple, so it needs a separator; a value inside a struct follows the
-/// separator that its [`Field`](Event::Field) already rendered.
+/// tuple, and a value inside a list is a new element of it, so either needs a
+/// separator; a value inside a struct follows the separator that its
+/// [`Field`](Event::Field) already rendered.
 ///
 /// # Parameters
 /// - `f`: The formatter.
@@ -732,19 +808,26 @@ fn begin_value(
 	let levels = open.len();
 	match open.last_mut()
 	{
-		Some(container) if !container.is_struct =>
+		Some(container) if container.kind != Kind::Struct =>
 		{
+			// A list wrote its opening bracket when it opened.
+			let opener = match container.kind
+			{
+				Kind::List => "",
+				_ => "("
+			};
 			if pretty
 			{
 				if !container.has_fields
 				{
-					f.write_str("(\n")?;
+					f.write_str(opener)?;
+					f.write_str("\n")?;
 				}
 				indent(f, levels)?;
 			}
 			else
 			{
-				f.write_str(if container.has_fields { ", " } else { "(" })?;
+				f.write_str(if container.has_fields { ", " } else { opener })?;
 			}
 			container.has_fields = true;
 			Ok(())

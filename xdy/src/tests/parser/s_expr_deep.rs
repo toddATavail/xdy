@@ -5,21 +5,23 @@
 //! at its [depth](Nesting::depth), written as an S-expression with spans and
 //! groups on one line, and read back on a [small stack](on_small_stack), both
 //! as a valid S-expression and as one that fails at its innermost leaf.
-//! Functions with [very many](WIDTH) parameters and dice with very many faces
-//! are read back the same way. The default time budget of the small stack also
-//! bounds the read time, so a reader that took time quadratic in the depth or
-//! the width would not finish. The deep reads are ignored by default; `just
-//! stress` runs them.
+//! Functions with [very many](WIDTH) parameters, dice with very many faces, and
+//! extrema with very many arguments are read back the same way. The default
+//! time budget of the small stack also bounds the read time, so a reader that
+//! took time quadratic in the depth or the width would not finish. The deep
+//! reads are ignored by default; `just stress` runs them.
 
 use crate::{
-	Parser,
-	ast::{DiceExpression, Expression, Function},
+	Parser, SourceSpan,
+	ast::{
+		Constant, DiceExpression, Direction, Expression, Extremum, Function
+	},
 	s_expr::{
 		SExprError, SExprLocation, SExpressible, SExpressibleOptions,
 		read_s_expr
 	},
 	support::on_small_stack,
-	tests::ast::{Nesting, nest_parsable}
+	tests::ast::{Nesting, nest, nest_parsable}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,6 +192,36 @@ fn read_deep(nesting: Nesting)
 	});
 }
 
+/// Ensure that a deep chain of the first arguments of extrema reads on a small
+/// stack. The parser does not yet read extrema, so the chain is built.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_extremum_first() { read_deep_built(Nesting::ExtremumFirst) }
+
+/// Ensure that a deep chain of the last arguments of extrema reads on a small
+/// stack. The parser does not yet read extrema, so the chain is built.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_extremum_last() { read_deep_built(Nesting::ExtremumLast) }
+
+/// Build a [deep](Nesting::depth) function, and ensure that its S-expression
+/// reads back to it on a small stack, as [`read_deep`] does for a parsed
+/// source, but without spans.
+///
+/// # Parameters
+/// - `nesting`: The way to nest.
+fn read_deep_built(nesting: Nesting)
+{
+	on_small_stack(|| {
+		let function = Function {
+			parameters: None,
+			body: nest(nesting, nesting.depth(), LEAF),
+			span: SourceSpan::SYNTHETIC
+		};
+		round_trip(&function);
+	});
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                               Wrapped reads.                               //
 ////////////////////////////////////////////////////////////////////////////////
@@ -213,6 +245,19 @@ fn test_read_deep_wrapped()
 			.with_spans(true)
 			.with_groups(true);
 		let s_expr = function.to_s_expr(options);
+		assert!(s_expr.lines().count() > WRAPPED_DEPTH, "{:?}", nesting);
+		let read = read_s_expr(&s_expr).expect("S-expression failed to read");
+		assert!(read == function, "{:?}: read back differently", nesting);
+	}
+	// The parser does not yet read extrema, so their chains are built.
+	for nesting in [Nesting::ExtremumFirst, Nesting::ExtremumLast]
+	{
+		let function = Function {
+			parameters: None,
+			body: nest(nesting, WRAPPED_DEPTH, 1),
+			span: SourceSpan::SYNTHETIC
+		};
+		let s_expr = function.to_s_expr(SExpressibleOptions::default());
 		assert!(s_expr.lines().count() > WRAPPED_DEPTH, "{:?}", nesting);
 		let read = read_s_expr(&s_expr).expect("S-expression failed to read");
 		assert!(read == function, "{:?}: read back differently", nesting);
@@ -261,6 +306,32 @@ fn test_read_wide_faces()
 			},
 			_ => panic!("wide source did not parse as custom dice")
 		}
+		round_trip(&function);
+	});
+}
+
+/// Ensure that an extremum of very many arguments reads on a small stack. The
+/// parser does not yet read extrema, so the extremum is built.
+#[test]
+fn test_read_wide_extremum()
+{
+	on_small_stack(|| {
+		let function = Function {
+			parameters: None,
+			body: Expression::Extremum(Extremum {
+				direction: Direction::Highest,
+				arguments: (1..=WIDTH as i32)
+					.map(|value| {
+						Expression::Constant(Constant {
+							value,
+							span: SourceSpan::SYNTHETIC
+						})
+					})
+					.collect(),
+				span: SourceSpan::SYNTHETIC
+			}),
+			span: SourceSpan::SYNTHETIC
+		};
 		round_trip(&function);
 	});
 }

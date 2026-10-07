@@ -42,9 +42,10 @@ use super::{
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
-		Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
+		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp,
+		Expression, Extremum, Function, Group, KeepHighest, KeepLowest, Limit,
+		Mod, Mul, Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub,
+		Variable
 	},
 	span::{SourceSpan, Spanned}
 };
@@ -158,6 +159,17 @@ enum Form<'src>
 	{
 		/// The start, once read.
 		start: Option<Expression<'src>>
+	},
+
+	/// `(highest argument…)` or `(lowest argument…)`, of two or more arguments,
+	/// awaiting the next.
+	Extremum
+	{
+		/// The direction of the call.
+		direction: Direction,
+
+		/// The arguments read so far.
+		arguments: Vec<Expression<'src>>
 	},
 
 	/// `(binding name expression)`, whose name is read with its keyword.
@@ -647,6 +659,10 @@ fn open<'src>(
 		after_keyword,
 		stage: RerollStage::Dice
 	};
+	let extremum = |direction| Form::Extremum {
+		direction,
+		arguments: Vec::new()
+	};
 	let form = match *kw.fragment()
 	{
 		"add" => binary(Operator::Add),
@@ -665,6 +681,8 @@ fn open<'src>(
 		"keep-highest" => clause(ClauseKind::KeepHighest),
 		"reroll" => reroll,
 		"range" => Form::Range { start: None },
+		"highest" => extremum(Direction::Highest),
+		"lowest" => extremum(Direction::Lowest),
 		"binding" =>
 		{
 			// The bound name is emitted as an ident with an optional span
@@ -991,6 +1009,40 @@ fn deliver<'src>(
 				span
 			})
 		),
+		Form::Extremum {
+			direction,
+			mut arguments
+		} =>
+		{
+			arguments.push(child);
+			// A call awaits a second argument whatever follows its first, so
+			// that a missing argument is reported as any missing operand is.
+			let (probe, _) = skip_ws(input)?;
+			if arguments.len() >= 2 && probe.fragment().starts_with(')')
+			{
+				close(
+					input,
+					Expression::Extremum(Extremum {
+						direction,
+						arguments,
+						span
+					})
+				)
+			}
+			else
+			{
+				Ok(await_child(
+					stack,
+					Form::Extremum {
+						direction,
+						arguments
+					},
+					span,
+					child_span,
+					input
+				))
+			}
+		},
 		Form::Binding { name, name_span } => close(
 			input,
 			Expression::Binding(Binding {

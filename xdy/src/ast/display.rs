@@ -21,7 +21,7 @@ use std::fmt::{self, Formatter};
 
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
-	Div, DropHighest, DropLowest, Exp, Expression, Function, Group,
+	Div, DropHighest, DropLowest, Exp, Expression, Extremum, Function, Group,
 	KeepHighest, KeepLowest, Limit, Mod, Mul, Neg, Parameter, Predicate, Range,
 	Reroll, StandardDice, Sub, Variable
 };
@@ -254,6 +254,27 @@ impl Render for Range<'_>
 	}
 }
 
+impl Render for Extremum<'_>
+{
+	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
+	{
+		// Schedule the parts in reverse, since each goes atop its successor.
+		stack.push(Piece::Text(")"));
+		for (i, argument) in self.arguments.iter().enumerate().rev()
+		{
+			stack.push(Piece::Expression(argument));
+			if i > 0
+			{
+				stack.push(Piece::Text(", "));
+			}
+		}
+		schedule(
+			stack,
+			&[Piece::Text(self.direction.keyword()), Piece::Text("(")]
+		);
+	}
+}
+
 impl Render for Expression<'_>
 {
 	fn schedule<'a>(&'a self, stack: &mut Vec<Piece<'a>>)
@@ -265,6 +286,7 @@ impl Render for Expression<'_>
 			Expression::Variable(variable) => variable.schedule(stack),
 			Expression::Binding(binding) => binding.schedule(stack),
 			Expression::Range(range) => range.schedule(stack),
+			Expression::Extremum(extremum) => extremum.schedule(stack),
 			Expression::Dice(dice) => dice.schedule(stack),
 			Expression::Arithmetic(arithmetic) => arithmetic.schedule(stack)
 		}

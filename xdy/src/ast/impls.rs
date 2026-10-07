@@ -25,9 +25,9 @@ use std::{
 
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
-	Div, DropHighest, DropLowest, Exp, Expression, Group, KeepHighest,
-	KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll, StandardDice,
-	Sub, Variable,
+	Div, DropHighest, DropLowest, Exp, Expression, Extremum, Group,
+	KeepHighest, KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll,
+	StandardDice, Sub, Variable,
 	traversal::{self, Node}
 };
 use crate::span::SourceSpan;
@@ -305,6 +305,9 @@ impl<'a, 'src> Cloner<'a, 'src>
 				self.tasks.push(Task::Expression(&range.end));
 				self.tasks.push(Task::Expression(&range.start));
 			},
+			Expression::Extremum(extremum) => self
+				.tasks
+				.extend(extremum.arguments.iter().rev().map(Task::Expression)),
 			Expression::Dice(dice) => self.tasks.push(Task::Dice(dice)),
 			Expression::Arithmetic(arithmetic) => match arithmetic
 			{
@@ -426,6 +429,19 @@ impl<'a, 'src> Cloner<'a, 'src>
 					start,
 					end,
 					span: self.span(range.span)
+				})
+			},
+			Expression::Extremum(extremum) =>
+			{
+				let first = self
+					.expressions
+					.len()
+					.checked_sub(extremum.arguments.len())
+					.expect("the child must be cloned before its parent");
+				Expression::Extremum(Extremum {
+					direction: extremum.direction,
+					arguments: self.expressions.split_off(first),
+					span: self.span(extremum.span)
 				})
 			},
 			Expression::Dice(_) => Expression::Dice(self.pop_dice()),
@@ -754,6 +770,12 @@ fn detach_children<'src>(
 		{
 			detach(&mut range.start, orphans);
 			detach(&mut range.end, orphans);
+		},
+		// Move the arguments out wholesale, leaving an empty list, so that no
+		// placeholders are needed.
+		Expression::Extremum(extremum) =>
+		{
+			orphans.append(&mut extremum.arguments)
 		},
 		Expression::Dice(dice) => detach_dice_children(dice, orphans),
 		Expression::Arithmetic(arithmetic) => match arithmetic

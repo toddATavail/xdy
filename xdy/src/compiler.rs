@@ -691,6 +691,37 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Compiler<'a>
 		Ok(sum.into())
 	}
 
+	fn visit_extremum(
+		&mut self,
+		node: &'a ast::Extremum<'src>,
+		arguments: Vec<AddressingMode>
+	) -> Result<AddressingMode, Infallible>
+	{
+		// Every argument has been compiled, left to right, so chain their
+		// values in the order written. A call with fewer than two arguments,
+		// which only a tree that was not parsed can hold, has the value of its
+		// argument, or else the identity of its direction.
+		let mut arguments = arguments.into_iter();
+		let Some(first) = arguments.next()
+		else
+		{
+			let identity = match node.direction
+			{
+				ast::Direction::Highest => i32::MIN,
+				ast::Direction::Lowest => i32::MAX
+			};
+			return Ok(Immediate(identity).into())
+		};
+		let constructor = match node.direction
+		{
+			ast::Direction::Highest => Instruction::max,
+			ast::Direction::Lowest => Instruction::min
+		};
+		Ok(arguments.fold(first, |chain, argument| {
+			self.generate_binary(chain, argument, constructor)
+		}))
+	}
+
 	fn visit_standard_dice(
 		&mut self,
 		_node: &'a ast::StandardDice<'src>,

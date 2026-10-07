@@ -19,7 +19,7 @@
 //!
 //! # Deep nesting
 //!
-//! Every recursive field of the AST is an [`Expression`] or a
+//! Every recursive field of the AST is an [`Expression`], a list of them, or a
 //! [`DiceExpression`], whose implementations of [`Debug`](std::fmt::Debug),
 //! [`Clone`], [`PartialEq`], [`Eq`], [`Hash`](std::hash::Hash), and [`Drop`]
 //! use explicit stacks rather than recursion. An AST of any depth can therefore
@@ -282,6 +282,77 @@ impl Display for Range<'_>
 	}
 }
 
+/// A call of `highest` or `lowest`, whose value is the greatest or the least of
+/// the values of its arguments, e.g., `highest(1D20, 1D20)` or
+/// `lowest({POW} * 5, 99)`. Each argument is a full expression, delimited by
+/// the parentheses and the commas.
+///
+/// Every argument is evaluated, left to right, so every roll in every argument
+/// appears in the evaluation's records, in lexical order; nothing
+/// short-circuits. The arguments are values, not pools of dice:
+/// `highest(4D6, 10)` compares the sum of `4D6` with `10`, whereas
+/// `4D6 keep highest` keeps the highest die.
+///
+/// A call has two or more arguments, as the parser and the
+/// [S-expression reader](crate::s_expr::read_s_expr) require. The
+/// [compiler](crate::Compiler) nonetheless accepts a call built with fewer: a
+/// call of one argument has the value of that argument, and a call of none has
+/// the identity of its [direction](Direction), [`i32::MIN`] for
+/// [`Highest`](Direction::Highest) and [`i32::MAX`] for
+/// [`Lowest`](Direction::Lowest).
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Extremum<'src>
+{
+	/// Whether the call answers the greatest or the least of its arguments.
+	pub direction: Direction,
+
+	/// The arguments, in the order written.
+	pub arguments: Vec<Expression<'src>>,
+
+	/// The span of the call, from the keyword through the closing parenthesis.
+	pub span: SourceSpan
+}
+
+impl Display for Extremum<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		display::render(self, f)
+	}
+}
+
+/// The direction of an [extremum](Extremum): whether it answers the greatest or
+/// the least of its arguments.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Direction
+{
+	/// The greatest of the arguments, written `highest(…)`.
+	Highest,
+
+	/// The least of the arguments, written `lowest(…)`.
+	Lowest
+}
+
+impl Direction
+{
+	/// Answer the keyword that names the direction, in both the source and the
+	/// [S-expression](crate::s_expr) forms of a call.
+	///
+	/// # Returns
+	/// `highest` or `lowest`.
+	pub(crate) const fn keyword(self) -> &'static str
+	{
+		match self
+		{
+			Self::Highest => "highest",
+			Self::Lowest => "lowest"
+		}
+	}
+}
+
 /// An arbitrary expression.
 ///
 /// # Type parameters
@@ -305,6 +376,9 @@ pub enum Expression<'src>
 
 	/// A range expression.
 	Range(Range<'src>),
+
+	/// A call of `highest` or `lowest`.
+	Extremum(Extremum<'src>),
 
 	/// A dice expression.
 	Dice(DiceExpression<'src>),
@@ -1041,9 +1115,9 @@ impl Display for Neg<'_>
 ///     Parser,
 ///     ast::{
 ///         ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-///         DropLowest, Exp, Function, Group, KeepHighest, KeepLowest, Limit,
-///         Mod, Mul, Neg, Predicate, Range, Reroll, StandardDice, Sub,
-///         Variable
+///         DropLowest, Exp, Extremum, Function, Group, KeepHighest,
+///         KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll,
+///         StandardDice, Sub, Variable
 ///     }
 /// };
 ///
@@ -1066,6 +1140,9 @@ impl Display for Neg<'_>
 ///         -> Result<usize, Infallible> { Ok(expression) }
 ///     fn visit_range(&mut self, _: &'a Range<'src>, start: usize, end: usize)
 ///         -> Result<usize, Infallible> { Ok(start + end) }
+///     fn visit_extremum(
+///         &mut self, _: &'a Extremum<'src>, arguments: Vec<usize>
+///     ) -> Result<usize, Infallible> { Ok(arguments.into_iter().sum()) }
 ///     fn visit_standard_dice(
 ///         &mut self, _: &'a StandardDice<'src>, count: usize, faces: usize
 ///     ) -> Result<usize, Infallible> { Ok(1 + count + faces) }
@@ -1170,6 +1247,15 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	/// Enter a [range](Range) expression, before its bounds.
 	fn enter_range(&mut self, _node: &'a Range<'src>)
 	-> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter an [extremum](Extremum), before its arguments.
+	fn enter_extremum(
+		&mut self,
+		_node: &'a Extremum<'src>
+	) -> Result<(), Self::Error>
 	{
 		Ok(())
 	}
@@ -1348,6 +1434,17 @@ pub trait ASTVisitor<'a, 'src: 'a>
 		node: &'a Range<'src>,
 		start: Self::Output,
 		end: Self::Output
+	) -> Result<Self::Output, Self::Error>;
+
+	/// Visit an [extremum](Extremum), after its arguments.
+	///
+	/// # Parameters
+	/// - `node`: The extremum.
+	/// - `arguments`: The outputs of the arguments, in the order written.
+	fn visit_extremum(
+		&mut self,
+		node: &'a Extremum<'src>,
+		arguments: Vec<Self::Output>
 	) -> Result<Self::Output, Self::Error>;
 
 	/// Visit a [standard dice](StandardDice) expression, after its count and
@@ -1729,6 +1826,20 @@ impl Spanned for Range<'_>
 	}
 }
 
+impl Spanned for Extremum<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Extremum {
+			direction: self.direction,
+			arguments: self.arguments.iter().map(Spanned::untethered).collect(),
+			span: SourceSpan::default()
+		}
+	}
+}
+
 impl Spanned for Expression<'_>
 {
 	fn span(&self) -> SourceSpan
@@ -1740,6 +1851,7 @@ impl Spanned for Expression<'_>
 			Expression::Variable(v) => v.span(),
 			Expression::Binding(b) => b.span(),
 			Expression::Range(r) => r.span(),
+			Expression::Extremum(e) => e.span(),
 			Expression::Dice(d) => d.span(),
 			Expression::Arithmetic(a) => a.span()
 		}

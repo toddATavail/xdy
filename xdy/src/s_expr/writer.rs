@@ -2,10 +2,10 @@
 //!
 //! Herein is the engine behind the [`SExpressible`] implementations of the AST.
 //! Each AST type describes its S-expression form as a [`Shape`] — a leaf, a
-//! keyword form of up to three parts, a binding, or a function —
-//! through its [`Shaped`] implementation, which is the only statement of that
-//! form. The engine walks the shapes with explicit stacks, so its stack depth
-//! is constant however deep the tree.
+//! keyword form of up to three parts, one of which may be a run of arguments, a
+//! binding, or a function — through its [`Shaped`] implementation, which is
+//! the only statement of that form. The engine walks the shapes with explicit
+//! stacks, so its stack depth is constant however deep the tree.
 //!
 //! The size of a form is its own contribution — span prefix, keyword,
 //! delimiters, spaces, names, and lists — plus the sizes of its subexpressions.
@@ -29,8 +29,8 @@ use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
 		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
-		Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
+		Extremum, Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul,
+		Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
 	},
 	span::SourceSpan
 };
@@ -125,7 +125,31 @@ pub(super) enum Part<'a>
 	Child(Child<'a>),
 
 	/// The faces of a custom die, or the values of a list predicate.
-	Faces(&'a [i32])
+	Faces(&'a [i32]),
+
+	/// The arguments of an extremum, each a subexpression of its own.
+	Arguments(&'a [Expression<'a>])
+}
+
+impl<'a> Part<'a>
+{
+	/// Answer the subexpressions of the part, in order.
+	///
+	/// # Returns
+	/// The subexpressions: the part itself if it is a subexpression, none if
+	/// it is a list of faces, and each argument of a run of them.
+	fn children(self) -> impl DoubleEndedIterator<Item = Child<'a>>
+	{
+		let (child, arguments) = match self
+		{
+			Part::Child(child) => (Some(child), &[][..]),
+			Part::Faces(_) => (None, &[][..]),
+			Part::Arguments(arguments) => (None, arguments)
+		};
+		child
+			.into_iter()
+			.chain(arguments.iter().map(Child::Expression))
+	}
 }
 
 /// An AST type that can describe its S-expression form as a [`Shape`].
@@ -203,7 +227,8 @@ impl<'a> Shape<'a>
 			Shape::Constant(constant) => constant.size_s_expr(options),
 			Shape::Variable(variable) => variable.size_s_expr(options),
 			// Account for two parentheses, the keyword, an interposing space
-			// before each part, and any faces.
+			// before each part, or before each argument of a run of them, and
+			// any faces.
 			Shape::Form {
 				span,
 				keyword,
@@ -219,7 +244,11 @@ impl<'a> Shape<'a>
 						.map(|part| match part
 						{
 							Part::Child(_) => 1,
-							Part::Faces(faces) => 1 + faces.size_s_expr(options)
+							Part::Faces(faces) =>
+							{
+								1 + faces.size_s_expr(options)
+							},
+							Part::Arguments(arguments) => arguments.len()
 						})
 						.sum::<usize>()
 			},
@@ -259,41 +288,23 @@ impl<'a> Shape<'a>
 	/// Answer the subexpressions of the form, in order.
 	///
 	/// # Returns
-	/// The subexpressions, of which there are at most three. Every absent
-	/// subexpression follows every present one.
-	fn children(&self) -> [Option<Child<'a>>; 3]
+	/// The subexpressions.
+	fn children(self) -> impl DoubleEndedIterator<Item = Child<'a>>
 	{
-		match *self
+		let parts = match self
 		{
 			Shape::Constant(_) | Shape::Variable(_) => [None, None, None],
-			Shape::Form { parts, .. } =>
+			Shape::Form { parts, .. } => parts,
+			Shape::Binding { expression, .. }
+			| Shape::Function {
+				body: expression, ..
+			}
+			| Shape::Transparent(expression) =>
 			{
-				let mut children = [None; 3];
-				for (slot, child) in children.iter_mut().zip(
-					parts.into_iter().flatten().filter_map(|part| match part
-					{
-						Part::Child(child) => Some(child),
-						Part::Faces(_) => None
-					})
-				)
-				{
-					*slot = Some(child);
-				}
-				children
+				[Some(Part::Child(Child::Expression(expression))), None, None]
 			},
-			Shape::Binding { expression, .. } =>
-			{
-				[Some(Child::Expression(expression)), None, None]
-			},
-			Shape::Function { body, .. } =>
-			{
-				[Some(Child::Expression(body)), None, None]
-			},
-			Shape::Transparent(expression) =>
-			{
-				[Some(Child::Expression(expression)), None, None]
-			},
-		}
+		};
+		parts.into_iter().flatten().flat_map(Part::children)
 	}
 }
 
@@ -319,13 +330,7 @@ pub(super) fn size(
 	while let Some(shape) = pending.pop()
 	{
 		total += shape.own_size(options);
-		pending.extend(
-			shape
-				.children()
-				.into_iter()
-				.flatten()
-				.map(|child| child.shape(options))
-		);
+		pending.extend(shape.children().map(|child| child.shape(options)));
 	}
 	total
 }
@@ -380,7 +385,7 @@ fn sizes(root: Shape<'_>, options: SExpressibleOptions) -> Vec<usize>
 				tasks.push(SizeTask::Exit { index, parent });
 				// Schedule the subexpressions in reverse, so that they are
 				// entered, and therefore indexed, in order.
-				for child in shape.children().into_iter().rev().flatten()
+				for child in shape.children().rev()
 				{
 					tasks.push(SizeTask::Enter {
 						shape: child.shape(options),
@@ -626,30 +631,43 @@ impl<'a> Writer<'a, '_>
 					Some(indent) => Item::Newline(indent)
 				};
 				let indent = indent.unwrap_or(options.indent);
-				self.schedule(
-					parts
-						.into_iter()
-						.flatten()
-						.flat_map(|part| {
-							[
-								separator(),
-								match part
-								{
-									Part::Child(child) => Item::Child {
-										child,
-										remaining_space,
-										indent
-									},
-									Part::Faces(faces) => Item::Faces {
-										faces,
-										remaining_space,
-										indent
-									}
-								}
-							]
-						})
-						.chain([Item::Text(")")])
-				);
+				// Schedule the parts in reverse, since each goes atop its
+				// successor. Each part, or each argument of a run of them,
+				// follows a separator of its own.
+				let child = |child| Item::Child {
+					child,
+					remaining_space,
+					indent
+				};
+				self.stack.push(Item::Text(")"));
+				for part in parts.into_iter().rev().flatten()
+				{
+					match part
+					{
+						Part::Child(part) =>
+						{
+							self.stack.extend([child(part), separator()])
+						},
+						Part::Faces(faces) => self.stack.extend([
+							Item::Faces {
+								faces,
+								remaining_space,
+								indent
+							},
+							separator()
+						]),
+						Part::Arguments(arguments) =>
+						{
+							for argument in arguments.iter().rev()
+							{
+								self.stack.extend([
+									child(Child::Expression(argument)),
+									separator()
+								]);
+							}
+						}
+					}
+				}
 				Ok(())
 			},
 			Shape::Binding {
@@ -915,6 +933,18 @@ impl Shaped for Range<'_>
 	}
 }
 
+impl Shaped for Extremum<'_>
+{
+	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
+	{
+		Shape::Form {
+			span: self.span,
+			keyword: self.direction.keyword(),
+			parts: [Some(Part::Arguments(&self.arguments)), None, None]
+		}
+	}
+}
+
 impl Shaped for Binding<'_>
 {
 	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
@@ -941,6 +971,7 @@ impl Shaped for Expression<'_>
 			Expression::Variable(variable) => variable.shape(options),
 			Expression::Binding(binding) => binding.shape(options),
 			Expression::Range(range) => range.shape(options),
+			Expression::Extremum(extremum) => extremum.shape(options),
 			Expression::Dice(dice) => dice.shape(options),
 			Expression::Arithmetic(arithmetic) => arithmetic.shape(options)
 		}

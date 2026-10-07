@@ -518,6 +518,53 @@ fn validator_checks_reroll_clauses()
 	}
 }
 
+/// The [`Validator`] walks the arguments of an extremum in the order written: a
+/// binding may serve as an argument, and a later argument, or a reference after
+/// the extremum, sees it, but a reference in an argument precedes a binding in
+/// a later argument, or after the extremum. Bindings in different arguments
+/// share one namespace, so the same name may not be bound in two of them.
+#[test]
+fn validator_checks_extrema()
+{
+	for s_expr in [
+		"(function [] (highest (binding {a} (standard-dice 1 6)) {a}))",
+		"(function [] (add (lowest 1 (binding {a} 2)) {a}))",
+		"(function [] (highest (lowest (binding {a} 1) 2) (neg {a}) {a}))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(Validator::validate(&ast), Ok(()), "{s_expr}");
+	}
+	for s_expr in [
+		"(function [] (highest {a} (binding {a} (standard-dice 1 6))))",
+		"(function [] (add (lowest {a} 2) (binding {a} 2)))",
+		"(function [] (highest (lowest {a} 1) (binding {a} 2)))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert!(
+			matches!(
+				Validator::validate(&ast),
+				Err(CompilationError::UseBeforeBind { name, .. }) if name == "a"
+			),
+			"{s_expr}: {:?}",
+			Validator::validate(&ast)
+		);
+	}
+	let ast = crate::s_expr::read_s_expr(
+		"(function [] (lowest (binding {a} 1) (binding {a} 2)))"
+	)
+	.unwrap();
+	assert!(
+		matches!(
+			Validator::validate(&ast),
+			Err(CompilationError::DuplicateBinding { name, .. }) if name == "a"
+		),
+		"{:?}",
+		Validator::validate(&ast)
+	);
+}
+
 /// Driving the [`Validator`] through the [`ASTVisitor`](crate::ast::ASTVisitor)
 /// trait performs every check, not just the check of the parameters.
 #[test]

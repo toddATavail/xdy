@@ -160,6 +160,46 @@ fn indent(clause: &impl fmt::Debug) -> String
 	rendering
 }
 
+/// Ensure that `{:?}` and `{:#?}` render extrema exactly as the derived format
+/// would: the variant wraps the extremum, whose derived [`Debug`] names its
+/// direction and lists its arguments, however many, even none.
+#[test]
+fn test_debug_extrema_match_derived()
+{
+	let mut bodies = [
+		"(function [] (highest 1 2))",
+		"(function [{x}] (lowest {x} (standard-dice 2 6) (neg 3)))",
+		"(function [] (highest (lowest 1 2) (highest 3 (group 4) 5)))",
+		"(function [] (lowest (drop-lowest (standard-dice 4 6) (group (highest \
+		 1 2))) (binding {a} 3) {a}))"
+	]
+	.map(|s_expr| crate::s_expr::read_s_expr(s_expr).unwrap().body)
+	.into_iter()
+	.collect::<Vec<_>>();
+	bodies.extend([
+		extremum(Direction::Highest, []),
+		extremum(Direction::Lowest, [constant(-1)])
+	]);
+	for body in bodies
+	{
+		let Expression::Extremum(extremum) = &body
+		else
+		{
+			unreachable!()
+		};
+		let mut pretty = String::from("Extremum(\n");
+		for line in format!("{:#?}", extremum).lines()
+		{
+			writeln!(pretty, "    {line}").unwrap();
+		}
+		// The derived format ends each field, including the last, with a comma.
+		pretty.pop();
+		pretty.push_str(",\n)");
+		assert_eq!(format!("{:?}", body), format!("Extremum({:?})", extremum));
+		assert_eq!(format!("{:#?}", body), pretty);
+	}
+}
+
 /// Ensure that `{:#?}` renders a deep negation chain exactly as the derived
 /// format would, as reconstructed independently by [`pretty_negations`].
 #[test]
@@ -338,6 +378,154 @@ fn test_rerolls_are_distinct()
 			}
 		}
 	}
+}
+
+/// Ensure that extrema are distinct from one another whenever their directions,
+/// the number of their arguments, or the order or the values of their arguments
+/// differ, even when they mean the same, and from other forms, in equality and
+/// in hashing.
+#[test]
+fn test_extrema_are_distinct()
+{
+	let forms = [
+		"(highest 1 2)",
+		"(lowest 1 2)",
+		"(highest 2 1)",
+		"(highest 1 3)",
+		"(highest 1 2 3)",
+		"(highest 1 2 2)",
+		"(highest 1 (group 2))",
+		"(highest (highest 1 2) 3)",
+		"(highest 1 (highest 2 3))",
+		"(add 1 2)",
+		"(range 1 2)"
+	];
+	let sources = forms
+		.iter()
+		.map(|form| format!("(function [] {form})"))
+		.collect::<Vec<_>>();
+	let mut bodies = sources
+		.iter()
+		.map(|source| crate::s_expr::read_s_expr(source).unwrap().body)
+		.collect::<Vec<_>>();
+	let mut names = forms.map(str::to_string).to_vec();
+	for (name, body) in [
+		("(highest)", extremum(Direction::Highest, [])),
+		("(lowest)", extremum(Direction::Lowest, [])),
+		("(highest 1)", extremum(Direction::Highest, [constant(1)])),
+		("(lowest 1)", extremum(Direction::Lowest, [constant(1)]))
+	]
+	{
+		names.push(name.to_string());
+		bodies.push(body);
+	}
+	for (i, left) in bodies.iter().enumerate()
+	{
+		for (j, right) in bodies.iter().enumerate()
+		{
+			assert_eq!(left == right, i == j, "{} vs {}", names[i], names[j]);
+			if i != j
+			{
+				assert!(
+					hash_of(left) != hash_of(right),
+					"{} and {} hash alike",
+					names[i],
+					names[j]
+				);
+			}
+		}
+	}
+}
+
+/// Ensure that extrema render as calls, with their arguments in the order
+/// written, separated by commas, whatever the arguments are, and wherever the
+/// extrema appear; that an extremum built with fewer than two arguments
+/// renders likewise; and that the S-expressions of the trees, on one line or
+/// wrapped onto many, read back to the same trees.
+#[test]
+fn test_display_extrema()
+{
+	for (s_expr, expected) in [
+		("(function [] (highest 1 2))", "highest(1, 2)"),
+		(
+			"(function [{POW}] (lowest (mul {POW} 5) 99))",
+			"{POW}: lowest({POW} * 5, 99)"
+		),
+		(
+			"(function [] (highest (standard-dice 1 20) (standard-dice 1 20) \
+			 (standard-dice 1 20)))",
+			"highest(1D20, 1D20, 1D20)"
+		),
+		(
+			"(function [] (highest (sub (standard-dice 1 6) 2) 1))",
+			"highest(1D6 - 2, 1)"
+		),
+		(
+			"(function [{x}] (lowest (highest -1 (neg {x})) (keep-highest \
+			 (standard-dice 4 6) 3)))",
+			"{x}: lowest(highest(-1, -{x}), 4D6 keep highest 3)"
+		),
+		(
+			"(function [{x}] (drop-lowest (standard-dice 4 6) (group (lowest {x} \
+			 2))))",
+			"{x}: 4D6 drop lowest (lowest({x}, 2))"
+		),
+		(
+			"(function [] (add (highest 1 2) (mul 3 (lowest 4 5))))",
+			"highest(1, 2) + 3 * lowest(4, 5)"
+		),
+		(
+			"(function [] (lowest (binding {a} (standard-dice 3 6)) (group {a}) \
+			 (range 1 6) (custom-dice 2 [-1 1])))",
+			"lowest({a}@(3D6), ({a}), [1:6], 2D[-1, 1])"
+		)
+	]
+	{
+		let function = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(function.to_string(), expected);
+		let options =
+			SExpressibleOptions::new(0, 4, usize::MAX).with_groups(true);
+		assert_eq!(function.to_s_expr(options), s_expr);
+		for soft_limit in [0, 20, 40]
+		{
+			let options =
+				SExpressibleOptions::new(0, 4, soft_limit).with_groups(true);
+			let wrapped = function.to_s_expr(options);
+			assert!(
+				crate::s_expr::read_s_expr(&wrapped).unwrap() == function,
+				"{wrapped}"
+			);
+		}
+	}
+	for (body, expected) in [
+		(extremum(Direction::Highest, []), "highest()"),
+		(extremum(Direction::Lowest, [constant(7)]), "lowest(7)")
+	]
+	{
+		assert_eq!(body.to_string(), expected);
+	}
+}
+
+/// Ensure that an extremum that does not fit on its line wraps each argument
+/// onto a line of its own, one level deeper, and that its size agrees with its
+/// length on one line.
+#[test]
+fn test_s_expr_wraps_extrema()
+{
+	let function = crate::s_expr::read_s_expr(
+		"(function [] (highest (add 1 2) (standard-dice 3 6) {x}))"
+	)
+	.unwrap();
+	let options = SExpressibleOptions::new(0, 4, 30);
+	assert_eq!(
+		function.body.to_s_expr(options),
+		"(highest\n\t(add 1 2)\n\t(standard-dice 3 6)\n\t{x})"
+	);
+	let options = SExpressibleOptions::new(0, 4, usize::MAX);
+	assert_eq!(
+		function.body.size_s_expr(options),
+		function.body.to_s_expr(options).len()
+	);
 }
 
 /// Ensure that reroll clauses render as their source, in every form of
@@ -695,6 +883,42 @@ fn test_deep_reroll_clauses()
 	exercise_on_small_stack(Nesting::RerollClauses)
 }
 
+/// Ensure that a deep chain of the first arguments of extrema survives every
+/// trait on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_extremum_first()
+{
+	exercise_on_small_stack(Nesting::ExtremumFirst)
+}
+
+/// Ensure that a deep chain of the last arguments of extrema survives every
+/// trait on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_extremum_last() { exercise_on_small_stack(Nesting::ExtremumLast) }
+
+/// The number of arguments of a wide extremum.
+const WIDTH: usize = 100_000;
+
+/// Ensure that an extremum of very many arguments, each of which nests a
+/// little, survives every trait on a small stack.
+#[test]
+fn test_wide_extremum()
+{
+	on_small_stack(|| {
+		exercise(|leaf| {
+			extremum(
+				Direction::Lowest,
+				(0..WIDTH).map(|i| {
+					let value = if i == WIDTH - 1 { leaf } else { 1 };
+					nest(Nesting::Addition, 2, value)
+				})
+			)
+		})
+	});
+}
+
 /// Ensure that a deep interleaving of every nesting construct survives every
 /// trait on a small stack.
 #[test]
@@ -837,6 +1061,44 @@ fn test_miri_single_keep_clause()
 	}
 }
 
+/// Ensure that every trait works on chains of the first and the last arguments
+/// of extrema.
+#[test]
+fn test_miri_extrema()
+{
+	exercise(|leaf| nest(Nesting::ExtremumFirst, 40, leaf));
+	exercise(|leaf| nest(Nesting::ExtremumLast, 40, leaf));
+}
+
+/// Ensure that extrema drop, whether among clauses, beneath them, or atop them,
+/// and whether built with two or more arguments, with one, or with none.
+#[test]
+fn test_miri_extrema_among_clauses()
+{
+	for s_expr in [
+		"(function [{x}] (drop-lowest (keep-highest (standard-dice 4 6) (group \
+		 (lowest {x} 3))) (group (highest 1 (standard-dice 1 2)))))",
+		"(function [{x}] (highest (reroll (drop-lowest (standard-dice 4 6)) (le \
+		 (group (lowest {x} 2))) (unlimited)) (keep-lowest (custom-dice 2 [1 \
+		 2])) {x}))",
+		"(function [] (lowest (highest 1 2) (group (lowest 3 (neg 4))) 5))"
+	]
+	{
+		let expression = crate::s_expr::read_s_expr(s_expr).unwrap().body;
+		drop(expression.clone());
+		drop(expression);
+	}
+	for expression in [
+		extremum(Direction::Highest, []),
+		extremum(Direction::Lowest, [constant(1)]),
+		extremum(Direction::Highest, [nest(Nesting::Group, 3, 1)])
+	]
+	{
+		drop(expression.clone());
+		drop(expression);
+	}
+}
+
 /// Ensure that a drop clause directly atop a leaf dice expression drops.
 #[test]
 fn test_miri_single_drop_clause()
@@ -928,6 +1190,12 @@ pub(super) enum Nesting
 	/// clauses of every form](reroll_clauses), among drops, whose leaf count is
 	/// `e`.
 	RerollClauses,
+
+	/// `highest(e, 1)`.
+	ExtremumFirst,
+
+	/// `lowest(1, 2, e)`.
+	ExtremumLast,
 
 	/// Every other construct, in rotation.
 	Mixed
@@ -1369,6 +1637,14 @@ fn wrap(nesting: Nesting, inner: Expression<'static>) -> Expression<'static>
 				span
 			}))
 		},
+		Nesting::ExtremumFirst =>
+		{
+			extremum(Direction::Highest, [*inner, constant(1)])
+		},
+		Nesting::ExtremumLast =>
+		{
+			extremum(Direction::Lowest, [constant(1), constant(2), *inner])
+		},
 		Nesting::Mixed => unreachable!()
 	}
 }
@@ -1552,6 +1828,26 @@ fn constant(value: i32) -> Expression<'static>
 {
 	Expression::Constant(Constant {
 		value,
+		span: SourceSpan::SYNTHETIC
+	})
+}
+
+/// Answer an extremum with a synthetic span.
+///
+/// # Parameters
+/// - `direction`: The direction of the extremum.
+/// - `arguments`: The arguments.
+///
+/// # Returns
+/// The extremum.
+pub(super) fn extremum(
+	direction: Direction,
+	arguments: impl IntoIterator<Item = Expression<'static>>
+) -> Expression<'static>
+{
+	Expression::Extremum(Extremum {
+		direction,
+		arguments: arguments.into_iter().collect(),
 		span: SourceSpan::SYNTHETIC
 	})
 }
