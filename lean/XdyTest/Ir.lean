@@ -51,8 +51,10 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard reads (include_str "Fixtures/dynamic_keeps.json")
 #guard reads (include_str "Fixtures/dynamic_range.json")
 #guard reads (include_str "Fixtures/external.json")
+#guard reads (include_str "Fixtures/extrema.json")
 #guard reads (include_str "Fixtures/keep_highest.json")
 #guard reads (include_str "Fixtures/max.json")
+#guard reads (include_str "Fixtures/min.json")
 #guard reads (include_str "Fixtures/range.json")
 #guard reads (include_str "Fixtures/reroll.json")
 #guard reads (include_str "Fixtures/reroll_after_keep.json")
@@ -136,6 +138,14 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
   registerCount := 1, rollingRecordCount := 0
   instructions := #[
     .binary .max 0 (.immediate 0) (.register 0),
+    .return (.register 0)] }
+
+-- `{x}: lowest({x}, 3)`: `Min`.
+#guard read (include_str "Fixtures/min.json") == some {
+  parameters := #["x"], externals := #[]
+  registerCount := 1, rollingRecordCount := 0
+  instructions := #[
+    .binary .min 0 (.immediate 3) (.register 0),
     .return (.register 0)] }
 
 -- `1D6 + {y}`: an external variable, in the register after the parameters.

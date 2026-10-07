@@ -473,7 +473,7 @@ clamping to the number of results, as `Mixture::drop` does.
 The setup with its drop count updated.
 -/
 def dropLowest (s : Setup) (count : Int) : Setup :=
-  { s with lowest := min (s.lowest + count.toNat) s.results }
+  { s with lowest := Min.min (s.lowest + count.toNat) s.results }
 
 /--
 Drop the highest results of a setup, in addition to any already dropped,
@@ -487,7 +487,7 @@ clamping to the number of results, as `Mixture::drop` does.
 The setup with its drop count updated.
 -/
 def dropHighest (s : Setup) (count : Int) : Setup :=
-  { s with highest := min (s.highest + count.toNat) s.results }
+  { s with highest := Min.min (s.highest + count.toNat) s.results }
 
 /--
 Keep the lowest results of a setup that are still kept, dropping the rest of
@@ -882,7 +882,7 @@ of the copies, then a window of the rest. -/
 private theorem keep_replicate_append (m : Nat) (v : Int) (rest : List Int)
     (lo k : Nat) :
     ((List.replicate m v ++ rest).drop lo).take k =
-      List.replicate (min (m - lo) k) v ++
+      List.replicate (Min.min (m - lo) k) v ++
         (rest.drop (lo - m)).take (k - (m - lo)) := by
   rw [List.drop_append, List.drop_replicate, List.length_replicate,
     List.take_append, List.take_replicate, List.length_replicate,
@@ -920,7 +920,7 @@ private theorem foldl_keep (lowest stop : Int) :
     rw [hexp, keep_replicate_append, List.foldl_append,
       foldl_add_replicate hlo hhi]
     simp only [keptSumFrom]
-    have hp : ((min (m - lo) k : Nat) : Int) =
+    have hp : ((Min.min (m - lo) k : Nat) : Int) =
         Max.max 0 (Min.min stop (j + m) - Max.max lowest j) := by omega
     rw [hp]
     exact foldl_keep lowest stop rest (j + m) _ (lo - m) (k - (m - lo))

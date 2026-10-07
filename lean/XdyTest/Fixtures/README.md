@@ -30,8 +30,10 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `dynamic_keeps` | `{n}, {m}: 5D6 keep highest {n} drop lowest {m}` | a keep count from a parameter; a drop after a keep |
 | `dynamic_range` | `[1D3:2D6]` | range endpoints from registers |
 | `external` | `1D6 + {y}` | an external variable |
+| `extrema` | `lowest(highest(1D4, 1D6), 1D8)` | `Max` and `Min` of random registers |
 | `keep_highest` | `4D6 keep highest 3` | `KeepHighest` |
 | `max` | `{x}: {x}D1` | the optimizer's `Max` |
+| `min` | `{x}: lowest({x}, 3)` | `Min` |
 | `range` | `[1:6]` | `RollRange` |
 | `reroll` | `3D4 reroll = 1` | `Reroll`, limited to once |
 | `reroll_after_keep` | `4D6 keep highest 3 reroll < 3 2 times` | a reroll of the dice that a keep kept, twice |

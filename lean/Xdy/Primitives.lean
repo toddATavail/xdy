@@ -243,4 +243,25 @@ The greater operand.
 -/
 def «max» (op1 op2 : Int) : Int := Max.max op1 op2
 
+/--
+Compute the lesser of the two operands. Mirrors `min` in `primitives.rs`,
+which `lowest(…)` uses, as does the optimizer to cap the count of dice that a
+roll keeps.
+
+# Parameters
+- `op1`: The first operand.
+- `op2`: The second operand.
+
+# Returns
+The lesser operand.
+
+# Examples
+```lean
+#guard «min» 1 2 == 1
+#guard «min» 0 (-3) == -3
+#guard «min» i32Min i32Max == i32Min
+```
+-/
+def «min» (op1 op2 : Int) : Int := Min.min op1 op2
+
 end Xdy

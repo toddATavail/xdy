@@ -61,8 +61,8 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
-	Unobserved, Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
+	Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
@@ -71,7 +71,7 @@ use crate::{
 	tests::{
 		propagation::{resum, source_reroll},
 		property::{
-			NAMES, OPERATORS, agree, binding, check_within, variable,
+			NAMES, OPERATORS, agree, binding, check_within, extremum, variable,
 			with_parameters
 		}
 	}
@@ -107,8 +107,10 @@ const FIXTURES: &[(&str, &str)] = &[
 		"{n}, {m}: 5D6 keep highest {n} drop lowest {m}"
 	),
 	("external", "1D6 + {y}"),
+	("extrema", "lowest(highest(1D4, 1D6), 1D8)"),
 	("keep_highest", "4D6 keep highest 3"),
 	("max", "{x}: {x}D1"),
+	("min", "{x}: lowest({x}, 3)"),
 	("range", "[1:6]"),
 	("reroll", "3D4 reroll = 1"),
 	("reroll_after_keep", "4D6 keep highest 3 reroll < 3 2 times"),
@@ -487,31 +489,6 @@ fn test_oracle_distribution_corpus()
 		let case = format!("case {}: {source} {args:?} {externs:?}", index + 1);
 		// Compile exactly as the distribution tests do.
 		let function = optimize(compile_valid(source), Passes::all());
-		// The oracle does not read min instructions yet, so record a case
-		// that still takes a minimum after optimization as the corpus has it,
-		// unchecked.
-		if function
-			.instructions
-			.iter()
-			.any(|inst| matches!(inst, Instruction::Min(_)))
-		{
-			let expected = Distribution::from_weights(
-				expected
-					.iter()
-					.map(|&(outcome, count)| (outcome, Weight::from(count)))
-			)
-			.unwrap();
-			report_case(
-				&mut report,
-				previous,
-				source,
-				args,
-				externs,
-				&expected
-			);
-			previous = Some(source);
-			continue;
-		}
 		let actual =
 			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
 				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
@@ -912,7 +889,8 @@ fn small_program() -> impl Strategy<Value = String>
 /// faces, and drops are themselves rolled, ranges whose ends are rolled, and
 /// rolls bound to variables that later rolls read. These are the rolls whose
 /// paths are not equally likely, because the number of branches of one roll
-/// depends on an earlier roll.
+/// depends on an earlier roll. Sometimes it takes the [greatest or
+/// least](extremum) of several such expressions.
 ///
 /// # Returns
 /// The strategy.
@@ -929,7 +907,8 @@ fn small_expression() -> impl Strategy<Value = String>
 				.prop_map(|(name, e)| format!("{}@({})", name, e)),
 			2 => (inner.clone(), inner.clone())
 				.prop_map(|(start, end)| format!("[{}:{}]", start, end)),
-			4 => small_dice(inner)
+			4 => small_dice(inner.clone()),
+			1 => extremum(inner.boxed())
 		]
 	})
 }

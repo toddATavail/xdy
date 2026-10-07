@@ -80,7 +80,7 @@ results, which never exceeds `i32Max`, so adding exactly and then clamping
 gives the same total. The oracle's `Xdy.Record` accumulates the same way.
 -/
 private def accumulate (total : Nat) (count : Int) (len : Nat) : Nat :=
-  min (total + count.toNat) len
+  Min.min (total + count.toNat) len
 
 /--
 Drop the lowest `count` results, in addition to any already dropped.

@@ -77,6 +77,8 @@ inductive BinaryOp where
   | exp
   /-- The greater operand, `Max`. -/
   | «max»
+  /-- The lesser operand, `Min`. -/
+  | «min»
   deriving Repr, BEq, Inhabited
 
 /-- The predicate of a reroll: the test that a die must pass to be rerolled,
@@ -361,6 +363,7 @@ private def binaryOp? : String → Option BinaryOp
   | "Mod" => some .mod
   | "Exp" => some .exp
   | "Max" => some .max
+  | "Min" => some .min
   | _ => none
 
 /-- Read a predicate from its `serde` form, e.g., `{"Le": {"Immediate": 2}}`,

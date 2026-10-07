@@ -103,4 +103,10 @@ open Xdy
 #guard «max» 0 (-3) == 0
 #guard «max» i32Min i32Max == i32Max
 
+/-! ## `min` -/
+
+#guard «min» 1 2 == 1
+#guard «min» 0 (-3) == -3
+#guard «min» i32Min i32Max == i32Min
+
 end Xdy.Test

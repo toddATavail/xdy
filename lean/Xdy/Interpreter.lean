@@ -357,6 +357,7 @@ def BinaryOp.apply : BinaryOp → Int → Int → Int
   | .mod => Xdy.mod
   | .exp => Xdy.exp
   | .max => Xdy.max
+  | .min => Xdy.min
 
 /--
 Execute one instruction in one state.

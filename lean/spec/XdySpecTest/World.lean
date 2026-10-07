@@ -113,6 +113,24 @@ example :
     (has 1 (by decide))] at h
   exact h
 
+-- Taking the lesser of the two rolls, as `lowest(…)` does, has the same
+-- form: lemma 1's lift of `min`.
+example :
+    ((product base [.register 0, .register 1] rolls).bind
+        (step · (.binary .min 2 (.register 0) (.register 1)))).map
+          (·.buryAll [.register 0, .register 1]) =
+      product (base.buryAll [.register 0, .register 1]) [.register 2]
+        (Function.update rolls (.register 2)
+          (lift BinaryOp.min.apply roll roll)) := by
+  have h := bind_step_product (base := base) (laws := rolls)
+    (S := [.register 0, .register 1]) (T := [])
+    (i := .binary .min 2 (.register 0) (.register 1)) (by decide) (by simp)
+    (by simp) (has 2 (by decide))
+  simp only [Instruction.destination, List.append_nil] at h
+  rw [law_binary (by decide) (has 2 (by decide)) (has 0 (by decide))
+    (has 1 (by decide))] at h
+  exact h
+
 -- Mixing a world over the outcomes of its first roll, each a point mass,
 -- leaves it alone, as a split does.
 example :

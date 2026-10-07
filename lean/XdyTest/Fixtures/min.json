@@ -1,0 +1,1 @@
+{"parameters":["x"],"externals":[],"register_count":1,"rolling_record_count":0,"instructions":[{"Min":{"dest":0,"op1":{"Immediate":3},"op2":{"Register":0}}},{"Return":{"src":{"Register":0}}}]}

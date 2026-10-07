@@ -19,6 +19,11 @@ example : lift add (PMF.pure i32Max) (PMF.pure 1) = PMF.pure i32Max := by
 -- Saturating subtraction clamps the true difference.
 example : lift sub (PMF.pure i32Min) (PMF.pure 1) = PMF.pure i32Min := by
   rw [lift_sub]; simp [conv, lift, PMF.pure_map, clamp, i32Min, i32Max]
+-- The lesser and the greater never saturate.
+example : lift «min» (PMF.pure i32Min) (PMF.pure i32Max) = PMF.pure i32Min := by
+  simp [lift, PMF.pure_map, «min», i32Min, i32Max]
+example : lift «max» (PMF.pure i32Min) (PMF.pure i32Max) = PMF.pure i32Max := by
+  simp [lift, PMF.pure_map, «max», i32Min, i32Max]
 
 /-! ## Convolution powers -/
 

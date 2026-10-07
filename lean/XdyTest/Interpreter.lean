@@ -336,6 +336,7 @@ private def binary (op : BinaryOp) (a b : Int) :
 #guard binary .mod (-7) 2 == .ok [(-1, 1)]
 #guard binary .exp (-2) 3 == .ok [(-8, 1)]
 #guard binary .max (-2) 3 == .ok [(3, 1)]
+#guard binary .min (-2) 3 == .ok [(-2, 1)]
 #guard dist (prog [.neg 0 (imm i32Min), .return (reg 0)]) == .ok [(i32Max, 1)]
 -- Arithmetic applies to every state: `1D3 * 1D3`.
 #guard dist (prog [.rollRange 0 (imm 1) (imm 3), .sumRollingRecord 0 0,
@@ -459,6 +460,17 @@ private def keeps (n m : Int) : Except String (List (Int × Nat)) :=
 -- `{x}: {x}D1`, which the optimizer turns into `max(0, {x})`.
 #guard dist (fixture (include_str "Fixtures/max.json")) [5] == .ok [(5, 1)]
 #guard dist (fixture (include_str "Fixtures/max.json")) [-3] == .ok [(0, 1)]
+
+-- `{x}: lowest({x}, 3)`, which caps `{x}` at `3`.
+#guard dist (fixture (include_str "Fixtures/min.json")) [5] == .ok [(3, 1)]
+#guard dist (fixture (include_str "Fixtures/min.json")) [-3] == .ok [(-3, 1)]
+#guard dist (fixture (include_str "Fixtures/min.json")) [i32Min] ==
+  .ok [(i32Min, 1)]
+
+-- `lowest(highest(1D4, 1D6), 1D8)`: `Max` and `Min` of random registers, over
+-- 192.
+#guard dist (fixture (include_str "Fixtures/extrema.json")) ==
+  .ok [(1, 31), (2, 41), (3, 45), (4, 43), (5, 20), (6, 12)]
 
 -- `{a}, {b}: -({a} * {b} - {a} / {b} % 3 ^ {b})`.
 #guard dist (fixture (include_str "Fixtures/arithmetic.json")) [7, 2] ==

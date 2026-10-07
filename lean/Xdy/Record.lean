@@ -328,7 +328,7 @@ results, which never exceeds `i32Max`, so adding exactly and then clamping
 gives the same total.
 -/
 private def accumulate (total : Nat) (count : Int) (len : Nat) : Nat :=
-  min (total + count.toNat) len
+  Min.min (total + count.toNat) len
 
 /--
 Drop the lowest `count` results, in addition to any already dropped.
@@ -397,7 +397,7 @@ Rust clamps the number kept at `0`, as subtraction of naturals does here.
 -/
 def keepDrops (results lowest highest : Nat) (count : Int) : Int :=
   let kept : Nat := results - lowest - highest
-  kept - min (max count 0) kept
+  kept - Min.min (max count 0) kept
 
 /--
 Keep the lowest `count` of the results still kept, dropping the rest of them
