@@ -330,6 +330,42 @@ theorem value_set {s : State} {ℓ : Location} {op : AddressingMode}
       Array.getElem?_modify]
 
 /--
+Writing a location leaves alone the criterion of every predicate that does not
+read it.
+
+# Parameters
+- `s`: The state.
+- `ℓ`: The location.
+- `x`: The value.
+- `p`: The predicate.
+
+# Hypotheses
+- `h`: No operand of `p` reads `ℓ`.
+-/
+theorem resolve_set {s : State} {ℓ : Location} {p : Predicate}
+    (h : ∀ op ∈ p.operands, ℓ.isOperand op = false) (x : Content ℓ) :
+    p.resolve (s.set ℓ x).value = p.resolve s.value :=
+  Predicate.resolve_congr fun op hop => value_set (h op hop) x
+
+/--
+Writing a location leaves alone the count of every limit that does not read
+it.
+
+# Parameters
+- `s`: The state.
+- `ℓ`: The location.
+- `x`: The value.
+- `l`: The limit.
+
+# Hypotheses
+- `h`: No operand of `l` reads `ℓ`.
+-/
+theorem resolve_set_limit {s : State} {ℓ : Location} {l : Limit}
+    (h : ∀ op ∈ l.operands, ℓ.isOperand op = false) (x : Content ℓ) :
+    l.resolve (s.set ℓ x).value = l.resolve s.value :=
+  Limit.resolve_congr fun op hop => value_set (h op hop) x
+
+/--
 Writing a location leaves alone every other rolling record.
 
 # Parameters
@@ -582,7 +618,8 @@ theorem step_set {s : State} {ℓ : Location} (x : Content ℓ) {i : Instruction
   cases i <;> cases ℓ <;>
     simp_all [Location.readBy, Location.writtenBy, step, State.value_set,
       State.record_set, State.set_setRegister, State.set_setRecord,
-      PMF.map_comp, PMF.pure_map, Function.comp_def]
+      State.resolve_set, State.resolve_set_limit, PMF.map_comp, PMF.pure_map,
+      Function.comp_def]
 
 /--
 An instruction writes nothing but its destination: every state that it can

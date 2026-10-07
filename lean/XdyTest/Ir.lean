@@ -54,6 +54,12 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard reads (include_str "Fixtures/keep_highest.json")
 #guard reads (include_str "Fixtures/max.json")
 #guard reads (include_str "Fixtures/range.json")
+#guard reads (include_str "Fixtures/reroll.json")
+#guard reads (include_str "Fixtures/reroll_after_keep.json")
+#guard reads (include_str "Fixtures/reroll_cross_out.json")
+#guard reads (include_str "Fixtures/reroll_list.json")
+#guard reads (include_str "Fixtures/reroll_range.json")
+#guard reads (include_str "Fixtures/reroll_unlimited.json")
 #guard reads (include_str "Fixtures/shared_register.json")
 #guard reads (include_str "Fixtures/standard_dice.json")
 
@@ -142,6 +148,89 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
     .binary .add 0 (.register 0) (.register 1),
     .return (.register 0)] }
 
+-- `3D4 reroll = 1`: a reroll with a threshold and a count.
+#guard read (include_str "Fixtures/reroll.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 3) (.immediate 4),
+    .reroll 0 (.eq (.immediate 1)) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `{x}: 2D{x} reroll ≤ 6 ∞ times`: an unlimited reroll, which `serde` writes
+-- as a bare string.
+#guard read (include_str "Fixtures/reroll_cross_out.json") == some {
+  parameters := #["x"], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 2) (.register 0),
+    .reroll 0 (.le (.immediate 6)) .unlimited,
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `2D[1, 3, 5] reroll in [1, 5]`: a list.
+#guard read (include_str "Fixtures/reroll_list.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollCustomDice 0 (.immediate 2) [1, 3, 5],
+    .reroll 0 (.in [1, 5]) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `1D6 reroll in (1D2)..=(1D3)`: an inclusive range whose endpoints are
+-- registers.
+#guard read (include_str "Fixtures/reroll_range.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 2, rollingRecordCount := 3
+  instructions := #[
+    .rollRange 0 (.immediate 1) (.immediate 6),
+    .rollRange 1 (.immediate 1) (.immediate 2),
+    .sumRollingRecord 0 1,
+    .rollRange 2 (.immediate 1) (.immediate 3),
+    .sumRollingRecord 1 2,
+    .reroll 0 (.inRangeInclusive (.register 0) (.register 1))
+      (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+/--
+JSON text for a reroll of rolling record `0` with the given predicate and
+limit, as JSON text, then `return 0`.
+-/
+private def rerolling (predicate limit : String) : String :=
+  body ("{\"Reroll\": {\"dest\": 0, \"predicate\": " ++ predicate ++
+    ", \"limit\": " ++ limit ++ "}}, " ++ ret)
+
+/-- The instructions of a function read from JSON text, if it reads. -/
+private def instructions (s : String) : Option (Array Instruction) :=
+  (read s).map (·.instructions)
+
+-- Every predicate and limit, which no fixture holds.
+#guard instructions (rerolling "{\"Ne\": {\"Register\": 1}}"
+    "{\"Times\": {\"Register\": 0}}") ==
+  some #[.reroll 0 (.ne (.register 1)) (.times (.register 0)),
+    .return (.immediate 0)]
+#guard instructions (rerolling "{\"Lt\": {\"Immediate\": -2}}"
+    "\"Unlimited\"") ==
+  some #[.reroll 0 (.lt (.immediate (-2))) .unlimited, .return (.immediate 0)]
+#guard instructions (rerolling "{\"Gt\": {\"Immediate\": 4}}"
+    "\"Unlimited\"") ==
+  some #[.reroll 0 (.gt (.immediate 4)) .unlimited, .return (.immediate 0)]
+#guard instructions (rerolling "{\"Ge\": {\"Immediate\": 4}}"
+    "\"Unlimited\"") ==
+  some #[.reroll 0 (.ge (.immediate 4)) .unlimited, .return (.immediate 0)]
+#guard instructions (rerolling "{\"In\": []}" "\"Unlimited\"") ==
+  some #[.reroll 0 (.in []) .unlimited, .return (.immediate 0)]
+#guard instructions (rerolling
+    ("{\"InRange\": {\"start\": {\"Immediate\": 1}, " ++
+      "\"end\": {\"Register\": 1}}}")
+    "{\"Times\": {\"Immediate\": 2}}") ==
+  some #[.reroll 0 (.inRange (.immediate 1) (.register 1))
+      (.times (.immediate 2)),
+    .return (.immediate 0)]
+
 /-! ## Malformed JSON is rejected -/
 
 #guard !reads "not json"
@@ -151,6 +240,14 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard rejects (body "{\"Return\": {}, \"Neg\": {}}")
   "expected an object with one field"
 #guard !reads (body "{\"Return\": {}}")
+#guard rejects (rerolling "{\"Odd\": {\"Immediate\": 1}}" "\"Unlimited\"")
+  "unknown predicate Odd"
+#guard !reads (rerolling "{\"Eq\": {\"Immediate\": 1}}" "\"Forever\"")
+#guard rejects (rerolling "{\"Eq\": {\"Immediate\": 1}}"
+    "{\"Never\": {\"Immediate\": 1}}")
+  "unknown limit Never"
+#guard rejects (rerolling "{\"In\": [2147483648]}" "\"Unlimited\"")
+  "outside the i32 range"
 
 /-! ## Immediates must be `i32`s -/
 
@@ -187,6 +284,21 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
   "register @2 does not exist"
 #guard rejects (body "{\"Return\": {\"src\": {\"RollingRecord\": 0}}}")
   "rolling record ⚅0 used as a value"
+#guard rejects (body
+  ("{\"Reroll\": {\"dest\": 1, \"predicate\": {\"In\": []}, " ++
+   "\"limit\": \"Unlimited\"}}, " ++ ret))
+  "rolling record ⚅1 does not exist"
+#guard rejects (rerolling
+    ("{\"InRangeInclusive\": {\"start\": {\"Immediate\": 1}, " ++
+      "\"end\": {\"Register\": 2}}}")
+    "\"Unlimited\"")
+  "register @2 does not exist"
+#guard rejects
+  (rerolling "{\"Eq\": {\"RollingRecord\": 0}}" "\"Unlimited\"")
+  "rolling record ⚅0 used as a value"
+#guard rejects (rerolling "{\"Eq\": {\"Immediate\": 1}}"
+    "{\"Times\": {\"Register\": 2}}")
+  "register @2 does not exist"
 #guard rejects
   ("{\"parameters\": [\"a\", \"b\"], \"externals\": [\"c\"], " ++
    "\"register_count\": 2, \"rolling_record_count\": 0, " ++
@@ -205,11 +317,44 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
   (ret ++ ", {\"Neg\": {\"dest\": 0, \"op\": {\"Immediate\": 1}}}"))
   "instruction 0: return is not the last instruction"
 
+/-! ## Resolving rerolls -/
+
+/-- Read an operand as its immediate, or `10` times its register. -/
+private def value : AddressingMode → Int
+  | .immediate v => v
+  | .register r => 10 * r
+  | .rollingRecord _ => 0
+
+#guard (Predicate.eq (.register 1)).resolve value == .within 10 10
+#guard (Predicate.ne (.immediate 3)).resolve value == .outside 3 3
+#guard (Predicate.lt (.immediate 3)).resolve value == .within i32Min 2
+#guard (Predicate.le (.immediate 3)).resolve value == .within i32Min 3
+#guard (Predicate.gt (.immediate 3)).resolve value == .within 4 i32Max
+#guard (Predicate.ge (.immediate 3)).resolve value == .within 3 i32Max
+#guard (Predicate.in [5, 1, 5]).resolve value == .among [5, 1, 5]
+#guard (Predicate.inRange (.immediate 2) (.register 1)).resolve value
+  == .within 2 9
+#guard (Predicate.inRangeInclusive (.immediate 2) (.register 1)).resolve value
+  == .within 2 10
+#guard (Predicate.inRange (.register 1) (.immediate 2)).operands
+  == [.register 1, .immediate 2]
+#guard (Predicate.in [1]).operands == []
+#guard (Limit.times (.register 1)).resolve value == some 10
+#guard (Limit.times (.immediate 0)).resolve value == some 0
+#guard (Limit.times (.register 1)).operands == [.register 1]
+#guard Limit.unlimited.operands == []
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (Function.ofJson "{\"parameters\": [], \"externals\": [],
   \"register_count\": 0, \"rolling_record_count\": 0,
   \"instructions\": [{\"Return\": {\"src\": {\"Immediate\": 7}}}]}")
   matches .ok _
+#guard ((Predicate.lt (.immediate 3)).resolve
+  fun | .immediate v => v | _ => 0).matches 2
+#guard !((Predicate.inRange (.immediate 2) (.immediate 2)).resolve
+  fun | .immediate v => v | _ => 0).matches 2
+#guard (Limit.times (.immediate (-2))).resolve (fun _ => 0) == some 0
+#guard Limit.unlimited.resolve (fun _ => 0) == none
 
 end Xdy.Test

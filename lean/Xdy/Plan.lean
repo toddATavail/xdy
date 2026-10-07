@@ -16,11 +16,11 @@ worlds into one, at the first instruction after which at most one live value
 depends on it. A plan schedules these splits and merges before the pass runs.
 
 A plan reasons about _values_ rather than locations, since register
-coalescence reuses registers: every write to a location, including every drop
-and every keep, which rewrites its record, makes a new value, and every read
-reads the value most recently written there. Every instruction writes exactly
-one value, so a value is numbered by the program counter of the instruction
-that writes it.
+coalescence reuses registers: every write to a location, including every drop,
+every keep and every reroll, which rewrites its record, makes a new value, and
+every read reads the value most recently written there. Every instruction
+writes exactly one value, so a value is numbered by the program counter of the
+instruction that writes it.
 
 The Rust numbers the values in sweeps over the instructions, filling in their
 facts as it goes. Here each fact is a function of the instructions, defined
@@ -74,8 +74,8 @@ Whether an instruction reads a location.
 
 # Returns
 `true` if `i` reads the value at `ℓ`: an operand that is its register, the
-record that a drop or a keep drops from, or the record that a sum sums. No
-instruction reads the answer.
+record that a drop or a keep drops from or that a reroll rerolls, or the
+record that a sum sums. No instruction reads the answer.
 -/
 def readBy (ℓ : Location) : Instruction → Bool
   | .rollRange _ a b => ℓ.isOperand a || ℓ.isOperand b
@@ -85,6 +85,8 @@ def readBy (ℓ : Location) : Instruction → Bool
   | .dropHighest d c => ℓ == .record d || ℓ.isOperand c
   | .keepLowest d c => ℓ == .record d || ℓ.isOperand c
   | .keepHighest d c => ℓ == .record d || ℓ.isOperand c
+  | .reroll d p l =>
+    ℓ == .record d || (p.operands ++ l.operands).any ℓ.isOperand
   | .sumRollingRecord _ r => ℓ == .record r
   | .binary _ _ a b => ℓ.isOperand a || ℓ.isOperand b
   | .neg _ a => ℓ.isOperand a
@@ -98,13 +100,14 @@ Whether an instruction writes a location.
 - `i`: The instruction.
 
 # Returns
-`true` if `i` writes `ℓ`: the record that a roll, a drop, or a keep writes, the
-register that a sum or an arithmetic instruction writes, or the answer that
-`return` writes.
+`true` if `i` writes `ℓ`: the record that a roll, a drop, a keep, or a reroll
+writes, the register that a sum or an arithmetic instruction writes, or the
+answer that `return` writes.
 -/
 def writtenBy (ℓ : Location) : Instruction → Bool
   | .rollRange d _ _ | .rollStandardDice d _ _ | .rollCustomDice d _ _
-  | .dropLowest d _ | .dropHighest d _ | .keepLowest d _ | .keepHighest d _ =>
+  | .dropLowest d _ | .dropHighest d _ | .keepLowest d _ | .keepHighest d _
+  | .reroll d _ _ =>
     ℓ == .record d
   | .sumRollingRecord d _ | .binary _ d _ _ | .neg d _ => ℓ == .register d
   | .return _ => ℓ == .answer
@@ -167,7 +170,9 @@ The locations that an instruction reads, in order. Mirrors `sources` in
 
 # Returns
 The locations of its operands, preceded by the record that a drop or a keep
-drops from, or the record that a sum sums.
+drops from or that a reroll rerolls, or the record that a sum sums. A
+reroll's operands are those of its predicate, in the order written, then that
+of its limit, if any.
 -/
 def sources : Instruction → List Location
   | .rollRange _ a b => [a, b].filterMap Location.ofOperand
@@ -175,6 +180,8 @@ def sources : Instruction → List Location
   | .rollCustomDice _ c _ => [c].filterMap Location.ofOperand
   | .dropLowest d c | .dropHighest d c | .keepLowest d c | .keepHighest d c =>
     .record d :: [c].filterMap Location.ofOperand
+  | .reroll d p l =>
+    .record d :: (p.operands ++ l.operands).filterMap Location.ofOperand
   | .sumRollingRecord _ r => [.record r]
   | .binary _ _ a b => [a, b].filterMap Location.ofOperand
   | .neg _ a => [a].filterMap Location.ofOperand
@@ -189,12 +196,13 @@ reads it.
 - `i`: The instruction.
 
 # Returns
-The record that a roll, a drop, or a keep writes, the register that a sum or
-an arithmetic instruction writes, or the answer.
+The record that a roll, a drop, a keep, or a reroll writes, the register that
+a sum or an arithmetic instruction writes, or the answer.
 -/
 def destination : Instruction → Location
   | .rollRange d _ _ | .rollStandardDice d _ _ | .rollCustomDice d _ _
-  | .dropLowest d _ | .dropHighest d _ | .keepLowest d _ | .keepHighest d _ =>
+  | .dropLowest d _ | .dropHighest d _ | .keepLowest d _ | .keepHighest d _
+  | .reroll d _ _ =>
     .record d
   | .sumRollingRecord d _ | .binary _ d _ _ | .neg d _ => .register d
   | .return _ => .answer
@@ -206,10 +214,12 @@ Whether an instruction rolls: whether it draws its result at random.
 - `i`: The instruction.
 
 # Returns
-`true` for a range and for standard and custom dice, `false` otherwise.
+`true` for a range, for standard and custom dice, and for a reroll, which
+rolls dice too, `false` otherwise.
 -/
 def rolls : Instruction → Bool
-  | .rollRange .. | .rollStandardDice .. | .rollCustomDice .. => true
+  | .rollRange .. | .rollStandardDice .. | .rollCustomDice .. | .reroll .. =>
+    true
   | _ => false
 
 end Instruction

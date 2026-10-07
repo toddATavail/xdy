@@ -8,8 +8,8 @@ outcomes, which the Rust forward pass is checked against.
 ## Why a naive oracle
 
 The oracle is deliberately naive. It runs the program once over a distribution
-of whole machine states (every register and rolling record): each range or die
-draw branches into one state per outcome, and states that become equal merge,
+of whole machine states (every register and rolling record): each range, die
+or reroll draw branches into one state per outcome, and states that become equal merge,
 adding their weights. It shares no algorithm with the Rust forward pass, which
 relies on convolution, order statistics, mixtures and conditioning, so it cannot
 share its bugs. It is exponential in the worst case and intended only for small
@@ -26,12 +26,12 @@ exponentiation.
 | Module | Contents |
 |--------|----------|
 | [`Xdy/Primitives.lean`](Xdy/Primitives.lean) | The `i32` arithmetic primitives, as saturating operations on `Int`. |
-| [`Xdy/Record.lean`](Xdy/Record.lean) | Rolling records: results, drops and keeps, the kept window and the saturating sum, and the die from which the results were drawn. |
+| [`Xdy/Record.lean`](Xdy/Record.lean) | Rolling records: results, drops and keeps, the kept window and the saturating sum, and the die from which the results were drawn, with its faces; and the criteria by which a reroll matches results. |
 | [`Xdy/Saturation.lean`](Xdy/Saturation.lean) | Proofs of closed forms for the saturating fold that sums a record, and of the soundness of the test by which the Rust forward pass replaces it with one clamp, `folds_to_clamp`. |
 | [`Xdy/Dist.lean`](Xdy/Dist.lean) | Finite distributions: exact natural weights over one total, merging equal outcomes. |
 | [`Xdy/DistLaws.lean`](Xdy/DistLaws.lean) | Proofs of the weight and total of every distribution that `Dist` builds, as sums over its entries, for the proof that the oracle meets the specification. |
-| [`Xdy/Ir.lean`](Xdy/Ir.lean) | The IR, and a reader and validator for the JSON that Rust's `serde` feature writes. |
-| [`Xdy/Interpreter.lean`](Xdy/Interpreter.lean) | The interpreter: machine states, one step per instruction, and the exact distribution of a function's result. |
+| [`Xdy/Ir.lean`](Xdy/Ir.lean) | The IR, including the predicates and limits of rerolls and how their operands resolve, and a reader and validator for the JSON that Rust's `serde` feature writes. |
+| [`Xdy/Interpreter.lean`](Xdy/Interpreter.lean) | The interpreter: machine states, one step per instruction, and the exact distribution of a function's result. A limited reroll redraws naively, as the Rust loops, and an unlimited one draws from the die's conditional law, given that it does not match. |
 | [`Xdy/Oracle.lean`](Xdy/Oracle.lean) | The oracle's protocol: reading a request and writing the distribution as a response. |
 | [`Xdy/Plan.lean`](Xdy/Plan.lean) | The Rust forward pass's fan-out plans: locations, which instructions read and write them, and when each is dead; the values of a function, with their readers, whether each may be random, and the values that fan out on which each depends; and the splits and merges scheduled after each instruction. It mirrors `propagation/plan.rs`, so that the specification can prove that the plan preserves the law. |
 | [`Xdy/PlanLaws.lean`](Xdy/PlanLaws.lean) | Proofs of the structural facts about plans on which the proof that they preserve the law rests: a live value occupies its location, and an instruction that overwrites a live value reads it; a live value that fans out is an open split, so every random value that an instruction reads is an open split or is read for the last time; each merge meets the survivor's conditions; a register or record is live exactly when its location is not dead; and what is live before an instruction, and that the open splits ascend, so that none depends on a split that may merge but itself. |

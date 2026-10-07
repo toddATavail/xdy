@@ -61,15 +61,15 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
-	Unobserved, Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
+	Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
 		read_distribution_test_cases
 	},
 	tests::{
-		propagation::resum,
+		propagation::{resum, source_reroll},
 		property::{
 			NAMES, OPERATORS, agree, binding, check_within, variable,
 			with_parameters
@@ -110,6 +110,12 @@ const FIXTURES: &[(&str, &str)] = &[
 	("keep_highest", "4D6 keep highest 3"),
 	("max", "{x}: {x}D1"),
 	("range", "[1:6]"),
+	("reroll", "3D4 reroll = 1"),
+	("reroll_after_keep", "4D6 keep highest 3 reroll < 3 2 times"),
+	("reroll_cross_out", "{x}: 2D{x} reroll ≤ 6 ∞ times"),
+	("reroll_list", "2D[1, 3, 5] reroll in [1, 5]"),
+	("reroll_range", "1D6 reroll in (1D2)..=(1D3)"),
+	("reroll_unlimited", "{x}: 2D6 reroll ≤ {x} ∞ times"),
 	("shared_register", "{x}@(3D6) + {x}"),
 	("standard_dice", "3D6")
 ];
@@ -481,31 +487,6 @@ fn test_oracle_distribution_corpus()
 		let case = format!("case {}: {source} {args:?} {externs:?}", index + 1);
 		// Compile exactly as the distribution tests do.
 		let function = optimize(compile_valid(source), Passes::all());
-		// The oracle does not read reroll instructions yet, so record a case
-		// that still rerolls after optimization as the corpus has it,
-		// unchecked.
-		if function
-			.instructions
-			.iter()
-			.any(|inst| matches!(inst, Instruction::Reroll(_)))
-		{
-			let expected = Distribution::from_weights(
-				expected
-					.iter()
-					.map(|&(outcome, count)| (outcome, Weight::from(count)))
-			)
-			.unwrap();
-			report_case(
-				&mut report,
-				previous,
-				source,
-				args,
-				externs,
-				&expected
-			);
-			previous = Some(source);
-			continue;
-		}
 		let actual =
 			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
 				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
@@ -929,8 +910,10 @@ fn small_expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates small dice expressions, whose operands
-/// come from the specified strategy. Any drop or keep clause may lack a drop
-/// expression.
+/// come from the specified strategy, with drop, keep, and reroll clauses. Any
+/// drop or keep clause may lack a drop expression, and any reroll clause its
+/// limit; a reroll's thresholds and endpoints are operands like a drop
+/// expression, but may begin with `-`.
 ///
 /// # Parameters
 /// - `inner`: The strategy for nested expressions.
@@ -948,26 +931,35 @@ fn small_dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 	];
 	// A drop expression never begins with `-`, so a negative constant must be
 	// grouped.
-	let drop = small_atom(inner.clone(), small_constant()).prop_map(|drop| {
-		if drop.starts_with('-')
-		{
-			format!("({})", drop)
-		}
-		else
-		{
-			drop
-		}
-	});
+	let drop = small_atom(inner.clone(), small_constant())
+		.prop_map(|drop| {
+			if drop.starts_with('-')
+			{
+				format!("({})", drop)
+			}
+			else
+			{
+				drop
+			}
+		})
+		.boxed();
 	let clause = (
 		select(&["drop", "keep"][..]),
 		select(&["lowest", "highest"][..]),
-		option::of(drop)
+		option::of(drop.clone())
 	)
 		.prop_map(|(kind, direction, drop)| match drop
 		{
 			Some(drop) => format!(" {} {} {}", kind, direction, drop),
 			None => format!(" {} {}", kind, direction)
 		});
+	let clause = prop_oneof![
+		2 => clause,
+		1 => source_reroll(
+			small_atom(inner.clone(), small_constant()).boxed(),
+			drop
+		)
+	];
 	(
 		small_atom(inner, small_size()),
 		faces,

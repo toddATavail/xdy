@@ -1,5 +1,5 @@
 import Lean.Data.Json
-import Xdy.Primitives
+import Xdy.Record
 
 /-!
 # Intermediate representation
@@ -12,14 +12,16 @@ A function is a straight-line list of instructions over a bank of registers,
 which hold integers, and a set of rolling records, which hold the results of
 ranges and dice. The first registers hold the function's parameters, in
 order, and the next hold its external variables, in order. Only `RollRange`,
-`RollStandardDice` and `RollCustomDice` introduce randomness.
+`RollStandardDice`, `RollCustomDice` and `Reroll` introduce randomness.
 
 ## The JSON form
 
 `serde` writes enums in its default, externally tagged form: a variant is an
 object with a single field, named for the variant, whose value is the
-variant's payload. Structs are objects, and newtypes such as `Immediate` and
-`RegisterIndex` are their inner values. For example, the IR of `(1D3)D3`:
+variant's payload, or just its name, as a string, if it has no payload, as
+`Limit::Unlimited` has none. Structs are objects, and newtypes such as
+`Immediate` and `RegisterIndex` are their inner values. For example, the IR
+of `(1D3)D3`:
 
 ```json
 {"parameters": [], "externals": [],
@@ -77,6 +79,171 @@ inductive BinaryOp where
   | «max»
   deriving Repr, BEq, Inhabited
 
+/-- The predicate of a reroll: the test that a die must pass to be rerolled,
+whose thresholds and endpoints are operands, read once, before the first
+reroll. Mirrors `Predicate` in `ir.rs`. -/
+inductive Predicate where
+  /-- Matches a result equal to the threshold. -/
+  | eq (threshold : AddressingMode)
+  /-- Matches a result not equal to the threshold. -/
+  | ne (threshold : AddressingMode)
+  /-- Matches a result less than the threshold. -/
+  | lt (threshold : AddressingMode)
+  /-- Matches a result less than or equal to the threshold. -/
+  | le (threshold : AddressingMode)
+  /-- Matches a result greater than the threshold. -/
+  | gt (threshold : AddressingMode)
+  /-- Matches a result greater than or equal to the threshold. -/
+  | ge (threshold : AddressingMode)
+  /-- Matches a result among the listed values, which are literals. An empty
+  list matches nothing. -/
+  | «in» (values : List Int)
+  /-- Matches a result within the half-open range `start..stop`, which is
+  empty if `stop` does not exceed `start`. The JSON names `stop` `end`, a Lean
+  keyword. -/
+  | inRange (start stop : AddressingMode)
+  /-- Matches a result within the inclusive range `start..=stop`, which is
+  empty if `stop` is less than `start`. -/
+  | inRangeInclusive (start stop : AddressingMode)
+  deriving Repr, BEq, Inhabited
+
+/-- The limit of a reroll: the number of times that each die may be rerolled.
+Mirrors `Limit` in `ir.rs`. -/
+inductive Limit where
+  /-- Reroll each die at most `count` times, or not at all if the count is
+  zero or less. -/
+  | times (count : AddressingMode)
+  /-- Reroll each die until it no longer matches, or not at all if every face
+  of the die matches. -/
+  | unlimited
+  deriving Repr, BEq, Inhabited
+
+namespace Predicate
+
+/--
+The operands of a predicate, in the order written. Mirrors
+`Predicate::operands`.
+
+# Parameters
+- `p`: The predicate.
+
+# Returns
+The threshold of a comparison, the start and end of a range, or nothing for a
+list.
+-/
+def operands : Predicate → List AddressingMode
+  | .eq t | .ne t | .lt t | .le t | .gt t | .ge t => [t]
+  | .in _ => []
+  | .inRange a b | .inRangeInclusive a b => [a, b]
+
+/--
+Resolve a predicate to the set of results that it matches, given the values of
+its operands. Mirrors `Predicate::resolve`.
+
+# Parameters
+- `p`: The predicate.
+- `value`: Answers the value of an operand.
+
+# Returns
+The set of results that `p` matches.
+
+# Notes
+Rust clamps the bounds of each range to the `i32` range, after computing them
+in `i64`. Every result lies within the `i32` range, so the clamp changes
+nothing that a criterion matches, and here the bounds are left unclamped.
+
+# Examples
+```lean
+#guard ((Predicate.lt (.immediate 3)).resolve
+  fun | .immediate v => v | _ => 0).matches 2
+#guard !((Predicate.inRange (.immediate 2) (.immediate 2)).resolve
+  fun | .immediate v => v | _ => 0).matches 2
+```
+-/
+def resolve (p : Predicate) (value : AddressingMode → Int) : Criterion :=
+  match p with
+  | .eq t => .within (value t) (value t)
+  | .ne t => .outside (value t) (value t)
+  | .lt t => .within i32Min (value t - 1)
+  | .le t => .within i32Min (value t)
+  | .gt t => .within (value t + 1) i32Max
+  | .ge t => .within (value t) i32Max
+  | .in values => .among values
+  | .inRange a b => .within (value a) (value b - 1)
+  | .inRangeInclusive a b => .within (value a) (value b)
+
+/--
+A predicate resolves alike under any two readings of operands that agree on
+its own.
+
+# Parameters
+- `p`: The predicate.
+- `f`, `g`: The readings of operands.
+
+# Hypotheses
+- `h`: `f` and `g` agree on every operand of `p`.
+-/
+theorem resolve_congr {p : Predicate} {f g : AddressingMode → Int}
+    (h : ∀ op ∈ p.operands, f op = g op) : p.resolve f = p.resolve g := by
+  cases p <;> simp_all [resolve, operands]
+
+end Predicate
+
+namespace Limit
+
+/--
+The operand of a limit, if any, as a list. Mirrors `Limit::operand`.
+
+# Parameters
+- `l`: The limit.
+
+# Returns
+The count of a finite limit, or nothing if the limit is unlimited.
+-/
+def operands : Limit → List AddressingMode
+  | .times c => [c]
+  | .unlimited => []
+
+/--
+Resolve a limit to the number of times that each die may be rerolled, given
+the value of its operand, as `evaluator.rs` and `reroll_within` in
+`primitives.rs` resolve it together.
+
+# Parameters
+- `l`: The limit.
+- `value`: Answers the value of an operand.
+
+# Returns
+The count, or `0` if it is negative, or `none` if `l` is unlimited.
+
+# Examples
+```lean
+#guard (Limit.times (.immediate (-2))).resolve (fun _ => 0) == some 0
+#guard Limit.unlimited.resolve (fun _ => 0) == none
+```
+-/
+def resolve (l : Limit) (value : AddressingMode → Int) : Option Nat :=
+  match l with
+  | .times c => some (value c).toNat
+  | .unlimited => none
+
+/--
+A limit resolves alike under any two readings of operands that agree on its
+own.
+
+# Parameters
+- `l`: The limit.
+- `f`, `g`: The readings of operands.
+
+# Hypotheses
+- `h`: `f` and `g` agree on every operand of `l`.
+-/
+theorem resolve_congr {l : Limit} {f g : AddressingMode → Int}
+    (h : ∀ op ∈ l.operands, f op = g op) : l.resolve f = l.resolve g := by
+  cases l <;> simp_all [resolve, operands]
+
+end Limit
+
 /-- An instruction. Mirrors `Instruction` in `ir.rs`. -/
 inductive Instruction where
   /-- Roll one value uniformly from the inclusive range `[start, stop]` into
@@ -99,6 +266,12 @@ inductive Instruction where
   /-- Keep the highest `count` of the results of rolling record `dest` that are
   still kept, dropping the rest of them from the low end. -/
   | keepHighest (dest : Nat) (count : AddressingMode)
+  /-- Reroll the dice still kept in rolling record `dest` that satisfy the
+  predicate, each up to the limit of times: cross out a matching die and draw
+  its replacement from the record's die, repeating while the replacement
+  matches and the limit allows. An unlimited reroll whose predicate matches
+  every face of the die draws nothing, but crosses out every matching die. -/
+  | reroll (dest : Nat) (predicate : Predicate) (limit : Limit)
   /-- Write the sum of the kept results of rolling record `src` to register
   `dest`. -/
   | sumRollingRecord (dest src : Nat)
@@ -190,6 +363,38 @@ private def binaryOp? : String → Option BinaryOp
   | "Max" => some .max
   | _ => none
 
+/-- Read a predicate from its `serde` form, e.g., `{"Le": {"Immediate": 2}}`,
+`{"In": [1, 5]}` or `{"InRange": {"start": {"Immediate": 1},
+"end": {"Register": 0}}}`. -/
+instance : FromJson Predicate where
+  fromJson? j := do
+    let (tag, p) ← variant j
+    let mode (key : String) : Except String AddressingMode :=
+      p.getObjValAs? AddressingMode key
+    let threshold : Except String AddressingMode := fromJson? p
+    match tag with
+    | "Eq" => .eq <$> threshold
+    | "Ne" => .ne <$> threshold
+    | "Lt" => .lt <$> threshold
+    | "Le" => .le <$> threshold
+    | "Gt" => .gt <$> threshold
+    | "Ge" => .ge <$> threshold
+    | "In" => return .in (← (← p.getArr?).toList.mapM getI32)
+    | "InRange" => return .inRange (← mode "start") (← mode "end")
+    | "InRangeInclusive" =>
+      return .inRangeInclusive (← mode "start") (← mode "end")
+    | _ => throw s!"unknown predicate {tag}"
+
+/-- Read a limit from its `serde` form, `{"Times": {"Immediate": 2}}` or
+`"Unlimited"`, since `serde` writes a variant without a payload as its bare
+name. -/
+instance : FromJson Limit where
+  fromJson? j := do
+    if j == "Unlimited" then return .unlimited
+    match ← variant j with
+    | ("Times", c) => .times <$> fromJson? c
+    | (tag, _) => throw s!"unknown limit {tag}"
+
 /-- Read an instruction from its `serde` form, e.g.,
 `{"SumRollingRecord": {"dest": 0, "src": 1}}`. -/
 instance : FromJson Instruction where
@@ -211,6 +416,9 @@ instance : FromJson Instruction where
     | "DropHighest" => return .dropHighest (← dest) (← mode "count")
     | "KeepLowest" => return .keepLowest (← dest) (← mode "count")
     | "KeepHighest" => return .keepHighest (← dest) (← mode "count")
+    | "Reroll" =>
+      return .reroll (← dest) (← p.getObjValAs? Predicate "predicate")
+        (← p.getObjValAs? Limit "limit")
     | "SumRollingRecord" =>
       return .sumRollingRecord (← dest) (← p.getObjValAs? Nat "src")
     | "Neg" => return .neg (← dest) (← mode "op")
@@ -300,6 +508,8 @@ private def checkInstruction (f : Function) :
   | .rollCustomDice d c _ => do f.checkRecord d; f.checkValue c
   | .dropLowest d c | .dropHighest d c | .keepLowest d c | .keepHighest d c =>
     do f.checkRecord d; f.checkValue c
+  | .reroll d p l => do
+    f.checkRecord d; (p.operands ++ l.operands).forM f.checkValue
   | .sumRollingRecord d s => do f.checkRegister d; f.checkRecord s
   | .binary _ d a b => do
     f.checkRegister d; f.checkValue a; f.checkValue b

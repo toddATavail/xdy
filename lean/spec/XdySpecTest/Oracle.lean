@@ -42,6 +42,21 @@ example (f : Function) (args : List Int) (externals : List (String × Int))
   have := hpos e he
   simp; omega
 
+/-! ## Rerolls -/
+
+-- The oracle rerolls the sorted record, whose kept results are the
+-- specification's, to the law of the specification's reroll, sorted, limited
+-- or not.
+example (r : Spec.Record) (c : Criterion) (l : Option Nat) :
+    (Xdy.reroll r.toOracle c l).HasLaw
+      ((Spec.reroll r c l).map Spec.Record.toOracle) :=
+  hasLaw_reroll r c l
+-- A limited replacement has the law of the specification's, as a die does.
+example (c : Criterion) (faces : List Int) (n : Nat) :
+    (Xdy.limitedReplacement c (Xdy.customDie faces) n).HasLaw
+      (limitedReplacement c (Spec.customDie faces) n) :=
+  hasLaw_limitedReplacement c n (hasLaw_customDie faces)
+
 /-! ## Sorting states -/
 
 -- Every record of an initial state is empty, so sorted.

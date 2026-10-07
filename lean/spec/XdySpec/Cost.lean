@@ -8,7 +8,10 @@ Lemma 7 of the design: conditioning never costs more than enumerating paths.
 The forward pass in `xdy/src/distribution/propagation.rs` keeps one world for
 each assignment of outcomes to its open splits that it can reach, and the
 space that it needs grows with them. The enumerating builder that it
-replaced walked one path for each sequence of draws (`XdySpec/Paths.lean`).
+replaced walked one path for each sequence of draws (`XdySpec/Paths.lean`),
+and so do the paths here, but for an unlimited reroll, whose sequences of
+draws are unbounded: its paths follow its conditional law, one for each face
+that it can keep.
 At every program point, and after every step of the plan, the worlds of the
 pass number no more than the paths that reach that point, and so no more than
 the paths through the whole function (`worlds_le_paths`,

@@ -205,6 +205,112 @@ private def dropping (drops : List Instruction) : Function :=
     .sumRollingRecord 0 0, .return (reg 0)]) ==
   reduced (dropping [])
 
+/-! ## Rerolls -/
+
+/-- Roll `count` dice with `faces` faces into rolling record `0`, apply the
+reroll, and sum. -/
+private def rerolling (count faces : Int) (p : Predicate) (l : Limit) :
+    Function :=
+  prog [.rollStandardDice 0 (imm count) (imm faces), .reroll 0 p l,
+    .sumRollingRecord 0 0, .return (reg 0)]
+
+/-- The law of a die that a reroll rerolls once if `rerolled` matches it,
+composed from `Dist` alone. -/
+private def rerolledOnce (die : Dist Int) (rerolled : Int → Bool) :
+    Dist Int :=
+  die.bind fun x => if rerolled x then die else .pure x
+
+/-- The distribution of `d` reduced to lowest terms, as `reduced` answers. -/
+private def lowest (d : Dist Int) : Except String (List (Int × Nat)) :=
+  .ok d.lowestTerms.toList
+
+-- `1D6 reroll = 1`: a 1 survives only by matching twice.
+#guard reduced (rerolling 1 6 (.eq (imm 1)) (.times (imm 1))) ==
+  .ok [(1, 1), (2, 7), (3, 7), (4, 7), (5, 7), (6, 7)]
+-- `1D6 reroll = 1 2 times`: each other face in `36 + 6 + 1` ways of 216.
+#guard reduced (rerolling 1 6 (.eq (imm 1)) (.times (imm 2))) ==
+  .ok [(1, 1), (2, 43), (3, 43), (4, 43), (5, 43), (6, 43)]
+-- A limit of `0` or less rerolls nothing.
+#guard reduced (rerolling 1 6 (.eq (imm 1)) (.times (imm 0))) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 1) (imm 6)))
+#guard reduced (rerolling 1 6 (.eq (imm 1)) (.times (imm i32Min))) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 1) (imm 6)))
+-- Each die rerolls independently: `2D6 reroll = 1`.
+#guard reduced (rerolling 2 6 (.eq (imm 1)) (.times (imm 1))) ==
+  lowest (sumDice 2 (rerolledOnce (d 6) (· == 1)))
+-- An unlimited reroll answers the conditional law of the die, given that it
+-- does not match: `1D6 reroll = 1 ∞ times` and `1D6 reroll ≠ 6 ∞ times`.
+#guard reduced (rerolling 1 6 (.eq (imm 1)) .unlimited) ==
+  .ok [(2, 1), (3, 1), (4, 1), (5, 1), (6, 1)]
+#guard reduced (rerolling 1 6 (.ne (imm 6)) .unlimited) == .ok [(6, 1)]
+#guard reduced (rerolling 3 6 (.lt (imm 4)) .unlimited) ==
+  lowest (sumDice 3 (.uniform [4, 5, 6]))
+-- Its faces are equally likely by position, as the die's are.
+#guard reduced (prog [.rollCustomDice 0 (imm 1) [1, 2, 2, 3],
+    .reroll 0 (.eq (imm 1)) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(2, 2), (3, 1)]
+-- An unlimited reroll whose predicate matches every face crosses out every
+-- matching die, which then sums to `0`: `3D1 reroll = 1 ∞ times`, dice
+-- without faces, which show only `0`, and an empty range.
+#guard dist (rerolling 3 1 (.eq (imm 1)) .unlimited) == .ok [(0, 1)]
+#guard dist (rerolling 2 6 (.le (imm 6)) .unlimited) == .ok [(0, 36)]
+#guard dist (rerolling 2 0 (.in [0]) .unlimited) == .ok [(0, 1)]
+#guard dist (prog [.rollRange 0 (imm 4) (imm 3),
+    .reroll 0 (.ge (imm 0)) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(0, 1)]
+-- A limited reroll of such dice draws them again, to the same law.
+#guard reduced (rerolling 2 1 (.eq (imm 1)) (.times (imm 3))) ==
+  .ok [(2, 1)]
+#guard reduced (rerolling 2 6 (.le (imm 6)) (.times (imm 2))) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 2) (imm 6)))
+-- An unlimited reroll that matches nothing rerolls nothing.
+#guard reduced (rerolling 2 6 (.in []) .unlimited) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 2) (imm 6)))
+-- Ranges are half-open or inclusive: `1D6 reroll in 2..5 ∞ times` and
+-- `1D6 reroll in 2..=5 ∞ times`; an inverted range matches nothing.
+#guard reduced (rerolling 1 6 (.inRange (imm 2) (imm 5)) .unlimited) ==
+  .ok [(1, 1), (5, 1), (6, 1)]
+#guard reduced (rerolling 1 6 (.inRangeInclusive (imm 2) (imm 5))
+    .unlimited) ==
+  .ok [(1, 1), (6, 1)]
+#guard reduced (rerolling 1 6 (.inRangeInclusive (imm 5) (imm 2))
+    .unlimited) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 1) (imm 6)))
+-- Thresholds and counts may be read from registers.
+#guard reduced (prog [.rollStandardDice 0 (imm 1) (imm 6),
+    .reroll 0 (.gt (reg 0)) (.times (reg 1)), .sumRollingRecord 0 0,
+    .return (reg 0)] 2) [4, 1] ==
+  reduced (rerolling 1 6 (.gt (imm 4)) (.times (imm 1)))
+-- A reroll considers only the kept dice: `2D2 keep highest 1 reroll = 1`
+-- rerolls the higher die, a 1 only if both dice are.
+#guard reduced (prog [.rollStandardDice 0 (imm 2) (imm 2),
+    .keepHighest 0 (imm 1), .reroll 0 (.eq (imm 1)) (.times (imm 1)),
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  .ok [(1, 1), (2, 7)]
+-- A drop after a reroll drops from the dice that it left.
+#guard reduced (prog [.rollStandardDice 0 (imm 2) (imm 2),
+    .reroll 0 (.eq (imm 1)) .unlimited, .dropLowest 0 (imm 1),
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  .ok [(2, 1)]
+
+/-- A state whose rolling record `0` holds `[1, 2, 3]`, the lowest dropped,
+from a three-sided die. -/
+private def dropped : State :=
+  fresh.setRecord 0 { results := [1, 2, 3], lowest := 1, die := .standard 3 }
+
+-- A reroll leaves the kept dice, without drops, and its die.
+#guard step dropped (.reroll 0 (.in []) .unlimited) ==
+  .pure (fresh.setRecord 0 { results := [2, 3], die := .standard 3 })
+#guard step dropped (.reroll 0 (.eq (imm 1)) (.times (imm 5))) ==
+  .pure (fresh.setRecord 0 { results := [2, 3], die := .standard 3 })
+#guard step dropped (.reroll 0 (.ge (imm 1)) .unlimited) ==
+  .pure (fresh.setRecord 0 { die := .standard 3 })
+-- A record never rolled holds no dice, so a reroll changes nothing.
+#guard step fresh (.reroll 0 (.eq (imm 0)) (.times (imm 1))) == .pure fresh
+#guard step fresh (.reroll 1 (.eq (imm 0)) .unlimited) == .pure fresh
+
 /-! ## Sums, arithmetic and registers -/
 
 -- A rolling record that was never rolled sums to `0`.
@@ -363,6 +469,54 @@ private def keeps (n m : Int) : Except String (List (Int × Nat)) :=
     [i32Min, -1] ==
   .ok [(i32Min + 1, 1)]
 
+-- `3D4 reroll = 1`.
+#guard reduced (fixture (include_str "Fixtures/reroll.json")) ==
+  lowest (sumDice 3 (rerolledOnce (d 4) (· == 1)))
+-- `2D[1, 3, 5] reroll in [1, 5]`.
+#guard reduced (fixture (include_str "Fixtures/reroll_list.json")) ==
+  lowest (sumDice 2 (rerolledOnce (customDie [1, 3, 5]) ([1, 5].contains ·)))
+-- `1D6 reroll in (1D2)..=(1D3)`.
+#guard reduced (fixture (include_str "Fixtures/reroll_range.json")) ==
+  lowest ((d 2).bind fun a => (d 3).bind fun b =>
+    rerolledOnce (d 6) fun x => a ≤ x && x ≤ b)
+-- `{x}: 2D6 reroll ≤ {x} ∞ times`, which crosses out every die once every
+-- face matches.
+#guard (reduced (fixture (include_str "Fixtures/reroll_unlimited.json")) ·)
+    [2] ==
+  lowest (sumDice 2 (.uniform [3, 4, 5, 6]))
+#guard (reduced (fixture (include_str "Fixtures/reroll_unlimited.json")) ·)
+    [0] ==
+  lowest (sumDice 2 (d 6))
+#guard (reduced (fixture (include_str "Fixtures/reroll_unlimited.json")) ·)
+    [6] ==
+  .ok [(0, 1)]
+-- `{x}: 2D{x} reroll ≤ 6 ∞ times`, which crosses out every die unless the die
+-- has a face above 6.
+#guard (reduced (fixture (include_str "Fixtures/reroll_cross_out.json")) ·)
+    [8] ==
+  lowest (sumDice 2 (.uniform [7, 8]))
+#guard (reduced (fixture (include_str "Fixtures/reroll_cross_out.json")) ·)
+    [6] ==
+  .ok [(0, 1)]
+#guard (reduced (fixture (include_str "Fixtures/reroll_cross_out.json")) ·)
+    [0] ==
+  .ok [(0, 1)]
+
+/-- The distribution of `n` dice drawn from `die`, each as a sorted list,
+composed from `Dist` alone. -/
+private def sortedDice (n : Nat) (die : Dist Int) : Dist (List Int) :=
+  n.repeat (fun d => d.bind fun xs => die.map fun x =>
+    (x :: xs).mergeSort (· ≤ ·)) (.pure [])
+
+-- `4D6 keep highest 3 reroll < 3 2 times`: drop the lowest of four sorted
+-- dice, then reroll each of the rest independently, composed from `Dist`.
+#guard reduced (fixture (include_str "Fixtures/reroll_after_keep.json")) ==
+  lowest ((sortedDice 4 (d 6)).bind fun xs =>
+    (xs.drop 1).foldl (fun t x =>
+        t.bind fun t =>
+          (if x < 3 then rerolledOnce (d 6) (· < 3) else .pure x).map (t + ·))
+      (.pure 0))
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (rollRange 1 3).total == 3
@@ -374,6 +528,19 @@ private def keeps (n m : Int) : Except String (List (Int × Nat)) :=
 #guard standardDie 0 == Dist.pure 0
 #guard (customDie [1, 1, 2]).weight 1 == 2
 #guard customDie [] == Dist.pure 0
+#guard redraw (.within 1 1) (.uniform [1, 2]) (.pure 1) == .uniform [1, 2]
+#guard redraw (.within 1 1) (.uniform [1, 2]) (.pure 2) == .pure 2
+#guard (limitedReplacement (.within 1 1) (.uniform [1, 2]) 2).toList
+  == [(1, 1), (2, 3)]
+#guard (rerollKept (.standard 2) [1, 2] (· == 1) (.pure (.uniform [1, 2]))
+  |>.map (·.results)).toList == [([1, 2], 1), ([2, 2], 1)]
+#guard ((reroll { results := [1, 2], die := .standard 2 } (.within 1 1)
+    none).map (·.results)).toList == [([2, 2], 1)]
+#guard reroll { results := [1, 1], die := .standard 1 } (.within 1 1) none
+  == .pure { die := .standard 1 }
+#guard reroll { results := [1, 2], lowest := 1, die := .standard 2 }
+    (.within 1 1) (some 3)
+  == .pure { results := [2], die := .standard 2 }
 #guard BinaryOp.sub.apply 1 2 == -1
 #guard BinaryOp.add.apply i32Max 1 == i32Max
 -- `1D6`.

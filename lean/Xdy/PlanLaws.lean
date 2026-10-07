@@ -62,6 +62,7 @@ def Instruction.operandsAreValues : Instruction → Bool
     a.isValue && b.isValue
   | .rollCustomDice _ c _ | .dropLowest _ c | .dropHighest _ c
   | .keepLowest _ c | .keepHighest _ c | .neg _ c | .return c => c.isValue
+  | .reroll _ p l => (p.operands ++ l.operands).all AddressingMode.isValue
   | .sumRollingRecord .. => true
 
 /--
@@ -98,6 +99,14 @@ theorem Location.readBy_iff {ℓ : Location} {i : Instruction}
   cases i <;>
     simp_all [Location.readBy, Instruction.sources,
       Instruction.operandsAreValues, Location.isOperand_iff]
+  case reroll =>
+    constructor <;> rintro (h' | ⟨x, hx, h'⟩ | ⟨x, hx, h'⟩)
+    all_goals first
+      | exact .inl h'
+      | exact .inr (.inl ⟨x, hx, by simpa [Location.isOperand_iff (h.1 x hx)]
+          using h'⟩)
+      | exact .inr (.inr ⟨x, hx, by simpa [Location.isOperand_iff (h.2 x hx)]
+          using h'⟩)
 
 /--
 An instruction writes a location exactly when it is its destination.

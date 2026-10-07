@@ -5,19 +5,23 @@ import Xdy.Primitives
 
 A rolling record holds the results of one range or one set of dice, together
 with how many of its lowest and highest results have been dropped, and the die
-from which they were drawn. Models `RollingRecord` in `xdy/src/evaluator.rs`
-and its methods in `xdy/src/primitives.rs`.
+from which they were drawn, whose faces a reroll draws. Models `RollingRecord`
+in `xdy/src/evaluator.rs` and its methods in `xdy/src/primitives.rs`, and the
+criteria by which a reroll chooses the dice to reroll, `Criterion` in
+`primitives.rs`.
 
 The Rust record keeps its dice in the order rolled and crosses out each die
 that a drop or keep drops, always the lowest or highest of the dice still
 kept, so that it shows everything that happened to its dice. Only the multiset
-of the kept dice reaches its sum or any later drop or keep, and counting the
-lowest and highest results dropped determines that multiset, so this record
-keeps counts instead of crossing anything out. It also keeps its results
-sorted in ascending order as they arrive. Sorting early means that two records
-holding the same multiset of results are equal, which lets the oracle merge
-machine states that differ only in the order of their rolls: `3D6` then has
-`56` states rather than `216`.
+of the kept dice reaches its sum or any later drop, keep or reroll, and
+counting the lowest and highest results dropped determines that multiset, so
+this record keeps counts instead of crossing anything out. A reroll changes
+dice in the middle of the kept window, which counts cannot express, so the
+record that it leaves holds its kept results alone, without drops. The record
+also keeps its results sorted in ascending order as they arrive. Sorting early
+means that two records holding the same multiset of results are equal, which
+lets the oracle merge machine states that differ only in the order of their
+rolls: `3D6` then has `56` states rather than `216`.
 -/
 
 namespace Xdy
@@ -76,6 +80,107 @@ The die.
 ```
 -/
 def ofFaces (faces : List Int) : Die := .custom (faces.mergeSort (· ≤ ·))
+
+/--
+The faces of a die, each listed once for each position that shows it: the
+values of a range, in ascending order, or the faces of a custom die. A die that
+has no faces, or an empty range, shows only `0`, as `roll_die` in
+`primitives.rs` rolls it; and no die has no faces at all, since a record never
+rolled holds no dice to reroll.
+
+# Parameters
+- `d`: The die.
+
+# Returns
+The faces.
+
+# Examples
+```lean
+#guard (Die.range 2 4).faces == [2, 3, 4]
+#guard (Die.standard 0).faces == [0]
+#guard (Die.ofFaces [3, 1, 3]).faces == [1, 3, 3]
+#guard (Die.ofFaces []).faces == [0]
+#guard Die.none.faces == []
+```
+-/
+def faces : Die → List Int
+  | .none => []
+  | .range start stop =>
+    if stop < start then [0]
+    else (List.range (stop - start + 1).toNat).map fun (i : Nat) => start + i
+  | .custom [] => [0]
+  | .custom faces => faces
+
+end Die
+
+/-! ## Criteria -/
+
+/-- The set of results that a reroll rerolls: a predicate whose operands are
+resolved to values. Mirrors `Criterion` in `primitives.rs`. -/
+inductive Criterion where
+  /-- Matches every result from `start` to `stop`, inclusive, or none if the
+  range is empty. -/
+  | within (start stop : Int)
+  /-- Matches every result outside the inclusive range from `start` to
+  `stop`, or every result if the range is empty. -/
+  | outside (start stop : Int)
+  /-- Matches every listed result. -/
+  | among (values : List Int)
+  deriving Repr, BEq, Inhabited
+
+namespace Criterion
+
+/--
+Whether a criterion matches a result. Mirrors `Criterion::matches`.
+
+# Parameters
+- `c`: The criterion.
+- `x`: The result.
+
+# Returns
+`true` if `c` matches `x`, `false` otherwise.
+
+# Examples
+```lean
+#guard (Criterion.within 1 2).matches 2
+#guard !(Criterion.outside 1 2).matches 2
+#guard (Criterion.among [1, 3]).matches 3
+#guard !(Criterion.within 2 1).matches 2
+```
+-/
+def «matches» : Criterion → Int → Bool
+  | .within start stop, x => decide (start ≤ x ∧ x ≤ stop)
+  | .outside start stop, x => !decide (start ≤ x ∧ x ≤ stop)
+  | .among values, x => values.contains x
+
+end Criterion
+
+namespace Die
+
+/--
+Whether a criterion matches every face of a die, as an unlimited reroll asks
+before it rerolls anything. Mirrors `faces_within` in `primitives.rs`.
+
+# Parameters
+- `d`: The die.
+- `c`: The criterion.
+
+# Returns
+`true` if `c` matches every face of `d`, as it does vacuously if `d` is
+`none`, which has none; `false` otherwise.
+
+# Notes
+The Rust decides a range in time independent of its width; this lists its
+faces, which costs no more than the oracle's roll of the die did.
+
+# Examples
+```lean
+#guard (Die.standard 3).facesWithin (.within 1 3)
+#guard !(Die.standard 3).facesWithin (.within 1 2)
+#guard (Die.standard 0).facesWithin (.among [0])
+```
+-/
+def facesWithin (d : Die) (c : Criterion) : Bool := d.faces.all c.matches
 
 end Die
 

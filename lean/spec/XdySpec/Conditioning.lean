@@ -458,6 +458,40 @@ theorem value_bury {s : State} {ℓ : Location} {op : AddressingMode}
       Array.getElem?_modify]
 
 /--
+Burying a location leaves alone the criterion of every predicate that does
+not read it.
+
+# Parameters
+- `s`: The state.
+- `ℓ`: The location.
+- `p`: The predicate.
+
+# Hypotheses
+- `h`: No operand of `p` reads `ℓ`.
+-/
+theorem resolve_bury {s : State} {ℓ : Location} {p : Predicate}
+    (h : ∀ op ∈ p.operands, ℓ.isOperand op = false) :
+    p.resolve (s.bury ℓ).value = p.resolve s.value :=
+  Predicate.resolve_congr fun op hop => value_bury (h op hop)
+
+/--
+Burying a location leaves alone the count of every limit that does not read
+it.
+
+# Parameters
+- `s`: The state.
+- `ℓ`: The location.
+- `l`: The limit.
+
+# Hypotheses
+- `h`: No operand of `l` reads `ℓ`.
+-/
+theorem resolve_bury_limit {s : State} {ℓ : Location} {l : Limit}
+    (h : ∀ op ∈ l.operands, ℓ.isOperand op = false) :
+    l.resolve (s.bury ℓ).value = l.resolve s.value :=
+  Limit.resolve_congr fun op hop => value_bury (h op hop)
+
+/--
 Burying a location leaves alone every other rolling record.
 
 # Parameters
@@ -574,7 +608,8 @@ theorem step_bury {s : State} {ℓ : Location} {i : Instruction}
   cases i <;> cases ℓ <;>
     simp_all [Location.readBy, Location.writtenBy, step, State.value_bury,
       State.record_bury, State.bury_setRegister, State.bury_setRecord,
-      PMF.map_comp, PMF.pure_map, Function.comp_def]
+      State.resolve_bury, State.resolve_bury_limit, PMF.map_comp,
+      PMF.pure_map, Function.comp_def]
 
 /--
 Burying a dead location never changes the law of the result: running the

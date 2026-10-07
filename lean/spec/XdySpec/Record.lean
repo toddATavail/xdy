@@ -15,12 +15,13 @@ reaches its sum or any later drop or keep, and counting the lowest and highest
 results dropped determines that multiset, so this record keeps counts instead
 of crossing anything out. Like the Rust record, and unlike the oracle's
 `Xdy.Record`, this one keeps its results in the order they were rolled, and
-sorts them only to find the ones that its drops keep. The oracle sorts on arrival so that it can merge states
-that differ only in the order of their rolls; the specification merges
-nothing, so it follows the Rust as written. `toOracle` reads a record as the
-oracle's by sorting it, and the lemmas beside it, that sorting commutes with
-rolling, dropping, keeping and summing, are how `XdySpec/Oracle.lean` proves
-that sorting early changes nothing.
+sorts them only to find the ones that its drops keep. The oracle sorts on
+arrival so that it can merge states that differ only in the order of their
+rolls; the specification merges nothing, so it follows the Rust as written.
+`toOracle` reads a record as the oracle's by sorting it, and the lemmas beside
+it, that sorting commutes with rolling, dropping, keeping and summing, and
+leaves alone the kept results, which a reroll rerolls, are how
+`XdySpec/Oracle.lean` proves that sorting early changes nothing.
 -/
 
 namespace Xdy.Spec
@@ -392,6 +393,26 @@ sorts before it keeps and folds.
 theorem sum_toOracle (r : Record) : r.toOracle.sum = r.sum := by
   simp only [Xdy.Record.sum, Xdy.Record.kept, sum, kept, toOracle, sorted,
     List.length_mergeSort]
+
+/--
+The oracle's kept results of the sorted record are the specification's, which
+it too takes from the sorted results.
+
+# Parameters
+- `r`: The record.
+-/
+theorem kept_toOracle (r : Record) : r.toOracle.kept = r.kept := by
+  simp only [Xdy.Record.kept, kept, toOracle, sorted, List.length_mergeSort]
+
+/--
+The kept results are sorted, as a window of the sorted results.
+
+# Parameters
+- `r`: The record.
+-/
+theorem kept_pairwise (r : Record) : r.kept.Pairwise (· ≤ ·) :=
+  ((sorted_pairwise r).sublist (List.drop_sublist _ _)).sublist
+    (List.take_sublist _ _)
 
 /-- The empty record sorts to the empty record. -/
 theorem toOracle_empty : ({} : Record).toOracle = {} := by

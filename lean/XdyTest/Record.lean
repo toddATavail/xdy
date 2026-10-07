@@ -28,6 +28,37 @@ private def rec (xs : List Int) : Record := xs.foldl Record.push {}
 -- Records differing only in their dice differ.
 #guard ({ results := [1] } : Record) != { results := [1], die := .range 1 6 }
 
+/-! ## Faces -/
+
+-- A die lists each face once for each position that shows it, and a die that
+-- has no faces, or an empty range, shows only `0`.
+#guard (Die.range (-1) 1).faces == [-1, 0, 1]
+#guard (Die.range 3 3).faces == [3]
+#guard (Die.range 3 2).faces == [0]
+#guard (Die.standard (-2)).faces == [0]
+#guard (Die.ofFaces [2, 1, 2]).faces == [1, 2, 2]
+-- A record never rolled has no die, and so no faces.
+#guard Die.none.faces == []
+#guard Die.none.facesWithin (.among [])
+
+/-! ## Criteria -/
+
+#guard (Criterion.within 1 3).matches 1 && (Criterion.within 1 3).matches 3
+#guard !(Criterion.within 1 3).matches 0 && !(Criterion.within 1 3).matches 4
+-- An empty range matches nothing inside it, and everything outside it.
+#guard !(Criterion.within 3 1).matches 2
+#guard (Criterion.outside 3 1).matches 2
+#guard !(Criterion.outside 2 2).matches 2 && (Criterion.outside 2 2).matches 3
+#guard (Criterion.among [3, 1]).matches 1 && !(Criterion.among [3, 1]).matches 2
+#guard !(Criterion.among []).matches 0
+-- Every face must match, by position or not.
+#guard (Die.ofFaces [1, 3, 1]).facesWithin (.among [1, 3])
+#guard !(Die.ofFaces [1, 3, 1]).facesWithin (.among [1])
+#guard (Die.range 1 4).facesWithin (.outside 5 9)
+#guard !(Die.range 1 4).facesWithin (.outside 4 9)
+#guard (Die.range 4 3).facesWithin (.within 0 0)
+#guard !(Die.ofFaces []).facesWithin (.within 1 1)
+
 /-! ## Sorting on arrival -/
 
 #guard (rec [3, 1, 2]).results == [1, 2, 3]
@@ -105,6 +136,18 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 
 #guard Die.standard 6 == .range 1 6
 #guard Die.ofFaces [3, 1, 3] == .custom [1, 3, 3]
+#guard (Die.range 2 4).faces == [2, 3, 4]
+#guard (Die.standard 0).faces == [0]
+#guard (Die.ofFaces [3, 1, 3]).faces == [1, 3, 3]
+#guard (Die.ofFaces []).faces == [0]
+#guard Die.none.faces == []
+#guard (Criterion.within 1 2).matches 2
+#guard !(Criterion.outside 1 2).matches 2
+#guard (Criterion.among [1, 3]).matches 3
+#guard !(Criterion.within 2 1).matches 2
+#guard (Die.standard 3).facesWithin (.within 1 3)
+#guard !(Die.standard 3).facesWithin (.within 1 2)
+#guard (Die.standard 0).facesWithin (.among [0])
 #guard (({} : Record).push 3 |>.push 1 |>.push 2).results == [1, 2, 3]
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 2).lowest == 2
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 5).lowest == 3

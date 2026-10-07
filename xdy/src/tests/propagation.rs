@@ -1330,6 +1330,63 @@ fn test_plan_rolling_records()
 	);
 }
 
+/// Ensure that a plan splits on a rolling record that two sums read across a
+/// reroll, which rewrites the record, and on a random threshold that a reroll
+/// and a later instruction both read.
+#[test]
+fn test_plan_rerolls()
+{
+	assert_eq!(
+		schedule(
+			"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 - @1
+		return @2"
+		),
+		vec![
+			(0, vec![Step::Split(record(0))]),
+			(
+				4,
+				vec![Step::Merge {
+					split: 0,
+					survivor: Some(register(2)),
+					dead: vec![register(0), record(0), register(1)]
+				}]
+			),
+		]
+	);
+	assert_eq!(
+		schedule(
+			"Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll range 1:3
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 2D6
+		⚅1 <- reroll <= @0 up to 1 times from ⚅1
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 + @1
+		return @0"
+		),
+		vec![
+			(1, vec![Step::Split(register(0))]),
+			(
+				5,
+				vec![Step::Merge {
+					split: 0,
+					survivor: Some(register(0)),
+					dead: vec![record(1), register(1)]
+				}]
+			),
+		]
+	);
+}
+
 /// Ensure that a split merges beneath a later split that is independent of
 /// it, but waits for a later split that depends on it to merge first.
 #[test]
@@ -3983,7 +4040,7 @@ fn static_dice() -> impl Strategy<Value = String>
 ///
 /// # Returns
 /// The strategy.
-fn source_reroll(
+pub(super) fn source_reroll(
 	operand: BoxedStrategy<String>,
 	count: BoxedStrategy<String>
 ) -> impl Strategy<Value = String>

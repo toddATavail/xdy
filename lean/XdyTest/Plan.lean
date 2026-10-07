@@ -154,6 +154,45 @@ example : (Location.register 0).dead (.register 0) [] = false := rfl
   (4, [.merge 0 (some (.register 2))
     [.register 0, .record 0, .register 1]])]
 
+/-! ## Rerolls -/
+
+-- A rolling record that two sums read splits across a reroll, which rewrites
+-- the record.
+#guard schedule [
+    dice 0 (imm 3) (imm 6),
+    .sumRollingRecord 0 0,
+    .reroll 0 (.eq (imm 1)) (.times (imm 1)),
+    .sumRollingRecord 1 0,
+    .binary .sub 2 (reg 0) (reg 1),
+    .return (reg 2)] == [
+  (0, [.split (.record 0)]),
+  (4, [.merge 0 (some (.register 2))
+    [.register 0, .record 0, .register 1]])]
+
+-- A random threshold that a reroll and a later instruction read splits.
+#guard schedule [
+    .rollRange 0 (imm 1) (imm 3),
+    .sumRollingRecord 0 0,
+    dice 1 (imm 2) (imm 6),
+    .reroll 1 (.le (reg 0)) (.times (imm 1)),
+    .sumRollingRecord 1 1,
+    .binary .add 0 (reg 0) (reg 1),
+    .return (reg 0)] == [
+  (1, [.split (.register 0)]),
+  (5, [.merge 0 (some (.register 0)) [.record 1, .register 1]])]
+
+-- A reroll rolls, reads its record and every operand, and writes its record.
+#guard (Instruction.reroll 0 (.inRange (reg 1) (imm 2)) (.times (reg 3))).rolls
+#guard (Instruction.reroll 0 (.inRange (reg 1) (imm 2))
+    (.times (reg 3))).sources == [.record 0, .register 1, .register 3]
+#guard (Instruction.reroll 0 (.in [1]) .unlimited).sources == [.record 0]
+#guard (Location.register 3).readBy
+  (.reroll 0 (.eq (imm 1)) (.times (reg 3)))
+#guard !(Location.register 3).readBy (.reroll 0 (.eq (imm 1)) .unlimited)
+#guard (Location.record 0).readBy (.reroll 0 (.in []) .unlimited)
+#guard (Location.record 0).writtenBy (.reroll 0 (.in []) .unlimited)
+#guard (Instruction.reroll 2 (.in []) .unlimited).destination == .record 2
+
 /-! ## Nested splits -/
 
 -- A split merges beneath a later split that is independent of it. This is

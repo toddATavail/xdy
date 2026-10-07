@@ -13,15 +13,25 @@ every outcome.
 
 A machine state holds every register and every rolling record. Each
 instruction maps one state to a distribution of next states: arithmetic,
-drops, keeps and sums to a single certain state, and the rolls to one state per
-outcome. Rolls draw one die at a time, and since records keep their results
-sorted, states that differ only in the order of their rolls merge as they
-arise. The instructions never branch or loop, so the interpreter binds them
-in order and then reads the returned operand from every final state.
+drops, keeps and sums to a single certain state, and the rolls and rerolls to
+one state per outcome. Rolls draw one die at a time, and since records keep
+their results sorted, states that differ only in the order of their rolls
+merge as they arise. The instructions never branch or loop, so the
+interpreter binds them in order and then reads the returned operand from every
+final state.
+
+A reroll replaces each kept result that it rerolls by a draw of one
+replacement, which is the same for every rerolled result, so the interpreter
+computes it once. A reroll limited to `n` times draws its replacement
+naively, from the die and then up to `n - 1` redraws, as the Rust loops, but
+merges outcomes after each redraw. An unlimited reroll may loop forever in
+Rust, with probability zero, so the interpreter draws its replacement from
+the conditional law of the die instead, given that it does not match, which is
+the law to which the limited replacement converges.
 
 The interpreter is exponential in the worst case: `nDk` has as many states as
-there are multisets of `n` faces drawn from `k`. It is meant only for small
-programs.
+there are multisets of `n` faces drawn from `k`. A limited reroll costs time
+proportional to its limit. It is meant only for small programs.
 -/
 
 namespace Xdy
@@ -195,6 +205,130 @@ The distribution of the die.
 def customDie (faces : List Int) : Dist Int :=
   if faces.isEmpty then .pure 0 else .uniform faces
 
+/-! ## Rerolls -/
+
+/--
+Redraw a die that matches a criterion: one more step of a limited reroll,
+applied to the distribution of a die's current result.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The distribution of the die.
+- `d`: The distribution of the die's current result.
+
+# Returns
+The distribution of the result after redrawing it from `die` if `c` matches
+it, and keeping it otherwise.
+
+# Examples
+```lean
+#guard redraw (.within 1 1) (.uniform [1, 2]) (.pure 1) == .uniform [1, 2]
+#guard redraw (.within 1 1) (.uniform [1, 2]) (.pure 2) == .pure 2
+```
+-/
+def redraw (c : Criterion) (die : Dist Int) (d : Dist Int) : Dist Int :=
+  d.bind fun x => if c.matches x then die else .pure x
+
+/--
+The distribution of the replacement of a die that a reroll limited to
+`limit` times crosses out: a draw from the die, then up to `limit - 1` more
+redraws, each while the result matches, as `reroll_within` in `primitives.rs`
+loops. Every matching die has the same replacement, so the oracle computes it
+once for them all, merging outcomes after every redraw, rather than following
+each chain of redraws apart.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The distribution of the die.
+- `limit`: The number of times that each die may be rerolled, which is
+  positive if any die is rerolled.
+
+# Returns
+The distribution of the replacement.
+
+# Examples
+```lean
+-- `1D2 reroll = 1 2 times`: a 1 survives only by matching twice.
+#guard (limitedReplacement (.within 1 1) (.uniform [1, 2]) 2).toList
+  == [(1, 1), (2, 3)]
+```
+-/
+def limitedReplacement (c : Criterion) (die : Dist Int) (limit : Nat) :
+    Dist Int :=
+  (limit - 1).repeat (redraw c die) die
+
+/--
+Reroll the kept results of a record, one at a time, in ascending order: each
+that the reroll rerolls is replaced by a draw of the replacement, and every
+other is kept. The record that answers holds the results, sorted, without
+drops, since the dice that the drops crossed out reach nothing after a
+reroll, as only the kept dice reach a later clause or the sum.
+
+# Parameters
+- `die`: The die of the record.
+- `kept`: The kept results of the record.
+- `rerolled`: Whether the reroll rerolls a result.
+- `replacement`: The distribution of the replacement of a rerolled result,
+  computed only if some result is rerolled.
+
+# Returns
+The distribution of the record after the reroll.
+
+# Examples
+```lean
+#guard (rerollKept (.standard 2) [1, 2] (· == 1) (.pure (.uniform [1, 2]))
+  |>.map (·.results)).toList == [([1, 2], 1), ([2, 2], 1)]
+```
+-/
+def rerollKept (die : Die) (kept : List Int) (rerolled : Int → Bool)
+    (replacement : Thunk (Dist Int)) : Dist Record :=
+  kept.foldl
+    (fun d x =>
+      if rerolled x then d.bind fun r => replacement.get.map r.push
+      else d.map (·.push x))
+    (.pure { die })
+
+/--
+The distribution of a record after a reroll, as `reroll` in `primitives.rs`
+rerolls it. A reroll limited to `limit` times replaces each matching kept
+result by its limited replacement, and rerolls nothing if `limit` is `0`. An
+unlimited reroll whose criterion matches every face of the die rolls nothing,
+but crosses out every matching result; otherwise, it replaces each matching
+result by a draw from the faces of the die that the criterion does not match,
+the law of a die rerolled until it no longer matches.
+
+# Parameters
+- `r`: The record.
+- `c`: The criterion.
+- `limit`: The number of times that each die may be rerolled, or `none` for
+  no limit.
+
+# Returns
+The distribution of the record after the reroll, which holds its kept
+results, sorted, without drops, and its die.
+
+# Examples
+```lean
+#guard ((reroll { results := [1, 2], die := .standard 2 } (.within 1 1)
+    none).map (·.results)).toList == [([2, 2], 1)]
+#guard reroll { results := [1, 1], die := .standard 1 } (.within 1 1) none
+  == .pure { die := .standard 1 }
+#guard reroll { results := [1, 2], lowest := 1, die := .standard 2 }
+    (.within 1 1) (some 3)
+  == .pure { results := [2], die := .standard 2 }
+```
+-/
+def reroll (r : Record) (c : Criterion) : Option Nat → Dist Record
+  | none =>
+    if r.die.facesWithin c then
+      .pure { results := r.kept.filter (!c.matches ·), die := r.die }
+    else
+      rerollKept r.die r.kept c.matches
+        (Thunk.mk fun _ => .uniform (r.die.faces.filter (!c.matches ·)))
+  | some limit =>
+    rerollKept r.die r.kept (fun x => 0 < limit && c.matches x)
+      (Thunk.mk fun _ => limitedReplacement c (customDie r.die.faces) limit)
+
 /-! ## Instructions -/
 
 /--
@@ -254,6 +388,9 @@ def step (s : State) : Instruction → Dist State
     .pure (s.setRecord d ((s.record d).keepLowest (s.value c)))
   | .keepHighest d c =>
     .pure (s.setRecord d ((s.record d).keepHighest (s.value c)))
+  | .reroll d p l =>
+    (reroll (s.record d) (p.resolve s.value) (l.resolve s.value)).map
+      (s.setRecord d)
   | .sumRollingRecord d r => .pure (s.setRegister d (s.record r).sum)
   | .binary op d a b =>
     .pure (s.setRegister d (op.apply (s.value a) (s.value b)))

@@ -209,6 +209,16 @@ private theorem checkInstruction_ok {f : Function} {i : Instruction}
     exact ⟨by simp [Instruction.operandsAreValues, checkValue_ok h],
       by simpa [State.Has, Instruction.destination, hr] using
         checkRegister_ok hd'⟩
+  case reroll =>
+    obtain ⟨hd', h⟩ := bind_ok h
+    have hv := forM_ok h
+    exact ⟨by
+        simp only [Instruction.operandsAreValues, List.all_append,
+          Bool.and_eq_true, List.all_eq_true]
+        exact ⟨fun x hx => checkValue_ok (hv x (List.mem_append_left _ hx)),
+          fun x hx => checkValue_ok (hv x (List.mem_append_right _ hx))⟩,
+      by simpa [State.Has, Instruction.destination, hd] using
+        checkRecord_ok hd'⟩
   case rollRange | rollStandardDice =>
     obtain ⟨hd', h⟩ := bind_ok h
     obtain ⟨h₁, h₂⟩ := bind_ok h

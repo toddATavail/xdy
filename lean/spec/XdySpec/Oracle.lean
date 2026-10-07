@@ -15,8 +15,8 @@ arrive, so that states differing only in the order of their rolls merge. So
 the proof relates each oracle distribution of states to the specification's
 law of states with every record sorted, read by `State.toOracle`. That
 relation holds of the initial state, whose records are empty; each
-instruction keeps it, since sorting commutes with rolling, dropping, keeping
-and summing, by `hasLaw_step`; so it holds of the final states, by
+instruction keeps it, since sorting commutes with rolling, dropping, keeping,
+rerolling and summing, by `hasLaw_step`; so it holds of the final states, by
 `hasLaw_foldl`; and the returned operand reads only registers, which sorting
 leaves alone.
 
@@ -220,6 +220,165 @@ theorem hasLaw_rollDice (c : Int) (die : Unit → Dist Int) (pdie : PMF Int)
         funext (Record.toOracle_push r)]
       exact Dist.hasLaw_map _ h
 
+/-! ## Rerolls -/
+
+/--
+The oracle's redraw has the specification's law, if the die and the result
+before it do.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The oracle's die.
+- `pdie`: The specification's die.
+- `d`: The oracle's result before the redraw.
+- `p`: The specification's result before the redraw.
+
+# Hypotheses
+- `hdie`: The oracle's die has the specification's law.
+- `h`: The oracle's result has the specification's law.
+-/
+theorem hasLaw_redraw (c : Criterion) {die : Dist Int} {pdie : PMF Int}
+    {d : Dist Int} {p : PMF Int} (hdie : die.HasLaw pdie) (h : d.HasLaw p) :
+    (Xdy.redraw c die d).HasLaw (redraw c pdie p) := by
+  have := Dist.hasLaw_bind (g := id) (h := id) (q := fun x =>
+      if c.matches x then pdie else PMF.pure x)
+    (k := fun x => if c.matches x then die else .pure x)
+    (by rw [PMF.map_id]; exact h) fun x _ => by
+      rw [PMF.map_id]
+      by_cases hm : c.matches x
+      · simpa [hm] using hdie
+      · simpa [hm] using Dist.hasLaw_pure x
+  rw [PMF.map_id] at this
+  exact this
+
+/--
+The oracle's limited replacement has the specification's law, if the die
+does.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The oracle's die.
+- `pdie`: The specification's die.
+- `limit`: The number of times that each die may be rerolled.
+
+# Hypotheses
+- `hdie`: The oracle's die has the specification's law.
+-/
+theorem hasLaw_limitedReplacement (c : Criterion) {die : Dist Int}
+    {pdie : PMF Int} (limit : Nat) (hdie : die.HasLaw pdie) :
+    (Xdy.limitedReplacement c die limit).HasLaw
+      (limitedReplacement c pdie limit) := by
+  unfold Xdy.limitedReplacement limitedReplacement
+  induction limit - 1 with
+  | zero => exact hdie
+  | succ n ih => exact hasLaw_redraw c hdie ih
+
+/--
+The oracle's reroll of kept results has the law of the specification's,
+sorted, from any records before them that do: rerolling in place and sorting
+at the end is sorting as each result arrives.
+
+# Parameters
+- `rerolled`: Whether the reroll rerolls a result.
+- `rep`: The oracle's replacement.
+- `prep`: The specification's replacement.
+- `kept`: The results to reroll.
+- `d`: The oracle's records before them.
+- `p`: The specification's records before them.
+
+# Hypotheses
+- `hrep`: The oracle's replacement has the specification's law.
+- `h`: `d` has the law of `p`, sorted.
+-/
+theorem hasLaw_foldl_rerollKept (rerolled : Int → Bool)
+    {rep : Thunk (Dist Int)} {prep : PMF Int} (hrep : rep.get.HasLaw prep)
+    (kept : List Int) {d : Dist Xdy.Record} {p : PMF Record}
+    (h : d.HasLaw (p.map Record.toOracle)) :
+    (kept.foldl
+        (fun d x =>
+          if rerolled x then d.bind fun r => rep.get.map r.push
+          else d.map (·.push x)) d).HasLaw
+      ((kept.foldl
+        (fun p x =>
+          if rerolled x then p.bind fun r => prep.map r.push
+          else p.map (·.push x)) p).map Record.toOracle) := by
+  induction kept generalizing d p with
+  | nil => exact h
+  | cons x kept ih =>
+    simp only [List.foldl_cons]
+    apply ih
+    by_cases hx : rerolled x
+    · simp only [hx, ↓reduceIte]
+      refine Dist.hasLaw_bind h fun r _ => ?_
+      rw [PMF.map_comp, show Record.toOracle ∘ r.push = r.toOracle.push from
+        funext (Record.toOracle_push r)]
+      exact Dist.hasLaw_map _ hrep
+    · simp only [hx, Bool.false_eq_true, ↓reduceIte]
+      rw [PMF.map_comp, show Record.toOracle ∘ (·.push x) =
+          (·.push x) ∘ Record.toOracle from
+        funext fun r => Record.toOracle_push r x, ← PMF.map_comp]
+      exact Dist.hasLaw_map _ h
+
+/--
+The oracle's reroll of the kept results of a record has the law of the
+specification's, sorted.
+
+# Parameters
+- `die`: The die of the record.
+- `kept`: The kept results.
+- `rerolled`: Whether the reroll rerolls a result.
+- `rep`: The oracle's replacement.
+- `prep`: The specification's replacement.
+
+# Hypotheses
+- `hrep`: The oracle's replacement has the specification's law.
+-/
+theorem hasLaw_rerollKept (die : Die) (kept : List Int)
+    (rerolled : Int → Bool) {rep : Thunk (Dist Int)} {prep : PMF Int}
+    (hrep : rep.get.HasLaw prep) :
+    (Xdy.rerollKept die kept rerolled rep).HasLaw
+      ((rerollKept die kept rerolled prep).map Record.toOracle) := by
+  refine hasLaw_foldl_rerollKept rerolled hrep kept ?_
+  rw [PMF.pure_map, show Record.toOracle { die } = { die } by
+    simp [Record.toOracle, Record.sorted]]
+  exact Dist.hasLaw_pure _
+
+/--
+The oracle's reroll of the sorted record has the law of the specification's,
+sorted.
+
+# Parameters
+- `r`: The specification's record.
+- `c`: The criterion.
+- `limit`: The number of times that each die may be rerolled, or `none` for
+  no limit.
+-/
+theorem hasLaw_reroll (r : Record) (c : Criterion) (limit : Option Nat) :
+    (Xdy.reroll r.toOracle c limit).HasLaw
+      ((reroll r c limit).map Record.toOracle) := by
+  have hdie : r.toOracle.die = r.die := rfl
+  cases limit with
+  | none =>
+    unfold Xdy.reroll reroll
+    rw [hdie, Record.kept_toOracle]
+    by_cases h : r.die.facesWithin c
+    · have hs : (r.kept.filter (!c.matches ·)).mergeSort
+            (fun a b => decide (a ≤ b)) = r.kept.filter (!c.matches ·) :=
+        List.mergeSort_of_pairwise
+          (by simpa using (Record.kept_pairwise r).filter _)
+      simp only [h, ↓reduceIte, ↓reduceDIte, PMF.pure_map, Record.toOracle,
+        Record.sorted, hs]
+      exact Dist.hasLaw_pure _
+    · simp only [h, Bool.false_eq_true, ↓reduceIte, ↓reduceDIte]
+      refine hasLaw_rerollKept _ _ _ ?_
+      exact Dist.hasLaw_uniform _ (by
+        simpa using unmatched_ne_zero h)
+  | some limit =>
+    unfold Xdy.reroll reroll
+    rw [hdie, Record.kept_toOracle]
+    exact hasLaw_rerollKept _ _ _
+      (hasLaw_limitedReplacement c limit (hasLaw_customDie _))
+
 /-! ## Instructions -/
 
 /--
@@ -294,6 +453,10 @@ theorem hasLaw_step (s : State) (i : Instruction) :
       Record.toOracle_keepHighest, State.record_toOracle,
       State.value_toOracle]
     exact Dist.hasLaw_pure _
+  | reroll d p l =>
+    simp only [Xdy.step, step, State.record_toOracle,
+      show s.toOracle.value = s.value from funext (State.value_toOracle s)]
+    exact hasLaw_roll s d _ _ id id (fun _ => rfl) (hasLaw_reroll _ _ _)
   | sumRollingRecord d r =>
     simp only [Xdy.step, step, PMF.pure_map, State.setRegister_toOracle,
       State.record_toOracle, Record.sum_toOracle]

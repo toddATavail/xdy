@@ -68,6 +68,12 @@ example : ((rec [5, 1, 3]).keepLowest 2).toOracle =
 #guard ((rec [5, 1, 3]).keepHighest 2 |>.dropLowest 1).kept == [5]
 #guard ((rec [5, 1, 3]).dropLowest 1 |>.keepHighest 2).kept == [3, 5]
 #guard (rec []).kept == []
+-- The oracle keeps the same results of the sorted record, which a reroll
+-- rerolls.
+#guard ((rec [5, 1, 3]).dropLowest 1).toOracle.kept
+  == ((rec [5, 1, 3]).dropLowest 1).kept
+example (r : Record) : r.toOracle.kept = r.kept := Record.kept_toOracle r
+example (r : Record) : r.kept.Pairwise (· ≤ ·) := Record.kept_pairwise r
 
 /-! ## The ascending saturating fold -/
 

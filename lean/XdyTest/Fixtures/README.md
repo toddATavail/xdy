@@ -33,6 +33,12 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `keep_highest` | `4D6 keep highest 3` | `KeepHighest` |
 | `max` | `{x}: {x}D1` | the optimizer's `Max` |
 | `range` | `[1:6]` | `RollRange` |
+| `reroll` | `3D4 reroll = 1` | `Reroll`, limited to once |
+| `reroll_after_keep` | `4D6 keep highest 3 reroll < 3 2 times` | a reroll of the dice that a keep kept, twice |
+| `reroll_cross_out` | `{x}: 2D{x} reroll ≤ 6 ∞ times` | an unlimited reroll whose predicate matches every face of some dice, known only at runtime |
+| `reroll_list` | `2D[1, 3, 5] reroll in [1, 5]` | a reroll of custom dice by a list |
+| `reroll_range` | `1D6 reroll in (1D2)..=(1D3)` | an inclusive range whose endpoints are registers |
+| `reroll_unlimited` | `{x}: 2D6 reroll ≤ {x} ∞ times` | an unlimited reroll, whose threshold is a parameter |
 | `shared_register` | `{x}@(3D6) + {x}` | one random register read twice |
 | `standard_dice` | `3D6` | `RollStandardDice` |
 
