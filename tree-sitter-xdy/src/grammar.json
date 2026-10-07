@@ -114,6 +114,14 @@
         },
         {
           "type": "SYMBOL",
+          "name": "highest"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "lowest"
+        },
+        {
+          "type": "SYMBOL",
           "name": "_dice"
         },
         {
@@ -235,6 +243,96 @@
         {
           "type": "STRING",
           "value": "]"
+        }
+      ]
+    },
+    "highest": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "highest"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "argument",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        },
+        {
+          "type": "REPEAT1",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "argument",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expression"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "lowest": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "lowest"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "argument",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        },
+        {
+          "type": "REPEAT1",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "argument",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expression"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
         }
       ]
     },

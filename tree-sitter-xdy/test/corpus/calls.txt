@@ -1,0 +1,365 @@
+======================
+Highest: highest(1, 2)
+======================
+
+highest(1, 2)
+
+---
+
+(function
+	(highest
+		(constant)
+		(constant)))
+
+====================
+Lowest: lowest(1, 2)
+====================
+
+lowest(1, 2)
+
+---
+
+(function
+	(lowest
+		(constant)
+		(constant)))
+
+==================================
+Highest: highest(1D20, 1D20, 1D20)
+==================================
+
+highest(1D20, 1D20, 1D20)
+
+---
+
+(function
+	(highest
+		(standard_dice (constant) (integer))
+		(standard_dice (constant) (integer))
+		(standard_dice (constant) (integer))))
+
+=============================
+Lowest: lowest({POW} * 5, 99)
+=============================
+
+lowest({POW} * 5, 99)
+
+---
+
+(function
+	(lowest
+		(mul
+			(variable (identifier))
+			(constant))
+		(constant)))
+
+================================
+Highest: highest(1D6 - 2, 1) + 3
+================================
+
+highest(1D6 - 2, 1) + 3
+
+---
+
+(function
+	(add
+		(highest
+			(sub
+				(standard_dice (constant) (integer))
+				(constant))
+			(constant))
+		(constant)))
+
+=================================
+Highest: highest(1,2) (no spaces)
+=================================
+
+highest(1,2)
+
+---
+
+(function
+	(highest
+		(constant)
+		(constant)))
+
+=================================
+Lowest: lowest ( 1 , 2 ) (spaces)
+=================================
+
+lowest ( 1 , 2 )
+
+---
+
+(function
+	(lowest
+		(constant)
+		(constant)))
+
+=======================================
+Lowest: arguments on lines of their own
+=======================================
+
+lowest(
+	1,
+	2
+)
+
+---
+
+(function
+	(lowest
+		(constant)
+		(constant)))
+
+================================================
+Highest: highest(lowest(1D6, 3), lowest(1D8, 4))
+================================================
+
+highest(lowest(1D6, 3), lowest(1D8, 4))
+
+---
+
+(function
+	(highest
+		(lowest
+			(standard_dice (constant) (integer))
+			(constant))
+		(lowest
+			(standard_dice (constant) (integer))
+			(constant))))
+
+===================================================
+Highest: highest(4D6 drop lowest, [1:6], {x}@(2D6))
+===================================================
+
+highest(4D6 drop lowest, [1:6], {x}@(2D6))
+
+---
+
+(function
+	(highest
+		(drop_lowest
+			(standard_dice (constant) (integer)))
+		(range (constant) (constant))
+		(binding
+			(identifier)
+			(standard_dice (constant) (integer)))))
+
+============================================
+Lowest: -lowest(1, 2) (negation of the call)
+============================================
+
+-lowest(1, 2)
+
+---
+
+(function
+	(neg
+		(lowest
+			(constant)
+			(constant))))
+
+=====================================
+Highest: highest(1, 2) ^ lowest(3, 4)
+=====================================
+
+highest(1, 2) ^ lowest(3, 4)
+
+---
+
+(function
+	(exp
+		(highest
+			(constant)
+			(constant))
+		(lowest
+			(constant)
+			(constant))))
+
+============================================
+Highest: (highest(1, {n}))D6 (grouped count)
+============================================
+
+(highest(1, {n}))D6
+
+---
+
+(function
+	(standard_dice
+		(group
+			(highest
+				(constant)
+				(variable (identifier))))
+		(integer)))
+
+==========================================
+Lowest: 1D(lowest(6, {x})) (grouped faces)
+==========================================
+
+1D(lowest(6, {x}))
+
+---
+
+(function
+	(standard_dice
+		(constant)
+		(group
+			(lowest
+				(constant)
+				(variable (identifier))))))
+
+========================================================
+Lowest: 4D6 drop lowest (lowest({x}, 2)) (grouped count)
+========================================================
+
+4D6 drop lowest (lowest({x}, 2))
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice (constant) (integer))
+		(group
+			(lowest
+				(variable (identifier))
+				(constant)))))
+
+============================================================
+Highest: 2D8 reroll <= (highest({x}, 2)) (grouped threshold)
+============================================================
+
+2D8 reroll <= (highest({x}, 2))
+
+---
+
+(function
+	(reroll
+		(standard_dice (constant) (integer))
+		(le
+			(group
+				(highest
+					(variable (identifier))
+					(constant))))))
+
+=============================
+Highest: {x}: highest({x}, 0)
+=============================
+
+{x}: highest({x}, 0)
+
+---
+
+(function
+	(parameters
+		(parameter (identifier)))
+	(highest
+		(variable (identifier))
+		(constant)))
+
+==============================================
+Drop: 4D6 drop lowest(2) (a count, not a call)
+==============================================
+
+4D6 drop lowest(2)
+
+---
+
+(function
+	(drop_lowest
+		(standard_dice (constant) (integer))
+		(group (constant))))
+
+================================================
+Keep: 4D6 keep highest (2) (a count, not a call)
+================================================
+
+4D6 keep highest (2)
+
+---
+
+(function
+	(keep_highest
+		(standard_dice (constant) (integer))
+		(group (constant))))
+
+=========================
+Lone Argument: highest(1)
+:error
+=========================
+
+highest(1)
+
+---
+
+=======================
+No Arguments: highest()
+:error
+=======================
+
+highest()
+
+---
+
+==============================
+Trailing Comma: highest(1, 2,)
+:error
+==============================
+
+highest(1, 2,)
+
+---
+
+=================================
+Missing Parentheses: highest 1, 2
+:error
+=================================
+
+highest 1, 2
+
+---
+
+===========================
+Unknown Function: max(1, 2)
+:error
+===========================
+
+max(1, 2)
+
+---
+
+================================
+Uppercase Keyword: Highest(1, 2)
+:error
+================================
+
+Highest(1, 2)
+
+---
+
+================================
+Ungrouped Count: highest(1, 2)D6
+:error
+================================
+
+highest(1, 2)D6
+
+---
+
+===============================
+Ungrouped Faces: 1Dlowest(6, 2)
+:error
+===============================
+
+1Dlowest(6, 2)
+
+---
+
+==================================================
+Ungrouped Drop Count: 4D6 drop lowest lowest(1, 2)
+:error
+==================================================
+
+4D6 drop lowest lowest(1, 2)
+
+---

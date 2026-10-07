@@ -40,6 +40,8 @@ module.exports = grammar({
         $.variable,
         $.binding,
         $.range,
+        $.highest,
+        $.lowest,
         $._dice,
         $._arithmetic,
       ),
@@ -73,6 +75,30 @@ module.exports = grammar({
         ":",
         field("end", $._expression),
         "]",
+      ),
+
+    // A call that answers the greatest of the values of its arguments, two or
+    // more full expressions. As a dice count, faces, the count of a clause, or
+    // an operand of a reroll, a call must be grouped.
+    highest: ($) =>
+      seq(
+        "highest",
+        "(",
+        field("argument", $._expression),
+        repeat1(seq(",", field("argument", $._expression))),
+        ")",
+      ),
+
+    // A call that answers the least of the values of its arguments, two or more
+    // full expressions. As a dice count, faces, the count of a clause, or an
+    // operand of a reroll, a call must be grouped.
+    lowest: ($) =>
+      seq(
+        "lowest",
+        "(",
+        field("argument", $._expression),
+        repeat1(seq(",", field("argument", $._expression))),
+        ")",
       ),
 
     // A dice expression.

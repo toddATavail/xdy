@@ -44,11 +44,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -126,11 +134,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -214,11 +230,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -366,11 +390,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -448,11 +480,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -688,11 +728,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -770,11 +818,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -859,11 +915,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -985,11 +1049,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1046,6 +1118,102 @@
           },
           {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "highest",
+    "named": true,
+    "fields": {
+      "argument": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "div",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "exp",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "highest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
+            "named": true
+          },
+          {
+            "type": "mod",
+            "named": true
+          },
+          {
+            "type": "mul",
+            "named": true
+          },
+          {
+            "type": "neg",
+            "named": true
+          },
+          {
+            "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          },
+          {
+            "type": "sub",
             "named": true
           },
           {
@@ -1325,6 +1493,102 @@
     }
   },
   {
+    "type": "lowest",
+    "named": true,
+    "fields": {
+      "argument": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "add",
+            "named": true
+          },
+          {
+            "type": "binding",
+            "named": true
+          },
+          {
+            "type": "constant",
+            "named": true
+          },
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "div",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "exp",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "highest",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
+            "named": true
+          },
+          {
+            "type": "mod",
+            "named": true
+          },
+          {
+            "type": "mul",
+            "named": true
+          },
+          {
+            "type": "neg",
+            "named": true
+          },
+          {
+            "type": "range",
+            "named": true
+          },
+          {
+            "type": "reroll",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          },
+          {
+            "type": "sub",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "lt",
     "named": true,
     "fields": {
@@ -1397,11 +1661,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1479,11 +1751,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1567,11 +1847,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1649,11 +1937,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1765,11 +2061,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1885,11 +2189,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -1967,11 +2279,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -2201,11 +2521,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {
@@ -2283,11 +2611,19 @@
             "named": true
           },
           {
+            "type": "highest",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
           {
             "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "lowest",
             "named": true
           },
           {

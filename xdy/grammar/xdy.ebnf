@@ -22,7 +22,9 @@
 
 <exponent_tail> ::= "^" <unary>
 
-<primary> ::= <range> | <dice> | <group> | <variable> | <binding> | <CONSTANT>
+<primary> ::= <range> | <call> | <dice> | <group> | <variable> | <binding> | <CONSTANT>
+
+<call> ::= "highest" "(" <expression> ("," <expression>)+ ")" | "lowest" "(" <expression> ("," <expression>)+ ")"
 
 <group> ::= "(" <expression> ")"
 
