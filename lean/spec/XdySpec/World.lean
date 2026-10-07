@@ -603,6 +603,7 @@ theorem exists_set_of_mem_support_step {s : State} {i : Instruction}
     Set.mem_image, Set.mem_singleton_iff] at h
   all_goals first
     | (obtain ⟨x, _, rfl⟩ := h; exact ⟨x, rfl⟩)
+    | (obtain ⟨x, _, rfl⟩ := h; exact ⟨{ x with die := _ }, rfl⟩)
     | (subst h; exact ⟨_, rfl⟩)
     | (subst h; exact ⟨(), rfl⟩)
 
@@ -1913,8 +1914,8 @@ theorem law_rollRange_operands {d : Nat} {a b : AddressingMode}
 
 /--
 Standard dice write the law of the dice at each pair of count and faces,
-mixed over their joint law, as `visit_roll_standard_dice` in `propagation.rs`
-makes one setup of each pair.
+recording their die, mixed over their joint law, as `visit_roll_standard_dice`
+in `propagation.rs` makes one setup of each pair.
 
 # Parameters
 - `d`: The rolling record.
@@ -1929,17 +1930,22 @@ theorem law_rollStandardDice {d : Nat} {c n : AddressingMode}
     (hd : base.Has (.record d)) (hcn : ∀ ℓ ∈ pairLocations c n, base.Has ℓ) :
     ((product base (pairLocations c n) laws).bind
         (step · (.rollStandardDice d c n))).map (·.get (.record d)) =
-      (pairLaw laws c n).bind fun p => rollDice p.1 (standardDie p.2) :=
+      (pairLaw laws c n).bind fun p =>
+        (rollDice p.1 (standardDie p.2)).map fun r =>
+          { r with die := .standard p.2 } :=
   law_of_pair (i := .rollStandardDice d c n)
-    (k := fun x y => rollDice x (standardDie y)) (fun s hs => by
+    (k := fun x y =>
+      (rollDice x (standardDie y)).map fun (r : Record) =>
+        { r with die := .standard y })
+    (fun s hs => by
       simp only [step, PMF.map_comp]
-      conv_rhs => rw [← PMF.map_id (rollDice _ _)]
-      exact congrArg (PMF.map · _) (funext fun x => State.get_set_self hs x))
+      exact congrArg (PMF.map · _) (funext fun x => State.get_set_self hs _))
     hd hcn
 
 /--
-Custom dice write the law of the dice at each count, mixed over its law, as
-`visit_roll_custom_dice` in `propagation.rs` makes one setup of each count.
+Custom dice write the law of the dice at each count, recording their die,
+mixed over its law, as `visit_roll_custom_dice` in `propagation.rs` makes one
+setup of each count.
 
 # Parameters
 - `d`: The rolling record.
@@ -1954,12 +1960,16 @@ theorem law_rollCustomDice {d : Nat} {c : AddressingMode} {faces : List Int}
     (hd : base.Has (.record d)) (hc : ∀ ℓ ∈ operandLocations c, base.Has ℓ) :
     ((product base (operandLocations c) laws).bind
         (step · (.rollCustomDice d c faces))).map (·.get (.record d)) =
-      (operandLaw laws c).bind fun x => rollDice x (customDie faces) :=
+      (operandLaw laws c).bind fun x =>
+        (rollDice x (customDie faces)).map fun r =>
+          { r with die := .ofFaces faces } :=
   law_of_operand (i := .rollCustomDice d c faces)
-    (k := fun x => rollDice x (customDie faces)) (fun s hs => by
+    (k := fun x =>
+      (rollDice x (customDie faces)).map fun (r : Record) =>
+        { r with die := .ofFaces faces })
+    (fun s hs => by
       simp only [step, PMF.map_comp]
-      conv_rhs => rw [← PMF.map_id (rollDice _ _)]
-      exact congrArg (PMF.map · _) (funext fun x => State.get_set_self hs x))
+      exact congrArg (PMF.map · _) (funext fun x => State.get_set_self hs _))
     hd hc
 
 /--

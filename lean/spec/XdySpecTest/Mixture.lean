@@ -14,6 +14,9 @@ namespace Xdy.Spec.Test.Mixture
 /-! ## Rolls and setups -/
 
 #guard Roll.expand [(1, 2), (4, 1)] == [1, 1, 4]
+
+#guard (Roll.custom 2 [(1, 2), (4, 1)]).replacement == .custom [1, 1, 4]
+#guard (Roll.fixed [(1, 2)]).replacement == .none
 #guard (Roll.range 3 1).results == 1
 #guard (Roll.standard 3 6).results == 3
 #guard (Roll.standard (-2) 6).results == 0
@@ -63,7 +66,9 @@ example : twoD6.law.map (·.keepHighest 1) =
 -- A roll of a random count of dice mixes the dice of each count.
 example (π : PMF Int) :
     mixtureLaw (π.map fun c => { roll := some (.standard c 6) }) =
-      π.bind fun c => rollDice c (standardDie 6) :=
+      π.bind fun c =>
+        (rollDice c (standardDie 6)).map fun r =>
+          { r with die := .standard 6 } :=
   mixtureLaw_rolls _ _
 
 -- Dropping a random count of the lowest of three dice is lemma 1's lift of
@@ -71,7 +76,9 @@ example (π : PMF Int) :
 example (κ : PMF Int) :
     mixtureLaw (lift Setup.dropLowest
       (PMF.pure { roll := some (.standard 3 6) }) κ) =
-      lift Record.dropLowest (rollDice 3 (standardDie 6)) κ := by
+      lift Record.dropLowest
+        ((rollDice 3 (standardDie 6)).map fun r =>
+          { r with die := .standard 6 }) κ := by
   rw [mixtureLaw_dropLowest, mixtureLaw_pure, Setup.law_roll]
   rfl
 
@@ -79,7 +86,9 @@ example (κ : PMF Int) :
 example (κ : PMF Int) :
     mixtureLaw (lift Setup.dropHighest
       (PMF.pure { roll := some (.standard 3 6) }) κ) =
-      lift Record.dropHighest (rollDice 3 (standardDie 6)) κ := by
+      lift Record.dropHighest
+        ((rollDice 3 (standardDie 6)).map fun r =>
+          { r with die := .standard 6 }) κ := by
   rw [mixtureLaw_dropHighest, mixtureLaw_pure, Setup.law_roll]
   rfl
 
@@ -88,7 +97,9 @@ example (κ : PMF Int) :
 example (κ : PMF Int) :
     mixtureLaw (lift Setup.keepLowest
       (PMF.pure { roll := some (.standard 3 6) }) κ) =
-      lift Record.keepLowest (rollDice 3 (standardDie 6)) κ := by
+      lift Record.keepLowest
+        ((rollDice 3 (standardDie 6)).map fun r =>
+          { r with die := .standard 6 }) κ := by
   rw [mixtureLaw_keepLowest, mixtureLaw_pure, Setup.law_roll]
   rfl
 
@@ -96,7 +107,9 @@ example (κ : PMF Int) :
 example (κ : PMF Int) :
     mixtureLaw (lift Setup.keepHighest
       (PMF.pure { roll := some (.standard 3 6) }) κ) =
-      lift Record.keepHighest (rollDice 3 (standardDie 6)) κ := by
+      lift Record.keepHighest
+        ((rollDice 3 (standardDie 6)).map fun r =>
+          { r with die := .standard 6 }) κ := by
   rw [mixtureLaw_keepHighest, mixtureLaw_pure, Setup.law_roll]
   rfl
 
@@ -187,6 +200,22 @@ private def spans : List Span := [⟨1, 3, 2⟩, ⟨2, 5, 1⟩]
 example (v : Int) : Span.sweep spans 0 [1, 2, 4, 6] v = Span.cover spans v :=
   Span.sweep_eq_cover (by decide) (by decide) (by decide) (by decide) v
 
+/-! ## Dice -/
+
+-- A roll shows its die, which a setup holds only once the roll no longer
+-- shows it.
+#guard (Roll.range 1 6).replacement == .range 1 6
+#guard (Roll.standard 2 6).replacement == .standard 6
+#guard ({ roll := some (.standard 2 6) } : Setup).replacement == .standard 6
+#guard ({ roll := some (.fixed [(1, 1)]), die := some (.range 1 6) } :
+    Setup).replacement == .range 1 6
+#guard ({} : Setup).replacement == .none
+
+-- A setup describes the records of its roll, with its die.
+example : ({ roll := some (.fixed [(1, 1)]), die := some (.range 1 6) } :
+    Setup).law = PMF.pure { results := [1], die := .range 1 6 } := by
+  simp [Setup.law, Roll.law, Roll.expand, Setup.replacement, PMF.pure_map]
+
 /-! ## Docstring examples, verbatim -/
 
 #guard keptSum [(1, 2), (4, 1)] 1 0 == 5
@@ -195,6 +224,9 @@ example (v : Int) : Span.sweep spans 0 [1, 2, 4, 6] v = Span.cover spans v :=
 example : weightedDie [] = PMF.pure 0 := by simp [weightedDie, customDie]
 
 #guard Roll.expand [(1, 2), (4, 1)] == [1, 1, 4]
+
+#guard (Roll.custom 2 [(1, 2), (4, 1)]).replacement == .custom [1, 1, 4]
+#guard (Roll.fixed [(1, 2)]).replacement == .none
 
 #guard (Roll.standard (-2) 6).results == 0
 #guard (Roll.fixed [(1, 2), (4, 1)]).results == 3

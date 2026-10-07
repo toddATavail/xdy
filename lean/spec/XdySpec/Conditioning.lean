@@ -553,7 +553,7 @@ theorem step_bury_of_written {s : State} {ℓ : Location} {i : Instruction}
     simp_all [Location.readBy, Location.writtenBy, step, State.value_bury,
       State.record_bury, State.setRegister_bury] <;>
     (subst_vars
-     exact congrArg (PMF.map · _) (funext (State.setRecord_bury s _)))
+     exact congrArg (PMF.map · _) (funext fun _ => State.setRecord_bury s _ _))
 
 /--
 An instruction that neither reads nor writes a location runs alike whether or

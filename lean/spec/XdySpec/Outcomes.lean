@@ -25,8 +25,8 @@ on one, changes nothing that any later instruction can tell:
   are the law of the record that it fills, sorted
   (`Roll.tsum_law_sorted`, `Roll.map_sorted_law`), and each outcome is fixed
   results in ascending order (`Roll.wellFormed_of_mem_outcomes`).
-- A setup's outcomes keep its drops, and are the law of its record read as
-  the oracle reads it, sorted (`Setup.tsum_law_toOracle`,
+- A setup's outcomes keep its die and its drops, and are the law of its record
+  read as the oracle reads it, sorted (`Setup.tsum_law_toOracle`,
   `Setup.map_toOracle_law`); each describes a certain record, already sorted
   (`Setup.law_of_mem_outcomes`). A mixture read sorted mixes its setups read
   sorted (`map_toOracle_mixtureLaw`), and `Dist.hasLaw_mixture` cancels the
@@ -604,7 +604,8 @@ theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (ψ : List Int → Nat
       rw [Outcomes.tsum_rollRange_sorted (by omega)]
       simp [OrderStatistics.integral, expand, Function.comp_def]
   | standard count faces =>
-    simp only [law, outcomes, total, Outcomes.standardDie_eq_weightedDie]
+    simp only [law, outcomes, total, Outcomes.standardDie_eq_weightedDie,
+      tsum_map_mul, Record.sorted_die]
     rw [rollDice_toNat,
       Outcomes.tsum_rollDice_sorted (standardFaces_sorted faces)
         (by simp [standardFaces]) count.toNat ψ]
@@ -614,7 +615,7 @@ theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (ψ : List Int → Nat
     simp only [hne, total_standardFaces]
     split_ifs <;> omega
   | custom count faces =>
-    simp only [law, outcomes, total]
+    simp only [law, outcomes, total, tsum_map_mul, Record.sorted_die]
     rw [rollDice_toNat, Outcomes.tsum_rollDice_sorted hρ.1 hρ.2 count.toNat ψ]
     simp only [show 0 < count.toNat ↔ 0 < count by omega]
   | fixed rs =>
@@ -675,9 +676,9 @@ def total (s : Setup) : Nat := (s.roll.map Roll.total).getD 1
 
 /--
 Every outcome of a setup: the setup with each multiset of its roll's results
-fixed, keeping its drops, or the setup itself if it has no roll. Mirrors the
-outcomes of each setup in `Mixture::outcomes` in `mixture.rs`, before it
-scales them to the common denominator.
+fixed, keeping its die and its drops, or the setup itself if it has no roll.
+Mirrors the outcomes of each setup in `Mixture::outcomes` in `mixture.rs`,
+before it scales them to the common denominator.
 
 # Parameters
 - `s`: The setup.
@@ -686,21 +687,31 @@ scales them to the common denominator.
 The outcomes, each with its weight, whose weights sum to the
 [total](Setup.total).
 
+# Notes
+The Rust keeps the die only if a later reroll reads the record before a roll
+refills it (`rerolled` in `propagation/plan.rs`), and otherwise merges the
+outcomes that differ only in their dice. Keeping it always splits no less
+finely, and is as sound.
+
 # Examples
 ```lean
 #guard ({ roll := some (.range 1 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 1)]), lowest := 1 }, 1),
-    ({ roll := some (.fixed [(2, 1)]), lowest := 1 }, 1)]
+  [({ roll := some (.fixed [(1, 1)]), die := some (.range 1 2),
+      lowest := 1 }, 1),
+    ({ roll := some (.fixed [(2, 1)]), die := some (.range 1 2),
+       lowest := 1 }, 1)]
 ```
 -/
 def outcomes (s : Setup) : List (Setup × Nat) :=
   match s.roll with
-  | some ρ => ρ.outcomes.map fun e => ({ s with roll := some (.fixed e.1) }, e.2)
+  | some ρ => ρ.outcomes.map fun e =>
+    ({ s with roll := some (.fixed e.1), die := some s.replacement }, e.2)
   | none => [(s, 1)]
 
 /--
 The record that an outcome of a setup holds, as the oracle reads it: the
-results of its fixed roll, or none if it has no roll, with its drops.
+results of its fixed roll, or none if it has no roll, with its drops and its
+die.
 
 # Parameters
 - `s`: The outcome, a setup of fixed results or of no roll.
@@ -720,7 +731,8 @@ def held (s : Setup) : Xdy.Record :=
       | some (.fixed rs) => Roll.expand rs
       | _ => []
     lowest := s.lowest
-    highest := s.highest }
+    highest := s.highest
+    die := s.replacement }
 
 /--
 A setup's outcomes, over its total, are the law of the record that it
@@ -740,15 +752,16 @@ theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed)
     ∑' r, s.law r * (ψ r.toOracle : ℝ≥0∞) =
       (OrderStatistics.integral s.outcomes (fun o => ψ o.held) : ℝ≥0∞) /
         (s.total : ℝ≥0∞) := by
-  rcases s with ⟨_ | ρ, lowest, highest⟩
+  rcases s with ⟨_ | ρ, die, lowest, highest⟩
   · simp only [law, Option.map_none, Option.getD_none, PMF.pure_map,
       Outcomes.tsum_pure_mul, outcomes, total]
     simp [OrderStatistics.integral, held, Record.toOracle, Record.sorted]
   · have h := ρ.tsum_law_sorted (hs ρ rfl)
-      fun ys => ψ { results := ys, lowest, highest }
+      fun ys => ψ ⟨ys, lowest, highest, die.getD ρ.replacement⟩
     simp only [law, Option.map_some, Option.getD_some, tsum_map_mul]
     refine h.trans ?_
-    simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def]
+    simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def,
+      replacement]
 
 /--
 The law of the record that a setup describes, read as the oracle reads it,
@@ -787,7 +800,7 @@ theorem law_of_mem_outcomes {s : Setup} (hs : s.WellFormed)
     {o : Setup × Nat} (ho : o ∈ s.outcomes) :
     o.1.law = PMF.pure (Record.ofOracle o.1.held) ∧
       o.1.held.results.Pairwise (· ≤ ·) := by
-  rcases s with ⟨_ | ρ, lowest, highest⟩
+  rcases s with ⟨_ | ρ, die, lowest, highest⟩
   · simp only [outcomes, List.mem_singleton] at ho
     subst ho
     simp [law, PMF.pure_map, held, Record.ofOracle]

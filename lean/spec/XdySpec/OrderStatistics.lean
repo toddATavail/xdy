@@ -930,7 +930,7 @@ theorem Setup.map_sum_law_custom_order {count : Int}
         Record.sum) t =
       (weight (orderStatistics faces count.toNat lowest highest) t : ℝ≥0∞) /
         (total faces : ℝ≥0∞) ^ count.toNat := by
-  rw [Setup.law_some, PMF.map_comp]
+  rw [Setup.law_custom, PMF.map_comp]
   exact map_sum_rollDice_order sorted hW count lowest highest t
 
 open OrderStatistics in
@@ -952,8 +952,8 @@ theorem Setup.map_sum_law_standard_order {count faces : Int}
         Setup).law.map Record.sum) t =
       (weight (orderStatistics (standardFaces faces) count.toNat lowest highest)
           t : ℝ≥0∞) / (faces.toNat : ℝ≥0∞) ^ count.toNat := by
-  rw [Setup.law_some, PMF.map_comp]
-  simp only [Roll.law, standardDie_eq h]
+  rw [Setup.law_standard, PMF.map_comp]
+  simp only [standardDie_eq h]
   have := map_sum_rollDice_order (standardFaces_sorted faces)
     (by rw [total_standardFaces]; omega) count lowest highest t
   rw [total_standardFaces] at this

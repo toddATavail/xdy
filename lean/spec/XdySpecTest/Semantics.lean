@@ -11,8 +11,9 @@ namespace Xdy.Spec.Test
 
 /-! ## Ranges -/
 
-example : rollRange 3 1 = PMF.pure { results := [0] } := by simp [rollRange]
-example : rollRange 1 3 { results := [2] } = 1 / 3 := by
+example : rollRange 3 1 = PMF.pure { results := [0], die := .range 3 1 } := by
+  simp [rollRange]
+example : rollRange 1 3 { results := [2], die := .range 1 3 } = 1 / 3 := by
   simp [rollRange, PMF.map_apply, PMF.ofMultiset_apply,
     Multiset.count_eq_one_of_mem (Finset.nodup _)]
 
@@ -40,7 +41,7 @@ example (die : PMF Int) :
 
 /-! ## Docstring examples, verbatim -/
 
-example : rollRange 3 1 = PMF.pure { results := [0] } := by
+example : rollRange 3 1 = PMF.pure { results := [0], die := .range 3 1 } := by
   simp [rollRange]
 example : standardDie 0 = PMF.pure 0 := by simp [standardDie]
 example : customDie [] = PMF.pure 0 := by simp [customDie]

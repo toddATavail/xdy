@@ -23,11 +23,13 @@ theorem mem_roll {x : Int} (hx : x ∈ roll.support) : x = 1 ∨ x = 2 := by
 /-- The roll of a range from `1` to `2`, which is how the compiler writes
 `1D2`. -/
 theorem rollRange_one_two :
-    rollRange 1 2 = roll.map fun x => { results := [x] } := by
+    rollRange 1 2 =
+      roll.map fun x => { results := [x], die := .range 1 2 } := by
   simp [rollRange, roll]
 
-/-- A record of one result sums to it, clamped. -/
-theorem sum_single (x : Int) : ({ results := [x] } : Record).sum = add 0 x := by
+/-- A record of one result sums to it, clamped, whatever its die. -/
+theorem sum_single (x : Int) (d : Die) :
+    ({ results := [x], die := d } : Record).sum = add 0 x := by
   simp [Record.sum, Record.kept, Record.sorted]
 
 /-! ## A split that merges beneath another

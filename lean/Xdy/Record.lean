@@ -4,9 +4,9 @@ import Xdy.Primitives
 # Rolling records
 
 A rolling record holds the results of one range or one set of dice, together
-with how many of its lowest and highest results have been dropped. Models
-`RollingRecord` in `xdy/src/evaluator.rs` and its methods in
-`xdy/src/primitives.rs`.
+with how many of its lowest and highest results have been dropped, and the die
+from which they were drawn. Models `RollingRecord` in `xdy/src/evaluator.rs`
+and its methods in `xdy/src/primitives.rs`.
 
 The Rust record keeps its dice in the order rolled and crosses out each die
 that a drop or keep drops, always the lowest or highest of the dice still
@@ -22,9 +22,68 @@ machine states that differ only in the order of their rolls: `3D6` then has
 
 namespace Xdy
 
-/-- The results of a range or a set of dice, and the drops applied to them.
-Equality is decided, not merely a `BEq`, so that it is lawful, as proofs
-about a `Dist` of records require. -/
+/-! ## Dice -/
+
+/-- The die from which the results of a rolling record were drawn. Models
+`RollingRecordKind` in `xdy/src/evaluator.rs`, less the number of dice, which
+nothing reads once they are rolled. A record holds its die so that a reroll
+can draw from it. The forms are few, so that records holding equal dice are
+equal, which lets the oracle merge their states: a standard die is the range
+of its faces, and a custom die keeps its faces sorted. -/
+inductive Die where
+  /-- No die, as for a record never rolled. Mirrors `Uninitialized`. -/
+  | none
+  /-- A die uniform over the inclusive range `[start, stop]`, or showing only
+  `0` if the range is empty. -/
+  | range (start stop : Int)
+  /-- A die of the faces, each equally likely by position, sorted in
+  ascending order, or showing only `0` if there are none. -/
+  | custom (faces : List Int)
+  deriving Repr, DecidableEq, Hashable, Inhabited
+
+namespace Die
+
+/--
+The die of a standard roll: the range of its faces, which is empty if it has
+none.
+
+# Parameters
+- `faces`: The number of faces.
+
+# Returns
+The die.
+
+# Examples
+```lean
+#guard Die.standard 6 == .range 1 6
+```
+-/
+def standard (faces : Int) : Die := .range 1 faces
+
+/--
+The die of a custom roll: its faces, sorted, so that dice whose faces differ
+only in order are equal.
+
+# Parameters
+- `faces`: The faces, in any order, possibly repeated.
+
+# Returns
+The die.
+
+# Examples
+```lean
+#guard Die.ofFaces [3, 1, 3] == .custom [1, 3, 3]
+```
+-/
+def ofFaces (faces : List Int) : Die := .custom (faces.mergeSort (· ≤ ·))
+
+end Die
+
+/-! ## Records -/
+
+/-- The results of a range or a set of dice, the drops applied to them, and
+the die from which they were drawn. Equality is decided, not merely a `BEq`,
+so that it is lawful, as proofs about a `Dist` of records require. -/
 structure Record where
   /-- The results, sorted in ascending order. -/
   results : List Int := []
@@ -32,6 +91,8 @@ structure Record where
   lowest : Nat := 0
   /-- The number of highest results dropped, at most the number of results. -/
   highest : Nat := 0
+  /-- The die from which the results were drawn. -/
+  die : Die := .none
   deriving Repr, DecidableEq, Hashable, Inhabited
 
 namespace Record

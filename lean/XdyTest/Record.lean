@@ -15,6 +15,19 @@ open Xdy
 /-- A record holding the given results, pushed in the order given. -/
 private def rec (xs : List Int) : Record := xs.foldl Record.push {}
 
+/-! ## Dice -/
+
+-- A standard die is the range of its faces, and a custom die sorts its faces,
+-- so that dice that roll alike compare equal.
+#guard Die.standard 6 == .range 1 6
+#guard Die.standard 0 == .range 1 0
+#guard Die.ofFaces [2, -1, 2] == Die.ofFaces [2, 2, -1]
+#guard Die.ofFaces [] == .custom []
+-- A record never rolled has no die.
+#guard ({} : Record).die == .none
+-- Records differing only in their dice differ.
+#guard ({ results := [1] } : Record) != { results := [1], die := .range 1 6 }
+
 /-! ## Sorting on arrival -/
 
 #guard (rec [3, 1, 2]).results == [1, 2, 3]
@@ -90,6 +103,8 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 
 /-! ## Docstring examples, verbatim -/
 
+#guard Die.standard 6 == .range 1 6
+#guard Die.ofFaces [3, 1, 3] == .custom [1, 3, 3]
 #guard (({} : Record).push 3 |>.push 1 |>.push 2).results == [1, 2, 3]
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 2).lowest == 2
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 5).lowest == 3

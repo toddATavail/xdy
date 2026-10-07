@@ -72,16 +72,24 @@ private def agrees (die : List (Int × Nat)) (n : Nat) : Bool :=
 #guard (Roll.standard 3 0).total == 1
 #guard (Roll.fixed [(1, 2), (4, 1)]).outcomes == [([(1, 2), (4, 1)], 1)]
 
--- A setup's outcomes keep its drops, and a setup without a roll is its own.
+-- A setup's outcomes keep its die and its drops, and a setup without a roll
+-- is its own.
 #guard ({ roll := some (.standard 2 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 2)]), lowest := 1 }, 1),
-    ({ roll := some (.fixed [(1, 1), (2, 1)]), lowest := 1 }, 2),
-    ({ roll := some (.fixed [(2, 2)]), lowest := 1 }, 1)]
+  [({ roll := some (.fixed [(1, 2)]), die := some (.standard 2),
+      lowest := 1 }, 1),
+    ({ roll := some (.fixed [(1, 1), (2, 1)]), die := some (.standard 2),
+       lowest := 1 }, 2),
+    ({ roll := some (.fixed [(2, 2)]), die := some (.standard 2),
+       lowest := 1 }, 1)]
+#guard ({ roll := some (.fixed [(1, 1)]), die := some (.standard 2) } :
+    Setup).outcomes ==
+  [({ roll := some (.fixed [(1, 1)]), die := some (.standard 2) }, 1)]
 #guard ({ highest := 0 } : Setup).outcomes == [({}, 1)]
 #guard (({ roll := some (.standard 2 2), lowest := 1 } : Setup).outcomes.map
     (·.1.held)) ==
-  [{ results := [1, 1], lowest := 1 }, { results := [1, 2], lowest := 1 },
-    { results := [2, 2], lowest := 1 }]
+  [{ results := [1, 1], lowest := 1, die := .standard 2 },
+    { results := [1, 2], lowest := 1, die := .standard 2 },
+    { results := [2, 2], lowest := 1, die := .standard 2 }]
 
 -- The law of `2D[1, 2, 2]`, sorted: `[1, 2]` along four of its nine rolls.
 example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
@@ -112,8 +120,10 @@ example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
 #guard (Roll.custom 2 []).outcomes == [([(0, 2)], 1)]
 
 #guard ({ roll := some (.range 1 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 1)]), lowest := 1 }, 1),
-    ({ roll := some (.fixed [(2, 1)]), lowest := 1 }, 1)]
+  [({ roll := some (.fixed [(1, 1)]), die := some (.range 1 2),
+      lowest := 1 }, 1),
+    ({ roll := some (.fixed [(2, 1)]), die := some (.range 1 2),
+       lowest := 1 }, 1)]
 
 #guard ({ roll := some (.fixed [(1, 2), (3, 1)]), highest := 1 } : Setup).held
   == { results := [1, 1, 3], highest := 1 }

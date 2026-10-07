@@ -21,8 +21,8 @@ bottom of the stack (`splitOutcomes`), in which:
 - each split's outcome depends only on the outcomes of the open splits on
   which it depends, which lie beneath it;
 - each split's every outcome is sorted, so that a rolling record's outcomes
-  are the multisets of its results, as in the worlds of `propagation.rs`
-  (`Worlds.sortContent_outcome`);
+  are the multisets of its results, as in the worlds of `propagation.rs`,
+  each with the record's die (`Worlds.sortContent_outcome`);
 - each live open split is a point mass at its outcome, and each live value
   that no roll reaches is a point mass.
 
@@ -801,7 +801,7 @@ variable {pc : Nat} {live splits : List Nat} {μ : PMF State}
 /--
 In every world of the open splits, every outcome is sorted: a rolling
 record's is the multiset of its results, as in the worlds of `propagation.rs`,
-and that of a value not in the stack is blank.
+with the record's die, and that of a value not in the stack is blank.
 
 # Parameters
 - `o`: The world.

@@ -75,7 +75,7 @@ private def initial : State := { registers := #[0, 0], records := #[{}] }
 
 /-- The state after the sum, given the roll. -/
 private def rolled (x : Int) : State :=
-  { registers := #[x, 0], records := #[{ results := [x] }] }
+  { registers := #[x, 0], records := #[{ results := [x], die := .range 1 2 }] }
 
 /-- The value of the split, `@0`. -/
 private def split₀ (s : State) : Int := s.value (.register 0)
@@ -86,8 +86,9 @@ private theorem exec_beforeSplit :
   simp only [beforeSplit, exec_cons, exec_nil, PMF.pure_bind, step,
     State.value, rollRange_one_two, PMF.bind_map, PMF.map_comp]
   refine bind_congr_support fun x hx => ?_
-  have hrec : ∀ x, (initial.setRecord 0 { results := [x] }).record 0 =
-      { results := [x] } := fun _ => rfl
+  have hrec : ∀ x,
+      (initial.setRecord 0 { results := [x], die := .range 1 2 }).record 0 =
+        { results := [x], die := .range 1 2 } := fun _ => rfl
   rcases mem_roll hx with rfl | rfl
   all_goals
     simp only [Function.comp, hrec, sum_single]
@@ -201,7 +202,8 @@ private def initialB : State :=
 /-- The state at the split on `b`, given `a` and `b`. -/
 private def rolledB (a b : Int) : State :=
   { registers := #[a, b - a, b, 0, 0, 0, 0],
-    records := #[{ results := [a] }, { results := [b - a] }] }
+    records := #[{ results := [a], die := .range 1 2 },
+      { results := [b - a], die := .range 1 2 }] }
 
 /-- The value of the split on `b`, `@2`. -/
 private def splitB (s : State) : Int := s.value (.register 2)
@@ -215,7 +217,7 @@ survivor `@5`: `@3` holds `2a`, and every other location that depends on `b`
 is buried. -/
 private def restB (a : Int) : State :=
   { registers := #[a, 0, 0, 2 * a, 0, 0, 0],
-    records := #[{ results := [a] }, {}] }
+    records := #[{ results := [a], die := .range 1 2 }, {}] }
 
 /-- At the split on `b`, the law of states is the mixture over `a` of its
 worlds. -/

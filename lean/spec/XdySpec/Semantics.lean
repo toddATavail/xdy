@@ -134,7 +134,8 @@ end State
 
 /--
 The law of a range, as `roll_range` in `primitives.rs` rolls it: one result,
-uniform over `[start, stop]`, or a certain `0` if the range is empty.
+uniform over `[start, stop]`, or a certain `0` if the range is empty, drawn
+from the range as its die.
 
 # Parameters
 - `start`: The least result.
@@ -145,15 +146,15 @@ The law of the rolling record.
 
 # Examples
 ```lean
-example : rollRange 3 1 = PMF.pure { results := [0] } := by
+example : rollRange 3 1 = PMF.pure { results := [0], die := .range 3 1 } := by
   simp [rollRange]
 ```
 -/
 noncomputable def rollRange (start stop : Int) : PMF Record :=
-  if h : stop < start then PMF.pure { results := [0] }
+  if h : stop < start then PMF.pure { results := [0], die := .range start stop }
   else
     (PMF.ofMultiset (Finset.Icc start stop).val (by simp; omega)).map
-      fun x => { results := [x] }
+      fun x => { results := [x], die := .range start stop }
 
 /--
 The law of one standard die, as `roll_standard_dice` in `primitives.rs` rolls
@@ -199,7 +200,7 @@ noncomputable def customDie (faces : List Int) : PMF Int :=
 
 /--
 The law of a set of dice: `count` independent draws from `die`, recorded in
-the order rolled.
+the order rolled, in a record without a die, which `step` then records.
 
 # Parameters
 - `count`: The number of dice. A count of `0` or less rolls no dice.
@@ -232,7 +233,8 @@ Execute one instruction in one state.
 
 # Returns
 The law of the state after the instruction. A roll replaces its rolling record
-outright, discarding any drops, as `evaluator.rs` does; every other
+outright, discarding any drops, and records its die, as `evaluator.rs` does;
+every other
 instruction answers a certain state. `return` changes nothing, since `run`
 reads its operand afterward.
 -/
@@ -240,9 +242,11 @@ noncomputable def step (s : State) : Instruction → PMF State
   | .rollRange d a b =>
     (rollRange (s.value a) (s.value b)).map (s.setRecord d)
   | .rollStandardDice d c n =>
-    (rollDice (s.value c) (standardDie (s.value n))).map (s.setRecord d)
+    (rollDice (s.value c) (standardDie (s.value n))).map fun r =>
+      s.setRecord d { r with die := .standard (s.value n) }
   | .rollCustomDice d c faces =>
-    (rollDice (s.value c) (customDie faces)).map (s.setRecord d)
+    (rollDice (s.value c) (customDie faces)).map fun r =>
+      s.setRecord d { r with die := .ofFaces faces }
   | .dropLowest d c =>
     PMF.pure (s.setRecord d ((s.record d).dropLowest (s.value c)))
   | .dropHighest d c =>

@@ -121,6 +121,25 @@ example : LawfulHashable State := inferInstance
 #guard dist (sumOf (.rollCustomDice 0 (imm 0) [1, 2])) == .ok [(0, 1)]
 #guard dist (sumOf (.rollCustomDice 0 (imm 3) [])) == .ok [(0, 1)]
 
+/-! ## Dice -/
+
+/-- A fresh state with two registers and two rolling records. -/
+private def fresh : State := { registers := #[0, 0], records := #[{}, {}] }
+
+-- A roll records the die from which it drew, even if it drew nothing.
+#guard step fresh (.rollRange 0 (imm 4) (imm 3)) ==
+  .pure (fresh.setRecord 0 { results := [0], die := .range 4 3 })
+#guard step fresh (.rollStandardDice 0 (imm 0) (imm 6)) ==
+  .pure (fresh.setRecord 0 { die := .standard 6 })
+#guard step fresh (.rollStandardDice 1 (imm 1) (imm 1)) ==
+  .pure (fresh.setRecord 1 { results := [1], die := .range 1 1 })
+#guard step fresh (.rollCustomDice 0 (imm 0) [3, 1, 3]) ==
+  .pure (fresh.setRecord 0 { die := .custom [1, 3, 3] })
+-- Rolling again replaces the die.
+#guard ((step fresh (.rollRange 0 (imm 1) (imm 1))).bind
+    (step · (.rollStandardDice 0 (imm 1) (imm 1)))) ==
+  .pure (fresh.setRecord 0 { results := [1], die := .standard 1 })
+
 /-! ## Drops -/
 
 /-- Roll `3D4` into rolling record `0`, apply the drops, and sum. -/
@@ -347,7 +366,7 @@ private def keeps (n m : Int) : Except String (List (Int × Nat)) :=
 /-! ## Docstring examples, verbatim -/
 
 #guard (rollRange 1 3).total == 3
-#guard rollRange 3 1 == Dist.pure { results := [0] }
+#guard rollRange 3 1 == Dist.pure { results := [0], die := .range 3 1 }
 #guard (rollDice 2 fun _ => Dist.uniform [1, 2]).total == 4
 #guard rollDice (-1) (fun _ => Dist.uniform [1, 2]) == Dist.pure {}
 #guard rollDice 0 (fun _ => standardDie i32Max) == Dist.pure {}

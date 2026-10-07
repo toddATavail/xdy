@@ -6,8 +6,8 @@ import XdySpec.World
 A rolling record of the forward pass in `xdy/src/distribution/propagation.rs`
 holds not its law but a mixture of setups, `Mixture` in
 `propagation/mixture.rs`: each setup a roll with its operands resolved to
-values, and its drops, weighed by the branches of the random operands that
-chose it. This module gives a setup its law, the law of the record that it
+values, the die from which it was drawn, if the roll no longer shows it, and
+its drops, weighed by the branches of the random operands that chose it. This module gives a setup its law, the law of the record that it
 fills, and a mixture the mixture of its setups' laws, and proves that the
 mixture's operations act on that law as the instructions do:
 
@@ -147,13 +147,18 @@ The law of the record that a roll fills.
 - `ρ`: The roll.
 
 # Returns
-The law of the range or of the dice, as `step` rolls them, or a certain
-record of the fixed results, in ascending order.
+The law of the range or of the dice, as `step` rolls them, with the die that
+the roll shows, or a certain record of the fixed results, in ascending order,
+without a die.
 -/
 noncomputable def law : Roll → PMF Record
   | .range start stop => rollRange start stop
-  | .standard count faces => rollDice count (standardDie faces)
-  | .custom count faces => rollDice count (weightedDie faces)
+  | .standard count faces =>
+    (rollDice count (standardDie faces)).map fun r =>
+      { r with die := .standard faces }
+  | .custom count faces =>
+    (rollDice count (weightedDie faces)).map fun r =>
+      { r with die := .ofFaces (expand faces) }
   | .fixed results => PMF.pure { results := expand results }
 
 /--
@@ -179,8 +184,32 @@ def results : Roll → Nat
   | .fixed results => (results.map (·.2)).sum
 
 /--
-Every record that a roll can fill holds its number of results, and drops
-none of them.
+The die from which a reroll draws the replacements of the dice of a roll, if
+the roll shows it. Mirrors `replacement` in `propagation/record.rs`.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+The range, the standard die, or the custom die's faces, repeated as many times
+as their weights, or no die for fixed results, which no longer show the die
+that rolled them.
+
+# Examples
+```lean
+#guard (Roll.custom 2 [(1, 2), (4, 1)]).replacement == .custom [1, 1, 4]
+#guard (Roll.fixed [(1, 2)]).replacement == .none
+```
+-/
+def replacement : Roll → Die
+  | .range start stop => .range start stop
+  | .standard _ faces => .standard faces
+  | .custom _ faces => .ofFaces (expand faces)
+  | .fixed _ => .none
+
+/--
+Every record that a roll can fill holds its number of results, drops none of
+them, and holds the die that the roll shows.
 
 # Parameters
 - `ρ`: The roll.
@@ -190,39 +219,46 @@ none of them.
 - `h`: The roll can fill `r`.
 -/
 theorem mem_support_law {ρ : Roll} {r : Record} (h : r ∈ ρ.law.support) :
-    r.results.length = ρ.results ∧ r.lowest = 0 ∧ r.highest = 0 := by
+    r.results.length = ρ.results ∧ r.lowest = 0 ∧ r.highest = 0 ∧
+      r.die = ρ.replacement := by
   cases ρ with
   | range start stop =>
     simp only [law, rollRange] at h
     split at h
     · simp only [PMF.mem_support_pure_iff] at h
       subst h
-      simp [results]
+      simp [results, replacement]
     · simp only [PMF.support_map, Set.mem_image] at h
       obtain ⟨x, _, rfl⟩ := h
-      simp [results]
+      simp [results, replacement]
   | standard count faces =>
-    simp only [law] at h
-    obtain ⟨hl, hh, hlen, _⟩ := mem_support_rollDice h
-    exact ⟨hlen, hl, hh⟩
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    obtain ⟨hl, hh, hlen, _⟩ := mem_support_rollDice hr
+    exact ⟨hlen, hl, hh, rfl⟩
   | custom count faces =>
-    simp only [law] at h
-    obtain ⟨hl, hh, hlen, _⟩ := mem_support_rollDice h
-    exact ⟨hlen, hl, hh⟩
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    obtain ⟨hl, hh, hlen, _⟩ := mem_support_rollDice hr
+    exact ⟨hlen, hl, hh, rfl⟩
   | fixed rs =>
     simp only [law, PMF.mem_support_pure_iff] at h
     subst h
-    simp [results, expand, List.length_flatMap]
+    simp [results, expand, List.length_flatMap, replacement]
 
 end Roll
 
 /-! ## Setups -/
 
-/-- One setup of a rolling record: its roll, if any, and its drops. Mirrors
-`Setup` in `propagation/mixture.rs`. -/
+/-- One setup of a rolling record: its roll, if any, the die from which it
+was drawn, if the roll no longer shows it, and its drops. Mirrors `Setup` in
+`propagation/mixture.rs`. -/
 structure Setup where
   /-- The roll that filled the record, if any. -/
   roll : Option Roll := none
+  /-- The die from which the roll was drawn, if the roll no longer shows it,
+  as when a split fixed its results. -/
+  die : Option Die := none
   /-- The number of lowest results dropped, at most the number of results. -/
   lowest : Nat := 0
   /-- The number of highest results dropped, at most the number of results. -/
@@ -243,17 +279,32 @@ The number of results of its roll, or `0` if it has none.
 def results (s : Setup) : Nat := (s.roll.map Roll.results).getD 0
 
 /--
+The die from which the records that a setup describes were drawn. Mirrors
+`die` in `mixture.rs`.
+
+# Parameters
+- `s`: The setup.
+
+# Returns
+The setup's die, if it holds one, or else the die that its roll shows, or no
+die if it has no roll.
+-/
+def replacement (s : Setup) : Die :=
+  s.die.getD ((s.roll.map Roll.replacement).getD .none)
+
+/--
 The law of the record that a setup describes.
 
 # Parameters
 - `s`: The setup.
 
 # Returns
-The law of its roll, or the empty record if it has none, with its drops.
+The law of its roll, or the empty record if it has none, with its drops and
+its die.
 -/
 noncomputable def law (s : Setup) : PMF Record :=
-  ((s.roll.map Roll.law).getD (PMF.pure {})).map
-    fun r => { r with lowest := s.lowest, highest := s.highest }
+  ((s.roll.map Roll.law).getD (PMF.pure {})).map fun r =>
+    { r with lowest := s.lowest, highest := s.highest, die := s.replacement }
 
 /--
 Drop the lowest results of a setup, in addition to any already dropped,
@@ -432,14 +483,14 @@ theorem law_roll (ρ : Roll) : ({ roll := some ρ } : Setup).law = ρ.law := by
   simp only [law, Option.map_some, Option.getD_some]
   conv_rhs => rw [← PMF.map_id ρ.law]
   refine map_congr_support fun r hr => ?_
-  obtain ⟨_, hl, hh⟩ := Roll.mem_support_law hr
+  obtain ⟨_, hl, hh, hd⟩ := Roll.mem_support_law hr
   cases r
-  simp_all
+  simp_all [replacement]
 
 /-- The setup of a record never rolled describes the empty record, as
 `Mixture::default` makes it. -/
 theorem law_empty : ({} : Setup).law = PMF.pure {} := by
-  simp [law, PMF.pure_map]
+  simp [law, PMF.pure_map, replacement]
 
 /--
 A setup without a roll sums to `0`, as `setup_sum` in `mixture.rs` sums it.
@@ -751,7 +802,8 @@ theorem Record.sum_eq_zero_of_zeros (r : Record)
   exact (List.mergeSort_perm _ _).mem_iff.mp this
 
 /--
-A setup of a roll describes the roll's law with the setup's drops.
+A setup of a roll describes the roll's law with the setup's drops and the
+roll's die.
 
 # Parameters
 - `ρ`: The roll.
@@ -759,7 +811,41 @@ A setup of a roll describes the roll's law with the setup's drops.
 -/
 theorem Setup.law_some (ρ : Roll) (lowest highest : Nat) :
     ({ roll := some ρ, lowest, highest } : Setup).law =
-      ρ.law.map fun r => { r with lowest, highest } := rfl
+      ρ.law.map fun r => { r with lowest, highest, die := ρ.replacement } :=
+  rfl
+
+/--
+A setup of standard dice describes the dice's law with the setup's drops and
+the standard die.
+
+# Parameters
+- `count`: The number of dice.
+- `faces`: The number of faces.
+- `lowest`, `highest`: The drops.
+-/
+theorem Setup.law_standard (count faces : Int) (lowest highest : Nat) :
+    ({ roll := some (.standard count faces), lowest, highest } : Setup).law =
+      (rollDice count (standardDie faces)).map fun r =>
+        { r with lowest, highest, die := .standard faces } := by
+  rw [Setup.law_some, Roll.law, PMF.map_comp]
+  rfl
+
+/--
+A setup of custom dice describes the dice's law with the setup's drops and
+the custom die.
+
+# Parameters
+- `count`: The number of dice.
+- `faces`: The faces, each with its weight.
+- `lowest`, `highest`: The drops.
+-/
+theorem Setup.law_custom (count : Int) (faces : List (Int × Nat))
+    (lowest highest : Nat) :
+    ({ roll := some (.custom count faces), lowest, highest } : Setup).law =
+      (rollDice count (weightedDie faces)).map fun r =>
+        { r with lowest, highest, die := .ofFaces (Roll.expand faces) } := by
+  rw [Setup.law_some, Roll.law, PMF.map_comp]
+  rfl
 
 /--
 Fixed results sum to their `keptSum`, as `Roll::sum` sums them.
@@ -865,12 +951,15 @@ Dice sum to a certain `0` if they drop every die, or if every face is `0`.
 - `lowest`, `highest`: The drops.
 
 # Hypotheses
+- `x`: The die that the records hold.
+
+# Hypotheses
 - `h`: The drops cover every die, or the die is a certain `0`.
 -/
 theorem map_sum_rollDice_eq_zero (count : Int) (die : PMF Int)
-    (lowest highest : Nat)
+    (lowest highest : Nat) (x : Die)
     (h : count.toNat ≤ lowest + highest ∨ die = PMF.pure 0) :
-    ((rollDice count die).map fun r => { r with lowest, highest }).map
+    ((rollDice count die).map fun r => { r with lowest, highest, die := x }).map
       Record.sum = PMF.pure 0 := by
   refine map_sum_const _ fun r hr => ?_
   obtain ⟨_, _, hlen, hmem⟩ := mem_support_rollDice hr
@@ -897,8 +986,8 @@ theorem Setup.map_sum_law_standard_eq_zero {count faces : Int}
     (h : count ≤ 0 ∨ faces ≤ 0 ∨ count ≤ lowest + highest) :
     ({ roll := some (.standard count faces), lowest, highest } :
         Setup).law.map Record.sum = PMF.pure 0 := by
-  rw [Setup.law_some]
-  exact map_sum_rollDice_eq_zero _ _ lowest highest (by
+  rw [Setup.law_standard]
+  exact map_sum_rollDice_eq_zero _ _ lowest highest _ (by
     rcases h with h | h | h
     · exact .inl (by omega)
     · exact .inr (by simp [standardDie, h])
@@ -920,8 +1009,8 @@ theorem Setup.map_sum_law_custom_eq_zero {count : Int}
     (h : count ≤ 0 ∨ faces = [] ∨ count ≤ lowest + highest) :
     ({ roll := some (.custom count faces), lowest, highest } :
         Setup).law.map Record.sum = PMF.pure 0 := by
-  rw [Setup.law_some]
-  exact map_sum_rollDice_eq_zero _ _ lowest highest (by
+  rw [Setup.law_custom]
+  exact map_sum_rollDice_eq_zero _ _ lowest highest _ (by
     rcases h with h | h | h
     · exact .inl (by omega)
     · exact .inr (by simp [h, weightedDie, customDie])

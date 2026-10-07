@@ -213,7 +213,9 @@ example :
     ((product base (pairLocations (.register 0) (.immediate 6)) rolls).bind
         (step · (.rollStandardDice 0 (.register 0) (.immediate 6)))).map
           (·.get (.record 0)) =
-      roll.bind fun x => rollDice x (standardDie 6) := by
+      roll.bind fun x =>
+        (rollDice x (standardDie 6)).map fun r =>
+          { r with die := .standard 6 } := by
   rw [law_rollStandardDice hasRecord
     (by simp [pairLocations, operandLocations, has 0 (by decide)])]
   simp [pairLaw, operandLaw, rolls, lift, PMF.bind_map, Function.comp_def]
@@ -223,7 +225,9 @@ example :
     ((product base (operandLocations (.register 0)) rolls).bind
         (step · (.rollCustomDice 0 (.register 0) [1, 1, 2]))).map
           (·.get (.record 0)) =
-      roll.bind fun x => rollDice x (customDie [1, 1, 2]) :=
+      roll.bind fun x =>
+        (rollDice x (customDie [1, 1, 2])).map fun r =>
+          { r with die := .ofFaces [1, 1, 2] } :=
   law_rollCustomDice hasRecord
     (by simp [operandLocations, has 0 (by decide)])
 

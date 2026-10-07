@@ -258,8 +258,9 @@ Split on a value. Mirrors `split` in `propagation.rs`.
 The pass after it, whose law of `v`'s outcome is `v`'s law read sorted
 (`sortContent`), and in each world of which `v` is a point mass at its
 outcome. So a rolling record splits by the multisets of its results, as
-`Roll::outcomes` in `propagation/record.rs` grows them, and each world fixes
-it at its results sorted; a register splits by its values.
+`Roll::outcomes` in `propagation/record.rs` grows them, each with the record's
+die, and each world fixes it at its results sorted; a register splits by its
+values.
 -/
 noncomputable def split (F : Forward vs) (v : Nat) : Forward vs :=
   { F with

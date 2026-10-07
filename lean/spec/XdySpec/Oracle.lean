@@ -224,24 +224,33 @@ theorem hasLaw_rollDice (c : Int) (die : Unit → Dist Int) (pdie : PMF Int)
 
 /--
 A roll into a record of the sorted state has the law of the specification's
-roll, sorted, if the rolls themselves do.
+roll, sorted, if the rolls themselves do, and the records that they fill are
+finished alike, as the dice are by recording their die.
 
 # Parameters
 - `s`: The specification's state.
 - `d`: The rolling record.
 - `oracle`: The oracle's roll.
 - `spec`: The specification's roll.
+- `g`: How the oracle finishes each record that it rolls.
+- `f`: How the specification finishes each record that it rolls.
 
 # Hypotheses
+- `hfg`: Finishing a record and then sorting it is sorting it and then
+  finishing it.
 - `h`: The oracle's roll has the law of the specification's, sorted.
 -/
 private theorem hasLaw_roll (s : State) (d : Nat) (oracle : Dist Xdy.Record)
-    (spec : PMF Record) (h : oracle.HasLaw (spec.map Record.toOracle)) :
-    (oracle.map (s.toOracle.setRecord d)).HasLaw
-      ((spec.map (s.setRecord d)).map State.toOracle) := by
-  rw [PMF.map_comp, show State.toOracle ∘ s.setRecord d =
-      s.toOracle.setRecord d ∘ Record.toOracle from
-    funext fun r => State.setRecord_toOracle s d r, ← PMF.map_comp]
+    (spec : PMF Record) (g : Xdy.Record → Xdy.Record) (f : Record → Record)
+    (hfg : ∀ r, (f r).toOracle = g r.toOracle)
+    (h : oracle.HasLaw (spec.map Record.toOracle)) :
+    (oracle.map fun r => s.toOracle.setRecord d (g r)).HasLaw
+      ((spec.map fun r => s.setRecord d (f r)).map State.toOracle) := by
+  rw [PMF.map_comp, show State.toOracle ∘ (fun r => s.setRecord d (f r)) =
+      (fun r => s.toOracle.setRecord d (g r)) ∘ Record.toOracle from
+    funext fun r => by
+      simp only [Function.comp_apply, State.setRecord_toOracle, hfg],
+    ← PMF.map_comp]
   exact Dist.hasLaw_map _ h
 
 /--
@@ -257,13 +266,15 @@ theorem hasLaw_step (s : State) (i : Instruction) :
   cases i with
   | rollRange d a b =>
     simp only [Xdy.step, step, State.value_toOracle]
-    exact hasLaw_roll s d _ _ (hasLaw_rollRange _ _)
+    exact hasLaw_roll s d _ _ id id (fun _ => rfl) (hasLaw_rollRange _ _)
   | rollStandardDice d c n =>
     simp only [Xdy.step, step, State.value_toOracle]
-    exact hasLaw_roll s d _ _ (hasLaw_rollDice _ _ _ (hasLaw_standardDie _))
+    exact hasLaw_roll s d _ _ _ _ (fun _ => rfl)
+      (hasLaw_rollDice _ _ _ (hasLaw_standardDie _))
   | rollCustomDice d c faces =>
     simp only [Xdy.step, step, State.value_toOracle]
-    exact hasLaw_roll s d _ _ (hasLaw_rollDice _ _ _ (hasLaw_customDie _))
+    exact hasLaw_roll s d _ _ _ _ (fun _ => rfl)
+      (hasLaw_rollDice _ _ _ (hasLaw_customDie _))
   | dropLowest d c =>
     simp only [Xdy.step, step, PMF.pure_map, State.setRecord_toOracle,
       Record.toOracle_dropLowest, State.record_toOracle, State.value_toOracle]

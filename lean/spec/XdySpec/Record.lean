@@ -4,7 +4,8 @@ import Xdy.Record
 # Rolling records, in roll order
 
 A rolling record holds the results of one range or one set of dice, together
-with how many of its lowest and highest results have been dropped. Models
+with how many of its lowest and highest results have been dropped, and the die
+from which they were drawn, the oracle's `Xdy.Die`. Models
 `RollingRecord` in `xdy/src/evaluator.rs` and its methods in
 `xdy/src/primitives.rs`.
 
@@ -24,8 +25,10 @@ that sorting early changes nothing.
 
 namespace Xdy.Spec
 
-/-- The results of a range or a set of dice, in the order rolled, and the
-drops applied to them. -/
+open Xdy (Die)
+
+/-- The results of a range or a set of dice, in the order rolled, the drops
+applied to them, and the die from which they were drawn. -/
 structure Record where
   /-- The results, in the order rolled. -/
   results : List Int := []
@@ -33,6 +36,8 @@ structure Record where
   lowest : Nat := 0
   /-- The number of highest results dropped, at most the number of results. -/
   highest : Nat := 0
+  /-- The die from which the results were drawn. -/
+  die : Die := .none
   deriving Repr, DecidableEq, Inhabited
 
 namespace Record
@@ -185,6 +190,16 @@ the same list of integers; the choice only mirrors the Rust.
 def sorted (r : Record) : List Int := r.results.mergeSort (· ≤ ·)
 
 /--
+Recording a die leaves the sorted results alone.
+
+# Parameters
+- `r`: The record.
+- `x`: The die.
+-/
+theorem sorted_die (r : Record) (x : Die) :
+    ({ r with die := x } : Record).sorted = r.sorted := rfl
+
+/--
 Answer the results that survive the drops: sort the results, skip the lowest
 dropped, then take what the highest dropped leave. These are the results that
 `kept` in `primitives.rs` answers, sorted rather than in the order rolled.
@@ -235,7 +250,8 @@ Read a record of the oracle as a record of the specification.
 - `r`: The oracle's record, whose results are sorted.
 
 # Returns
-The record with the same results, in the same order, and the same drops.
+The record with the same results, in the same order, the same drops and the
+same die.
 
 # Notes
 The oracle's sorted results are one order in which they could have been
@@ -248,7 +264,8 @@ rolled, so the specification's record describes the same roll.
 ```
 -/
 def ofOracle (r : Xdy.Record) : Record :=
-  { results := r.results, lowest := r.lowest, highest := r.highest }
+  { results := r.results, lowest := r.lowest, highest := r.highest,
+    die := r.die }
 
 /--
 Read a record of the specification as a record of the oracle, by sorting its
@@ -259,7 +276,7 @@ results. Inverse to `ofOracle` on sorted records.
 
 # Returns
 The record with the same results, sorted in ascending order, as the oracle
-keeps them, and the same drops.
+keeps them, the same drops and the same die.
 
 # Notes
 The oracle's distribution of states is the specification's, with every
@@ -273,7 +290,8 @@ specification relates them.
 ```
 -/
 def toOracle (r : Record) : Xdy.Record :=
-  { results := r.sorted, lowest := r.lowest, highest := r.highest }
+  { results := r.sorted, lowest := r.lowest, highest := r.highest,
+    die := r.die }
 
 /--
 The sorted results are sorted.
@@ -307,7 +325,7 @@ theorem toOracle_push (r : Record) (x : Int) :
         (Xdy.Record.push_perm r.toOracle x).symm)
   rw [show r.toOracle.push x =
       { results := (r.toOracle.push x).results, lowest := r.lowest,
-        highest := r.highest } from rfl, ← hres]
+        highest := r.highest, die := r.die } from rfl, ← hres]
   rfl
 
 /--
@@ -403,8 +421,8 @@ that its sorted reading describes.
 - `r`: The record.
 
 # Returns
-The record with the same results, sorted in ascending order, and the same
-drops.
+The record with the same results, sorted in ascending order, the same drops
+and the same die.
 
 # Notes
 The forward pass fixes a split record at its sorted reading, as `split` in

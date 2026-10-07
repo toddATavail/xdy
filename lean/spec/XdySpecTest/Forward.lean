@@ -29,7 +29,7 @@ private noncomputable abbrev sumLaw : PMF Int := (rollRange 1 2).map Record.sum
 /-- The sum of a rolling record of `1D2` is the roll, clamped. -/
 private theorem sumLaw_eq : sumLaw = roll.map (add 0) := by
   rw [sumLaw, rollRange_one_two, PMF.map_comp]
-  exact congrArg (PMF.map · _) (funext sum_single)
+  exact congrArg (PMF.map · _) (funext fun x => sum_single x _)
 
 /-! ## A split that merges into its own location
 
@@ -530,7 +530,7 @@ private theorem F₁ :
 
 /-- The split's law is the roll's, sorted. -/
 private theorem K_roll (o : Outcomes vs) :
-    (F 1).K 0 o = (rollDice 2 (standardDie 2)).map Record.sort := by
+    (F 1).K 0 o = (Roll.standard 2 2).law.map Record.sort := by
   rw [F₁, Forward.split_K_self]
   refine congrArg (PMF.map _) ((Forward.exec_laws_self _ 0 _ o).trans ?_)
   rw [Forward.destination, show (readLive vs 0 ++ readLast vs 0).map
@@ -538,7 +538,7 @@ private theorem K_roll (o : Outcomes vs) :
   refine (law_rollStandardDice (c := .immediate 2) (n := .immediate 2)
     (has (n := 0) (by decide) 0) (by simp [pairLocations,
       operandLocations])).trans ?_
-  simp [pairLaw, operandLaw, lift, PMF.pure_bind, PMF.pure_map]
+  simp [pairLaw, operandLaw, lift, PMF.pure_bind, PMF.pure_map, Roll.law]
 
 -- The law of the results of each world's record: the law of the results of
 -- the roll, sorted.

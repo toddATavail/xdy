@@ -35,9 +35,11 @@ flowchart LR
 
 The worlds are counted as the support of `splitOutcomes`: the assignments of
 outcomes that the pass reaches with positive probability. A rolling record's
-outcomes are the multisets of its results, as the Rust's are, and the Rust keeps
-one world for each outcome of positive weight at each split, and merges the
-worlds that agree on every other split, so its count is that support's size.
+outcomes are the multisets of its results, as the Rust's are, each with the
+record's die, which the Rust keeps only if a later reroll reads the record, so
+that it merges the outcomes that differ only in their dice. The Rust keeps one
+world for each outcome of positive weight at each split, and merges the worlds
+that agree on every other split, so its count is at most that support's size.
 That correspondence is argued, not proved, here.
 -/
 

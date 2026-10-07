@@ -104,7 +104,8 @@ end State
 
 /--
 The distribution of a range, as `roll_range` in `primitives.rs` rolls it: one
-result, uniform over `[start, stop]`, or a certain `0` if the range is empty.
+result, uniform over `[start, stop]`, or a certain `0` if the range is empty,
+drawn from the range as its die.
 
 # Parameters
 - `start`: The least result.
@@ -116,19 +117,20 @@ The distribution of the rolling record.
 # Examples
 ```lean
 #guard (rollRange 1 3).total == 3
-#guard rollRange 3 1 == Dist.pure { results := [0] }
+#guard rollRange 3 1 == Dist.pure { results := [0], die := .range 3 1 }
 ```
 -/
 def rollRange (start stop : Int) : Dist Record :=
-  if stop < start then .pure { results := [0] }
+  if stop < start then .pure { results := [0], die := .range start stop }
   else
     let results :=
       (List.range (stop - start + 1).toNat).map fun (i : Nat) => start + i
-    (Dist.uniform results).map fun x => { results := [x] }
+    (Dist.uniform results).map fun x =>
+      { results := [x], die := .range start stop }
 
 /--
 The distribution of a set of dice: `count` independent draws from `die`, one
-at a time.
+at a time, into a record without a die, which `step` then records.
 
 # Parameters
 - `count`: The number of dice. A count of `0` or less rolls no dice.
@@ -230,7 +232,8 @@ Execute one instruction in one state.
 
 # Returns
 The distribution of states after the instruction. A roll replaces its rolling
-record outright, discarding any drops, as `evaluator.rs` does; every other
+record outright, discarding any drops, and records its die, as `evaluator.rs`
+does; every other
 instruction answers a single certain state. `return` changes nothing, since
 `Function.run` reads its operand afterward.
 -/
@@ -238,10 +241,11 @@ def step (s : State) : Instruction → Dist State
   | .rollRange d a b =>
     (rollRange (s.value a) (s.value b)).map (s.setRecord d)
   | .rollStandardDice d c n =>
-    (rollDice (s.value c) fun _ => standardDie (s.value n)).map
-      (s.setRecord d)
+    (rollDice (s.value c) fun _ => standardDie (s.value n)).map fun r =>
+      s.setRecord d { r with die := .standard (s.value n) }
   | .rollCustomDice d c faces =>
-    (rollDice (s.value c) fun _ => customDie faces).map (s.setRecord d)
+    (rollDice (s.value c) fun _ => customDie faces).map fun r =>
+      s.setRecord d { r with die := .ofFaces faces }
   | .dropLowest d c =>
     .pure (s.setRecord d ((s.record d).dropLowest (s.value c)))
   | .dropHighest d c =>

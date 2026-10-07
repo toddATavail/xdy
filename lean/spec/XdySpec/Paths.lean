@@ -35,7 +35,8 @@ namespace Xdy.Spec
 
 /--
 The results of a range, as the paths fork them: each value from `start`
-to `stop`, or a single `0` if the range is empty.
+to `stop`, or a single `0` if the range is empty, drawn from the range as its
+die.
 
 # Parameters
 - `start`: The least result.
@@ -51,10 +52,10 @@ The rolling record of each fork, in ascending order.
 ```
 -/
 def rangeForks (start stop : Int) : List Record :=
-  if stop < start then [{ results := [0] }]
+  if stop < start then [{ results := [0], die := .range start stop }]
   else
     (List.range (stop - start + 1).toNat).map fun (i : Nat) =>
-      { results := [start + i] }
+      { results := [start + i], die := .range start stop }
 
 /--
 The faces of a standard die, as the paths fork them: `1` through `faces`,
@@ -106,7 +107,8 @@ next, and so on.
 - `faces`: The faces of one die, as the paths fork them.
 
 # Returns
-The rolling record of each fork, whose results are in the order rolled.
+The rolling record of each fork, whose results are in the order rolled, and
+which has no die, which `forks` then records.
 
 # Examples
 ```lean
@@ -139,9 +141,11 @@ def forks (s : State) : Instruction → List State
   | .rollRange d a b =>
     (rangeForks (s.value a) (s.value b)).map (s.setRecord d)
   | .rollStandardDice d c n =>
-    (diceForks (s.value c) (standardFaces (s.value n))).map (s.setRecord d)
+    (diceForks (s.value c) (standardFaces (s.value n))).map fun r =>
+      s.setRecord d { r with die := .standard (s.value n) }
   | .rollCustomDice d c faces =>
-    (diceForks (s.value c) (customFaces faces)).map (s.setRecord d)
+    (diceForks (s.value c) (customFaces faces)).map fun r =>
+      s.setRecord d { r with die := .ofFaces faces }
   | .dropLowest d c => [s.setRecord d ((s.record d).dropLowest (s.value c))]
   | .dropHighest d c => [s.setRecord d ((s.record d).dropHighest (s.value c))]
   | .keepLowest d c => [s.setRecord d ((s.record d).keepLowest (s.value c))]
