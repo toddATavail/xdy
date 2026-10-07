@@ -437,6 +437,17 @@ impl RollingRecord
 	/// [evaluator](Evaluator) [meters](Evaluator::evaluate_metered) every
 	/// reroll as a die, so that a budget bounds them.
 	///
+	/// `lean/spec/XdySpec/Unlimited.lean` justifies the specification's law of
+	/// an unlimited reroll against this loop: after `n` rolls, a die rolls
+	/// again only with the `n`th power of the probability that it matches
+	/// (`matched_limitedReplacement`), and as `n` grows, the laws of rerolls
+	/// limited to `n` times converge to the conditional law of the die, given
+	/// that it does not match (`tendsto_limitedReplacement`, `tendsto_reroll`).
+	/// If every face matches, then no limited reroll changes the law of the die
+	/// (`limitedReplacement_of_matches`), so the loop has no limit; crossing
+	/// out is a convention, under which each matching die contributes zero
+	/// (`sum_reroll_crossOut`).
+	///
 	/// # Examples
 	/// Reroll the `1` of `[2, 1, 4]` once, which appends its replacement:
 	///

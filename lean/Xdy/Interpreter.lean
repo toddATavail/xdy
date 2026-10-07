@@ -27,7 +27,8 @@ naively, from the die and then up to `n - 1` redraws, as the Rust loops, but
 merges outcomes after each redraw. An unlimited reroll may loop forever in
 Rust, with probability zero, so the interpreter draws its replacement from
 the conditional law of the die instead, given that it does not match, which is
-the law to which the limited replacement converges.
+the law to which the limited replacement converges, as
+`tendsto_limitedReplacement` in `lean/spec/XdySpec/Unlimited.lean` proves.
 
 The interpreter is exponential in the worst case: `nDk` has as many states as
 there are multisets of `n` faces drawn from `k`. A limited reroll costs time

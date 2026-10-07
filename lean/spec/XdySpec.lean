@@ -13,6 +13,7 @@ import XdySpec.Paths
 import XdySpec.Record
 import XdySpec.Reroll
 import XdySpec.Semantics
+import XdySpec.Unlimited
 import XdySpec.World
 
 /-!

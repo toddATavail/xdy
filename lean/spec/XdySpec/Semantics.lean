@@ -20,8 +20,10 @@ draw: limited to `n` times, from the die and then up to `n - 1` redraws, each
 while the result matches, as the Rust loops; and unlimited, from the
 conditional law of the die, given that it does not match, rather than from a
 loop that may never end, unless every face matches, when it crosses out every
-matching result instead. The instructions never branch or loop, so a
-function's meaning binds them in order and then reads the returned operand.
+matching result instead. The conditional law is the limit of the limited
+rerolls as their limit grows, which `XdySpec/Unlimited.lean` proves
+(`tendsto_reroll`). The instructions never branch or loop, so a function's
+meaning binds them in order and then reads the returned operand.
 
 This is the specification that the oracle, `Xdy.Function.run`, must meet, and
 does, by `run_eq` in `XdySpec/Oracle.lean`. It
@@ -256,7 +258,8 @@ noncomputable def redraw (c : Criterion) (die : PMF Int) (p : PMF Int) :
 /--
 The law of the replacement of a die that a reroll limited to `limit` times
 crosses out: a draw from the die, then up to `limit - 1` more redraws, each
-while the result matches, as `reroll_within` in `primitives.rs` loops.
+while the result matches, as `reroll_within` in `primitives.rs` loops. Its
+closed form is `limitedReplacement_apply`, in `XdySpec/Unlimited.lean`.
 
 # Parameters
 - `c`: The criterion.
@@ -342,6 +345,15 @@ crosses out every matching result; otherwise, it replaces each matching
 result by a draw from the faces of the die that the criterion does not
 match: the conditional law of the die, given that it does not match, which
 is the law of a die rerolled until it no longer matches.
+
+# Notes
+`XdySpec/Unlimited.lean` justifies the unlimited reroll against the Rust's
+loop: the limited rerolls converge to it as their limit grows
+(`tendsto_reroll`), since the loop stops with probability one and its first
+`n` draws are the reroll limited to `n` times. If every face matches, then no
+limited reroll changes the die's law (`limitedReplacement_of_matches`), so the
+loop has no limit and would never stop; crossing out is a convention, under
+which each matching die contributes zero (`sum_reroll_crossOut`).
 
 # Parameters
 - `r`: The record.
