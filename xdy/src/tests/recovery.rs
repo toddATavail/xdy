@@ -320,6 +320,9 @@ fn test_canonical_repairs()
 			"3d6 reroll = 1 unlimited  times + 1"
 		),
 		("3 reroll = 1", "3D6 reroll = 1"),
+		("3 reroll!=1", "3D6 reroll!=1"),
+		("1 + rerollhighest", "1 + {rerollhighest}"),
+		("highest(1, rerollhighest)", "highest(1, {rerollhighest})"),
 		("-3 reroll in [1]", "-3D6 reroll in [1]"),
 		("(2 reroll ≥ 2", "(2D6 reroll ≥ 2)"),
 		("3d-", "3d-6"),
@@ -686,9 +689,9 @@ fn test_unwrap_and_keep()
 
 /// Ensure that recovery stops, rather than supply `,` after `,` forever,
 /// wherever the argument after a supplied `,` fails without reading anything,
-/// as at a clause verb that runs into its direction, which reads as a
-/// misplaced clause that a fix reads past without consuming; and that it does
-/// not stop where a call within a call lacks its `,` at the same place.
+/// as where a policy supplies an operand before a bare word rather than read
+/// the word as a variable, so that the word is never consumed; and that it
+/// does not stop where a call within a call lacks its `,` at the same place.
 #[test]
 fn test_repeated_comma_stops()
 {

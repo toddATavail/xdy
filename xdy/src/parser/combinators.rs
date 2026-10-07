@@ -1143,18 +1143,33 @@ pub(crate) fn keyword<'src>(
 	}
 }
 
-/// Answer whether text begins with the verb of a clause that cannot follow a
-/// dice count, `keep` or `reroll`, as [`begins_verb`] recognizes it. Unlike
-/// the `d` of `drop`, neither reads as a dice operator.
+/// Answer the verb of a clause that cannot follow a dice count, `keep` or
+/// `reroll`, if text begins with it as the clause would. Unlike the `d` of
+/// `drop`, neither reads as a dice operator. A keep clause takes a direction,
+/// which may run into its verb, so `keep` is recognized as [`begins_verb`]
+/// recognizes it, e.g., in `keephighest`; a reroll clause takes none, so
+/// `reroll` is recognized as a [keyword](begins_keyword), e.g., in `reroll!=1`
+/// but not in `rerollhighest`.
 ///
 /// # Parameters
 /// - `text`: The text.
 ///
 /// # Returns
-/// `true` if `text` begins with `keep` or `reroll`, `false` otherwise.
-pub(crate) fn begins_misplaced_clause(text: &str) -> bool
+/// `keep` or `reroll`, if `text` begins with that verb, or [`None`] otherwise.
+pub(crate) fn begins_misplaced_clause(text: &str) -> Option<&'static str>
 {
-	begins_verb(text, "keep") || begins_verb(text, "reroll")
+	if begins_verb(text, "keep")
+	{
+		Some("keep")
+	}
+	else if begins_keyword(text, "reroll")
+	{
+		Some("reroll")
+	}
+	else
+	{
+		None
+	}
 }
 
 /// Answer whether text begins with a call of `highest` or `lowest`, as the

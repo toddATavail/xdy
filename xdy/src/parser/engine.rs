@@ -3380,6 +3380,7 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 			// dice count, as in the ordinary parse.
 			if rec.recovering()
 				&& begins_misplaced_clause(skip_whitespace(rest).fragment())
+					.is_some()
 				&& rec.offer(Site::DiceOperator, cut_error(e), stack)
 			{
 				let at = rest.location_offset();
@@ -6154,7 +6155,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		let after = rest.fragment().trim_start_matches(is_token_space);
 		if rest.location_offset() != at
 			|| after.starts_with(['d', 'D', '^'])
-			|| begins_misplaced_clause(after)
+			|| begins_misplaced_clause(after).is_some()
 		{
 			return None;
 		}
@@ -6450,7 +6451,8 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 			if rec.recovering()
 				&& begins_misplaced_clause(
 					skip_whitespace(rest).fragment()
-				) =>
+				)
+				.is_some() =>
 		{
 			Err(nom::Err::Error(ParseError::from_error_kind(
 				input,

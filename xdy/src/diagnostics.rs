@@ -71,9 +71,9 @@ use crate::{
 		FailureSite, LoneArgument, NomErrorKind, Operand, PLACEHOLDER_OPERAND,
 		PLACEHOLDER_THRESHOLD, REROLL_RANGE_END_CONTEXT,
 		REROLL_RANGE_START_CONTEXT, REROLL_THRESHOLD_CONTEXT, Recovery, Repair,
-		Site, Span, begins_operand, begins_verb, canonical_name,
-		is_bare_word_continue, is_bare_word_start, is_token_space, token,
-		unclosed_name_ends
+		Site, Span, begins_misplaced_clause, begins_operand, begins_verb,
+		canonical_name, is_bare_word_continue, is_bare_word_start,
+		is_token_space, token, unclosed_name_ends
 	},
 	span::SourceSpan
 };
@@ -1293,9 +1293,7 @@ impl<'src> Doctor<'src>
 		// expression was expected, the parse supplies an operand, which it
 		// reads as a dice count, and then fails at the dice operator, as after
 		// a dice count.
-		let verb = ["keep", "reroll"]
-			.into_iter()
-			.find(|verb| begins_verb(&source[pos..], verb));
+		let verb = begins_misplaced_clause(&source[pos..]);
 		let misplaced = match (site.site, verb)
 		{
 			(Site::DiceOperator, Some(verb)) => Some((verb, true)),

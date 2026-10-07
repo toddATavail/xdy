@@ -1570,6 +1570,45 @@ rendered: misplaced reroll clause (4..10): `reroll` must follow a dice expressio
 suggestion: 1 + 1D6 reroll = 1
 placeholder: 4..7 "dice expression" [dice expression]
 
+3 reroll!=1
+=
+kind: MisplacedRerollClause
+span: 2..8
+message: `reroll` must follow a dice expression
+rendered: misplaced reroll clause (2..8): `reroll` must follow a dice expression
+suggestion: 3D6 reroll!=1
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+3 rerollhighest
+=
+kind: TrailingInput
+span: 2..15
+message: unexpected `rerollhighest` after expression
+rendered: trailing input (2..15): unexpected `rerollhighest` after expression
+suggestion: 3
+
+1 + rerollhighest
+=
+kind: BareIdentifier
+span: 4..17
+message: bare identifier `rerollhighest` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..17): bare identifier `rerollhighest` is not valid here; variables must be wrapped in `{}`
+suggestion: 1 + {rerollhighest}
+
+highest(1, rerollhighest
+=
+kind: BareIdentifier
+span: 11..24
+message: bare identifier `rerollhighest` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (11..24): bare identifier `rerollhighest` is not valid here; variables must be wrapped in `{}`
+suggestion: highest(1, {rerollhighest}
+---
+kind: UnclosedDelimiter
+span: 7..8
+message: expected `)` to close `(`
+rendered: unclosed `(` (7..8): expected `)` to close `(`
+suggestion: highest(1, {rerollhighest})
+
 4D6 reroll = x
 =
 kind: BareIdentifier

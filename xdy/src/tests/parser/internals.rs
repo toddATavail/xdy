@@ -1,8 +1,9 @@
 //! # Internal parser mechanism test cases
 //!
 //! Herein are the test cases for internal parser mechanisms that are not
-//! externally-facing combinators: token classification for error reporting
-//! and identifier and bare word trailing-whitespace handling.
+//! externally-facing combinators: token classification for error reporting,
+//! identifier and bare word trailing-whitespace handling, and the recognition
+//! of misplaced clause verbs.
 
 use crate::parser::*;
 use pretty_assertions::assert_eq;
@@ -132,4 +133,34 @@ fn test_bare_word_trailing_whitespace()
 	let (residue, result) = bare_word(span).unwrap();
 	assert_eq!(*result.fragment(), "baz");
 	assert_eq!(*residue.fragment(), ")");
+}
+
+/// Ensure that [`begins_misplaced_clause`] recognizes the verb of a keep or
+/// reroll clause as the clause would: `keep` before a direction that may run
+/// into it, and `reroll` only as a keyword, which never runs into a word, so
+/// that `rerollhighest`, which no reroll clause begins, is a bare word.
+#[test]
+fn test_begins_misplaced_clause()
+{
+	for (text, expected) in [
+		("keep lowest", Some("keep")),
+		("keephighest 2", Some("keep")),
+		("keep", Some("keep")),
+		("reroll = 1", Some("reroll")),
+		("reroll=1", Some("reroll")),
+		("reroll!=1", Some("reroll")),
+		("reroll≤2", Some("reroll")),
+		("reroll1..3", Some("reroll")),
+		("reroll", Some("reroll")),
+		("rerollhighest", None),
+		("rerolllowest = 1", None),
+		("rerolled", None),
+		("keeper", None),
+		("drop lowest", None),
+		("{x}", None),
+		("", None)
+	]
+	{
+		assert_eq!(begins_misplaced_clause(text), expected, "{text:?}");
+	}
 }
