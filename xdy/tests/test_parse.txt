@@ -630,3 +630,80 @@
 3D6 reroll = 1 - 1
 =
 (function [] (sub (reroll (standard-dice 3 6) (eq 1)) 1))
+
+highest(1, 2)
+=
+(function [] (highest 1 2))
+
+lowest(3, 1, 2)
+=
+(function [] (lowest 3 1 2))
+
+highest(-2147483648, 2147483647)
+=
+(function [] (highest -2147483648 2147483647))
+
+highest(1D6, 1D6)
+=
+(function [] (highest (standard-dice 1 6) (standard-dice 1 6)))
+
+lowest(1D20, 1D20)
+=
+(function [] (lowest (standard-dice 1 20) (standard-dice 1 20)))
+
+highest(1D20, 1D20, 1D20)
+=
+(function []
+	(highest (standard-dice 1 20) (standard-dice 1 20) (standard-dice 1 20)))
+
+highest(3D6, 1D20, 10)
+=
+(function [] (highest (standard-dice 3 6) (standard-dice 1 20) 10))
+
+{x}: lowest({x} * 5, 99)
+=
+(function [{x}] (lowest (mul {x} 5) 99))
+
+highest(1D6 - 2, 1)
+=
+(function [] (highest (sub (standard-dice 1 6) 2) 1))
+
+{x}: 4D6 drop lowest (lowest({x}, 2))
+=
+(function [{x}] (drop-lowest (standard-dice 4 6) (lowest {x} 2)))
+
+lowest(highest(1D6, 5), 3)
+=
+(function [] (lowest (highest (standard-dice 1 6) 5) 3))
+
+highest(lowest(1D6, 4), 2)
+=
+(function [] (highest (lowest (standard-dice 1 6) 4) 2))
+
+highest({a}@(1D6), {a} + 1)
+=
+(function [] (highest (binding {a} (standard-dice 1 6)) (add {a} 1)))
+
+lowest(1D6, 1D6) + highest(1D6, 1D6)
+=
+(function []
+	(add
+		(lowest (standard-dice 1 6) (standard-dice 1 6))
+		(highest (standard-dice 1 6) (standard-dice 1 6))))
+
+{x}: highest({x}, {x})
+=
+(function [{x}] (highest {x} {x}))
+
+(highest(1, 2))D6
+=
+(function [] (standard-dice (highest 1 2) 6))
+
+highest(1D4, lowest(1D4, 1D4)) * 2
+=
+(function []
+	(mul
+		(highest
+			(standard-dice 1 4)
+			(lowest (standard-dice 1 4) (standard-dice 1 4)))
+		2))

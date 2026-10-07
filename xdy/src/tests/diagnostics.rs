@@ -14,6 +14,7 @@ use pretty_assertions::assert_eq;
 
 use super::{
 	ast::{LEAF, Nesting, nest_function, nest_parsable},
+	corpus::corpus,
 	recovery::{FAMILIES, SCALE}
 };
 use crate::{
@@ -52,6 +53,11 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 		},
 		DiagnosticKind::MissingRerollRangeEnd => "MissingRerollRangeEnd",
 		DiagnosticKind::MissingRerollTimes => "MissingRerollTimes",
+		DiagnosticKind::UnknownFunction { .. } => "UnknownFunction",
+		DiagnosticKind::LoneArgument => "LoneArgument",
+		DiagnosticKind::MissingComma => "MissingComma",
+		DiagnosticKind::TrailingComma => "TrailingComma",
+		DiagnosticKind::UngroupedCall => "UngroupedCall",
 		DiagnosticKind::IncompleteParameterDefinition =>
 		{
 			"IncompleteParameterDefinition"
@@ -456,6 +462,30 @@ fn test_corrected_sources_parse()
 				Parser::parse(corrected).is_ok(),
 				"corrected source for {:?} does not parse: {:?}",
 				case.source,
+				corrected
+			);
+		}
+	}
+}
+
+/// Ensure that the doctor diagnoses every input of the [corpus](corpus)
+/// without panicking, and that every corrected source that it produces parses
+/// cleanly, so that the fixes of different diagnostics compose, whatever they
+/// meet. The corpus is large, so the test is ignored by default; `just stress`
+/// runs it.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_corrected_sources_of_corpus_parse()
+{
+	for input in corpus()
+	{
+		let result = diagnostics::diagnose(input);
+		if let Some(corrected) = &result.corrected_source
+		{
+			assert!(
+				Parser::parse(corrected).is_ok(),
+				"corrected source for {:?} does not parse: {:?}",
+				input,
 				corrected
 			);
 		}
@@ -1088,6 +1118,18 @@ fn test_diagnose_deep_reroll_count() { diagnose_deep(Nesting::RerollCount) }
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_diagnose_deep_reroll_clauses() { diagnose_deep(Nesting::RerollClauses) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of the first arguments of extrema on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_extremum_first() { diagnose_deep(Nesting::ExtremumFirst) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of the last arguments of extrema on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_extremum_last() { diagnose_deep(Nesting::ExtremumLast) }
 
 /// On a small stack, [diagnose](diagnostics::diagnose) a binding that collides
 /// with a parameter, a duplicate binding, and a use before binding, each
@@ -1925,6 +1967,13 @@ const DIAGNOSE_FAMILIES: &[(&str, Member)] = &[
 	("misplaced drops", |n| vec!["3 drop lowest"; n].join(" + ")),
 	("operandless drops", |n| {
 		format!("1{}", " + drop lowest".repeat(n))
+	}),
+	("misnamed calls", |n| vec!["max(1, 2)"; n].join(" + ")),
+	("nested misnamed lone calls", |n| {
+		format!("{}4D6{}", "min(".repeat(n), ")".repeat(n))
+	}),
+	("lone dice after trailing commas", |n| {
+		vec!["highest(4D6,)"; n].join(" + ")
 	})
 ];
 

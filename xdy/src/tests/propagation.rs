@@ -48,7 +48,7 @@ use crate::{
 		read_distribution_test_cases
 	},
 	tests::property::{
-		NAMES, OPERATORS, agree, binding, check_within, variable,
+		NAMES, OPERATORS, agree, binding, check_within, extremum, variable,
 		with_parameters
 	}
 };
@@ -3984,8 +3984,9 @@ fn static_program() -> impl Strategy<Value = String>
 	with_parameters(static_expression())
 }
 
-/// Answer a strategy that generates static expressions: arithmetic over
-/// constants, variables, and rolls whose operands are fixed.
+/// Answer a strategy that generates static expressions: arithmetic and calls of
+/// `highest` and `lowest` over constants, variables, and rolls whose operands
+/// are fixed.
 ///
 /// # Returns
 /// The strategy.
@@ -4003,8 +4004,9 @@ fn static_expression() -> impl Strategy<Value = String>
 				|(left, op, right)| format!("{} {} {}", left, op, right)
 			),
 			1 => inner.clone().prop_map(|operand| format!("-({})", operand)),
-			1 => (variable(), inner)
-				.prop_map(|(name, e)| format!("{}@({})", name, e))
+			1 => (variable(), inner.clone())
+				.prop_map(|(name, e)| format!("{}@({})", name, e)),
+			1 => extremum(inner.boxed())
 		]
 	})
 }
@@ -4138,8 +4140,9 @@ fn dynamic_program() -> impl Strategy<Value = String>
 
 /// Answer a strategy that generates dynamic expressions: [static
 /// expressions](static_expression), within dice whose counts, faces, drop and
-/// keep counts, and reroll thresholds, endpoints, and counts, and ranges whose
-/// endpoints, may be random.
+/// keep counts, and reroll thresholds, endpoints, and counts, ranges whose
+/// endpoints, and calls of `highest` and `lowest` whose arguments, may be
+/// random.
 ///
 /// # Returns
 /// The strategy.
@@ -4181,8 +4184,9 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 				.prop_map(|(count, faces, clauses)| {
 					format!("{}D{}{}", count, faces, clauses.concat())
 				}),
-			1 => (operand.clone(), operand)
-				.prop_map(|(start, end)| format!("[{}:{}]", start, end))
+			1 => (operand.clone(), operand.clone())
+				.prop_map(|(start, end)| format!("[{}:{}]", start, end)),
+			1 => extremum(operand.boxed())
 		]
 	})
 }

@@ -75,7 +75,10 @@ pub(super) const TOKENS: &[&str] = &[
 	"in",
 	"..=",
 	"times",
-	"∞"
+	"∞",
+	"highest(",
+	"lowest(",
+	"max("
 ];
 
 /// The number of random strings of [tokens](TOKENS) in the corpus.

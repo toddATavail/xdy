@@ -1,7 +1,7 @@
 //! # Primary-expression combinator test cases
 //!
 //! Herein are the test cases for the [`primary`], [`group`], [`variable`],
-//! and [`range`] combinators.
+//! [`range`], [`binding`], and [`extremum`] combinators.
 
 use crate::{
 	ast::*,
@@ -746,5 +746,166 @@ fn test_binding_rewinds_on_no_at_sign()
 	else
 	{
 		panic!("expected nom::Err::Error, got: {:?}", result);
+	}
+}
+
+/// Ensure that [`extremum`] parses calls of `highest` and `lowest` of two or
+/// more full expressions, with whitespace anywhere between tokens, and that it
+/// rejects calls of fewer arguments, trailing commas, missing commas and
+/// parentheses, and keywords that run into a word after them.
+#[test]
+fn test_extremum()
+{
+	for (input, expected) in [
+		("highest(1, 2)", "(highest 1 2)"),
+		("lowest({POW} * 5, 99)", "(lowest (mul {POW} 5) 99)"),
+		(
+			"highest (1D20, 1D20, 1D20)",
+			"(highest (standard-dice 1 20) (standard-dice 1 20) (standard-dice \
+			 1 20))"
+		),
+		("lowest( 1 ,2 )", "(lowest 1 2)"),
+		("highest(\n\t1,\n\t2\n)", "(highest 1 2)"),
+		("highest(-1, -{x})", "(highest -1 (neg {x}))"),
+		(
+			"highest(1D6 - 2, 1)",
+			"(highest (sub (standard-dice 1 6) 2) 1)"
+		),
+		(
+			"highest(highest(1, 2), lowest(3, 4))",
+			"(highest (highest 1 2) (lowest 3 4))"
+		),
+		(
+			"lowest({a}@(3D6), {a}, [1:6], (2))",
+			"(lowest (binding {a} (standard-dice 3 6)) {a} (range 1 6) (group \
+			 2))"
+		),
+		(
+			"highest(4D6 drop lowest, 4D6 keep highest 3)",
+			"(highest (drop-lowest (standard-dice 4 6)) (keep-highest \
+			 (standard-dice 4 6) 3))"
+		)
+	]
+	{
+		let (residue, actual) = extremum(Span::new(input))
+			.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		let expected = format!("(function [] {expected})");
+		let expected = crate::s_expr::read_s_expr(&expected).unwrap();
+		assert_eq!(
+			Expression::Extremum(actual).untethered(),
+			expected.body.untethered(),
+			"{input:?}"
+		);
+	}
+	for input in [
+		"",
+		" highest(1, 2)",
+		"highest",
+		"highest 1, 2",
+		"highest()",
+		"highest(1)",
+		"highest(1,)",
+		"highest(1, 2,)",
+		"highest(1 2)",
+		"highest(1, 2",
+		"highest(1, 2 3)",
+		"highest2(1, 2)",
+		"highestx(1, 2)",
+		"Highest(1, 2)",
+		"max(1, 2)",
+		"min(1, 2)"
+	]
+	{
+		let result = extremum(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+	// A call of one argument fails where its `,` should be, with nothing else
+	// to try.
+	match extremum(Span::new("highest(4D6)"))
+	{
+		Err(nom::Err::Failure(e)) =>
+		{
+			assert_eq!(e.errors[0].0.location_offset(), 11);
+			assert_eq!(e.errors[0].1, NomErrorKind::Char(','));
+		},
+		result => panic!("expected a failure: {:?}", result)
+	}
+}
+
+/// Ensure that a call is a primary expression, which may stand wherever an
+/// expression may begin, but which must be grouped wherever only a constant,
+/// a variable, a binding, or a group may, and that a drop or keep clause still
+/// reads `lowest` or `highest` as its direction, whatever follows it.
+#[test]
+fn test_extremum_positions()
+{
+	for (input, expected) in [
+		("highest(1, 2)", "highest(1, 2)"),
+		("-lowest(1, 2)", "-lowest(1, 2)"),
+		("2 ^ lowest(1, 2) * 3", "2 ^ lowest(1, 2) * 3"),
+		(
+			"highest(1, 2) + lowest(3, 4)",
+			"highest(1, 2) + lowest(3, 4)"
+		),
+		("(highest(1, 2))D6", "(highest(1, 2))D6"),
+		("3D(lowest(4, 6))", "3D(lowest(4, 6))"),
+		("4D6 drop lowest (2)", "4D6 drop lowest (2)"),
+		("4D6 drop lowest(2)", "4D6 drop lowest (2)"),
+		("4D6 keep highest(2)", "4D6 keep highest (2)"),
+		(
+			"4D6 drop lowest (lowest({x}, 2))",
+			"4D6 drop lowest (lowest({x}, 2))"
+		),
+		(
+			"1D6 reroll in (lowest(1, 2))..(highest(3, 4))",
+			"1D6 reroll in (lowest(1, 2))..(highest(3, 4))"
+		),
+		(
+			"[highest(1, 2):lowest(3, 4)]",
+			"[highest(1, 2):lowest(3, 4)]"
+		),
+		("{a}@(highest(1, 2))", "{a}@(highest(1, 2))")
+	]
+	{
+		let (residue, actual) = expression(Span::new(input))
+			.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		assert_eq!(actual.to_string(), expected, "{input:?}");
+	}
+	// The drop count is `2`, not a call of `lowest`.
+	for input in ["4D6 drop lowest (2)", "4D6 drop lowest(2)"]
+	{
+		let (_, actual) = dice(Span::new(input)).unwrap();
+		match &actual
+		{
+			DiceExpression::DropLowest(drop) => assert!(matches!(
+				drop.drop.as_deref(),
+				Some(Expression::Group(_))
+			)),
+			other => panic!("{input:?}: {other:?}")
+		}
+	}
+	// Ungrouped, a call is no atom.
+	assert!(dice_count(Span::new("highest(1, 2)")).is_err());
+	assert!(standard_faces(Span::new("lowest(1, 2)")).is_err());
+	assert!(drop_expression(Span::new("lowest(1, 2)")).is_err());
+	for (input, residue) in [
+		("highest(1, 2)D6", "D6"),
+		("4D6 drop lowest lowest(1, 2)", " lowest(1, 2)"),
+		("4D6 reroll = 1 highest(1, 2) times", " highest(1, 2) times")
+	]
+	{
+		let (rest, _) = expression(Span::new(input)).unwrap();
+		assert_eq!(*rest.fragment(), residue, "{input:?}");
+	}
+	// A bare name that begins with a keyword is no call.
+	for input in ["lowest roll + 1", "highest", "highest2(1, 2)"]
+	{
+		assert!(expression(Span::new(input)).is_err(), "{input:?}");
 	}
 }

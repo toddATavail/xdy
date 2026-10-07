@@ -33,8 +33,9 @@ use nom_locate::LocatedSpan;
 
 use crate::{
 	ast::{
-		Binding, Constant, CustomDice, DiceExpression, Expression, Function,
-		Group, Limit, Parameter, Predicate, Range, StandardDice, Variable
+		Binding, Constant, CustomDice, DiceExpression, Direction, Expression,
+		Extremum, Function, Group, Limit, Parameter, Predicate, Range,
+		StandardDice, Variable
 	},
 	parser::NomErrorKind,
 	span::SourceSpan
@@ -483,6 +484,45 @@ pub fn binding(input: Span) -> IResult<Span, Binding, ParseError>
 pub fn range(input: Span) -> IResult<Span, Range, ParseError>
 {
 	run(Goal::Range, input).map(|(rest, value)| (rest, value.into_range()))
+}
+
+/// Parse a call of `highest` or `lowest`, without leading whitespace: the
+/// keyword, then `(`, then two or more [expressions](expression), separated by
+/// commas, then `)`. Whitespace may separate the keyword from the `(`, as it
+/// may any other tokens, but the keyword may not run into a word after it, so
+/// `highest2(1, 2)` is no call. A call is a [primary] expression, which may
+/// stand wherever an expression may begin; as a dice count, faces, the count
+/// of a clause, or an operand of a reroll, it must be grouped, as in `4D6 drop
+/// lowest (lowest({x}, 2))`. So `4D6 drop lowest (2)` and `4D6 drop
+/// lowest(2)` are still drop clauses, whose count is `2`.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed call.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed, or the call has fewer
+///   than two arguments.
+///
+/// # Examples
+/// ```rust
+/// use xdy::{
+///     ast::Direction,
+///     parser::{Span, extremum}
+/// };
+///
+/// let (rest, call) = extremum(Span::new("lowest({POW} * 5, 99)")).unwrap();
+/// assert!(rest.fragment().is_empty());
+/// assert_eq!(call.direction, Direction::Lowest);
+/// assert_eq!(call.arguments.len(), 2);
+/// assert!(extremum(Span::new("highest(4D6)")).is_err());
+/// ```
+pub fn extremum(input: Span) -> IResult<Span, Extremum, ParseError>
+{
+	run(Goal::Extremum, input)
+		.map(|(rest, value)| (rest, value.into_extremum()))
 }
 
 /// Parse a dice expression, without leading whitespace. A dice expression never
@@ -1115,6 +1155,47 @@ pub(crate) fn keyword<'src>(
 pub(crate) fn begins_misplaced_clause(text: &str) -> bool
 {
 	begins_verb(text, "keep") || begins_verb(text, "reroll")
+}
+
+/// Answer whether text begins with a call of `highest` or `lowest`, as the
+/// parser recognizes one: the keyword, then any [whitespace between
+/// tokens](is_token_space), then `(`. The keyword therefore never runs into a
+/// word after it, and a bare name that begins with it, e.g., `lowest roll`, is
+/// no call.
+///
+/// # Parameters
+/// - `text`: The text.
+///
+/// # Returns
+/// The direction of the call, if `text` begins with one.
+pub(crate) fn begins_call(text: &str) -> Option<Direction>
+{
+	[Direction::Highest, Direction::Lowest]
+		.into_iter()
+		.find(|direction| {
+			text.strip_prefix(direction.keyword()).is_some_and(|after| {
+				after.trim_start_matches(is_token_space).starts_with('(')
+			})
+		})
+}
+
+/// Answer whether text begins with something that may begin an operand, as
+/// the token after an argument of a call that lacks its `,` would: a digit, an
+/// opening delimiter, or a character that may begin a [bare word](bare_word),
+/// such as a call or a name that lacks its braces.
+///
+/// # Parameters
+/// - `text`: The text.
+///
+/// # Returns
+/// `true` if `text` begins an operand, `false` otherwise.
+pub(crate) fn begins_operand(text: &str) -> bool
+{
+	text.chars().next().is_some_and(|c| {
+		c.is_ascii_digit()
+			|| matches!(c, '(' | '[' | '{')
+			|| is_bare_word_start(c)
+	})
 }
 
 /// The characters before which the name of an unclosed variable may

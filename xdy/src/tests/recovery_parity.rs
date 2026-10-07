@@ -49,7 +49,8 @@ impl<'src> Recovery<'src> for Decline<'src>
 /// Ensure that, when its policy declines every repair, recovery mode matches
 /// [`Parser::parse`] on every input in the corpus, and presents exactly one
 /// failure for each input that fails, with the leading entries of the error.
-/// A [`Site::DiceOperator`] is not a failure of the ordinary parse, and
+/// A [`Site::DiceOperator`], [`Site::TrailingComma`], or
+/// [`Site::UngroupedCall`] is not a failure of the ordinary parse, and
 /// declining it does not end recovery, so it may precede the failure, but only
 /// in an input that fails.
 #[test]
@@ -66,7 +67,14 @@ fn test_declining_recovery_matches_parse()
 			Ok(_) => assert_eq!(policy.sites, vec![], "input: {:?}", input),
 			Err(error) =>
 			{
-				policy.sites.retain(|site| site.site != Site::DiceOperator);
+				policy.sites.retain(|site| {
+					!matches!(
+						site.site,
+						Site::DiceOperator
+							| Site::TrailingComma
+							| Site::UngroupedCall { .. }
+					)
+				});
 				let position = error.errors[0].0.location_offset();
 				let leading = error
 					.errors

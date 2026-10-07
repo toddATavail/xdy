@@ -55,17 +55,18 @@ use nom::{
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
-		Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul, Neg,
-		Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
+		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp,
+		Expression, Extremum, Function, Group, KeepHighest, KeepLowest, Limit,
+		Mod, Mul, Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub,
+		Variable
 	},
 	span::{SourceSpan, Spanned}
 };
 
 use super::{
-	BINDING_CONTEXT, BINDING_EXPRESSION_CONTEXT, CLOSING_BRACE_CONTEXT,
-	CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT, CONSTANT_CONTEXT,
-	CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
+	ARGUMENT_CONTEXT, BINDING_CONTEXT, BINDING_EXPRESSION_CONTEXT,
+	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT,
+	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
 	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT,
 	FUNCTION_BODY_CONTEXT, FUNCTION_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
 	KEEP_DIRECTION_CONTEXT, KEEP_EXPRESSION_CONTEXT, NEXT_PARAMETER_CONTEXT,
@@ -74,10 +75,11 @@ use super::{
 	REROLL_PREDICATE_CONTEXT, REROLL_RANGE_END_CONTEXT,
 	REROLL_RANGE_OPERATOR_CONTEXT, REROLL_RANGE_START_CONTEXT,
 	REROLL_THRESHOLD_CONTEXT, REROLL_TIMES_CONTEXT, RIGHT_OPERAND_CONTEXT,
-	RerollParts, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT,
-	begins_misplaced_clause, braced_name, canonical_name, constant,
-	custom_faces, d_operator, identifier, integer, is_token_space, keyword,
-	name_space0, negative_constant, parameter, parameters
+	RerollParts, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT, begins_call,
+	begins_misplaced_clause, begins_operand, begins_verb, braced_name,
+	canonical_name, constant, custom_faces, d_operator, identifier, integer,
+	is_token_space, keyword, name_space0, negative_constant, parameter,
+	parameters
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,7 +162,12 @@ pub(crate) enum Goal
 	KeepHighest,
 
 	/// [`reroll`](super::reroll), producing [`Value::Reroll`].
-	Reroll
+	Reroll,
+
+	/// [`extremum`](super::extremum), producing [`Value::Expression`]: the
+	/// call, unless a [repair](Repair::Unwrap) replaced a call of one argument
+	/// with that argument.
+	Extremum
 }
 
 /// The value produced by a [goal](Goal).
@@ -173,7 +180,10 @@ pub(super) enum Value<'src>
 	/// A function.
 	Function(Function<'src>),
 
-	/// An expression.
+	/// An expression. Where a repair made a call the [dice
+	/// count](Site::UngroupedCall) of a dice expression in place of a primary
+	/// expression, the [dice expression](Value::Dice) stands for the
+	/// expression instead; see [`into_expression`](Value::into_expression).
 	Expression(Expression<'src>),
 
 	/// A group.
@@ -226,19 +236,50 @@ impl<'src> Value<'src>
 		}
 	}
 
-	/// Answer the expression.
+	/// Answer the expression. A [dice expression](Value::Dice) is an
+	/// expression too, which a primary expression produces where a repair made
+	/// a call the [dice count](Site::UngroupedCall) of a dice expression.
 	///
 	/// # Returns
 	/// The expression.
 	///
 	/// # Panics
-	/// If the receiver is not an [expression](Value::Expression).
+	/// If the receiver is neither an [expression](Value::Expression) nor a
+	/// [dice expression](Value::Dice).
 	pub(super) fn into_expression(self) -> Expression<'src>
 	{
 		match self
 		{
 			Value::Expression(expression) => expression,
+			Value::Dice(dice) => Expression::Dice(dice),
 			value => unreachable!("expected an expression: {:?}", value)
+		}
+	}
+
+	/// Answer the call of `highest` or `lowest`.
+	///
+	/// # Returns
+	/// The call.
+	///
+	/// # Panics
+	/// If the receiver is not an [expression](Value::Expression) that is a
+	/// call.
+	pub(super) fn into_extremum(self) -> Extremum<'src>
+	{
+		match self
+		{
+			// `Expression` implements `Drop`, so the call cannot move out of
+			// it; take its arguments instead.
+			Value::Expression(mut expression) => match &mut expression
+			{
+				Expression::Extremum(call) => Extremum {
+					direction: call.direction,
+					arguments: std::mem::take(&mut call.arguments),
+					span: call.span
+				},
+				_ => unreachable!("expected a call: {:?}", expression)
+			},
+			value => unreachable!("expected a call: {:?}", value)
 		}
 	}
 
@@ -698,6 +739,11 @@ enum Frame<'src>
 	/// [`Goal::Primary`], awaiting a range, its first alternative.
 	PrimaryRange(Span<'src>),
 
+	/// [`Goal::Primary`], awaiting a call of `highest` or `lowest`, which it
+	/// tries after a range, wherever the input [begins a call](begins_call).
+	/// It holds the input of the primary expression.
+	PrimaryCall(Span<'src>),
+
 	/// [`Goal::Primary`], awaiting dice, its second alternative. It holds the
 	/// input of the primary expression. The error of the first alternative is
 	/// [recomputed](range_error) if the second fails.
@@ -718,6 +764,23 @@ enum Frame<'src>
 
 		/// Whether the goal is [`Goal::Faces`], whose literal is signed.
 		signed: bool
+	},
+
+	/// [`Goal::Atom`] or [`Goal::Faces`], awaiting a call of `highest` or
+	/// `lowest` that stands ungrouped where only an atom may, which a repair at
+	/// [`Site::UngroupedCall`] reads as though grouped. It holds the input of
+	/// the atom. Only a recovering parse pushes it.
+	AtomCall(Span<'src>),
+
+	/// [`Goal::Extremum`], awaiting an argument. It carries the
+	/// [call](Payload::Call) so far.
+	CallArgument
+	{
+		/// The byte offset of the `(` of the call.
+		opener: usize,
+
+		/// The input of the argument.
+		input: Span<'src>
 	},
 
 	/// [`Goal::Group`], awaiting the grouped expression.
@@ -877,14 +940,17 @@ impl Frame<'_>
 			| Frame::DropExpression { .. }
 			| Frame::RerollFirst { .. }
 			| Frame::RerollEnd { .. }
-			| Frame::RerollCount(_) => true,
+			| Frame::RerollCount(_)
+			| Frame::CallArgument { .. } => true,
 			Frame::UnaryExponent { merged, .. } => *merged,
 			Frame::BinaryFirst(_)
 			| Frame::UnaryNegation(_)
 			| Frame::ExponentBase
 			| Frame::PrimaryRange(_)
+			| Frame::PrimaryCall(_)
 			| Frame::PrimaryDice(_)
 			| Frame::AtomGroup { .. }
+			| Frame::AtomCall(_)
 			| Frame::GroupExpression { .. }
 			| Frame::RangeStart { .. }
 			| Frame::DiceCount { .. }
@@ -960,7 +1026,36 @@ enum Payload<'src>
 	/// The parts of the reroll clause of [`Frame::RerollFirst`],
 	/// [`Frame::RerollEnd`], or [`Frame::RerollCount`] read so far. They are
 	/// boxed, lest they enlarge every payload.
-	Reroll(Box<RerollClause<'src>>)
+	Reroll(Box<RerollClause<'src>>),
+
+	/// The call of [`Frame::CallArgument`] so far. It is boxed, lest it
+	/// enlarge every payload.
+	Call(Box<Call<'src>>)
+}
+
+/// A call of `highest` or `lowest` so far, which [`Frame::CallArgument`]
+/// [carries](Payload::Call).
+///
+/// # Type parameters
+/// - `'src`: The lifetime of the source text being parsed.
+struct Call<'src>
+{
+	/// The start of the call, at its keyword.
+	start: usize,
+
+	/// The byte offset of the `(` of the call.
+	opener: usize,
+
+	/// The direction of the call.
+	direction: Direction,
+
+	/// The arguments read so far.
+	arguments: Vec<Expression<'src>>,
+
+	/// The span of the first argument, as written, which differs from the
+	/// span of the argument where a repair replaced a call there with its own
+	/// argument.
+	first: SourceSpan
 }
 
 /// The parts of a reroll clause read so far, which the frames of the clause
@@ -1096,6 +1191,22 @@ impl<'src> Payload<'src>
 			_ => unreachable!("the payload is not a reroll clause")
 		}
 	}
+
+	/// Answer the call so far.
+	///
+	/// # Returns
+	/// The call.
+	///
+	/// # Panics
+	/// If the payload is not [`Payload::Call`].
+	fn into_call(self) -> Box<Call<'src>>
+	{
+		match self
+		{
+			Payload::Call(call) => call,
+			_ => unreachable!("the payload is not a call")
+		}
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1150,6 +1261,12 @@ impl<'src> Stack<'src>
 	/// # Returns
 	/// The frame, or `None` if the stack is empty.
 	fn first(&self) -> Option<&Frame<'src>> { self.frames.first() }
+
+	/// Answer the frame on top of the stack.
+	///
+	/// # Returns
+	/// The frame, or `None` if the stack is empty.
+	fn last(&self) -> Option<&Frame<'src>> { self.frames.last() }
 
 	/// Push a frame that carries no payload.
 	///
@@ -1283,7 +1400,8 @@ impl<'src> std::ops::Index<usize> for Stack<'src>
 ///     Unary --> Exponent
 ///     Exponent -->|"base"| Primary
 ///     Exponent -->|"power"| Unary
-///     Primary --> Range & PrimaryDice & Group & Binding
+///     Primary --> Range & Extremum & PrimaryDice & Group & Binding
+///     Extremum --> AddSub
 ///     Range --> AddSub
 ///     Group --> AddSub
 ///     Binding --> AddSub
@@ -1291,6 +1409,7 @@ impl<'src> std::ops::Index<usize> for Stack<'src>
 ///     DropLowest & DropHighest & KeepLowest & KeepHighest --> Atom
 ///     Dice & PrimaryDice & Reroll --> Faces & Atom
 ///     Faces & Atom --> Binding & Group
+///     Faces & Atom -.->|"recovering"| Extremum
 /// ```
 ///
 /// # Parameters
@@ -1520,7 +1639,8 @@ fn start<'src, R: Recovery<'src>>(
 		Goal::DropHighest => start_drop(input, ClauseKind::DropHighest, stack),
 		Goal::KeepLowest => start_drop(input, ClauseKind::KeepLowest, stack),
 		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack),
-		Goal::Reroll => start_reroll(input, stack, rec)
+		Goal::Reroll => start_reroll(input, stack, rec),
+		Goal::Extremum => start_extremum(input, stack, rec)
 	}
 }
 
@@ -1583,7 +1703,11 @@ fn resume<'src, R: Recovery<'src>>(
 		},
 		Frame::PrimaryRange(input) =>
 		{
-			resume_primary_range(input, outcome, stack)
+			resume_primary_range(input, outcome, stack, rec)
+		},
+		Frame::PrimaryCall(input) =>
+		{
+			resume_primary_call(input, outcome, stack, rec)
 		},
 		Frame::PrimaryDice(input) => resume_primary_dice(input, outcome, stack),
 		Frame::PrimaryGroup(input) =>
@@ -1594,6 +1718,12 @@ fn resume<'src, R: Recovery<'src>>(
 		Frame::AtomGroup { input, signed } =>
 		{
 			resume_atom_group(input, signed, outcome)
+		},
+		Frame::AtomCall(input) => resume_atom_call(input, outcome, stack, rec),
+		Frame::CallArgument { input, .. } =>
+		{
+			let call = stack.pop_payload().into_call();
+			resume_call_argument(call, input, outcome, stack, rec)
 		},
 		Frame::GroupExpression { start, input } =>
 		{
@@ -2374,17 +2504,26 @@ fn resume_exponent_power<'src>(
 /// If the range fails, its error is discarded, and [recomputed](range_error)
 /// only if the dice fail too.
 ///
+/// Between the range and the dice, the engine tries a call of `highest` or
+/// `lowest`, but only where the input [begins a call](begins_call), or a repair
+/// [overlaid](Overlay::Call) the keyword of one, since a call commits once it
+/// reads its `(`. Otherwise, nothing else begins with the keyword, so the call
+/// would fail recoverably at the input, and its error would add nothing to the
+/// errors of the other alternatives.
+///
 /// # Parameters
 /// - `input`: The input of the primary expression.
 /// - `outcome`: The outcome of the range.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn resume_primary_range<'src>(
+fn resume_primary_range<'src, R: Recovery<'src>>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
 	match with_context_on_error(input, RANGE_CONTEXT, outcome)
@@ -2393,12 +2532,92 @@ fn resume_primary_range<'src>(
 			rest,
 			Value::Expression(Expression::Range(range.into_range()))
 		),
+		Err(nom::Err::Error(_))
+			if begins_call(input.fragment()).is_some()
+				|| rec.recovering() && rec.overlays_call(input) =>
+		{
+			call(stack, Frame::PrimaryCall(input), Goal::Extremum, input)
+		},
 		Err(nom::Err::Error(_)) =>
 		{
 			call(stack, Frame::PrimaryDice(input), Goal::PrimaryDice, input)
 		},
 		Err(e) => fail(e)
 	}
+}
+
+/// Resume [`Goal::Primary`] with the outcome of a call of `highest` or
+/// `lowest`.
+///
+/// A call is no dice count, so the ordinary parse ends the primary expression
+/// at the call, even if a dice operator follows it, e.g., `highest(1, 2)D6`,
+/// and fails later, wherever the dice operator stands. While recovering, a
+/// dice operator after the call, other than the `d` of `drop`, offers a repair
+/// at [`Site::UngroupedCall`], whose fix groups the call, and makes it the dice
+/// count of a dice expression, e.g., `(highest(1, 2))D6`. The fix supplies its
+/// `(` before the call, and its `)` after the call, at a [`Site::Closer`].
+///
+/// # Parameters
+/// - `input`: The input of the primary expression.
+/// - `outcome`: The outcome of the call.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state, which remembers the dice operator for a
+///   [reread](Repair::Reread).
+///
+/// # Returns
+/// The next step. Where the repair made the call a dice count, the dice
+/// expression, as a [`Value::Dice`], stands for the primary expression.
+fn resume_primary_call<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let (rest, call) = match outcome
+	{
+		Ok((rest, Value::Expression(call)))
+			if rec.recovering() && matches!(call, Expression::Extremum(_)) =>
+		{
+			(rest, call)
+		},
+		outcome => return Step::Return(outcome)
+	};
+	let operator: IResult<Span, char, ParseError> =
+		preceded(multispace0, d_operator).parse_complete(rest);
+	let after = match operator
+	{
+		Ok((after, _))
+			if !begins_verb(skip_whitespace(rest).fragment(), "drop")
+				&& rec.offer(
+					Site::UngroupedCall {
+						operand: Operand::DiceCount
+					},
+					offered(input),
+					stack
+				) =>
+		{
+			after
+		},
+		_ => return succeed(rest, Value::Expression(call))
+	};
+	let count = match group_call(input, call, rest, stack, rec)
+	{
+		Ok(count) => count,
+		Err(e) => return fail(e)
+	};
+	rec.operator = Some(skip_whitespace(rest));
+	let faces = skip_whitespace(after);
+	call_with(
+		stack,
+		Frame::DiceFaces {
+			start: input.location_offset(),
+			input: faces
+		},
+		Payload::Expression(count),
+		Goal::Faces,
+		faces
+	)
 }
 
 /// Resume [`Goal::Primary`] with the outcome of dice, its second alternative.
@@ -2563,6 +2782,21 @@ fn start_atom<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
+	// A call that stands ungrouped where only an atom may fails here, as no
+	// alternative begins with its keyword. While recovering, offer to read it
+	// as though grouped.
+	if rec.recovering()
+		&& begins_call(input.fragment()).is_some()
+		&& rec.offer(
+			Site::UngroupedCall {
+				operand: Operand::of(stack.last())
+			},
+			offered(input),
+			stack
+		)
+	{
+		return call(stack, Frame::AtomCall(input), Goal::Extremum, input);
+	}
 	match parse_constant(input, signed, rec)
 	{
 		Ok((rest, constant)) =>
@@ -2620,6 +2854,99 @@ fn resume_atom_group<'src>(
 		},
 		Err(e) => fail(e)
 	}
+}
+
+/// Resume [`Goal::Atom`] or [`Goal::Faces`] with the outcome of a call that
+/// stands ungrouped where only an atom may, which a repair at
+/// [`Site::UngroupedCall`] reads as though grouped. The repair supplied the
+/// `(` before the call, and its `)` is supplied after the call, at a
+/// [`Site::Closer`].
+///
+/// # Parameters
+/// - `input`: The input of the atom, at the start of the call.
+/// - `outcome`: The outcome of the call.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn resume_atom_call<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let (rest, call) = match outcome
+	{
+		Ok((rest, call)) => (rest, call.into_expression()),
+		Err(e) => return fail(e)
+	};
+	match group_call(input, call, rest, stack, rec)
+	{
+		Ok(group) => succeed(rest, Value::Expression(group)),
+		Err(e) => fail(e)
+	}
+}
+
+/// Group a call that a repair at [`Site::UngroupedCall`] reads as though
+/// grouped, by supplying the `)` after it at a [`Site::Closer`], whose `(` is
+/// the start of the call, where the repair supplied it.
+///
+/// # Parameters
+/// - `input`: The input at the start of the call.
+/// - `call`: The call, or what a repair made of it.
+/// - `rest`: The input after the call.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The group.
+///
+/// # Errors
+/// * [`Failure`](nom::Err::Failure) if the policy declines to supply the `)`.
+fn group_call<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	call: Expression<'src>,
+	rest: Span<'src>,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Result<Expression<'src>, nom::Err<ParseError<'src>>>
+{
+	let start = input.location_offset();
+	let site = Site::Closer {
+		opener: start,
+		closer: ')'
+	};
+	// The source has no `)` for the supplied `(`, so the `)` is missing after
+	// the call, whatever follows it.
+	let e = nom::Err::Failure(ParseError::add_context(
+		rest,
+		CLOSING_PAREN_CONTEXT,
+		ParseError::from_char(rest, ')')
+	));
+	let at = rec.repair(site, e, stack)?;
+	Ok(Expression::Group(Group {
+		expression: Box::new(call),
+		span: SourceSpan {
+			start,
+			end: at.location_offset()
+		}
+	}))
+}
+
+/// Answer the error that an offer of a repair at a call presents: one at the
+/// start of the call. Since an offer is no failure of the ordinary parse, only
+/// its position matters.
+///
+/// # Parameters
+/// - `input`: The input at the start of the call.
+///
+/// # Returns
+/// The error.
+fn offered(input: Span<'_>) -> nom::Err<ParseError<'_>>
+{
+	nom::Err::Failure(ParseError::from_error_kind(input, ErrorKind::Tag))
 }
 
 /// Start [`Goal::Group`]: `char('(')`, then `cut(preceded(multispace0,
@@ -3868,6 +4195,396 @@ fn start_reroll<'src, R: Recovery<'src>>(
 	}
 }
 
+/// Start [`Goal::Extremum`]: the keyword, `highest` or `lowest`, then
+/// `preceded(multispace0, char('('))`, then `cut(preceded(multispace0,
+/// context(ARGUMENT_CONTEXT, expression)))`, then the rest of the arguments;
+/// see [`call_continue`]. The keyword must [begin a call](begins_call), so the
+/// call fails recoverably at its input unless its `(` follows, and commits once
+/// it does. A repair may instead [overlay](Overlay::Call) the keyword, as it
+/// does for `max` in `max(1, 2)`.
+///
+/// # Parameters
+/// - `input`: The input of the production.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn start_extremum<'src, R: Recovery<'src>>(
+	input: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let overlaid = if rec.recovering()
+	{
+		rec.take_call(input)
+	}
+	else
+	{
+		None
+	};
+	let keyword = overlaid.or_else(|| {
+		begins_call(input.fragment()).map(|direction| {
+			(input.take_from(direction.keyword().len()), direction)
+		})
+	});
+	let paren = keyword.and_then(|(after, direction)| {
+		let paren: IResult<Span, char, ParseError> =
+			preceded(multispace0, char('(')).parse_complete(after);
+		paren.ok().map(|(after, _)| (after, direction))
+	});
+	let Some((after, direction)) = paren
+	else
+	{
+		return fail(nom::Err::Error(ParseError::from_error_kind(
+			input,
+			ErrorKind::Tag
+		)));
+	};
+	let opener = after.location_offset() - 1;
+	let call = Call {
+		start: input.location_offset(),
+		opener,
+		direction,
+		arguments: Vec::new(),
+		first: SourceSpan::default()
+	};
+	argument(Box::new(call), skip_whitespace(after), stack)
+}
+
+/// Call the next argument of a call.
+///
+/// # Parameters
+/// - `call`: The call so far.
+/// - `input`: The input of the argument.
+/// - `stack`: The stack of suspended productions.
+///
+/// # Returns
+/// The next step.
+fn argument<'src>(
+	call: Box<Call<'src>>,
+	input: Span<'src>,
+	stack: &mut Stack<'src>
+) -> Step<'src>
+{
+	call_with(
+		stack,
+		Frame::CallArgument {
+			opener: call.opener,
+			input
+		},
+		Payload::Call(call),
+		Goal::AddSub,
+		input
+	)
+}
+
+/// Resume [`Goal::Extremum`] with the outcome of an argument.
+///
+/// # Parameters
+/// - `call`: The call so far.
+/// - `input`: The input of the argument.
+/// - `outcome`: The outcome of the argument.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn resume_call_argument<'src, R: Recovery<'src>>(
+	mut call: Box<Call<'src>>,
+	input: Span<'src>,
+	outcome: Outcome<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	match outcome
+	{
+		Ok((rest, argument)) =>
+		{
+			if call.arguments.is_empty()
+			{
+				call.first = SourceSpan {
+					start: input.location_offset(),
+					end: rest.location_offset()
+				};
+			}
+			call.arguments.push(argument.into_expression());
+			call_continue(call, rest, stack, rec)
+		},
+		Err(e) => fail(cut_error(with_context(input, ARGUMENT_CONTEXT, e)))
+	}
+}
+
+/// Continue [`Goal::Extremum`] after an argument. After the first, only a `,`
+/// may follow, as `cut(preceded(multispace0, char(',')))`, since a call has
+/// two or more arguments; after a later one, a `,` or the closing `)` may, as
+/// `cut(preceded(multispace0, alt((char(','), char(')')))))`. After a `,`,
+/// call the next argument; after the `)`, finish the call.
+///
+/// While recovering, a `,` that a `)` follows offers a repair at
+/// [`Site::TrailingComma`], whose fix retracts the comma. If neither a `,` nor
+/// a `)` follows where one must, the failure is at [`Site::Comma`] after the
+/// first argument, or wherever the next token [begins an
+/// operand](begins_operand), as another argument would, and at a
+/// [`Site::Closer`] otherwise.
+///
+/// # Parameters
+/// - `call`: The call so far.
+/// - `rest`: The input after the last argument.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn call_continue<'src, R: Recovery<'src>>(
+	call: Box<Call<'src>>,
+	rest: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	let separator: IResult<Span, char, ParseError> = if call.arguments.len() < 2
+	{
+		cut(preceded(multispace0, char(','))).parse_complete(rest)
+	}
+	else
+	{
+		cut(preceded(multispace0, alt((char(','), char(')')))))
+			.parse_complete(rest)
+	};
+	match separator
+	{
+		Ok((after, ',')) =>
+		{
+			let next = skip_whitespace(after);
+			if rec.recovering()
+				&& next.fragment().starts_with(')')
+				&& rec.offer(
+					Site::TrailingComma,
+					nom::Err::Failure(ParseError::from_char(
+						skip_whitespace(rest),
+						')'
+					)),
+					stack
+				)
+			{
+				// Continue as though the source lacked the comma.
+				return call_continue(call, next, stack, rec);
+			}
+			argument(call, next, stack)
+		},
+		Ok((after, _)) => finish_call(*call, after),
+		Err(e) => recover_separator(call, rest, e, stack, rec)
+	}
+}
+
+/// Recover from a missing `,` or `)` after an argument of a call, unless the
+/// engine is not recovering.
+///
+/// # Parameters
+/// - `call`: The call so far.
+/// - `rest`: The input after the last argument.
+/// - `e`: The error of the missing separator.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The next step.
+fn recover_separator<'src, R: Recovery<'src>>(
+	call: Box<Call<'src>>,
+	rest: Span<'src>,
+	e: nom::Err<ParseError<'src>>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R>
+) -> Step<'src>
+{
+	if !rec.recovering()
+	{
+		return fail(e);
+	}
+	let next = skip_whitespace(rest);
+	let site = match &call.arguments[..]
+	{
+		[only] =>
+		{
+			let lone = next.fragment().starts_with(')').then(|| LoneArgument {
+				call: call.start,
+				argument: call.first,
+				direction: call.direction,
+				dice: matches!(only, Expression::Dice(_)),
+				bare: stands_bare(only)
+			});
+			Site::Comma {
+				opener: call.opener,
+				lone
+			}
+		},
+		_ if begins_operand(next.fragment()) => Site::Comma {
+			opener: call.opener,
+			lone: None
+		},
+		_ => Site::Closer {
+			opener: call.opener,
+			closer: ')'
+		}
+	};
+	// A `,` is missing again where a repair supplied one, so the argument
+	// after it read nothing, and another would read nothing too.
+	if matches!(site, Site::Comma { .. })
+		&& rec.comma == Some((call.opener, next.location_offset()))
+	{
+		rec.active = false;
+		return fail(e);
+	}
+	let repaired =
+		rec.consult_with(site, e, stack, |repair, at| match (repair, site)
+		{
+			(Repair::Fix, _) => Some((repair, at)),
+			(Repair::Unwrap, Site::Comma { lone: Some(_), .. })
+			| (
+				Repair::Keep,
+				Site::Comma {
+					lone: Some(LoneArgument { dice: true, .. }),
+					..
+				}
+			) => Some((repair, at)),
+			_ => None
+		});
+	match (repaired, site)
+	{
+		(Err(e), _) => fail(e),
+		(Ok((Repair::Fix, at)), Site::Comma { .. }) =>
+		{
+			rec.comma = Some((call.opener, at.location_offset()));
+			argument(call, at, stack)
+		},
+		// The supplied `)` ends the call at the failure.
+		(Ok((Repair::Fix, at)), _) => finish_call(*call, at),
+		(Ok((repair, at)), _) => unwrap_call(*call, repair == Repair::Keep, at)
+	}
+}
+
+/// Finish a call of `highest` or `lowest`.
+///
+/// # Parameters
+/// - `call`: The call.
+/// - `rest`: The input after the call.
+///
+/// # Returns
+/// The next step.
+fn finish_call<'src>(call: Call<'src>, rest: Span<'src>) -> Step<'src>
+{
+	succeed(
+		rest,
+		Value::Expression(Expression::Extremum(Extremum {
+			direction: call.direction,
+			arguments: call.arguments,
+			span: SourceSpan {
+				start: call.start,
+				end: rest.location_offset()
+			}
+		}))
+	)
+}
+
+/// Replace a call of one argument with that argument, as a
+/// [repair](Repair::Unwrap) at [`Site::Comma`] does: grouped, unless it
+/// [stands bare](stands_bare), or, for [`Repair::Keep`], with a keep clause of
+/// the direction of the call.
+///
+/// # Parameters
+/// - `call`: The call, whose only argument is a dice expression if `keep`.
+/// - `keep`: Whether to keep the highest or lowest die of the argument.
+/// - `at`: The input at the `)` of the call.
+///
+/// # Returns
+/// The next step.
+fn unwrap_call<'src>(
+	mut call: Call<'src>,
+	keep: bool,
+	at: Span<'src>
+) -> Step<'src>
+{
+	let rest = at.take_from(1);
+	let span = SourceSpan {
+		start: call.start,
+		end: rest.location_offset()
+	};
+	let argument = call.arguments.pop().expect("a call of one argument");
+	let value = match into_dice(argument)
+	{
+		Ok(dice) if keep =>
+		{
+			let kind =
+				ClauseKind::of(true, call.direction == Direction::Lowest);
+			Expression::Dice(kind.build(dice, None, span))
+		},
+		Ok(dice) => Expression::Dice(dice),
+		Err(argument) if stands_bare(&argument) => argument,
+		Err(argument) => Expression::Group(Group {
+			expression: Box::new(argument),
+			span
+		})
+	};
+	succeed(rest, Value::Expression(value))
+}
+
+/// Answer the dice expression that an expression is, if it is one.
+///
+/// # Parameters
+/// - `expression`: The expression.
+///
+/// # Returns
+/// The dice expression.
+///
+/// # Errors
+/// * The expression itself, if it is not a dice expression.
+fn into_dice(
+	mut expression: Expression<'_>
+) -> Result<DiceExpression<'_>, Expression<'_>>
+{
+	match &mut expression
+	{
+		// `Expression` implements `Drop`, so the dice expression cannot move
+		// out of it; swap in a childless placeholder instead.
+		Expression::Dice(dice) =>
+		{
+			let placeholder = DiceExpression::Custom(CustomDice {
+				count: Box::new(Expression::Constant(Constant {
+					value: 0,
+					span: SourceSpan::SYNTHETIC
+				})),
+				faces: Vec::new(),
+				span: SourceSpan::SYNTHETIC
+			});
+			Ok(std::mem::replace(dice, placeholder))
+		},
+		_ => Err(expression)
+	}
+}
+
+/// Answer whether an expression may stand bare in place of a call, as a
+/// primary expression whose meaning no neighbor can change: anything but an
+/// arithmetic expression, or a negative constant, which a `^` after it would
+/// bind more tightly than its sign, e.g., `-1 ^ 2`.
+///
+/// # Parameters
+/// - `expression`: The expression.
+///
+/// # Returns
+/// `true` if the expression may stand bare, `false` if it must be grouped.
+fn stands_bare(expression: &Expression<'_>) -> bool
+{
+	match expression
+	{
+		Expression::Constant(constant) => constant.value >= 0,
+		Expression::Arithmetic(_) => false,
+		_ => true
+	}
+}
+
 /// Resume [`Goal::StandardDice`] with the outcome of the dice count.
 ///
 /// [`Goal::StandardDice`] is `separated_pair(context(DICE_COUNT_CONTEXT,
@@ -4164,6 +4881,9 @@ pub(crate) enum Repair
 	/// | [`Site::Predicate`]   | `=` and a threshold, [`PLACEHOLDER_THRESHOLD`] |
 	/// | [`Site::RangeOperator`] | `..=`                                   |
 	/// | [`Site::Times`]       | `time` after the count `1`, and `times` otherwise |
+	/// | [`Site::Comma`]       | `,`, before another argument              |
+	/// | [`Site::TrailingComma`] | nothing: the comma is retracted, as though the source lacked it |
+	/// | [`Site::UngroupedCall`] | `(` before the call, and then `)` after it, at a [`Site::Closer`] |
 	/// | [`Site::TrailingInput`] | nothing: the trailing input is discarded |
 	///
 	/// At [`Site::Goal`], the edit must separate the operand from a `-` just
@@ -4256,7 +4976,41 @@ pub(crate) enum Repair
 		/// The byte offset of the end of the name, which must exceed the start
 		/// of the name, and not exceed its end.
 		end: usize
-	}
+	},
+
+	/// Only at [`Site::Goal`], where an expression may begin: read the word
+	/// that begins at the [position](FailureSite::position) of the failure and
+	/// ends at `end` as the keyword of a call of the specified direction, as
+	/// though the source had the keyword there, e.g., `highest(1, 2)` for
+	/// `max(1, 2)`, and parse the goal again. A `(` must follow the word, after
+	/// any [whitespace between tokens](crate::parser::is_token_space).
+	/// Elsewhere, or otherwise, this is the same as [`Stop`](Repair::Stop).
+	///
+	/// # Panics
+	/// If `end` is not a character boundary of the source.
+	Call
+	{
+		/// The byte offset of the end of the word, which must exceed the
+		/// position of the failure.
+		end: usize,
+
+		/// The direction of the call.
+		direction: Direction
+	},
+
+	/// Only at a [`Site::Comma`] of a [lone argument](LoneArgument): replace
+	/// the call with its only argument, grouped unless it may [stand
+	/// bare](LoneArgument::bare), and continue after the `)` of the call,
+	/// e.g., `(1 + 2) * 3` for `highest(1 + 2) * 3`. Elsewhere, this is the
+	/// same as [`Stop`](Repair::Stop).
+	Unwrap,
+
+	/// Only at a [`Site::Comma`] of a [lone argument](LoneArgument) that is a
+	/// dice expression: replace the call with its only argument and a keep
+	/// clause of the direction of the call, without a count, and continue
+	/// after the `)` of the call, e.g., `4D6 keep highest` for `highest(4D6)`.
+	/// Elsewhere, this is the same as [`Stop`](Repair::Stop).
+	Keep
 }
 
 /// The kind of a [failure](FailureSite): where in the grammar the parse could
@@ -4282,7 +5036,12 @@ pub(crate) enum Site
 		/// reroll clause, a threshold or an endpoint, whose literal is signed,
 		/// as that of [standard faces](Goal::Faces) is, so that a `-` just
 		/// before the failure is its sign.
-		operand: bool
+		operand: bool,
+
+		/// The byte offset of the `(` of the call, if the failure lies in an
+		/// argument of a call of `highest` or `lowest`, as the innermost
+		/// production that cuts.
+		call: Option<usize>
 	},
 
 	/// A comma after a formal parameter is not followed by another.
@@ -4370,8 +5129,137 @@ pub(crate) enum Site
 		singular: bool
 	},
 
+	/// Neither a `,` nor the closing `)` follows an argument of a call of
+	/// `highest` or `lowest`, where one must: a `,` after its first argument,
+	/// since a call has two or more, and either after a later one. A `,` is
+	/// missing after the first argument, or wherever the next token [begins an
+	/// operand](crate::parser::begins_operand), as another argument would;
+	/// otherwise, the failure is at a [`Site::Closer`] for the `)`.
+	Comma
+	{
+		/// The byte offset of the `(` of the call.
+		opener: usize,
+
+		/// The call, if the `)` follows its only argument.
+		lone: Option<LoneArgument>
+	},
+
+	/// A `,` after an argument of a call is followed by the `)` of the call,
+	/// rather than by another argument. Only a [recovering](Recovery::ENABLED)
+	/// parse looks for this failure, since the ordinary parse fails at the `)`,
+	/// where it expects an argument, at a [goal](Site::Goal). The
+	/// [position](FailureSite::position) of the failure is that of the comma.
+	/// Since the ordinary parse does not fail here,
+	/// [declining](Repair::Stop) the repair does not end recovery.
+	TrailingComma,
+
+	/// A call of `highest` or `lowest` stands ungrouped where only a constant,
+	/// a variable, a binding, or a group may, e.g., `3Dhighest(1, 2)` or `4D6
+	/// drop lowest lowest({x}, 2)`. Only a [recovering](Recovery::ENABLED)
+	/// parse looks for this failure, since the ordinary parse fails where the
+	/// call stands, or, where the operand is optional, after the clause, e.g.,
+	/// as trailing input. The [position](FailureSite::position) of the failure
+	/// is that of the keyword of the call. Since the ordinary parse does not
+	/// fail here, [declining](Repair::Stop) the repair does not end recovery.
+	UngroupedCall
+	{
+		/// The operand that the call stands as.
+		operand: Operand
+	},
+
 	/// A complete function is followed by input that is not whitespace.
 	TrailingInput
+}
+
+/// The operand that a [call](Site::UngroupedCall) stands as, ungrouped, where
+/// only a constant, a variable, a binding, or a group may.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Operand
+{
+	/// The dice count of a dice expression.
+	DiceCount,
+
+	/// The standard faces of a dice expression.
+	Faces,
+
+	/// The count of a drop clause.
+	DropCount,
+
+	/// The count of a keep clause.
+	KeepCount,
+
+	/// The threshold of the comparison of a reroll clause.
+	Threshold,
+
+	/// The start of the range of a reroll clause.
+	RangeStart,
+
+	/// The end of the range of a reroll clause.
+	RangeEnd,
+
+	/// The count of the limit of a reroll clause.
+	Limit
+}
+
+impl Operand
+{
+	/// Answer the operand that an atom stands as, by the frame that awaits it.
+	///
+	/// # Parameters
+	/// - `frame`: The frame on top of the stack, which awaits the atom.
+	///
+	/// # Returns
+	/// The operand.
+	fn of(frame: Option<&Frame<'_>>) -> Self
+	{
+		match frame
+		{
+			Some(Frame::DiceFaces { .. } | Frame::StandardFaces(_)) =>
+			{
+				Operand::Faces
+			},
+			Some(
+				Frame::DiceDrop { kind, .. }
+				| Frame::DropExpression { kind, .. }
+			) if kind.keeps() => Operand::KeepCount,
+			Some(Frame::DiceDrop { .. } | Frame::DropExpression { .. }) =>
+			{
+				Operand::DropCount
+			},
+			Some(Frame::RerollFirst {
+				comparison: Some(_),
+				..
+			}) => Operand::Threshold,
+			Some(Frame::RerollFirst { .. }) => Operand::RangeStart,
+			Some(Frame::RerollEnd { .. }) => Operand::RangeEnd,
+			Some(Frame::RerollCount(_)) => Operand::Limit,
+			_ => Operand::DiceCount
+		}
+	}
+}
+
+/// A call of `highest` or `lowest` whose `)` follows its only argument, which
+/// a [`Site::Comma`] presents.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LoneArgument
+{
+	/// The byte offset of the start of the call, at its keyword.
+	pub(crate) call: usize,
+
+	/// The span of the argument, as written, from its first token to its
+	/// last.
+	pub(crate) argument: SourceSpan,
+
+	/// The direction of the call.
+	pub(crate) direction: Direction,
+
+	/// Whether the argument is a dice expression, which a
+	/// [keep](Repair::Keep) may replace the call with.
+	pub(crate) dice: bool,
+
+	/// Whether the argument may stand bare in place of the call, as a primary
+	/// expression whose meaning no neighbor can change, rather than grouped.
+	pub(crate) bare: bool
 }
 
 impl Site
@@ -4461,6 +5349,7 @@ impl Role
 			| Frame::ExponentPower(_)
 			| Frame::RerollFirst { .. }
 			| Frame::RerollEnd { .. }
+			| Frame::CallArgument { .. }
 			| Frame::GroupExpression { .. }
 			| Frame::BindingExpression { .. }
 			| Frame::RangeStart { .. }
@@ -4469,7 +5358,9 @@ impl Role
 			| Frame::BinaryFirst(_)
 			| Frame::UnaryExponent { .. }
 			| Frame::ExponentBase
+			| Frame::PrimaryCall(_)
 			| Frame::AtomGroup { .. }
+			| Frame::AtomCall(_)
 			| Frame::DiceCount { .. }
 			| Frame::StandardCount(_)
 			| Frame::StandardFaces(_)
@@ -4518,6 +5409,20 @@ enum Overlay<'src>
 
 		/// The byte offset of the end of the name.
 		end: usize
+	},
+
+	/// The keyword of a call, `highest` or `lowest`, in place of the word that
+	/// spans a range of the source, as a [call](Repair::Call) supplies it.
+	Call
+	{
+		/// The byte offset of the start of the word.
+		at: usize,
+
+		/// The byte offset of the end of the word.
+		end: usize,
+
+		/// The direction of the call.
+		direction: Direction
 	},
 
 	/// A braced name whose `}` a [break](Repair::Break) supplied, as the first
@@ -4577,7 +5482,15 @@ struct Recoverer<'src, 'p, R>
 	/// The input from which to parse the function again, if a repair of the
 	/// name at the start of its body made the name its first formal parameter.
 	/// The engine restarts before its next step.
-	restart: Option<Span<'src>>
+	restart: Option<Span<'src>>,
+
+	/// The byte offsets of the `(` of the call and of the last `,` that a
+	/// repair supplied between the arguments of a call. If the argument after
+	/// it fails without reading anything, e.g., at a misplaced clause that a
+	/// repair read past without consuming, a `,` is missing there again, and
+	/// supplying another would never end, so the engine stops recovering
+	/// instead.
+	comma: Option<(usize, usize)>
 }
 
 impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
@@ -4600,7 +5513,8 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 			operator: None,
 			calls: Vec::new(),
 			barriers: Vec::new(),
-			restart: None
+			restart: None,
+			comma: None
 		}
 	}
 
@@ -4738,11 +5652,17 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 			stack[anchor],
 			Frame::RerollFirst { .. } | Frame::RerollEnd { .. }
 		);
+		let call = match &stack[anchor]
+		{
+			Frame::CallArgument { opener, .. } => Some(*opener),
+			_ => None
+		};
 		let site = FailureSite {
 			site: Site::Goal {
 				goal,
 				range,
-				operand
+				operand,
+				call
 			},
 			error: settle(e.clone(), stack, self.root)
 		};
@@ -4756,6 +5676,10 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 					at,
 					value: PLACEHOLDER_OPERAND
 				});
+			},
+			Repair::Call { end, direction } if end > at =>
+			{
+				self.overlay = Some(Overlay::Call { at, end, direction });
 			},
 			Repair::Variable { end } if end > at =>
 			{
@@ -5074,6 +5998,54 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		))
 	}
 
+	/// Answer whether the [overlaid](Overlay::Call) keyword of a call begins at
+	/// the specified input.
+	///
+	/// # Parameters
+	/// - `input`: The input.
+	///
+	/// # Returns
+	/// `true` if the overlay is the keyword of a call that begins at `input`,
+	/// `false` otherwise.
+	fn overlays_call(&self, input: Span<'src>) -> bool
+	{
+		matches!(
+			self.overlay,
+			Some(Overlay::Call { at, .. }) if at == input.location_offset()
+		)
+	}
+
+	/// Read the [overlaid](Overlay::Call) keyword of a call, if it begins at
+	/// the specified input, and a `(` follows the word that it replaces, after
+	/// any whitespace. Otherwise, the overlay remains unread, so that the
+	/// failure of the goal stops recovery.
+	///
+	/// # Parameters
+	/// - `input`: The input.
+	///
+	/// # Returns
+	/// The input after the word that the keyword replaces, and the direction
+	/// of the call, if the overlay begins at `input`, and a `(` follows it.
+	fn take_call(
+		&mut self,
+		input: Span<'src>
+	) -> Option<(Span<'src>, Direction)>
+	{
+		let Some(Overlay::Call { at, end, direction }) = self.overlay
+		else
+		{
+			return None;
+		};
+		let after = input.take_from(end - at);
+		if at != input.location_offset()
+			|| !skip_whitespace(after).fragment().starts_with('(')
+		{
+			return None;
+		}
+		self.overlay = None;
+		Some((after, direction))
+	}
+
 	/// Read the [overlaid](Overlay::Variable) variable, if it begins at the
 	/// specified input.
 	///
@@ -5291,7 +6263,9 @@ fn unwind<'src>(
 		},
 		Frame::BinaryFirst(_)
 		| Frame::UnaryNegation(_)
-		| Frame::ExponentBase => e,
+		| Frame::ExponentBase
+		| Frame::PrimaryCall(_)
+		| Frame::AtomCall(_) => e,
 		Frame::BinaryRight { input, .. } | Frame::ExponentPower(input) =>
 		{
 			cut_error(with_context(*input, RIGHT_OPERAND_CONTEXT, e))
@@ -5371,6 +6345,10 @@ fn unwind<'src>(
 		Frame::RerollCount(input) =>
 		{
 			with_context(*input, REROLL_COUNT_CONTEXT, e)
+		},
+		Frame::CallArgument { input, .. } =>
+		{
+			cut_error(with_context(*input, ARGUMENT_CONTEXT, e))
 		},
 	}
 }

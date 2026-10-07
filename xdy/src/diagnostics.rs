@@ -59,20 +59,21 @@
 
 use std::{
 	borrow::Cow,
-	collections::HashSet,
+	collections::{HashMap, HashSet},
 	fmt::{self, Display, Formatter},
 	iter
 };
 
 use crate::{
 	CompilationError, Parser, Validator,
-	ast::{Event, Expression, Function, Node, Walk},
+	ast::{Direction, Event, Expression, Function, Node, Walk},
 	parser::{
-		FailureSite, NomErrorKind, PLACEHOLDER_OPERAND, PLACEHOLDER_THRESHOLD,
-		REROLL_RANGE_END_CONTEXT, REROLL_RANGE_START_CONTEXT,
-		REROLL_THRESHOLD_CONTEXT, Recovery, Repair, Site, begins_verb,
-		canonical_name, is_bare_word_continue, is_bare_word_start,
-		is_token_space, unclosed_name_ends
+		FailureSite, LoneArgument, NomErrorKind, Operand, PLACEHOLDER_OPERAND,
+		PLACEHOLDER_THRESHOLD, REROLL_RANGE_END_CONTEXT,
+		REROLL_RANGE_START_CONTEXT, REROLL_THRESHOLD_CONTEXT, Recovery, Repair,
+		Site, Span, begins_operand, begins_verb, canonical_name,
+		is_bare_word_continue, is_bare_word_start, is_token_space, token,
+		unclosed_name_ends
 	},
 	span::SourceSpan
 };
@@ -219,6 +220,49 @@ pub enum DiagnosticKind
 	/// # Examples
 	/// `4D6 reroll = 1 2`, `4D6 reroll = 1 ∞`
 	MissingRerollTimes,
+
+	/// A call names a function that the language spells otherwise: `max` for
+	/// `highest`, or `min` for `lowest`.
+	///
+	/// # Examples
+	/// `max(1D20, 1D20)`, `min({POW} * 5, 99)`
+	UnknownFunction
+	{
+		/// The name of the function, as written.
+		name: String
+	},
+
+	/// A call of `highest` or `lowest` has only one argument, whose greatest
+	/// or least is itself. Its argument is a value, not a pool of dice, so
+	/// `highest(4D6)` is the sum of `4D6`, not its highest die.
+	///
+	/// # Examples
+	/// `highest(4D6)`, `lowest({x} + 1)`
+	LoneArgument,
+
+	/// Two arguments of a call of `highest` or `lowest` lack the `,` between
+	/// them.
+	///
+	/// # Examples
+	/// `highest(1D20 1D20)`, `lowest(1, 2 3)`
+	MissingComma,
+
+	/// The last argument of a call of `highest` or `lowest` is followed by a
+	/// `,`.
+	///
+	/// # Examples
+	/// `highest(1D20, 1D20,)`
+	TrailingComma,
+
+	/// A call of `highest` or `lowest` stands ungrouped as a dice count, the
+	/// faces of dice, the count of a drop, keep, or reroll clause, or an
+	/// operand of the predicate of a reroll clause, where only a constant, a
+	/// variable, a binding, or a group may.
+	///
+	/// # Examples
+	/// `3Dhighest({x}, 4)`, `4D6 drop lowest lowest({x}, 2)`,
+	/// `highest(1, 2)D6`
+	UngroupedCall,
 
 	/// A parameter definition is missing the `:` separator and body.
 	///
@@ -377,6 +421,14 @@ impl Display for DiagnosticKind
 				write!(f, "missing reroll range end")
 			},
 			Self::MissingRerollTimes => write!(f, "missing `times`"),
+			Self::UnknownFunction { name } =>
+			{
+				write!(f, "unknown function `{}`", name)
+			},
+			Self::LoneArgument => write!(f, "lone argument"),
+			Self::MissingComma => write!(f, "missing `,`"),
+			Self::TrailingComma => write!(f, "trailing `,`"),
+			Self::UngroupedCall => write!(f, "ungrouped call"),
 			Self::IncompleteParameterDefinition =>
 			{
 				write!(f, "incomplete parameter definition")
@@ -622,6 +674,11 @@ const THRESHOLD_KINDS: &[&str] = &["integer", "{variable}", "(expression)"];
 /// Valid kinds for the operator of the range of a reroll clause.
 const RANGE_OPERATOR_KINDS: &[&str] = &["..", "..="];
 
+/// The names that other languages give the functions of the language, and the
+/// direction of the call that the language spells them as.
+const MISNAMED_CALLS: &[(&str, Direction)] =
+	&[("max", Direction::Highest), ("min", Direction::Lowest)];
+
 ////////////////////////////////////////////////////////////////////////////////
 //                              Error analysis.                               //
 ////////////////////////////////////////////////////////////////////////////////
@@ -701,7 +758,23 @@ struct Doctor<'src>
 
 	/// The byte offsets of the start and end of the last run of unopened
 	/// closing delimiters that fixes discarded, separated by whitespace only.
-	skipped: Option<(usize, usize)>
+	skipped: Option<(usize, usize)>,
+
+	/// For each call that a fix groups, whose `)` the parser has yet to
+	/// supply, from the outermost: the byte offset of the call, where the
+	/// fix supplied the `(`, and the index of its diagnostic, to whose fix
+	/// the `)` belongs.
+	wraps: Vec<(usize, usize)>,
+
+	/// For each call whose name a fix replaced, as `highest` for `max`: the
+	/// byte offset of the call, and the index of the fix, which a fix that
+	/// replaces the whole call supersedes.
+	renames: HashMap<usize, usize>,
+
+	/// The byte offset of the `)` after the last trailing comma that a fix
+	/// removed, and the index of the fix, which a fix that replaces the `)`
+	/// supersedes.
+	trailing_comma: Option<(usize, usize)>
 }
 
 /// The state of a [diagnosis](Doctor).
@@ -783,7 +856,10 @@ impl<'src> Doctor<'src>
 			trailing: false,
 			reread: None,
 			misplaced_clause: None,
-			skipped: None
+			skipped: None,
+			wraps: Vec::new(),
+			renames: HashMap::new(),
+			trailing_comma: None
 		}
 	}
 
@@ -891,6 +967,79 @@ impl<'src> Doctor<'src>
 			self.fixes.extend(first.edits.iter().cloned());
 		}
 		self.diagnostics.push(diagnostic);
+	}
+
+	/// Supersede an earlier fix with a later one whose edit replaces the
+	/// region of the source that the earlier one edits, so that the edits of
+	/// the fixes do not overlap. The earlier fix becomes an empty insertion at
+	/// the start of the later edit, which therefore applies first, and changes
+	/// nothing.
+	///
+	/// # Parameters
+	/// - `index`: The index of the earlier fix.
+	/// - `at`: The byte offset of the start of the later edit.
+	fn supersede(&mut self, index: usize, at: usize)
+	{
+		self.fixes[index] = insertion(at, "");
+	}
+
+	/// Diagnose a call that stands ungrouped where only an atom may, whose fix
+	/// groups it, and record the diagnostic, with the `(` of its fix, in source
+	/// order: after the diagnostics of the call's own failures, if the parser
+	/// read the call before it reached the failure, as it does for a dice
+	/// count. The parser supplies the `)` later, at a [`Site::Closer`], which
+	/// [`close_wrap`](Self::close_wrap) adds to the fix.
+	///
+	/// # Parameters
+	/// - `pos`: The byte offset of the call.
+	/// - `operand`: The operand that the call stands as.
+	fn wrap(&mut self, pos: usize, operand: Operand)
+	{
+		self.finish_compound();
+		let diagnostic = make_ungrouped_call(self.source, pos, operand);
+		let index = self
+			.diagnostics
+			.partition_point(|diagnostic| diagnostic.span.start <= pos);
+		debug_assert!(
+			self.wraps.last().is_none_or(|&(_, last)| last < index),
+			"a call grouped later lies within one grouped earlier"
+		);
+		self.fixes
+			.extend(diagnostic.suggestions[0].edits.iter().cloned());
+		self.diagnostics.insert(index, diagnostic);
+		self.wraps.push((pos, index));
+	}
+
+	/// Supply the `)` of the innermost call that a fix groups, if the parser
+	/// needs it at the specified failure.
+	///
+	/// # Parameters
+	/// - `site`: The failure.
+	///
+	/// # Returns
+	/// `true` if the doctor supplied the `)`, `false` otherwise.
+	fn close_wrap(&mut self, site: &FailureSite<'src>) -> bool
+	{
+		let Some(&(call, index)) = self.wraps.last()
+		else
+		{
+			return false;
+		};
+		if site.site
+			!= (Site::Closer {
+				opener: call,
+				closer: ')'
+			})
+		{
+			return false;
+		}
+		self.wraps.pop();
+		let edit = insertion(site.position(), ")");
+		self.diagnostics[index].suggestions[0]
+			.edits
+			.push(edit.clone());
+		self.fixes.push(edit);
+		true
 	}
 
 	/// Answer the nearest character before a position that is not whitespace,
@@ -1065,6 +1214,34 @@ impl<'src> Doctor<'src>
 			);
 		}
 
+		// Pattern: a call whose `,` or `)` is missing, or that has a lone
+		// argument, or a trailing comma.
+		if let Some(analysis) = self.incomplete_call(site, at_eof)
+		{
+			return analysis;
+		}
+
+		// Pattern: a call of `max` or `min`, where an expression may begin,
+		// which the language spells `highest` or `lowest`.
+		if let Site::Goal { operand: false, .. } = site.site
+			&& expects_expression
+			&& let Some(&(name, direction)) =
+				MISNAMED_CALLS.iter().find(|(name, _)| {
+					source[pos..].strip_prefix(name).is_some_and(|after| {
+						after
+							.trim_start_matches(is_token_space)
+							.starts_with('(')
+					})
+				})
+		{
+			let end = pos + name.len();
+			self.renames.insert(pos, self.fixes.len());
+			return Analysis::Diagnosed(
+				make_unknown_function(name, direction, pos),
+				Repair::Call { end, direction }
+			);
+		}
+
 		// Pattern: a drop clause that follows no dice expression, e.g.,
 		// `3 drop lowest`, whose `d` the parser read as a dice operator, or
 		// `1 + drop lowest`, where an expression was expected, rather than a
@@ -1233,7 +1410,26 @@ impl<'src> Doctor<'src>
 				);
 			}
 			// Opening delimiter with no expression inside:
-			// e.g., `(` → `(0)`, `[` → `[0:0]`, `{` → `{x}`.
+			// e.g., `(` → `(0)`, `[` → `[0:0]`, `{` → `{x}`; or a call without
+			// its arguments, e.g., `highest(` → `highest(0, 0)`, or without an
+			// argument after a comma, e.g., `highest(1,` → `highest(1, 0)`.
+			if let Site::Goal {
+				call: Some(opener), ..
+			} = site.site
+			{
+				let shape = match prev
+				{
+					'(' => Some(Shape::Arguments),
+					',' => Some(Shape::Argument),
+					_ => None
+				};
+				if let Some(shape) = shape
+				{
+					return Analysis::Compound(Compound::new(
+						shape, opener, pos
+					));
+				}
+			}
 			let shape = match (prev, site.site)
 			{
 				('(', Site::Goal { .. }) => Some(Shape::Group),
@@ -1369,6 +1565,93 @@ impl<'src> Doctor<'src>
 			}
 		};
 		Analysis::Diagnosed(diagnostic, Repair::Stop)
+	}
+
+	/// Diagnose a call of `highest` or `lowest` that lacks the `,` between two
+	/// arguments, or after its only argument, or that has a trailing comma.
+	///
+	/// # Parameters
+	/// - `site`: The failure.
+	/// - `at_eof`: Whether the failure is at the end of the input.
+	///
+	/// # Returns
+	/// The analysis, if the failure is one of these.
+	fn incomplete_call(
+		&mut self,
+		site: &FailureSite<'src>,
+		at_eof: bool
+	) -> Option<Analysis>
+	{
+		let source = self.source;
+		let pos = site.position();
+		match site.site
+		{
+			Site::TrailingComma =>
+			{
+				let close = source.len()
+					- source[pos + 1..]
+						.trim_start_matches(is_token_space)
+						.len();
+				self.trailing_comma = Some((close, self.fixes.len()));
+				Some(Analysis::Diagnosed(
+					make_trailing_comma(pos, close),
+					Repair::Fix
+				))
+			},
+			Site::Comma {
+				opener,
+				lone: Some(lone)
+			} =>
+			{
+				let diagnostic = make_lone_argument(source, lone, opener, pos);
+				// The fix replaces the whole call, and so supersedes any fix
+				// that renamed it, or that removed a trailing comma before its
+				// `)`.
+				if let Some(index) = self.renames.remove(&lone.call)
+				{
+					self.supersede(index, lone.call);
+				}
+				if let Some((close, index)) = self.trailing_comma
+					&& close == pos
+				{
+					self.trailing_comma = None;
+					self.supersede(index, lone.argument.end);
+				}
+				let repair = if lone.dice
+				{
+					Repair::Keep
+				}
+				else
+				{
+					Repair::Unwrap
+				};
+				Some(Analysis::Diagnosed(diagnostic, repair))
+			},
+			// Only the first argument lacks its `,` at the end of the input,
+			// since after a later one the `)` is missing instead, so supply
+			// a second argument too.
+			Site::Comma { opener, .. } if at_eof => Some(Analysis::Compound(
+				Compound::new(Shape::SecondArgument, opener, pos)
+			)),
+			Site::Comma { .. } if begins_operand(&source[pos..]) =>
+			{
+				let (last, last_pos) = self.preceding(pos)?;
+				// The `,` follows the argument, unless a fix supplied the end
+				// of the argument after its last token in the source, e.g.,
+				// the predicate of a reroll clause, which the `,` follows too.
+				let after = last_pos + last.len_utf8();
+				let after = match self.fixes.last()
+				{
+					Some(edit) if edit.span.start > after => pos,
+					_ => after
+				};
+				Some(Analysis::Diagnosed(
+					make_missing_comma(source, after, pos),
+					Repair::Fix
+				))
+			},
+			_ => None
+		}
 	}
 
 	/// Diagnose a reroll clause that lacks its predicate, an operand of its
@@ -1758,6 +2041,15 @@ impl<'src> Recovery<'src> for Doctor<'src>
 			}
 			self.finish_compound();
 		}
+		if let Site::UngroupedCall { operand } = site.site
+		{
+			self.wrap(site.position(), operand);
+			return Repair::Fix;
+		}
+		if self.close_wrap(site)
+		{
+			return Repair::Fix;
+		}
 		// The faces of the dice expression that a fix supplied before a
 		// misplaced `drop` fail at once, and the fix already accounts for them.
 		if let Some(drop_pos) = self.reread.take()
@@ -1967,7 +2259,17 @@ enum Shape
 	Variable,
 
 	/// The end of a range, after its `:`: `0]`.
-	RangeEnd
+	RangeEnd,
+
+	/// The arguments of a call, after its `(`: `0, 0)`.
+	Arguments,
+
+	/// An argument of a call, after a `,`: `0)`.
+	Argument,
+
+	/// The second argument of a call, after its first, at the end of the
+	/// input: `, 0)`.
+	SecondArgument
 }
 
 /// A [token](Token) that a [compound fix](Compound) may supply, and the
@@ -2003,6 +2305,14 @@ impl Token
 			placeholder: Some((description, OPERAND_KINDS))
 		}
 	}
+
+	/// The `,` between the arguments of a call, needed at a
+	/// [comma](Site::Comma).
+	const COMMA: Self = Self {
+		text: ", ",
+		needed_at: |site| matches!(site, Site::Comma { .. }),
+		placeholder: None
+	};
 
 	/// A closing delimiter, needed at a [closer](Site::Closer).
 	///
@@ -2059,13 +2369,26 @@ impl Shape
 		];
 		const RANGE_END: &[Token] =
 			&[Token::operand("range end"), Token::closer("]")];
+		const ARGUMENTS: &[Token] = &[
+			Token::operand("argument"),
+			Token::COMMA,
+			Token::operand("argument"),
+			Token::closer(")")
+		];
+		const ARGUMENT: &[Token] =
+			&[Token::operand("argument"), Token::closer(")")];
+		const SECOND_ARGUMENT: &[Token] =
+			&[Token::COMMA, Token::operand("argument"), Token::closer(")")];
 		match self
 		{
 			Shape::Group => GROUP,
 			Shape::Range => RANGE,
 			Shape::CustomFaces => CUSTOM_FACES,
 			Shape::Variable => VARIABLE,
-			Shape::RangeEnd => RANGE_END
+			Shape::RangeEnd => RANGE_END,
+			Shape::Arguments => ARGUMENTS,
+			Shape::Argument => ARGUMENT,
+			Shape::SecondArgument => SECOND_ARGUMENT
 		}
 	}
 
@@ -2087,7 +2410,10 @@ impl Shape
 			(Shape::Range, _) => "range start and end",
 			(Shape::CustomFaces, _) => "face value",
 			(Shape::Variable, _) => "identifier",
-			(Shape::RangeEnd, _) => "range end"
+			(Shape::RangeEnd, _) => "range end",
+			(Shape::Arguments, 1) | (Shape::Argument, _) => "argument",
+			(Shape::Arguments, _) => "arguments",
+			(Shape::SecondArgument, _) => "second argument"
 		}
 	}
 }
@@ -2205,7 +2531,13 @@ impl Compound
 			let closer = tokens[tokens.len() - 1].text;
 			let description = match self.shape
 			{
-				Shape::RangeEnd => "insert range end and `]`".to_string(),
+				Shape::RangeEnd
+				| Shape::Arguments
+				| Shape::Argument
+				| Shape::SecondArgument =>
+				{
+					format!("insert {} and `{}`", self.shape.what(0), closer)
+				},
 				_ => format!("insert expression and `{}`", closer)
 			};
 			Diagnostic {
@@ -3034,6 +3366,236 @@ fn make_missing_times(
 		suggestions: vec![Suggestion {
 			description: format!("insert `{word}`"),
 			edits: vec![padded_insertion(source, pos, word, None)]
+		}]
+	}
+}
+
+/// Create a diagnostic for a call of a function that the language spells
+/// otherwise, `max` or `min`. The fix replaces the name with the keyword of
+/// the call, `highest` or `lowest`.
+///
+/// # Parameters
+/// - `name`: The name, as written.
+/// - `direction`: The direction of the call that the language spells it as.
+/// - `pos`: The byte offset of the name.
+///
+/// # Returns
+/// A diagnostic with an `UnknownFunction` kind and a suggestion that replaces
+/// the name.
+fn make_unknown_function(
+	name: &str,
+	direction: Direction,
+	pos: usize
+) -> Diagnostic
+{
+	let keyword = direction.keyword();
+	Diagnostic {
+		kind: DiagnosticKind::UnknownFunction {
+			name: name.to_string()
+		},
+		span: SourceSpan {
+			start: pos,
+			end: pos + name.len()
+		},
+		message: format!("unknown function `{name}`; use `{keyword}`"),
+		related: vec![],
+		suggestions: vec![Suggestion {
+			description: format!("replace `{name}` with `{keyword}`"),
+			edits: vec![replacement(pos, pos + name.len(), keyword)]
+		}]
+	}
+}
+
+/// Create a diagnostic for a call of one argument. For a dice argument, the
+/// first fix keeps the highest or lowest die, as the author most likely
+/// meant, since the argument is a value, not a pool of dice, e.g., `4D6 keep
+/// highest` for `highest(4D6)`. Otherwise, the first fix replaces the call
+/// with its argument, grouped unless it may stand bare, e.g., `(1 + 2)` for
+/// `highest(1 + 2)`; for a dice argument, this is the second fix. The last fix
+/// inserts a second argument.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `lone`: The call.
+/// - `opener`: The byte offset of the `(` of the call.
+/// - `close`: The byte offset of the `)` of the call.
+///
+/// # Returns
+/// A diagnostic with a `LoneArgument` kind and its suggestions.
+fn make_lone_argument(
+	source: &str,
+	lone: LoneArgument,
+	opener: usize,
+	close: usize
+) -> Diagnostic
+{
+	let keyword = lone.direction.keyword();
+	let name_end = lone.call
+		+ source[lone.call..opener]
+			.trim_end_matches(is_token_space)
+			.len();
+	let argument = lone.argument;
+	let replace = |head: &str, tail: &str| {
+		vec![
+			replacement(lone.call, argument.start, head),
+			replacement(argument.end, close + 1, tail),
+		]
+	};
+	let mut suggestions = Vec::new();
+	if lone.dice
+	{
+		suggestions.push(Suggestion {
+			description: format!("keep the {keyword} die"),
+			edits: replace("", &format!(" keep {keyword}"))
+		});
+	}
+	suggestions.push(
+		if lone.bare
+		{
+			Suggestion {
+				description: "use the argument alone".into(),
+				edits: replace("", "")
+			}
+		}
+		else
+		{
+			Suggestion {
+				description: "use the argument alone, grouped".into(),
+				edits: replace("(", ")")
+			}
+		}
+	);
+	suggestions.push(Suggestion {
+		description: "insert a second argument".into(),
+		edits: vec![Edit {
+			span: SourceSpan {
+				start: argument.end,
+				end: argument.end
+			},
+			replacement: ", 0".into(),
+			placeholders: vec![Placeholder {
+				span: SourceSpan { start: 2, end: 3 },
+				description: "argument",
+				valid_kinds: OPERAND_KINDS
+			}]
+		}]
+	});
+	Diagnostic {
+		kind: DiagnosticKind::LoneArgument,
+		span: SourceSpan {
+			start: lone.call,
+			end: name_end
+		},
+		message: format!(
+			"`{keyword}` needs two or more arguments, but has only one"
+		),
+		related: vec![],
+		suggestions
+	}
+}
+
+/// Create a diagnostic for two arguments of a call that lack the `,` between
+/// them. The fix inserts the `,` just after the first argument.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `after`: The byte offset of the end of the first argument.
+/// - `pos`: The byte offset of the second argument.
+///
+/// # Returns
+/// A diagnostic with a `MissingComma` kind and a suggestion that inserts the
+/// `,`.
+fn make_missing_comma(source: &str, after: usize, pos: usize) -> Diagnostic
+{
+	// The second argument begins with a token that may begin an operand, so
+	// show just that token, e.g., `2` rather than `2)`.
+	let token =
+		token(Span::new(&source[pos..])).map_or("", |token| *token.fragment());
+	let comma = if after == pos { ", " } else { "," };
+	Diagnostic {
+		kind: DiagnosticKind::MissingComma,
+		span: SourceSpan {
+			start: pos,
+			end: pos + token.len()
+		},
+		message: format!("expected `,` before `{}`", token),
+		related: vec![],
+		suggestions: vec![Suggestion {
+			description: "insert `,`".into(),
+			edits: vec![insertion(after, comma)]
+		}]
+	}
+}
+
+/// Create a diagnostic for a `,` after the last argument of a call. The fix
+/// removes the `,`, and the whitespace after it.
+///
+/// # Parameters
+/// - `comma`: The byte offset of the `,`.
+/// - `close`: The byte offset of the `)` after it.
+///
+/// # Returns
+/// A diagnostic with a `TrailingComma` kind and a suggestion that removes the
+/// `,`.
+fn make_trailing_comma(comma: usize, close: usize) -> Diagnostic
+{
+	Diagnostic {
+		kind: DiagnosticKind::TrailingComma,
+		span: SourceSpan {
+			start: comma,
+			end: comma + 1
+		},
+		message: "expected another argument after `,`".into(),
+		related: vec![],
+		suggestions: vec![Suggestion {
+			description: "remove `,`".into(),
+			edits: vec![replacement(comma, close, "")]
+		}]
+	}
+}
+
+/// Create a diagnostic for a call that stands ungrouped where only an atom
+/// may. The fix encloses the call in parentheses; this supplies only the `(`,
+/// to which the doctor adds the `)` once the parser has read the call.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `pos`: The byte offset of the call.
+/// - `operand`: The operand that the call stands as.
+///
+/// # Returns
+/// A diagnostic with an `UngroupedCall` kind and a suggestion that inserts the
+/// `(`.
+fn make_ungrouped_call(source: &str, pos: usize, operand: Operand)
+-> Diagnostic
+{
+	// The name, as written, which a fix may have replaced, e.g., `max`.
+	let name = &source[pos..];
+	let name = &name[..name
+		.find(|c: char| c == '(' || is_token_space(c))
+		.unwrap_or(name.len())];
+	let what = match operand
+	{
+		Operand::DiceCount => "a dice count",
+		Operand::Faces => "the faces of dice",
+		Operand::DropCount => "the count of a drop clause",
+		Operand::KeepCount => "the count of a keep clause",
+		Operand::Threshold => "a reroll threshold",
+		Operand::RangeStart => "the start of a reroll range",
+		Operand::RangeEnd => "the end of a reroll range",
+		Operand::Limit => "the count of a reroll limit"
+	};
+	Diagnostic {
+		kind: DiagnosticKind::UngroupedCall,
+		span: SourceSpan {
+			start: pos,
+			end: pos + name.len()
+		},
+		message: format!("a call of `{name}` must be grouped as {what}"),
+		related: vec![],
+		suggestions: vec![Suggestion {
+			description: "enclose the call in parentheses".into(),
+			edits: vec![insertion(pos, "(")]
 		}]
 	}
 }

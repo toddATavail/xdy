@@ -143,6 +143,18 @@ fn test_parse_deep_reroll_count() { parse_deep(Nesting::RerollCount) }
 #[ignore = "stress: run with just stress"]
 fn test_parse_deep_reroll_clauses() { parse_deep(Nesting::RerollClauses) }
 
+/// Ensure that a deep chain of the first arguments of extrema parses on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_extremum_first() { parse_deep(Nesting::ExtremumFirst) }
+
+/// Ensure that a deep chain of the last arguments of extrema parses on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_extremum_last() { parse_deep(Nesting::ExtremumLast) }
+
 /// Ensure that a deep mixture of every nesting construct parses on a small
 /// stack.
 #[test]

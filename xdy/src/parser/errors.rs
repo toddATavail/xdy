@@ -324,6 +324,18 @@ where
 	}
 }
 
+/// The lexical expectations wherever an expression may begin.
+const EXPRESSION_EXPECTATIONS: &[&str] = &[
+	"`{`",
+	"`[`",
+	"`(`",
+	"`-`",
+	"`highest(`",
+	"`lowest(`",
+	"dice expression",
+	"integer"
+];
+
 /// Answer the lexical expectations for a given parse position classifier.
 ///
 /// # Parameters
@@ -342,28 +354,18 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 			"`[`",
 			"`(`",
 			"`-`",
+			"`highest(`",
+			"`lowest(`",
 			"dice expression",
 			"integer"
 		],
 		PARAMETER_CONTEXT => &["parameter definition"],
 		NEXT_PARAMETER_CONTEXT => &["`,`"],
-		FUNCTION_BODY_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
-		EXPRESSION_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
+		FUNCTION_BODY_CONTEXT => EXPRESSION_EXPECTATIONS,
+		EXPRESSION_CONTEXT => EXPRESSION_EXPECTATIONS,
 		RANGE_CONTEXT => &["`[`"],
-		RANGE_START_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
-		RANGE_END_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
+		RANGE_START_CONTEXT => EXPRESSION_EXPECTATIONS,
+		RANGE_END_CONTEXT => EXPRESSION_EXPECTATIONS,
 		DICE_CONTEXT => &["`{`", "`(`", "integer"],
 		STANDARD_DICE_CONTEXT => &["`{`", "`(`", "integer"],
 		CUSTOM_DICE_CONTEXT => &["`{`", "`(`", "integer"],
@@ -375,19 +377,13 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		GROUP_CONTEXT => &["`(`"],
 		VARIABLE_CONTEXT => &["`{`"],
 		BINDING_CONTEXT => &["binding"],
-		BINDING_EXPRESSION_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
+		BINDING_EXPRESSION_CONTEXT => EXPRESSION_EXPECTATIONS,
 		IDENTIFIER_CONTEXT => &["identifier"],
 		CONSTANT_CONTEXT => &["integer"],
 		CLOSING_PAREN_CONTEXT => &["`)`"],
 		CLOSING_BRACKET_CONTEXT => &["`]`"],
 		CLOSING_BRACE_CONTEXT => &["`}`"],
-		RIGHT_OPERAND_CONTEXT =>
-		{
-			&["`{`", "`[`", "`(`", "`-`", "dice expression", "integer"]
-		},
+		RIGHT_OPERAND_CONTEXT => EXPRESSION_EXPECTATIONS,
 		DROP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		KEEP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		REROLL_PREDICATE_CONTEXT => &[
@@ -400,6 +396,7 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		REROLL_RANGE_END_CONTEXT => &["`{`", "`(`", "integer"],
 		REROLL_COUNT_CONTEXT => &["`{`", "`(`", "integer"],
 		REROLL_TIMES_CONTEXT => &["`time`", "`times`"],
+		ARGUMENT_CONTEXT => EXPRESSION_EXPECTATIONS,
 		unexpected =>
 		{
 			unreachable!("unexpected context classifier: {}", unexpected)
@@ -520,3 +517,6 @@ pub(crate) const REROLL_COUNT_CONTEXT: &str = "reroll count";
 /// Context classifier for a missing `time` or `times` after the count of a
 /// reroll, or after `∞` or `unlimited`.
 pub(crate) const REROLL_TIMES_CONTEXT: &str = "reroll times";
+
+/// Context classifier for an argument of a call of `highest` or `lowest`.
+pub(crate) const ARGUMENT_CONTEXT: &str = "argument";

@@ -16,7 +16,10 @@
 //! mul_div_mod    ::= unary (('*' | '×' | '/' | '÷' | '%') unary)*
 //! unary          ::= '-' unary | exponent
 //! exponent       ::= primary ('^' unary)?
-//! primary        ::= range | dice | group | variable | binding | CONSTANT
+//! primary        ::= range | call | dice | group | variable | binding
+//!                  | CONSTANT
+//! call           ::= ('highest' | 'lowest') '(' expression (',' expression)+
+//!                    ')'
 //! group          ::= '(' expression ')'
 //! variable       ::= name
 //! binding        ::= name '@' '(' expression ')'
@@ -76,6 +79,21 @@
 //! `start..=end` inclusive; either is empty if its end precedes its start. The
 //! comparators `!=`, `<=`, and `>=` may also be written `≠`, `≤`, and `≥`.
 //!
+//! A call of `highest` or `lowest` answers the greatest or the least of the
+//! values of its arguments, two or more full expressions, each evaluated in
+//! turn, left to right, e.g., `highest(1D20, 1D20)` or `lowest({POW} * 5,
+//! 99)`. An argument is a value, not a pool of dice, so `highest(4D6, 10)`
+//! compares the sum of `4D6` with `10`; `4D6 keep highest` keeps the highest
+//! die. A call is a primary expression, which may stand wherever an expression
+//! may begin, but nowhere that only a constant, a variable, a binding, or a
+//! group may: as a dice count, faces, the count of a clause, or an operand of a
+//! reroll, it must be grouped, as a range must, e.g., `4D6 drop lowest
+//! (lowest({x}, 2))`. So a drop or keep clause still reads `lowest` or
+//! `highest` as its direction, whatever follows it: `4D6 drop lowest (2)` and
+//! `4D6 drop lowest(2)` both drop the lowest 2 dice. The keyword is
+//! recognized only where a `(` follows it, after any whitespace, so a name that
+//! begins with it, such as `lowest roll` without its braces, is no call.
+//!
 //! Tokens may be separated by spaces, horizontal tabs, line feeds, and carriage
 //! returns, but by no other whitespace; the [doctor](crate::diagnostics)
 //! replaces stray whitespace between tokens, such as U+00A0 NO-BREAK SPACE,
@@ -123,8 +141,8 @@ mod errors;
 
 pub use combinators::*;
 pub(crate) use engine::{
-	FailureSite, PLACEHOLDER_OPERAND, PLACEHOLDER_THRESHOLD, Recovery, Repair,
-	Site
+	FailureSite, LoneArgument, Operand, PLACEHOLDER_OPERAND,
+	PLACEHOLDER_THRESHOLD, Recovery, Repair, Site
 };
 #[cfg(test)]
 pub(crate) use engine::{

@@ -2425,3 +2425,1364 @@ Function {
         end: 18,
     },
 }
+
+highest(1, 2)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Constant(
+                    Constant {
+                        value: 1,
+                        span: SourceSpan {
+                            start: 8,
+                            end: 9,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 2,
+                        span: SourceSpan {
+                            start: 11,
+                            end: 12,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 13,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 13,
+    },
+}
+
+lowest(3, 1, 2)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Lowest,
+            arguments: [
+                Constant(
+                    Constant {
+                        value: 3,
+                        span: SourceSpan {
+                            start: 7,
+                            end: 8,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 1,
+                        span: SourceSpan {
+                            start: 10,
+                            end: 11,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 2,
+                        span: SourceSpan {
+                            start: 13,
+                            end: 14,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 15,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 15,
+    },
+}
+
+highest(-2147483648, 2147483647)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Constant(
+                    Constant {
+                        value: -2147483648,
+                        span: SourceSpan {
+                            start: 8,
+                            end: 19,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 2147483647,
+                        span: SourceSpan {
+                            start: 21,
+                            end: 31,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 32,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 32,
+    },
+}
+
+highest(1D6, 1D6)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 8,
+                                        end: 9,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 6,
+                                    span: SourceSpan {
+                                        start: 10,
+                                        end: 11,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 8,
+                                end: 11,
+                            },
+                        },
+                    ),
+                ),
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 13,
+                                        end: 14,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 6,
+                                    span: SourceSpan {
+                                        start: 15,
+                                        end: 16,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 13,
+                                end: 16,
+                            },
+                        },
+                    ),
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 17,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 17,
+    },
+}
+
+lowest(1D20, 1D20)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Lowest,
+            arguments: [
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 7,
+                                        end: 8,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 9,
+                                        end: 11,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 7,
+                                end: 11,
+                            },
+                        },
+                    ),
+                ),
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 13,
+                                        end: 14,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 15,
+                                        end: 17,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 13,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 18,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 18,
+    },
+}
+
+highest(1D20, 1D20, 1D20)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 8,
+                                        end: 9,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 10,
+                                        end: 12,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 8,
+                                end: 12,
+                            },
+                        },
+                    ),
+                ),
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 16,
+                                        end: 18,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 14,
+                                end: 18,
+                            },
+                        },
+                    ),
+                ),
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 20,
+                                        end: 21,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 22,
+                                        end: 24,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 20,
+                                end: 24,
+                            },
+                        },
+                    ),
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 25,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 25,
+    },
+}
+
+highest(3D6, 1D20, 10)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 3,
+                                    span: SourceSpan {
+                                        start: 8,
+                                        end: 9,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 6,
+                                    span: SourceSpan {
+                                        start: 10,
+                                        end: 11,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 8,
+                                end: 11,
+                            },
+                        },
+                    ),
+                ),
+                Dice(
+                    Standard(
+                        StandardDice {
+                            count: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 13,
+                                        end: 14,
+                                    },
+                                },
+                            ),
+                            faces: Constant(
+                                Constant {
+                                    value: 20,
+                                    span: SourceSpan {
+                                        start: 15,
+                                        end: 17,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 13,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+                Constant(
+                    Constant {
+                        value: 10,
+                        span: SourceSpan {
+                            start: 19,
+                            end: 21,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 22,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 22,
+    },
+}
+
+{x}: lowest({x} * 5, 99)
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "x",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+        ],
+    ),
+    body: Extremum(
+        Extremum {
+            direction: Lowest,
+            arguments: [
+                Arithmetic(
+                    Mul(
+                        Mul {
+                            left: Variable(
+                                Variable {
+                                    name: "x",
+                                    span: SourceSpan {
+                                        start: 12,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                            right: Constant(
+                                Constant {
+                                    value: 5,
+                                    span: SourceSpan {
+                                        start: 18,
+                                        end: 19,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 12,
+                                end: 19,
+                            },
+                        },
+                    ),
+                ),
+                Constant(
+                    Constant {
+                        value: 99,
+                        span: SourceSpan {
+                            start: 21,
+                            end: 23,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 5,
+                end: 24,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 24,
+    },
+}
+
+highest(1D6 - 2, 1)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Arithmetic(
+                    Sub(
+                        Sub {
+                            left: Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 8,
+                                                    end: 9,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 10,
+                                                    end: 11,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 8,
+                                            end: 11,
+                                        },
+                                    },
+                                ),
+                            ),
+                            right: Constant(
+                                Constant {
+                                    value: 2,
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 8,
+                                end: 15,
+                            },
+                        },
+                    ),
+                ),
+                Constant(
+                    Constant {
+                        value: 1,
+                        span: SourceSpan {
+                            start: 17,
+                            end: 18,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 19,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 19,
+    },
+}
+
+{x}: 4D6 drop lowest (lowest({x}, 2))
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "x",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+        ],
+    ),
+    body: Dice(
+        DropLowest(
+            DropLowest {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 4,
+                                span: SourceSpan {
+                                    start: 5,
+                                    end: 6,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 7,
+                                    end: 8,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 5,
+                            end: 8,
+                        },
+                    },
+                ),
+                drop: Some(
+                    Group(
+                        Group {
+                            expression: Extremum(
+                                Extremum {
+                                    direction: Lowest,
+                                    arguments: [
+                                        Variable(
+                                            Variable {
+                                                name: "x",
+                                                span: SourceSpan {
+                                                    start: 29,
+                                                    end: 32,
+                                                },
+                                            },
+                                        ),
+                                        Constant(
+                                            Constant {
+                                                value: 2,
+                                                span: SourceSpan {
+                                                    start: 34,
+                                                    end: 35,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    span: SourceSpan {
+                                        start: 22,
+                                        end: 36,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 21,
+                                end: 37,
+                            },
+                        },
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 5,
+                    end: 37,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 37,
+    },
+}
+
+lowest(highest(1D6, 5), 3)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Lowest,
+            arguments: [
+                Extremum(
+                    Extremum {
+                        direction: Highest,
+                        arguments: [
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 15,
+                                                    end: 16,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 17,
+                                                    end: 18,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 15,
+                                            end: 18,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Constant(
+                                Constant {
+                                    value: 5,
+                                    span: SourceSpan {
+                                        start: 20,
+                                        end: 21,
+                                    },
+                                },
+                            ),
+                        ],
+                        span: SourceSpan {
+                            start: 7,
+                            end: 22,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 3,
+                        span: SourceSpan {
+                            start: 24,
+                            end: 25,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 26,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 26,
+    },
+}
+
+highest(lowest(1D6, 4), 2)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Extremum(
+                    Extremum {
+                        direction: Lowest,
+                        arguments: [
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 15,
+                                                    end: 16,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 17,
+                                                    end: 18,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 15,
+                                            end: 18,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Constant(
+                                Constant {
+                                    value: 4,
+                                    span: SourceSpan {
+                                        start: 20,
+                                        end: 21,
+                                    },
+                                },
+                            ),
+                        ],
+                        span: SourceSpan {
+                            start: 8,
+                            end: 22,
+                        },
+                    },
+                ),
+                Constant(
+                    Constant {
+                        value: 2,
+                        span: SourceSpan {
+                            start: 24,
+                            end: 25,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 26,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 26,
+    },
+}
+
+highest({a}@(1D6), {a} + 1)
+=
+Function {
+    parameters: None,
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Binding(
+                    Binding {
+                        name: "a",
+                        name_span: SourceSpan {
+                            start: 9,
+                            end: 10,
+                        },
+                        expression: Dice(
+                            Standard(
+                                StandardDice {
+                                    count: Constant(
+                                        Constant {
+                                            value: 1,
+                                            span: SourceSpan {
+                                                start: 13,
+                                                end: 14,
+                                            },
+                                        },
+                                    ),
+                                    faces: Constant(
+                                        Constant {
+                                            value: 6,
+                                            span: SourceSpan {
+                                                start: 15,
+                                                end: 16,
+                                            },
+                                        },
+                                    ),
+                                    span: SourceSpan {
+                                        start: 13,
+                                        end: 16,
+                                    },
+                                },
+                            ),
+                        ),
+                        span: SourceSpan {
+                            start: 8,
+                            end: 17,
+                        },
+                    },
+                ),
+                Arithmetic(
+                    Add(
+                        Add {
+                            left: Variable(
+                                Variable {
+                                    name: "a",
+                                    span: SourceSpan {
+                                        start: 19,
+                                        end: 22,
+                                    },
+                                },
+                            ),
+                            right: Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 25,
+                                        end: 26,
+                                    },
+                                },
+                            ),
+                            span: SourceSpan {
+                                start: 19,
+                                end: 26,
+                            },
+                        },
+                    ),
+                ),
+            ],
+            span: SourceSpan {
+                start: 0,
+                end: 27,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 27,
+    },
+}
+
+lowest(1D6, 1D6) + highest(1D6, 1D6)
+=
+Function {
+    parameters: None,
+    body: Arithmetic(
+        Add(
+            Add {
+                left: Extremum(
+                    Extremum {
+                        direction: Lowest,
+                        arguments: [
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 7,
+                                                    end: 8,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 9,
+                                                    end: 10,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 7,
+                                            end: 10,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 12,
+                                                    end: 13,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 14,
+                                                    end: 15,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 12,
+                                            end: 15,
+                                        },
+                                    },
+                                ),
+                            ),
+                        ],
+                        span: SourceSpan {
+                            start: 0,
+                            end: 16,
+                        },
+                    },
+                ),
+                right: Extremum(
+                    Extremum {
+                        direction: Highest,
+                        arguments: [
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 27,
+                                                    end: 28,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 29,
+                                                    end: 30,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 27,
+                                            end: 30,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 32,
+                                                    end: 33,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 6,
+                                                span: SourceSpan {
+                                                    start: 34,
+                                                    end: 35,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 32,
+                                            end: 35,
+                                        },
+                                    },
+                                ),
+                            ),
+                        ],
+                        span: SourceSpan {
+                            start: 19,
+                            end: 36,
+                        },
+                    },
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 36,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 36,
+    },
+}
+
+{x}: highest({x}, {x})
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "x",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+        ],
+    ),
+    body: Extremum(
+        Extremum {
+            direction: Highest,
+            arguments: [
+                Variable(
+                    Variable {
+                        name: "x",
+                        span: SourceSpan {
+                            start: 13,
+                            end: 16,
+                        },
+                    },
+                ),
+                Variable(
+                    Variable {
+                        name: "x",
+                        span: SourceSpan {
+                            start: 18,
+                            end: 21,
+                        },
+                    },
+                ),
+            ],
+            span: SourceSpan {
+                start: 5,
+                end: 22,
+            },
+        },
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 22,
+    },
+}
+
+(highest(1, 2))D6
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Standard(
+            StandardDice {
+                count: Group(
+                    Group {
+                        expression: Extremum(
+                            Extremum {
+                                direction: Highest,
+                                arguments: [
+                                    Constant(
+                                        Constant {
+                                            value: 1,
+                                            span: SourceSpan {
+                                                start: 9,
+                                                end: 10,
+                                            },
+                                        },
+                                    ),
+                                    Constant(
+                                        Constant {
+                                            value: 2,
+                                            span: SourceSpan {
+                                                start: 12,
+                                                end: 13,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: SourceSpan {
+                                    start: 1,
+                                    end: 14,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 15,
+                        },
+                    },
+                ),
+                faces: Constant(
+                    Constant {
+                        value: 6,
+                        span: SourceSpan {
+                            start: 16,
+                            end: 17,
+                        },
+                    },
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 17,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 17,
+    },
+}
+
+highest(1D4, lowest(1D4, 1D4)) * 2
+=
+Function {
+    parameters: None,
+    body: Arithmetic(
+        Mul(
+            Mul {
+                left: Extremum(
+                    Extremum {
+                        direction: Highest,
+                        arguments: [
+                            Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 8,
+                                                    end: 9,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 4,
+                                                span: SourceSpan {
+                                                    start: 10,
+                                                    end: 11,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 8,
+                                            end: 11,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Extremum(
+                                Extremum {
+                                    direction: Lowest,
+                                    arguments: [
+                                        Dice(
+                                            Standard(
+                                                StandardDice {
+                                                    count: Constant(
+                                                        Constant {
+                                                            value: 1,
+                                                            span: SourceSpan {
+                                                                start: 20,
+                                                                end: 21,
+                                                            },
+                                                        },
+                                                    ),
+                                                    faces: Constant(
+                                                        Constant {
+                                                            value: 4,
+                                                            span: SourceSpan {
+                                                                start: 22,
+                                                                end: 23,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: SourceSpan {
+                                                        start: 20,
+                                                        end: 23,
+                                                    },
+                                                },
+                                            ),
+                                        ),
+                                        Dice(
+                                            Standard(
+                                                StandardDice {
+                                                    count: Constant(
+                                                        Constant {
+                                                            value: 1,
+                                                            span: SourceSpan {
+                                                                start: 25,
+                                                                end: 26,
+                                                            },
+                                                        },
+                                                    ),
+                                                    faces: Constant(
+                                                        Constant {
+                                                            value: 4,
+                                                            span: SourceSpan {
+                                                                start: 27,
+                                                                end: 28,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: SourceSpan {
+                                                        start: 25,
+                                                        end: 28,
+                                                    },
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                    span: SourceSpan {
+                                        start: 13,
+                                        end: 29,
+                                    },
+                                },
+                            ),
+                        ],
+                        span: SourceSpan {
+                            start: 0,
+                            end: 30,
+                        },
+                    },
+                ),
+                right: Constant(
+                    Constant {
+                        value: 2,
+                        span: SourceSpan {
+                            start: 33,
+                            end: 34,
+                        },
+                    },
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 34,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 34,
+    },
+}

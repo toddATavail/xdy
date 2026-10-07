@@ -1614,3 +1614,393 @@ message: expected the end of the range
 rendered: missing reroll range end (28..28): expected the end of the range
 suggestion: 4D6 reroll in {keep highest 2}..= 0
 placeholder: 34..35 "range end" [integer, {variable}, (expression)]
+
+max(1D20, 1D20)
+=
+kind: UnknownFunction
+span: 0..3
+message: unknown function `max`; use `highest`
+rendered: unknown function `max` (0..3): unknown function `max`; use `highest`
+suggestion: highest(1D20, 1D20)
+
+min({POW} * 5, 99)
+=
+kind: UnknownFunction
+span: 0..3
+message: unknown function `min`; use `lowest`
+rendered: unknown function `min` (0..3): unknown function `min`; use `lowest`
+suggestion: lowest({POW} * 5, 99)
+
+1 + max (1, 2)
+=
+kind: UnknownFunction
+span: 4..7
+message: unknown function `max`; use `highest`
+rendered: unknown function `max` (4..7): unknown function `max`; use `highest`
+suggestion: 1 + highest (1, 2)
+
+lowest(max(1, 2), 3)
+=
+kind: UnknownFunction
+span: 7..10
+message: unknown function `max`; use `highest`
+rendered: unknown function `max` (7..10): unknown function `max`; use `highest`
+suggestion: lowest(highest(1, 2), 3)
+
+max(4D6)
+=
+kind: UnknownFunction
+span: 0..3
+message: unknown function `max`; use `highest`
+rendered: unknown function `max` (0..3): unknown function `max`; use `highest`
+suggestion: highest(4D6)
+---
+kind: LoneArgument
+span: 0..3
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..3): `highest` needs two or more arguments, but has only one
+suggestion: 4D6 keep highest
+suggestion: 4D6
+suggestion: highest(4D6, 0)
+placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(4D6)
+=
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: 4D6 keep highest
+suggestion: 4D6
+suggestion: highest(4D6, 0)
+placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
+
+lowest(4D6) + 1
+=
+kind: LoneArgument
+span: 0..6
+message: `lowest` needs two or more arguments, but has only one
+rendered: lone argument (0..6): `lowest` needs two or more arguments, but has only one
+suggestion: 4D6 keep lowest + 1
+suggestion: 4D6 + 1
+suggestion: lowest(4D6, 0) + 1
+placeholder: 12..13 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(4D6 drop lowest)
+=
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: 4D6 drop lowest keep highest
+suggestion: 4D6 drop lowest
+suggestion: highest(4D6 drop lowest, 0)
+placeholder: 25..26 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(1 + 2) * 3
+=
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: (1 + 2) * 3
+suggestion: highest(1 + 2, 0) * 3
+placeholder: 15..16 "argument" [integer, {variable}, (expression), dice expression]
+
+lowest(-1) ^ 2
+=
+kind: LoneArgument
+span: 0..6
+message: `lowest` needs two or more arguments, but has only one
+rendered: lone argument (0..6): `lowest` needs two or more arguments, but has only one
+suggestion: (-1) ^ 2
+suggestion: lowest(-1, 0) ^ 2
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+highest({x})
+=
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: {x}
+suggestion: highest({x}, 0)
+placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
+
+highest( {x} )
+=
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: {x}
+suggestion: highest( {x}, 0 )
+placeholder: 14..15 "argument" [integer, {variable}, (expression), dice expression]
+
+highest()
+=
+kind: MissingExpression
+span: 7..8
+message: expected arguments before `)`
+rendered: missing expression in `(` (7..8): expected arguments before `)`
+suggestion: highest(0, 0)
+placeholder: 8..9 "argument" [integer, {variable}, (expression), dice expression]
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+lowest( )
+=
+kind: MissingExpression
+span: 6..7
+message: expected arguments before `)`
+rendered: missing expression in `(` (6..7): expected arguments before `)`
+suggestion: lowest( 0, 0)
+placeholder: 8..9 "argument" [integer, {variable}, (expression), dice expression]
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(
+=
+kind: UnclosedDelimiter
+span: 7..8
+message: expected `)` to close `(`
+rendered: unclosed `(` (7..8): expected `)` to close `(`
+suggestion: highest(0, 0)
+placeholder: 8..9 "argument" [integer, {variable}, (expression), dice expression]
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(1
+=
+kind: UnclosedDelimiter
+span: 7..8
+message: expected `)` to close `(`
+rendered: unclosed `(` (7..8): expected `)` to close `(`
+suggestion: highest(1, 0)
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+lowest(1D6,
+=
+kind: UnclosedDelimiter
+span: 6..7
+message: expected `)` to close `(`
+rendered: unclosed `(` (6..7): expected `)` to close `(`
+suggestion: lowest(1D6,0)
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(1, , 2)
+=
+kind: MissingExpression
+span: 7..8
+message: expected argument before `,`
+rendered: missing expression in `(` (7..8): expected argument before `,`
+suggestion: highest(1, 0, 2)
+placeholder: 11..12 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(1, 2,)
+=
+kind: TrailingComma
+span: 12..13
+message: expected another argument after `,`
+rendered: trailing `,` (12..13): expected another argument after `,`
+suggestion: highest(1, 2)
+
+lowest(1, 2 , )
+=
+kind: TrailingComma
+span: 12..13
+message: expected another argument after `,`
+rendered: trailing `,` (12..13): expected another argument after `,`
+suggestion: lowest(1, 2 )
+
+highest(4D6,)
+=
+kind: TrailingComma
+span: 11..12
+message: expected another argument after `,`
+rendered: trailing `,` (11..12): expected another argument after `,`
+suggestion: highest(4D6)
+---
+kind: LoneArgument
+span: 0..7
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..7): `highest` needs two or more arguments, but has only one
+suggestion: 4D6 keep highest
+suggestion: 4D6
+suggestion: highest(4D6, 0)
+placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
+
+max(4D6,)
+=
+kind: UnknownFunction
+span: 0..3
+message: unknown function `max`; use `highest`
+rendered: unknown function `max` (0..3): unknown function `max`; use `highest`
+suggestion: highest(4D6,)
+---
+kind: TrailingComma
+span: 7..8
+message: expected another argument after `,`
+rendered: trailing `,` (7..8): expected another argument after `,`
+suggestion: highest(4D6)
+---
+kind: LoneArgument
+span: 0..3
+message: `highest` needs two or more arguments, but has only one
+rendered: lone argument (0..3): `highest` needs two or more arguments, but has only one
+suggestion: 4D6 keep highest
+suggestion: 4D6
+suggestion: highest(4D6, 0)
+placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
+
+highest(1 2)
+=
+kind: MissingComma
+span: 10..11
+message: expected `,` before `2`
+rendered: missing `,` (10..11): expected `,` before `2`
+suggestion: highest(1, 2)
+
+highest(1D20 1D20)
+=
+kind: MissingComma
+span: 13..14
+message: expected `,` before `1`
+rendered: missing `,` (13..14): expected `,` before `1`
+suggestion: highest(1D20, 1D20)
+
+lowest(1, 2 3)
+=
+kind: MissingComma
+span: 12..13
+message: expected `,` before `3`
+rendered: missing `,` (12..13): expected `,` before `3`
+suggestion: lowest(1, 2, 3)
+
+highest(1, 2(3))
+=
+kind: MissingComma
+span: 12..13
+message: expected `,` before `(`
+rendered: missing `,` (12..13): expected `,` before `(`
+suggestion: highest(1, 2, (3))
+
+highest(1, 2
+=
+kind: UnclosedDelimiter
+span: 7..8
+message: expected `)` to close `(`
+rendered: unclosed `(` (7..8): expected `)` to close `(`
+suggestion: highest(1, 2)
+
+lowest(1, highest(2, 3)
+=
+kind: UnclosedDelimiter
+span: 6..7
+message: expected `)` to close `(`
+rendered: unclosed `(` (6..7): expected `)` to close `(`
+suggestion: lowest(1, highest(2, 3))
+
+highest(1]
+=
+kind: UnexpectedToken
+span: 9..10
+message: unexpected `]`
+rendered: unexpected token (9..10): unexpected `]`
+
+3Dhighest({x}, 4)
+=
+kind: UngroupedCall
+span: 2..9
+message: a call of `highest` must be grouped as the faces of dice
+rendered: ungrouped call (2..9): a call of `highest` must be grouped as the faces of dice
+suggestion: 3D(highest({x}, 4))
+
+3D highest(1, 2) + 1
+=
+kind: UngroupedCall
+span: 3..10
+message: a call of `highest` must be grouped as the faces of dice
+rendered: ungrouped call (3..10): a call of `highest` must be grouped as the faces of dice
+suggestion: 3D (highest(1, 2)) + 1
+
+4D6 drop lowest lowest({x}, 2)
+=
+kind: UngroupedCall
+span: 16..22
+message: a call of `lowest` must be grouped as the count of a drop clause
+rendered: ungrouped call (16..22): a call of `lowest` must be grouped as the count of a drop clause
+suggestion: 4D6 drop lowest (lowest({x}, 2))
+
+4D6 keep highest highest(1, 2)
+=
+kind: UngroupedCall
+span: 17..24
+message: a call of `highest` must be grouped as the count of a keep clause
+rendered: ungrouped call (17..24): a call of `highest` must be grouped as the count of a keep clause
+suggestion: 4D6 keep highest (highest(1, 2))
+
+1D6 reroll ≤ highest(1, 2)
+=
+kind: UngroupedCall
+span: 15..22
+message: a call of `highest` must be grouped as a reroll threshold
+rendered: ungrouped call (15..22): a call of `highest` must be grouped as a reroll threshold
+suggestion: 1D6 reroll ≤ (highest(1, 2))
+
+1D6 reroll in lowest(1, 2)..3
+=
+kind: UngroupedCall
+span: 14..20
+message: a call of `lowest` must be grouped as the start of a reroll range
+rendered: ungrouped call (14..20): a call of `lowest` must be grouped as the start of a reroll range
+suggestion: 1D6 reroll in (lowest(1, 2))..3
+
+1D6 reroll in 1..=lowest(3, 4)
+=
+kind: UngroupedCall
+span: 18..24
+message: a call of `lowest` must be grouped as the end of a reroll range
+rendered: ungrouped call (18..24): a call of `lowest` must be grouped as the end of a reroll range
+suggestion: 1D6 reroll in 1..=(lowest(3, 4))
+
+1D6 reroll = 1 highest(1, 2) times
+=
+kind: UngroupedCall
+span: 15..22
+message: a call of `highest` must be grouped as the count of a reroll limit
+rendered: ungrouped call (15..22): a call of `highest` must be grouped as the count of a reroll limit
+suggestion: 1D6 reroll = 1 (highest(1, 2)) times
+
+highest(1, 2)D6
+=
+kind: UngroupedCall
+span: 0..7
+message: a call of `highest` must be grouped as a dice count
+rendered: ungrouped call (0..7): a call of `highest` must be grouped as a dice count
+suggestion: (highest(1, 2))D6
+
+lowest(1, 2) d6 drop lowest
+=
+kind: UngroupedCall
+span: 0..6
+message: a call of `lowest` must be grouped as a dice count
+rendered: ungrouped call (0..6): a call of `lowest` must be grouped as a dice count
+suggestion: (lowest(1, 2)) d6 drop lowest
+
+3Dhighest(1 2
+=
+kind: UngroupedCall
+span: 2..9
+message: a call of `highest` must be grouped as the faces of dice
+rendered: ungrouped call (2..9): a call of `highest` must be grouped as the faces of dice
+suggestion: 3D(highest(1 2)
+---
+kind: MissingComma
+span: 12..13
+message: expected `,` before `2`
+rendered: missing `,` (12..13): expected `,` before `2`
+suggestion: 3D(highest(1, 2)
+---
+kind: UnclosedDelimiter
+span: 9..10
+message: expected `)` to close `(`
+rendered: unclosed `(` (9..10): expected `)` to close `(`
+suggestion: 3D(highest(1, 2))

@@ -405,6 +405,34 @@ fn test_reroll_clause_spans()
 	assert_eq!(*rest.fragment(), " -1");
 }
 
+/// A call's span runs from its keyword through its `)`, and each argument
+/// keeps its own span, whatever the whitespace around it.
+#[test]
+fn test_extremum_spans()
+{
+	let (_, result) =
+		expression(Span::new("1 + lowest ( {x} * 5 , 99 )")).unwrap();
+	let Expression::Arithmetic(ArithmeticExpression::Add(add)) = &result
+	else
+	{
+		panic!("expected Add, got {:?}", result)
+	};
+	assert_eq!(add.span, span(0, 27));
+	let Expression::Extremum(call) = add.right.as_ref()
+	else
+	{
+		panic!("expected Extremum, got {:?}", add.right)
+	};
+	assert_eq!(call.span, span(4, 27));
+	assert_eq!(
+		call.arguments.iter().map(Spanned::span).collect::<Vec<_>>(),
+		[span(13, 20), span(23, 25)]
+	);
+	let (_, call) = extremum(Span::new("highest(highest(1, 2), 3)")).unwrap();
+	assert_eq!(call.span, span(0, 25));
+	assert_eq!(call.arguments[0].span(), span(8, 21));
+}
+
 /// A reroll clause, chained with a keep clause, produces nested wrappers, each
 /// with a span extending through its own clause.
 #[test]

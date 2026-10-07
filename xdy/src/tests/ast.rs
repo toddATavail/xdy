@@ -439,9 +439,10 @@ fn test_extrema_are_distinct()
 
 /// Ensure that extrema render as calls, with their arguments in the order
 /// written, separated by commas, whatever the arguments are, and wherever the
-/// extrema appear; that an extremum built with fewer than two arguments
-/// renders likewise; and that the S-expressions of the trees, on one line or
-/// wrapped onto many, read back to the same trees.
+/// extrema appear; that the renderings parse back to the same trees; that an
+/// extremum built with fewer than two arguments renders likewise; and that the
+/// S-expressions of the trees, on one line or wrapped onto many, read back to
+/// the same trees.
 #[test]
 fn test_display_extrema()
 {
@@ -486,6 +487,12 @@ fn test_display_extrema()
 		let options =
 			SExpressibleOptions::new(0, 4, usize::MAX).with_groups(true);
 		assert_eq!(function.to_s_expr(options), s_expr);
+		let reparsed = Parser::parse(expected).unwrap();
+		assert_eq!(
+			reparsed.to_s_expr(options),
+			function.to_s_expr(options),
+			"{expected}"
+		);
 		for soft_limit in [0, 20, 40]
 		{
 			let options =
@@ -1204,7 +1211,7 @@ pub(super) enum Nesting
 impl Nesting
 {
 	/// The constructs through which [`Mixed`](Self::Mixed) rotates.
-	pub(super) const ROTATION: [Nesting; 22] = [
+	pub(super) const ROTATION: [Nesting; 24] = [
 		Nesting::Group,
 		Nesting::Binding,
 		Nesting::RangeStart,
@@ -1226,7 +1233,9 @@ impl Nesting
 		Nesting::RerollThreshold,
 		Nesting::RerollRangeEnd,
 		Nesting::RerollCount,
-		Nesting::RerollClauses
+		Nesting::RerollClauses,
+		Nesting::ExtremumFirst,
+		Nesting::ExtremumLast
 	];
 
 	/// Answer whether nesting this way introduces [bindings](Binding). Every

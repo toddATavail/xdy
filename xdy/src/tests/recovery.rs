@@ -18,10 +18,12 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	Parser,
+	ast::Direction,
 	parser::{
-		FailureSite, PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME,
-		PLACEHOLDER_OPERAND, PLACEHOLDER_THRESHOLD, Recovery, Repair, Site,
-		bare_word, is_token_space, steps, unclosed_name_ends
+		FailureSite, LoneArgument, Operand, PLACEHOLDER_FACE,
+		PLACEHOLDER_FACES, PLACEHOLDER_NAME, PLACEHOLDER_OPERAND,
+		PLACEHOLDER_THRESHOLD, Recovery, Repair, Site, bare_word,
+		is_token_space, steps, unclosed_name_ends
 	}
 };
 
@@ -202,6 +204,13 @@ impl<'src> Recovery<'src> for Canonical<'src>
 				self.insert(at, format!("= {} ", PLACEHOLDER_THRESHOLD))
 			},
 			Site::RangeOperator => self.insert(at, "..="),
+			// Supply the `,`, before another argument; a second after a lone
+			// argument, before its `)`.
+			Site::Comma { .. } => self.insert(at, ","),
+			// Retract the comma.
+			Site::TrailingComma => self.edits.push((at, 1, String::new())),
+			// Supply the `(` before the call, whose `)` a closer supplies.
+			Site::UngroupedCall { .. } => self.insert(at, "("),
 			Site::Times { singular } =>
 			{
 				self.insert(at, if singular { " time " } else { " times " })
@@ -317,7 +326,47 @@ fn test_canonical_repairs()
 		("3d-^2", "3d-6^2"),
 		("3dx", "3d{x}"),
 		("3d x + 1", "3d {x} + 1"),
-		("3d-x", "3d-6")
+		("3d-x", "3d-6"),
+		("highest(", "highest( 0, 0)"),
+		("highest()", "highest( 0, 0)"),
+		("lowest(1", "lowest(1, 0)"),
+		("lowest(1 2)", "lowest(1 ,2)"),
+		("highest(1, 2", "highest(1, 2)"),
+		("highest(1, 2 3)", "highest(1, 2 ,3)"),
+		("highest(1, x)", "highest(1, {x})"),
+		("highest(1, 2,)", "highest(1, 2)"),
+		("highest(1, 2 , )", "highest(1, 2  )"),
+		("lowest(1,)", "lowest(1, 0)"),
+		("highest(4D6)", "highest(4D6, 0)"),
+		("3dhighest(1, 2)", "3d(highest(1, 2))"),
+		("3d highest(1 2", "3d (highest(1 ,2))"),
+		("highest(1, 2)d6", "(highest(1, 2))d6"),
+		("lowest (1, 2) d6 + 1", "(lowest (1, 2)) d6 + 1"),
+		(
+			"3d6 drop lowest lowest(1, 2)",
+			"3d6 drop lowest (lowest(1, 2))"
+		),
+		(
+			"3d6 keep highest highest(1, 2) + 1",
+			"3d6 keep highest (highest(1, 2)) + 1"
+		),
+		("3d6 reroll ≤ highest(1, 2)", "3d6 reroll ≤ (highest(1, 2))"),
+		(
+			"3d6 reroll in lowest(1, 2)..3",
+			"3d6 reroll in (lowest(1, 2))..3"
+		),
+		(
+			"3d6 reroll in 1..lowest(2, 3)",
+			"3d6 reroll in 1..(lowest(2, 3))"
+		),
+		(
+			"3d6 reroll = 1 highest(1, 2) times",
+			"3d6 reroll = 1 (highest(1, 2)) times"
+		),
+		(
+			"3dhighest(1, 2dlowest(3, 4))",
+			"3d(highest(1, 2d(lowest(3, 4))))"
+		)
 	]
 	{
 		let mut policy = Canonical::new(source);
@@ -461,6 +510,223 @@ fn test_declining_dice_operator_continues_reroll()
 		});
 	assert_eq!(recovered.as_deref(), Some("(3D6 reroll = 1) + 1"));
 	assert_eq!(sites.len(), 1);
+}
+
+/// Ensure that declining a [`Site::UngroupedCall`] or a
+/// [`Site::TrailingComma`], which are not failures of the ordinary parse,
+/// leaves the parse as the ordinary parse is, and does not end recovery, and
+/// that accepting one alone recovers.
+#[test]
+fn test_declining_call_offers_continues()
+{
+	let decline = |site: &FailureSite<'_>| match site.site
+	{
+		Site::UngroupedCall { .. } | Site::TrailingComma => Repair::Stop,
+		_ => Repair::Fix
+	};
+	let (recovered, sites) = recover("3dhighest(1, 2)", decline);
+	assert_eq!(recovered.as_deref(), Some("3D6"));
+	assert_eq!(
+		sites.iter().map(|site| site.site).collect::<Vec<_>>(),
+		[
+			Site::UngroupedCall {
+				operand: Operand::Faces
+			},
+			Site::Faces,
+			Site::TrailingInput
+		]
+	);
+	assert_eq!(sites[0].position(), 2);
+	let (recovered, sites) = recover("highest(1, 2,)", decline);
+	assert_eq!(recovered.as_deref(), Some("highest(1, 2, 0)"));
+	assert_eq!(sites[0].site, Site::TrailingComma);
+	assert_eq!(sites[0].position(), 12);
+	let accept = |site: &FailureSite<'_>| match site.site
+	{
+		Site::UngroupedCall { .. }
+		| Site::TrailingComma
+		| Site::Closer { .. } => Repair::Fix,
+		_ => Repair::Stop
+	};
+	for (source, expected) in [
+		(
+			"3d6 drop lowest lowest(1, 2,)",
+			"3D6 drop lowest (lowest(1, 2))"
+		),
+		("highest(1, 2)d6 + 1", "(highest(1, 2))D6 + 1")
+	]
+	{
+		let (recovered, _) = recover(source, accept);
+		assert_eq!(recovered.as_deref(), Some(expected), "{source:?}");
+	}
+}
+
+/// Ensure that each ungrouped call reports the operand that it stands as.
+#[test]
+fn test_ungrouped_call_operands()
+{
+	for (source, operand) in [
+		("highest(1, 2)d6", Operand::DiceCount),
+		("3dhighest(1, 2)", Operand::Faces),
+		("3d6 drop lowest lowest(1, 2)", Operand::DropCount),
+		("3d6 keep lowest lowest(1, 2)", Operand::KeepCount),
+		("3d6 reroll < lowest(1, 2)", Operand::Threshold),
+		("3d6 reroll in lowest(1, 2)..3", Operand::RangeStart),
+		("3d6 reroll in 1..=lowest(1, 2)", Operand::RangeEnd),
+		("3d6 reroll = 1 lowest(1, 2) times", Operand::Limit)
+	]
+	{
+		let (_, sites) = recover(source, |_| Repair::Fix);
+		assert_eq!(
+			sites[0].site,
+			Site::UngroupedCall { operand },
+			"{source:?}"
+		);
+	}
+}
+
+/// Ensure that a [call](Repair::Call) reads a word as the keyword of a call,
+/// where an expression may begin and a `(` follows the word, and that it stops
+/// recovery otherwise.
+#[test]
+fn test_call()
+{
+	let call = |site: &FailureSite<'_>| {
+		let at = site.position();
+		match site.site
+		{
+			Site::Goal { .. } => Repair::Call {
+				end: at + 3,
+				direction: Direction::Lowest
+			},
+			_ => Repair::Stop
+		}
+	};
+	for (source, expected) in [
+		("min(1, 2)", "lowest(1, 2)"),
+		("1 + min (2, 3)", "1 + lowest(2, 3)"),
+		("-min(1, 2)", "-lowest(1, 2)"),
+		("lowest(min(1, 2), 3)", "lowest(lowest(1, 2), 3)"),
+		("(min(1, 2))d6", "(lowest(1, 2))D6")
+	]
+	{
+		let (recovered, sites) = recover(source, call);
+		assert_eq!(recovered.as_deref(), Some(expected), "{source:?}");
+		assert_eq!(sites.len(), 1, "{source:?}");
+	}
+	// No `(` follows the word.
+	let (recovered, sites) = recover("min + 1", call);
+	assert_eq!(recovered, None);
+	assert_eq!(sites.len(), 1);
+	// Only an expression may begin a call.
+	let (recovered, sites) = recover("3dmin(1, 2)", call);
+	assert_eq!(recovered, None);
+	assert_eq!(sites.len(), 1);
+}
+
+/// Ensure that an [unwrap](Repair::Unwrap) replaces a call of one argument
+/// with that argument, grouped unless it may stand bare, and that a
+/// [keep](Repair::Keep) replaces one of a dice argument with the argument and
+/// a keep clause, and that each stops recovery elsewhere.
+#[test]
+fn test_unwrap_and_keep()
+{
+	let lone = |repair: Repair| {
+		move |site: &FailureSite<'_>| match site.site
+		{
+			Site::Comma { lone: Some(_), .. } => repair,
+			_ => Repair::Stop
+		}
+	};
+	for (source, repair, expected) in [
+		("highest(1 + 2) * 3", Repair::Unwrap, "(1 + 2) * 3"),
+		("lowest(-1) ^ 2", Repair::Unwrap, "(-1) ^ 2"),
+		("highest( {x} ) + 1", Repair::Unwrap, "{x} + 1"),
+		("highest(4D6)", Repair::Unwrap, "4D6"),
+		("highest(4D6)", Repair::Keep, "4D6 keep highest"),
+		(
+			"lowest(4D6 drop lowest) - 1",
+			Repair::Keep,
+			"4D6 drop lowest keep lowest - 1"
+		),
+		(
+			"2 ^ highest(highest(3d6))",
+			Repair::Keep,
+			"2 ^ 3D6 keep highest keep highest"
+		)
+	]
+	{
+		let (recovered, _) = recover(source, lone(repair));
+		assert_eq!(recovered.as_deref(), Some(expected), "{source:?}");
+		let parsed = Parser::parse(expected).map(|f| f.to_string());
+		assert_eq!(parsed.as_deref(), Ok(expected), "{source:?}");
+	}
+	let LoneArgument { argument, .. } =
+		match recover("lowest( 1 + 2 )", lone(Repair::Stop)).1[0].site
+		{
+			Site::Comma {
+				opener: 6,
+				lone: Some(lone)
+			} => lone,
+			site => panic!("{site:?}")
+		};
+	assert_eq!((argument.start, argument.end), (8, 13));
+	// A keep needs a dice argument.
+	let (recovered, sites) = recover("highest({x})", lone(Repair::Keep));
+	assert_eq!(recovered, None);
+	assert_eq!(sites.len(), 1);
+	// Neither applies where the call goes on.
+	for repair in [Repair::Unwrap, Repair::Keep]
+	{
+		let (recovered, sites) = recover("highest(4D6 2)", |_| repair);
+		assert_eq!(recovered, None);
+		assert_eq!(sites.len(), 1);
+	}
+}
+
+/// Ensure that recovery stops, rather than supply `,` after `,` forever,
+/// wherever the argument after a supplied `,` fails without reading anything,
+/// as at a clause verb that runs into its direction, which reads as a
+/// misplaced clause that a fix reads past without consuming; and that it does
+/// not stop where a call within a call lacks its `,` at the same place.
+#[test]
+fn test_repeated_comma_stops()
+{
+	for source in ["highest(1, rerollhighest", "lowest(1 rerolllowest 2)"]
+	{
+		let (recovered, sites) = recover(source, |_| Repair::Fix);
+		assert_eq!(recovered, None, "{source:?}");
+		let commas = sites
+			.iter()
+			.filter(|site| matches!(site.site, Site::Comma { .. }))
+			.count();
+		assert_eq!(commas, 1, "{source:?}");
+	}
+	let (recovered, _) = recover("lowest(lowest(1", |_| Repair::Fix);
+	assert_eq!(recovered.as_deref(), Some("lowest(lowest(1, 0), 0)"));
+}
+
+/// Ensure that a failure at the start of an argument of a call reports the
+/// `(` of the call, and that a failure elsewhere reports none.
+#[test]
+fn test_goal_call()
+{
+	for (source, call) in [
+		("highest(", Some(7)),
+		("1 + lowest (1, ", Some(11)),
+		("highest(1, lowest(", Some(17)),
+		("highest(1 +", None),
+		("(", None)
+	]
+	{
+		let (_, sites) = recover(source, |_| Repair::Stop);
+		assert!(
+			matches!(sites[0].site, Site::Goal { call: c, .. } if c == call),
+			"source: {:?}, site: {:?}",
+			source,
+			sites[0]
+		);
+	}
 }
 
 /// Ensure that a goal that fails at an operand of the predicate of a reroll
@@ -744,6 +1010,49 @@ pub(super) const FAMILIES: &[Family] = &[
 		name: "misplaced rerolls",
 		source: |n| format!("1{}", " + 3 reroll = 1".repeat(n)),
 		repairs: |n| n
+	},
+	Family {
+		name: "missing commas",
+		source: |n| format!("highest(1{})", " 2".repeat(n)),
+		repairs: |n| n
+	},
+	// A lone argument gains a `,` and then a second argument.
+	Family {
+		name: "lone arguments",
+		source: |n| format!("1{}", " + highest(1)".repeat(n)),
+		repairs: |n| 2 * n
+	},
+	Family {
+		name: "nested lone arguments",
+		source: |n| format!("{}1{}", "lowest(".repeat(n), ")".repeat(n)),
+		repairs: |n| 2 * n
+	},
+	// An empty call gains an argument, a `,`, and another argument.
+	Family {
+		name: "empty calls",
+		source: |n| format!("1{}", " + highest()".repeat(n)),
+		repairs: |n| 3 * n
+	},
+	Family {
+		name: "trailing commas",
+		source: |n| format!("1{}", " + lowest(1, 2,)".repeat(n)),
+		repairs: |n| n
+	},
+	// An ungrouped call gains its `(` and its `)`.
+	Family {
+		name: "ungrouped faces",
+		source: |n| format!("1{}", " + 3dhighest(1, 2)".repeat(n)),
+		repairs: |n| 2 * n
+	},
+	Family {
+		name: "ungrouped dice counts",
+		source: |n| format!("1{}", " + lowest(1, 2)d6".repeat(n)),
+		repairs: |n| 2 * n
+	},
+	Family {
+		name: "nested ungrouped faces",
+		source: |n| format!("{}2{}", "3dhighest(1, ".repeat(n), ")".repeat(n)),
+		repairs: |n| 2 * n
 	},
 	Family {
 		name: "bare faces",

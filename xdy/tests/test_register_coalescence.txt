@@ -401,3 +401,196 @@ Function() r#1 ⚅#1
 		@0 <- sum rolling record ⚅0
 		@0 <- @0 - 1
 		return @0
+
+highest(1, 2)
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 1 max 2
+		return @0
+
+lowest(3, 1, 2)
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 3 min 1
+		@0 <- @0 min 2
+		return @0
+
+highest(-2147483648, 2147483647)
+=
+Function() r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- -2147483648 max 2147483647
+		return @0
+
+highest(1D6, 1D6)
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D6
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 max @1
+		return @0
+
+lowest(1D20, 1D20)
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D20
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D20
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 min @1
+		return @0
+
+highest(1D20, 1D20, 1D20)
+=
+Function() r#3 ⚅#3
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D20
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D20
+		@1 <- sum rolling record ⚅1
+		⚅2 <- roll standard dice 1D20
+		@2 <- sum rolling record ⚅2
+		@0 <- @0 max @1
+		@0 <- @0 max @2
+		return @0
+
+highest(3D6, 1D20, 10)
+=
+Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D20
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 max @1
+		@0 <- @0 max 10
+		return @0
+
+{x}: lowest({x} * 5, 99)
+=
+Function({x}@0) r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- @0 * 5
+		@0 <- @0 min 99
+		return @0
+
+highest(1D6 - 2, 1)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 - 2
+		@0 <- @0 max 1
+		return @0
+
+{x}: 4D6 drop lowest (lowest({x}, 2))
+=
+Function({x}@0) r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		@0 <- @0 min 2
+		⚅0 <- drop lowest @0 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+lowest(highest(1D6, 5), 3)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 max 5
+		@0 <- @0 min 3
+		return @0
+
+highest(lowest(1D6, 4), 2)
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		@0 <- @0 min 4
+		@0 <- @0 max 2
+		return @0
+
+highest({a}@(1D6), {a} + 1)
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + 1
+		@0 <- @0 max @1
+		return @0
+
+lowest(1D6, 1D6) + highest(1D6, 1D6)
+=
+Function() r#3 ⚅#4
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D6
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 min @1
+		⚅2 <- roll standard dice 1D6
+		@1 <- sum rolling record ⚅2
+		⚅3 <- roll standard dice 1D6
+		@2 <- sum rolling record ⚅3
+		@1 <- @1 max @2
+		@0 <- @0 + @1
+		return @0
+
+{x}: highest({x}, {x})
+=
+Function({x}@0) r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- @0 max @0
+		return @0
+
+(highest(1, 2))D6
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		@0 <- 1 max 2
+		⚅0 <- roll standard dice @0D6
+		@0 <- sum rolling record ⚅0
+		return @0
+
+highest(1D4, lowest(1D4, 1D4)) * 2
+=
+Function() r#3 ⚅#3
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D4
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D4
+		@1 <- sum rolling record ⚅1
+		⚅2 <- roll standard dice 1D4
+		@2 <- sum rolling record ⚅2
+		@1 <- @1 min @2
+		@0 <- @0 max @1
+		@0 <- @0 * 2
+		return @0

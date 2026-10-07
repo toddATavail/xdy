@@ -12,16 +12,14 @@
 //! reads are ignored by default; `just stress` runs them.
 
 use crate::{
-	Parser, SourceSpan,
-	ast::{
-		Constant, DiceExpression, Direction, Expression, Extremum, Function
-	},
+	Parser,
+	ast::{DiceExpression, Expression, Function},
 	s_expr::{
 		SExprError, SExprLocation, SExpressible, SExpressibleOptions,
 		read_s_expr
 	},
 	support::on_small_stack,
-	tests::ast::{Nesting, nest, nest_parsable}
+	tests::ast::{Nesting, nest_parsable}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,6 +138,18 @@ fn test_read_deep_reroll_count() { read_deep(Nesting::RerollCount) }
 #[ignore = "stress: run with just stress"]
 fn test_read_deep_reroll_clauses() { read_deep(Nesting::RerollClauses) }
 
+/// Ensure that a deep chain of the first arguments of extrema reads on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_extremum_first() { read_deep(Nesting::ExtremumFirst) }
+
+/// Ensure that a deep chain of the last arguments of extrema reads on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_extremum_last() { read_deep(Nesting::ExtremumLast) }
+
 /// Ensure that a deep mixture of every nesting construct reads on a small
 /// stack.
 #[test]
@@ -192,36 +202,6 @@ fn read_deep(nesting: Nesting)
 	});
 }
 
-/// Ensure that a deep chain of the first arguments of extrema reads on a small
-/// stack. The parser does not yet read extrema, so the chain is built.
-#[test]
-#[ignore = "stress: run with just stress"]
-fn test_read_deep_extremum_first() { read_deep_built(Nesting::ExtremumFirst) }
-
-/// Ensure that a deep chain of the last arguments of extrema reads on a small
-/// stack. The parser does not yet read extrema, so the chain is built.
-#[test]
-#[ignore = "stress: run with just stress"]
-fn test_read_deep_extremum_last() { read_deep_built(Nesting::ExtremumLast) }
-
-/// Build a [deep](Nesting::depth) function, and ensure that its S-expression
-/// reads back to it on a small stack, as [`read_deep`] does for a parsed
-/// source, but without spans.
-///
-/// # Parameters
-/// - `nesting`: The way to nest.
-fn read_deep_built(nesting: Nesting)
-{
-	on_small_stack(|| {
-		let function = Function {
-			parameters: None,
-			body: nest(nesting, nesting.depth(), LEAF),
-			span: SourceSpan::SYNTHETIC
-		};
-		round_trip(&function);
-	});
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 //                               Wrapped reads.                               //
 ////////////////////////////////////////////////////////////////////////////////
@@ -245,19 +225,6 @@ fn test_read_deep_wrapped()
 			.with_spans(true)
 			.with_groups(true);
 		let s_expr = function.to_s_expr(options);
-		assert!(s_expr.lines().count() > WRAPPED_DEPTH, "{:?}", nesting);
-		let read = read_s_expr(&s_expr).expect("S-expression failed to read");
-		assert!(read == function, "{:?}: read back differently", nesting);
-	}
-	// The parser does not yet read extrema, so their chains are built.
-	for nesting in [Nesting::ExtremumFirst, Nesting::ExtremumLast]
-	{
-		let function = Function {
-			parameters: None,
-			body: nest(nesting, WRAPPED_DEPTH, 1),
-			span: SourceSpan::SYNTHETIC
-		};
-		let s_expr = function.to_s_expr(SExpressibleOptions::default());
 		assert!(s_expr.lines().count() > WRAPPED_DEPTH, "{:?}", nesting);
 		let read = read_s_expr(&s_expr).expect("S-expression failed to read");
 		assert!(read == function, "{:?}: read back differently", nesting);
@@ -310,28 +277,25 @@ fn test_read_wide_faces()
 	});
 }
 
-/// Ensure that an extremum of very many arguments reads on a small stack. The
-/// parser does not yet read extrema, so the extremum is built.
+/// Ensure that an extremum of very many arguments reads on a small stack.
 #[test]
 fn test_read_wide_extremum()
 {
 	on_small_stack(|| {
-		let function = Function {
-			parameters: None,
-			body: Expression::Extremum(Extremum {
-				direction: Direction::Highest,
-				arguments: (1..=WIDTH as i32)
-					.map(|value| {
-						Expression::Constant(Constant {
-							value,
-							span: SourceSpan::SYNTHETIC
-						})
-					})
-					.collect(),
-				span: SourceSpan::SYNTHETIC
-			}),
-			span: SourceSpan::SYNTHETIC
-		};
+		let arguments = (1..=WIDTH)
+			.map(|i| i.to_string())
+			.collect::<Vec<_>>()
+			.join(", ");
+		let source = format!("highest({})", arguments);
+		let function = Parser::parse(&source).expect("wide source failed");
+		match &function.body
+		{
+			Expression::Extremum(extremum) =>
+			{
+				assert_eq!(extremum.arguments.len(), WIDTH)
+			},
+			_ => panic!("wide source did not parse as an extremum")
+		}
 		round_trip(&function);
 	});
 }

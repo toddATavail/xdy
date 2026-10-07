@@ -721,9 +721,33 @@ fn expression() -> impl Strategy<Value = String>
 				.prop_map(|(name, e)| format!("{}@({})", name, e)),
 			(inner.clone(), inner.clone())
 				.prop_map(|(start, end)| format!("[{}:{}]", start, end)),
+			extremum(inner.clone()),
 			dice(inner)
 		]
 	})
+}
+
+/// Answer a strategy that generates calls of `highest` and `lowest`, whose
+/// two or more arguments come from the specified strategy. Whitespace may
+/// separate the keyword from the `(`.
+///
+/// # Parameters
+/// - `inner`: The strategy for nested expressions.
+///
+/// # Returns
+/// The strategy.
+pub(super) fn extremum(
+	inner: BoxedStrategy<String>
+) -> impl Strategy<Value = String>
+{
+	(
+		select(&["highest", "lowest"][..]),
+		select(&["", " "][..]),
+		prop::collection::vec(inner, 2..5)
+	)
+		.prop_map(|(keyword, space, arguments)| {
+			format!("{}{}({})", keyword, space, arguments.join(", "))
+		})
 }
 
 /// Answer a strategy that generates dice expressions, whose operands come
