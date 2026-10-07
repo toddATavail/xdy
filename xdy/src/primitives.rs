@@ -11,7 +11,7 @@ use rand::{Rng, RngExt as _};
 
 #[cfg(doc)]
 use crate::Evaluator;
-use crate::{Die, Fate, RollingRecord, RollingRecordKind};
+use crate::{Die, Fate, Origin, RollingRecord, RollingRecordKind};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Primitives.                                 //
@@ -209,11 +209,13 @@ where
 
 impl RollingRecord
 {
-	/// Cross out the lowest `count` of the dice that are still kept. Of equal
-	/// dice, cross out the first rolled first. A `count` of zero or less
-	/// crosses out nothing, and a `count` of at least the dice still kept
-	/// crosses out all of them. Drops accumulate across calls, and their order
-	/// does not change which results are kept.
+	/// Cross out the lowest `count` of the dice that are still kept, counting
+	/// each [chain](Self::chains) as one die, worth its total, and crossing out
+	/// every kept die of each chain that it crosses out. Of equal chains, cross
+	/// out first the one whose earliest kept die was rolled first. A `count` of
+	/// zero or less crosses out nothing, and a `count` of at least the chains
+	/// still kept crosses out all of them. Drops accumulate across calls, and
+	/// their order does not change which results are kept.
 	///
 	/// # Parameters
 	/// - `count`: The number of dice to drop.
@@ -256,11 +258,13 @@ impl RollingRecord
 	/// ```
 	pub fn drop_lowest(&mut self, count: i32) { self.cross_out(count, |v| v); }
 
-	/// Cross out the highest `count` of the dice that are still kept. Of equal
-	/// dice, cross out the first rolled first. A `count` of zero or less
-	/// crosses out nothing, and a `count` of at least the dice still kept
-	/// crosses out all of them. Drops accumulate across calls, and their order
-	/// does not change which results are kept.
+	/// Cross out the highest `count` of the dice that are still kept, counting
+	/// each [chain](Self::chains) as one die, worth its total, and crossing out
+	/// every kept die of each chain that it crosses out. Of equal chains, cross
+	/// out first the one whose earliest kept die was rolled first. A `count` of
+	/// zero or less crosses out nothing, and a `count` of at least the chains
+	/// still kept crosses out all of them. Drops accumulate across calls, and
+	/// their order does not change which results are kept.
 	///
 	/// # Parameters
 	/// - `count`: The number of dice to drop.
@@ -307,9 +311,11 @@ impl RollingRecord
 	}
 
 	/// Keep the lowest `count` of the dice that are still kept, crossing out
-	/// the rest of them, highest first. A `count` of zero or less keeps
-	/// nothing. Unlike a drop, a keep counts from the dice that are still
-	/// kept, so it does not commute with drops or other keeps.
+	/// the rest of them, highest first, and counting each
+	/// [chain](Self::chains) as one die, worth its total, as
+	/// [`drop_highest`](Self::drop_highest) does. A `count` of zero or less
+	/// keeps nothing. Unlike a drop, a keep counts from the chains that are
+	/// still kept, so it does not commute with drops or other keeps.
 	///
 	/// # Parameters
 	/// - `count`: The number of dice to keep.
@@ -359,9 +365,11 @@ impl RollingRecord
 	}
 
 	/// Keep the highest `count` of the dice that are still kept, crossing out
-	/// the rest of them, lowest first. A `count` of zero or less keeps
-	/// nothing. Unlike a drop, a keep counts from the dice that are still
-	/// kept, so it does not commute with drops or other keeps.
+	/// the rest of them, lowest first, and counting each [chain](Self::chains)
+	/// as one die, worth its total, as [`drop_lowest`](Self::drop_lowest)
+	/// does. A `count` of zero or less keeps nothing. Unlike a drop, a keep
+	/// counts from the chains that are still kept, so it does not commute with
+	/// drops or other keeps.
 	///
 	/// # Parameters
 	/// - `count`: The number of dice to keep.
@@ -411,12 +419,13 @@ impl RollingRecord
 	/// up to `limit` times, or until it no longer matches if `limit` is `None`.
 	/// Consider the dice in the order rolled, and finish each before beginning
 	/// the next: cross out a matching die, roll its replacement from the same
-	/// die, append the replacement, [linked](Die::replaces) to the die that it
-	/// replaces, and repeat with the replacement while it matches and the limit
-	/// allows. A `limit` of zero or less rerolls nothing. If the limit is
-	/// `None` and the criterion matches every face of the die, then roll
-	/// nothing, but cross out every matching die, so that each contributes
-	/// zero. A die without faces, or an empty range, shows only the face `0`.
+	/// die, append the replacement, [linked](Origin::Replaces) to the die that
+	/// it replaces, and repeat with the replacement while it matches and the
+	/// limit allows. A `limit` of zero or less rerolls nothing. If the
+	/// limit is `None` and the criterion matches every face of the die,
+	/// then roll nothing, but cross out every matching die, so that each
+	/// contributes zero. A die without faces, or an empty range, shows only
+	/// the face `0`.
 	///
 	/// # Type parameters
 	/// - `R`: The type of the pseudo-random number generator.
@@ -453,7 +462,7 @@ impl RollingRecord
 	///
 	/// ```rust
 	/// # use rand::{Rng, rng};
-	/// # use xdy::{Criterion, Die, RollingRecord, RollingRecordKind};
+	/// # use xdy::{Criterion, Die, Origin, RollingRecord, RollingRecordKind};
 	/// let mut rolling_record = RollingRecord {
 	///     kind: RollingRecordKind::Standard { count: 3, faces: 4 },
 	///     dice: [2, 1, 4].into_iter().map(Die::kept).collect()
@@ -461,7 +470,7 @@ impl RollingRecord
 	/// let rolled = rolling_record.reroll(&mut rng(), &Criterion::Within(1..=1), Some(1));
 	/// assert_eq!(rolled, 1);
 	/// assert_eq!(rolling_record.dice.len(), 4);
-	/// assert_eq!(rolling_record.dice[3].replaces, Some(1));
+	/// assert_eq!(rolling_record.dice[3].origin, Origin::Replaces(1));
 	/// assert!(rolling_record.to_string().starts_with("3D4: [2, ~1, 4, "));
 	/// ```
 	///
@@ -612,22 +621,85 @@ impl RollingRecord
 			.collect()
 	}
 
-	/// Compute the sum of the [kept](Self::kept) results, i.e., excluding the
-	/// dice crossed out. If every die is crossed out, then nothing is kept and
-	/// the sum is `0`. Saturate the sum on overflow. Consecutive calls are
-	/// idempotent.
+	/// Answer the chains of the record. Every die descends, by its
+	/// [origin](crate::Die::origin), from a die that the roll that filled the
+	/// record rolled, and the dice that descend from the same one form a chain.
+	/// A replacement joins the chain of the die that it replaces, and a die
+	/// that extends another joins the chain of the die that it extends, so a
+	/// chain holds at most one kept die unless some die extends another. A link
+	/// that names no earlier die begins a chain of its own.
+	///
+	/// The sum and every drop and keep count a chain still kept as one die,
+	/// worth its total: the value of its earliest kept
+	/// [saturated](Origin::Saturates) die if it has one, or otherwise the sum
+	/// of its kept dice, folded in ascending order.
+	///
+	/// # Returns
+	/// The indices of the dice of each chain, whatever their fates, in the
+	/// order rolled, and the chains in the order in which their first dice
+	/// were rolled.
+	///
+	/// # Examples
+	/// A `6` extended by a `2`, beside a `4`, forms two chains, worth `8` and
+	/// `4`, so dropping the lowest die crosses out the `4`, and dropping the
+	/// highest crosses out the `6` and the `2`:
+	///
+	/// ```rust
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 2, faces: 6 },
+	///     dice: vec![Die::kept(6), Die::kept(4), Die::extending(2, 0)]
+	/// };
+	/// assert_eq!(rolling_record.chains(), vec![vec![0, 2], vec![1]]);
+	/// assert_eq!(rolling_record.sum(), 12);
+	///
+	/// let mut lowest = rolling_record.clone();
+	/// lowest.drop_lowest(1);
+	/// assert_eq!(lowest.to_string(), "2D6: [6, ~4, 2]");
+	/// assert_eq!(lowest.sum(), 8);
+	///
+	/// rolling_record.drop_highest(1);
+	/// assert_eq!(rolling_record.to_string(), "2D6: [~6, 4, ~2]");
+	/// assert_eq!(rolling_record.sum(), 4);
+	/// ```
+	pub fn chains(&self) -> Vec<Vec<usize>>
+	{
+		let roots = self.roots();
+		// The chain of each die that begins one, by the index of the die.
+		let mut slots = vec![0usize; self.dice.len()];
+		let mut chains = Vec::<Vec<usize>>::new();
+		for (index, root) in roots.into_iter().enumerate()
+		{
+			match root == index
+			{
+				true =>
+				{
+					slots[index] = chains.len();
+					chains.push(vec![index]);
+				},
+				false => chains[slots[root]].push(index)
+			}
+		}
+		chains
+	}
+
+	/// Compute the sum of the record: the sum of the totals of the
+	/// [chains](Self::chains) still kept, which, unless some die extends
+	/// another, are the [kept](Self::kept) results. If every die is crossed
+	/// out, then nothing is kept and the sum is `0`. Saturate the sum on
+	/// overflow. Consecutive calls are idempotent.
 	///
 	/// # Returns
 	/// The sum of the results.
 	///
 	/// # Notes
-	/// The sum folds the kept results in ascending order, not in the order
-	/// rolled. Saturating addition is not associative, so the order matters
-	/// when the results have mixed signs and the sum saturates: `i32::MAX`,
-	/// `1`, and `-1` sum to `i32::MAX` in ascending order, but to
-	/// `i32::MAX - 1` in the order given. Folding in ascending order makes the
-	/// sum depend only on the multiset of kept results, as the forward pass
-	/// and the Lean specification require.
+	/// The sum folds the totals in ascending order, not in the order rolled,
+	/// and so does the total of each chain fold its kept dice. Saturating
+	/// addition is not associative, so the order matters when the results have
+	/// mixed signs and the sum saturates: `i32::MAX`, `1`, and `-1` sum to
+	/// `i32::MAX` in ascending order, but to `i32::MAX - 1` in the order given.
+	/// Folding in ascending order makes the sum depend only on the multiset of
+	/// totals, as the forward pass and the Lean specification require.
 	///
 	/// # Examples
 	/// Roll `5D12` and sum the results:
@@ -651,35 +723,159 @@ impl RollingRecord
 	/// let sum = rolling_record.sum();
 	/// assert!(sum >= 2 && sum <= 12);
 	/// ```
+	///
+	/// A saturated die decides the total of its chain, whatever the other dice
+	/// of the chain show:
+	///
+	/// ```rust
+	/// # use xdy::{Die, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Custom { count: 1, faces: vec![-1, 1] },
+	///     dice: vec![Die::kept(1), Die::saturating(0, 0)]
+	/// };
+	/// assert_eq!(rolling_record.sum(), 0);
+	/// ```
 	pub fn sum(&mut self) -> i32
 	{
-		let mut kept = self.kept();
-		kept.sort();
-		kept.iter().fold(0i32, |a, b| a.saturating_add(*b))
+		let mut totals = match self.is_unlinked()
+		{
+			// Every die begins a chain of its own, so the totals are the kept
+			// results.
+			true => self.kept(),
+			false => self
+				.kept_chains()
+				.1
+				.into_iter()
+				.map(|chain| chain.total)
+				.collect::<Vec<_>>()
+		};
+		totals.sort_unstable();
+		totals.into_iter().fold(0i32, |a, b| a.saturating_add(b))
 	}
 
-	/// Answer the number of dice that are still kept.
+	/// Answer the number of [chains](Self::chains) that are still kept.
 	///
 	/// # Returns
-	/// The number of kept dice, saturated to `i32::MAX`.
+	/// The number of kept chains, saturated to `i32::MAX`.
 	fn kept_count(&self) -> i32
 	{
-		let kept = self.dice.iter().filter(|die| die.is_kept()).count();
-		i32::try_from(kept).unwrap_or(i32::MAX)
+		i32::try_from(self.kept_chains().1.len()).unwrap_or(i32::MAX)
 	}
 
-	/// Cross out the first `count` of the dice that are still kept, ordered by
-	/// the specified key and then by the order rolled, so that of dice with
-	/// equal keys the first rolled is crossed out first. A `count` of zero or
-	/// less crosses out nothing.
+	/// Answer whether the roll that filled the record rolled every die of it,
+	/// so that every die begins a [chain](Self::chains) of its own, as it does
+	/// unless a reroll or explosion has added dice.
+	///
+	/// # Returns
+	/// `true` if no die links to another, `false` otherwise.
+	fn is_unlinked(&self) -> bool
+	{
+		self.dice.iter().all(|die| die.origin == Origin::Rolled)
+	}
+
+	/// Answer, for each die, the index of the die that begins its
+	/// [chain](Self::chains). A link that names no earlier die begins a chain
+	/// of its own.
+	///
+	/// # Returns
+	/// The index of the first die of the chain of each die, in the order
+	/// rolled.
+	fn roots(&self) -> Vec<usize>
+	{
+		let mut roots = Vec::with_capacity(self.dice.len());
+		for (index, die) in self.dice.iter().enumerate()
+		{
+			let root = match die.origin.link()
+			{
+				Some(link) if link < index => roots[link],
+				_ => index
+			};
+			roots.push(root);
+		}
+		roots
+	}
+
+	/// Answer the [chains](Self::chains) that are still kept, i.e., that hold
+	/// a kept die.
+	///
+	/// # Returns
+	/// The index of the first die of the chain of each die, in the order
+	/// rolled, and the chains still kept, in the order in which their first
+	/// dice were rolled.
+	fn kept_chains(&self) -> (Vec<usize>, Vec<KeptChain>)
+	{
+		let roots = self.roots();
+		if self.is_unlinked()
+		{
+			// Every die begins a chain of its own, so skip the grouping.
+			let chains = self
+				.dice
+				.iter()
+				.enumerate()
+				.filter(|(_, die)| die.is_kept())
+				.map(|(index, die)| KeptChain {
+					root: index,
+					earliest: index,
+					total: die.value
+				})
+				.collect();
+			return (roots, chains)
+		}
+		// Order the kept dice by chain, and then by value, so that each chain
+		// folds its dice in ascending order.
+		let mut kept = self
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|(_, die)| die.is_kept())
+			.map(|(index, die)| (roots[index], die.value, index, die.origin))
+			.collect::<Vec<_>>();
+		kept.sort_unstable_by_key(|&(root, value, index, _)| {
+			(root, value, index)
+		});
+		let chains = kept
+			.chunk_by(|a, b| a.0 == b.0)
+			.map(|dice| {
+				let saturated = dice
+					.iter()
+					.filter(|(.., origin)| {
+						matches!(origin, Origin::Saturates(_))
+					})
+					.min_by_key(|&&(_, _, index, _)| index);
+				KeptChain {
+					root: dice[0].0,
+					earliest: dice
+						.iter()
+						.map(|&(_, _, index, _)| index)
+						.min()
+						.expect("a chunk is never empty"),
+					total: match saturated
+					{
+						Some(&(_, value, ..)) => value,
+						None => dice
+							.iter()
+							.fold(0i32, |a, &(_, b, ..)| a.saturating_add(b))
+					}
+				}
+			})
+			.collect();
+		(roots, chains)
+	}
+
+	/// Cross out the first `count` of the [chains](Self::chains) that are
+	/// still kept, ordered by the specified key of their totals and then by
+	/// the order in which their earliest kept dice were rolled, so that of
+	/// chains with equal keys the one whose earliest kept die was rolled first
+	/// is crossed out first. Crossing out a chain crosses out every kept die of
+	/// it. A `count` of zero or less crosses out nothing.
 	///
 	/// # Type parameters
 	/// - `K`: The type of the key.
 	///
 	/// # Parameters
-	/// - `count`: The number of dice to cross out.
-	/// - `key`: The key of a result: the result itself to cross out the lowest
-	///   dice, or its [reverse](Reverse) to cross out the highest.
+	/// - `count`: The number of chains to cross out.
+	/// - `key`: The key of a total: the total itself to cross out the lowest
+	///   chains, or its [reverse](Reverse) to cross out the highest.
 	fn cross_out<K>(&mut self, count: i32, key: impl Fn(i32) -> K)
 	where
 		K: Ord
@@ -689,19 +885,37 @@ impl RollingRecord
 		{
 			return
 		}
-		let mut kept = self
-			.dice
-			.iter()
-			.enumerate()
-			.filter(|(_, die)| die.is_kept())
-			.map(|(index, die)| (key(die.value), index))
-			.collect::<Vec<_>>();
-		kept.sort_unstable();
-		for &(_, index) in kept.iter().take(count)
+		let (roots, mut chains) = self.kept_chains();
+		chains.sort_unstable_by_key(|chain| (key(chain.total), chain.earliest));
+		let mut crossed = vec![false; self.dice.len()];
+		for chain in chains.iter().take(count)
 		{
-			self.dice[index].fate = Fate::Dropped;
+			crossed[chain.root] = true;
+		}
+		for (die, root) in self.dice.iter_mut().zip(roots)
+		{
+			if die.is_kept() && crossed[root]
+			{
+				die.fate = Fate::Dropped;
+			}
 		}
 	}
+}
+
+/// A [chain](RollingRecord::chains) of a [rolling record](RollingRecord) that
+/// is still kept.
+struct KeptChain
+{
+	/// The index of the first die of the chain.
+	root: usize,
+
+	/// The index of the earliest kept die of the chain.
+	earliest: usize,
+
+	/// The total of the chain: the value of its earliest kept saturated die if
+	/// it has one, or otherwise the sum of its kept dice, folded in ascending
+	/// order.
+	total: i32
 }
 
 impl RollingRecordKind<i32>
@@ -904,8 +1118,9 @@ impl Criterion
 /// as the definition of [`RollingRecord::keep_lowest`] and
 /// [`RollingRecord::keep_highest`], which drop this many results from the
 /// opposite end, and of the keeps of the forward pass, which share it. A
-/// rolling record passes the number of dice that it still keeps, and no drops,
-/// since it has already crossed out the dice that it dropped.
+/// rolling record passes the number of [chains](RollingRecord::chains) that it
+/// still keeps, each of which counts as one result, and no drops, since it has
+/// already crossed out the dice that it dropped.
 ///
 /// # Parameters
 /// - `results`: The number of results in the record.

@@ -12,7 +12,7 @@ use rand::{Rng as _, RngExt as _, SeedableRng, rngs::StdRng};
 
 use crate::{
 	AddressingMode, Assembler, Budget, Criterion, Die, EvaluationBounds,
-	EvaluationError, Evaluator, Fate, Immediate, Passes, Predicate,
+	EvaluationError, Evaluator, Fate, Immediate, Origin, Passes, Predicate,
 	RegisterIndex, RollingRecord, RollingRecordKind, Unobserved,
 	support::{
 		compile_valid, on_small_stack, optimize, read_evaluation_test_cases
@@ -121,7 +121,7 @@ fn test_evaluation()
 							record
 								.dice
 								.iter()
-								.filter(|die| die.replaces.is_none())
+								.filter(|die| die.origin == Origin::Rolled)
 								.count(),
 							1,
 							"case {}: {}: wrong number of results",
@@ -160,7 +160,7 @@ fn test_evaluation()
 							record
 								.dice
 								.iter()
-								.filter(|die| die.replaces.is_none())
+								.filter(|die| die.origin == Origin::Rolled)
 								.count(),
 							count.max(0) as usize,
 							"case {}: {}: wrong number of results",
@@ -196,7 +196,7 @@ fn test_evaluation()
 							record
 								.dice
 								.iter()
-								.filter(|die| die.replaces.is_none())
+								.filter(|die| die.origin == Origin::Rolled)
 								.count(),
 							count as usize,
 							"case {}: {}: wrong number of results",
@@ -952,6 +952,469 @@ fn test_evaluation_crosses_out_dice()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                                  Chains.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Answer a kept die with the specified origin.
+///
+/// # Parameters
+/// - `value`: The result of the die.
+/// - `origin`: The origin of the die.
+///
+/// # Returns
+/// The die.
+fn die(value: i32, origin: Origin) -> Die
+{
+	Die {
+		value,
+		fate: Fate::Kept,
+		origin
+	}
+}
+
+/// Test that every die joins the chain of the die from which it descends,
+/// whatever links it, and whatever its fate, that the chains follow the order
+/// in which their first dice were rolled, and that a link that names no
+/// earlier die begins a chain of its own.
+#[test]
+fn test_chains_follow_links()
+{
+	let mut record = record(6, &[]);
+	record.dice = vec![
+		die(6, Origin::Rolled),
+		die(3, Origin::Rolled),
+		die(6, Origin::Extends(0)),
+		die(1, Origin::Replaces(2)),
+		die(4, Origin::Extends(2)),
+		die(i32::MAX, Origin::Saturates(1)),
+		die(2, Origin::Replaces(6)),
+		die(5, Origin::Extends(7)),
+		die(5, Origin::Rolled),
+	];
+	record.dice[2].fate = Fate::Rerolled;
+	assert_eq!(
+		record.chains(),
+		vec![vec![0, 2, 3, 4], vec![1, 5], vec![6], vec![7], vec![8]]
+	);
+	assert_eq!(record.to_string(), "0D6: [6, 3, ~6, 1, 4, ∞, 2, 5, 5]");
+	assert_eq!(
+		record_of(RollingRecordKind::Uninitialized, &[]).chains(),
+		Vec::<Vec<usize>>::new()
+	);
+}
+
+/// Test that the sum and every drop and keep count each chain still kept as
+/// one die, worth the sum of its kept dice, or the value of its saturated die;
+/// that crossing out a chain crosses out every kept die of it, and leaves the
+/// dice that a reroll crossed out as they were; and that of equal chains, the
+/// one whose earliest kept die was rolled first is crossed out first.
+#[test]
+fn test_chains_count_as_one_die()
+{
+	// [6, 2] → 8, [3] → 3, [5, ~1, 3] → 8, [4] → 4.
+	let chains = || {
+		let mut record = record(6, &[]);
+		record.dice = vec![
+			die(6, Origin::Rolled),
+			die(3, Origin::Rolled),
+			die(5, Origin::Rolled),
+			die(4, Origin::Rolled),
+			die(2, Origin::Extends(0)),
+			die(1, Origin::Extends(2)),
+			die(3, Origin::Replaces(5)),
+		];
+		record.dice[5].fate = Fate::Rerolled;
+		record
+	};
+	let mut whole = chains();
+	assert_eq!(whole.sum(), 23);
+	assert_eq!(whole.kept(), vec![6, 3, 5, 4, 2, 3]);
+	type Clause = fn(&mut RollingRecord, i32);
+	let drop_lowest: Clause = RollingRecord::drop_lowest;
+	let drop_highest: Clause = RollingRecord::drop_highest;
+	let keep_lowest: Clause = RollingRecord::keep_lowest;
+	let keep_highest: Clause = RollingRecord::keep_highest;
+	for (clause, count, expected, sum) in [
+		(drop_lowest, 1, "0D6: [6, ~3, 5, 4, 2, ~1, 3]", 20),
+		(drop_lowest, 2, "0D6: [6, ~3, 5, ~4, 2, ~1, 3]", 16),
+		// The chains worth 8 tie, and the first, whose earliest kept die is
+		// the `6`, goes first.
+		(drop_highest, 1, "0D6: [~6, 3, 5, 4, ~2, ~1, 3]", 15),
+		(drop_highest, 2, "0D6: [~6, 3, ~5, 4, ~2, ~1, ~3]", 7),
+		// Of the chains worth 8, keeping the highest crosses out the first.
+		(keep_highest, 1, "0D6: [~6, ~3, 5, ~4, ~2, ~1, 3]", 8),
+		(keep_lowest, 3, "0D6: [~6, 3, 5, 4, ~2, ~1, 3]", 15),
+		(keep_lowest, 4, "0D6: [6, 3, 5, 4, 2, ~1, 3]", 23),
+		(drop_lowest, 9, "0D6: [~6, ~3, ~5, ~4, ~2, ~1, ~3]", 0),
+		(keep_highest, 0, "0D6: [~6, ~3, ~5, ~4, ~2, ~1, ~3]", 0)
+	]
+	{
+		let mut record = chains();
+		clause(&mut record, count);
+		assert_eq!(record.to_string(), expected);
+		assert_eq!(record.sum(), sum, "{}", expected);
+		assert_eq!(record.rerolled(), vec![1], "{}", expected);
+	}
+	// Of equal chains, the earliest kept die decides, not the first die: the
+	// replacement of the `1` that begins the first chain was rolled after the
+	// `3`, so the `3` is crossed out first.
+	let mut record = record(6, &[]);
+	record.dice = vec![
+		die(1, Origin::Rolled),
+		die(3, Origin::Rolled),
+		die(3, Origin::Replaces(0)),
+	];
+	record.dice[0].fate = Fate::Rerolled;
+	record.drop_lowest(1);
+	assert_eq!(record.to_string(), "0D6: [~1, ~3, 3]");
+}
+
+/// Test that a saturated die decides the total of its chain, whatever the
+/// other kept dice of the chain show, that drops and keeps count a saturated
+/// chain as one die worth that total, and that a saturated die prints as `∞`
+/// or `-∞`.
+#[test]
+fn test_saturated_chains()
+{
+	let saturated = |value| {
+		let mut record = record_of(
+			RollingRecordKind::Custom {
+				count: 3,
+				faces: vec![-10, 5]
+			},
+			&[]
+		);
+		record.dice = vec![
+			die(5, Origin::Rolled),
+			die(-10, Origin::Rolled),
+			die(5, Origin::Rolled),
+			die(value, Origin::Saturates(0)),
+			die(value, Origin::Saturates(1)),
+			die(value, Origin::Saturates(2)),
+		];
+		record
+	};
+	let mut record = saturated(i32::MIN);
+	assert_eq!(record.sum(), i32::MIN);
+	assert_eq!(record.to_string(), "3d[-10, 5]: [5, -10, 5, -∞, -∞, -∞]");
+	record.keep_highest(1);
+	assert_eq!(record.sum(), i32::MIN);
+	assert_eq!(
+		record.to_string(),
+		"3d[-10, 5]: [~5, ~-10, 5, ~-∞, ~-∞, -∞]"
+	);
+	let mut record = saturated(i32::MAX);
+	assert_eq!(record.sum(), i32::MAX);
+	assert_eq!(record.to_string(), "3d[-10, 5]: [5, -10, 5, ∞, ∞, ∞]");
+	record.drop_lowest(2);
+	assert_eq!(record.sum(), i32::MAX);
+	record.drop_lowest(1);
+	assert_eq!(record.sum(), 0);
+	let mut record = saturated(0);
+	assert_eq!(record.sum(), 0);
+	assert_eq!(record.to_string(), "3d[-10, 5]: [5, -10, 5, 0, 0, 0]");
+	// Only a saturated die prints as infinite.
+	let mut record = record_of(
+		RollingRecordKind::Custom {
+			count: 1,
+			faces: vec![i32::MAX]
+		},
+		&[i32::MAX]
+	);
+	assert_eq!(record.to_string(), "1d[2147483647]: [2147483647]");
+	assert_eq!(record.sum(), i32::MAX);
+	// The sum folds the totals of the chains in ascending order, and each
+	// chain folds its kept dice in ascending order.
+	let mut record = record_of(
+		RollingRecordKind::Custom {
+			count: 2,
+			faces: vec![i32::MAX, 1, -1]
+		},
+		&[]
+	);
+	record.dice = vec![
+		die(1, Origin::Rolled),
+		die(-1, Origin::Rolled),
+		die(i32::MAX, Origin::Extends(0)),
+		die(-1, Origin::Extends(2)),
+	];
+	// The first chain folds `-1`, `1`, and `i32::MAX`, to `i32::MAX`, and then
+	// the sum folds `-1` and `i32::MAX`, to `i32::MAX - 1`.
+	assert_eq!(record.sum(), i32::MAX - 1);
+}
+
+/// Test that, without dice that extend others, drops and keeps cross out
+/// exactly the dice that crossing out dice one by one would, as through the
+/// first release of crossed-out records, for random records with rerolls,
+/// drops and keeps in any order, so that every record and sum is unchanged.
+#[test]
+fn test_chains_without_extensions_are_dice()
+{
+	/// Cross out dice one by one, as records did before chains.
+	fn cross_out(record: &mut RollingRecord, count: i32, highest: bool)
+	{
+		let mut kept = record
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|(_, die)| die.is_kept())
+			.map(|(index, die)| {
+				(
+					if highest
+					{
+						-(die.value as i64)
+					}
+					else
+					{
+						die.value as i64
+					},
+					index
+				)
+			})
+			.collect::<Vec<_>>();
+		kept.sort_unstable();
+		for &(_, index) in kept.iter().take(count.max(0) as usize)
+		{
+			record.dice[index].fate = Fate::Dropped;
+		}
+	}
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(6618230984571203);
+	for _ in 0..10_000
+	{
+		let len = rng.random_range(0..=6);
+		let results = (0..len)
+			.map(|_| rng.random_range(1..=4))
+			.collect::<Vec<_>>();
+		let mut record = record(4, &results);
+		let mut model = record.clone();
+		for _ in 0..rng.random_range(0..=5)
+		{
+			let count = rng.random_range(-1..=len + 1);
+			let kept = model.kept().len() as i32;
+			let keep = kept - count.clamp(0, kept);
+			match rng.random_range(0..5)
+			{
+				0 =>
+				{
+					record.drop_lowest(count);
+					cross_out(&mut model, count, false);
+				},
+				1 =>
+				{
+					record.drop_highest(count);
+					cross_out(&mut model, count, true);
+				},
+				2 =>
+				{
+					record.keep_lowest(count);
+					cross_out(&mut model, keep, true);
+				},
+				3 =>
+				{
+					record.keep_highest(count);
+					cross_out(&mut model, keep, false);
+				},
+				_ =>
+				{
+					// Reroll both records alike.
+					let seed = rng.random::<u64>();
+					let threshold = rng.random_range(1..=4);
+					let criterion = Criterion::within(1, threshold);
+					let limit = Some(rng.random_range(0..=2));
+					record.reroll(
+						&mut StdRng::seed_from_u64(seed),
+						&criterion,
+						limit
+					);
+					model.reroll(
+						&mut StdRng::seed_from_u64(seed),
+						&criterion,
+						limit
+					);
+				}
+			}
+			assert_eq!(record, model, "{} vs {}", record, model);
+		}
+		let mut expected = model.kept();
+		expected.sort();
+		assert_eq!(
+			record.sum(),
+			expected.iter().fold(0i32, |a, b| a.saturating_add(*b)),
+			"{}",
+			record
+		);
+		assert!(
+			record.chains().iter().all(|chain| chain
+				.iter()
+				.filter(|&&i| record.dice[i].is_kept())
+				.count()
+				<= 1),
+			"{}",
+			record
+		);
+	}
+}
+
+/// Test that drops and keeps over random records with chains keep the same
+/// totals as dropping from the ends of the sorted totals of the chains, which
+/// a reference computes by following each die's links to the die that begins
+/// its chain, and that crossing out a chain leaves none of its dice kept.
+#[test]
+fn test_chains_agree_with_sorted_totals()
+{
+	/// Answer the index of the first die of the chain of the specified die.
+	fn root(record: &RollingRecord, index: usize) -> usize
+	{
+		match record.dice[index].origin.link()
+		{
+			Some(link) if link < index => root(record, link),
+			_ => index
+		}
+	}
+	/// Answer the totals of the chains still kept, by first die.
+	fn totals(record: &RollingRecord) -> Vec<(usize, i32)>
+	{
+		let mut chains = std::collections::BTreeMap::<usize, Vec<Die>>::new();
+		for (index, die) in record.dice.iter().enumerate()
+		{
+			if die.is_kept()
+			{
+				chains.entry(root(record, index)).or_default().push(*die);
+			}
+		}
+		chains
+			.into_iter()
+			.map(|(root, dice)| {
+				// The earliest saturated die decides, should several share a
+				// chain.
+				let saturated = dice
+					.iter()
+					.find(|die| matches!(die.origin, Origin::Saturates(_)));
+				let total = match saturated
+				{
+					Some(die) => die.value,
+					None =>
+					{
+						let mut values = dice
+							.iter()
+							.map(|die| die.value)
+							.collect::<Vec<_>>();
+						values.sort();
+						values.iter().fold(0i32, |a, b| a.saturating_add(*b))
+					}
+				};
+				(root, total)
+			})
+			.collect()
+	}
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(2093857120938471);
+	for _ in 0..10_000
+	{
+		let len = rng.random_range(0..=8);
+		let mut record = record(6, &[]);
+		for index in 0..len
+		{
+			let value = rng.random_range(-2..=6);
+			let origin = match (index, rng.random_range(0..6))
+			{
+				(0, _) | (_, 0..=2) => Origin::Rolled,
+				(_, 3) => Origin::Extends(rng.random_range(0..index)),
+				(_, 4) =>
+				{
+					let link = rng.random_range(0..index);
+					record.dice[link].fate = Fate::Rerolled;
+					Origin::Replaces(link)
+				},
+				_ =>
+				{
+					let value = [i32::MIN, 0, i32::MAX][rng.random_range(0..3)];
+					record.dice.push(die(
+						value,
+						Origin::Saturates(rng.random_range(0..index))
+					));
+					continue
+				}
+			};
+			record.dice.push(die(value, origin));
+		}
+		let mut sorted = totals(&record)
+			.into_iter()
+			.map(|(_, total)| total)
+			.collect::<Vec<_>>();
+		sorted.sort();
+		let before = record.clone();
+		let kept = sorted.len() as i32;
+		let count = rng.random_range(-1..=kept + 1);
+		let keep = (kept - count.clamp(0, kept)) as usize;
+		let lowest = rng.random_bool(0.5);
+		let expected: Vec<i32> = match (rng.random_bool(0.5), lowest)
+		{
+			(true, true) =>
+			{
+				record.drop_lowest(count);
+				sorted[(count.clamp(0, kept) as usize)..].to_vec()
+			},
+			(true, false) =>
+			{
+				record.drop_highest(count);
+				sorted[..keep].to_vec()
+			},
+			(false, true) =>
+			{
+				record.keep_lowest(count);
+				sorted[..(count.clamp(0, kept) as usize)].to_vec()
+			},
+			(false, false) =>
+			{
+				record.keep_highest(count);
+				sorted[keep..].to_vec()
+			}
+		};
+		let mut actual = totals(&record)
+			.into_iter()
+			.map(|(_, total)| total)
+			.collect::<Vec<_>>();
+		actual.sort();
+		assert_eq!(actual, expected, "{} -> {}", before, record);
+		assert_eq!(
+			record.sum(),
+			expected.iter().fold(0i32, |a, b| a.saturating_add(*b)),
+			"{}",
+			record
+		);
+		// A chain is kept whole or crossed out whole, and the dice that a
+		// reroll crossed out stay as they were.
+		for (index, (after, die)) in
+			record.dice.iter().zip(&before.dice).enumerate()
+		{
+			assert_eq!(after.value, die.value);
+			assert_eq!(after.origin, die.origin);
+			match die.fate
+			{
+				Fate::Kept => assert!(
+					after.is_kept()
+						|| (after.fate == Fate::Dropped
+							&& record.dice.iter().enumerate().all(
+								|(other, d)| {
+									root(&record, other) != root(&record, index)
+										|| !d.is_kept()
+								}
+							)),
+					"{} -> {}",
+					before,
+					record
+				),
+				fate => assert_eq!(after.fate, fate)
+			}
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                                  Rerolls.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1091,7 +1554,7 @@ fn test_reroll_appends_linked_replacements()
 	);
 	assert_eq!(record.to_string(), "3d[3]: [2, ~1, 4, 3]");
 	assert_eq!(record.dice[1].fate, Fate::Rerolled);
-	assert_eq!(record.dice[3].replaces, Some(1));
+	assert_eq!(record.dice[3].origin, Origin::Replaces(1));
 	assert_eq!(record.rerolled(), vec![1]);
 	assert_eq!(record.dropped(), Vec::<i32>::new());
 	assert_eq!(record.sum(), 9);
@@ -1106,23 +1569,19 @@ fn test_reroll_appends_linked_replacements()
 		record.to_string(),
 		"3d[3]: [~1, 2, ~4, ~3, ~3, 3, ~3, ~3, 3]"
 	);
-	let links = record
-		.dice
-		.iter()
-		.map(|die| die.replaces)
-		.collect::<Vec<_>>();
+	let links = record.dice.iter().map(|die| die.origin).collect::<Vec<_>>();
 	assert_eq!(
 		links,
 		[
-			None,
-			None,
-			None,
-			Some(0),
-			Some(3),
-			Some(4),
-			Some(2),
-			Some(6),
-			Some(7)
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Replaces(0),
+			Origin::Replaces(3),
+			Origin::Replaces(4),
+			Origin::Replaces(2),
+			Origin::Replaces(6),
+			Origin::Replaces(7)
 		]
 	);
 	// Only the dice still kept are rerolled, and their replacements are kept,
@@ -1371,7 +1830,7 @@ fn test_reroll_invariants()
 			let mut current = start;
 			let mut times = 0;
 			while next < record.dice.len()
-				&& record.dice[next].replaces == Some(current)
+				&& record.dice[next].origin == Origin::Replaces(current)
 			{
 				assert_eq!(
 					record.dice[current].fate,

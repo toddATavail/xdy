@@ -41,14 +41,24 @@ use crate::{
 /// A die that a drop or keep dropped stays in the record, crossed out, so the
 /// record shows everything that happened to its dice. So does a die that a
 /// [reroll](crate::Reroll) rerolled, whose replacement follows the dice
-/// already rolled, [linked](Die::replaces) to it, so that each die's chain of
-/// rerolls can be traced. Only the [kept](Fate::Kept) dice reach the sum or
-/// any later drop, keep, or reroll, so the multiset of kept dice decides
+/// already rolled, [linked](Origin::Replaces) to it, so that each die's chain
+/// of rerolls can be traced. Only the [kept](Fate::Kept) dice reach the sum or
+/// any later drop, keep, or reroll.
+///
+/// Every die descends, by its [origin](Die::origin), from a die that the roll
+/// that filled the record rolled, and every die that descends from the same
+/// one belongs to the same [chain](RollingRecord::chains). A die that extends
+/// another, as an explosion rolls it, joins the chain of the die that it
+/// extends, and a replacement joins the chain of the die that it replaces, so
+/// a chain holds at most one kept die unless some die extends another. The sum
+/// and every drop and keep count a chain as one die, worth the sum of its kept
+/// dice, or worth the value of its [saturated](Origin::Saturates) die if it
+/// has one, so the multiset of the totals of the chains still kept decides
 /// everything that the record computes.
 ///
 /// A record prints its kind and then its dice, in the order rolled, each
 /// crossed-out die prefixed with `~`, whatever crossed it out, as in
-/// `3D6: [5, ~1, 3]`.
+/// `3D6: [5, ~1, 3]`. A saturated die prints as `∞` or `-∞`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecord
@@ -77,9 +87,10 @@ impl Display for RollingRecord
 	}
 }
 
-/// A die of a [rolling record](RollingRecord): its result, its fate, and the
-/// die that it replaces, if a reroll rolled it. A die prints as its result,
-/// prefixed with `~` if it is crossed out.
+/// A die of a [rolling record](RollingRecord): its result, its fate, and its
+/// origin. A die prints as its result, prefixed with `~` if it is crossed out;
+/// a [saturated](Origin::Saturates) die whose result is `i32::MAX` or
+/// `i32::MIN` prints as `∞` or `-∞`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Die
@@ -90,11 +101,9 @@ pub struct Die
 	/// Whether the die still counts.
 	pub fate: Fate,
 
-	/// The index, among the [dice](RollingRecord::dice) of the record, of the
-	/// die that this die replaces, which a [reroll](Fate::Rerolled) crossed
-	/// out; or `None` if the die was rolled by the roll that filled the
-	/// record.
-	pub replaces: Option<usize>
+	/// What rolled the die: the roll that filled the record, or a reroll or
+	/// explosion of an earlier die of the record.
+	pub origin: Origin
 }
 
 impl Die
@@ -112,7 +121,7 @@ impl Die
 		Self {
 			value,
 			fate: Fate::Kept,
-			replaces: None
+			origin: Origin::Rolled
 		}
 	}
 
@@ -132,7 +141,49 @@ impl Die
 		Self {
 			value,
 			fate: Fate::Kept,
-			replaces: Some(replaces)
+			origin: Origin::Replaces(replaces)
+		}
+	}
+
+	/// Answer a freshly rolled die, which is [kept](Fate::Kept), that extends
+	/// a die that an explosion matched.
+	///
+	/// # Parameters
+	/// - `value`: The result of the die.
+	/// - `extends`: The index, among the dice of the record, of the die that it
+	///   extends.
+	///
+	/// # Returns
+	/// The kept die.
+	#[inline]
+	pub const fn extending(value: i32, extends: usize) -> Self
+	{
+		Self {
+			value,
+			fate: Fate::Kept,
+			origin: Origin::Extends(extends)
+		}
+	}
+
+	/// Answer a [saturated](Origin::Saturates) die, which is
+	/// [kept](Fate::Kept), that stands for the endless chain of dice that an
+	/// explosion matching every face of its die would roll.
+	///
+	/// # Parameters
+	/// - `value`: The total of the chain: `i32::MAX` or `i32::MIN` by the sign
+	///   of the mean face value, or `0` if that mean is `0`.
+	/// - `saturates`: The index, among the dice of the record, of the die after
+	///   which the endless chain would begin.
+	///
+	/// # Returns
+	/// The kept die.
+	#[inline]
+	pub const fn saturating(value: i32, saturates: usize) -> Self
+	{
+		Self {
+			value,
+			fate: Fate::Kept,
+			origin: Origin::Saturates(saturates)
 		}
 	}
 
@@ -148,10 +199,64 @@ impl Display for Die
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
 	{
-		match self.fate
+		if !self.is_kept()
 		{
-			Fate::Kept => write!(f, "{}", self.value),
-			Fate::Dropped | Fate::Rerolled => write!(f, "~{}", self.value)
+			write!(f, "~")?;
+		}
+		match (self.origin, self.value)
+		{
+			(Origin::Saturates(_), i32::MAX) => write!(f, "∞"),
+			(Origin::Saturates(_), i32::MIN) => write!(f, "-∞"),
+			(_, value) => write!(f, "{}", value)
+		}
+	}
+}
+
+/// The origin of a [die](Die) of a [rolling record](RollingRecord): the roll
+/// that filled the record, or the earlier die of the record from which the die
+/// descends. Following the links from any die leads to the die that begins its
+/// [chain](RollingRecord::chains). A link that names no earlier die of the
+/// record begins a chain of its own, as [`Rolled`](Self::Rolled) does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Origin
+{
+	/// The roll that filled the record rolled the die, which begins a chain.
+	#[default]
+	Rolled,
+
+	/// The die replaces the die at this index, which a
+	/// [reroll](Fate::Rerolled) crossed out, and joins its chain.
+	Replaces(usize),
+
+	/// The die extends the die at this index, which an explosion matched and
+	/// which stays [kept](Fate::Kept), and joins its chain.
+	Extends(usize),
+
+	/// The die stands for the endless chain of dice that an explosion matching
+	/// every face of its die would roll after the die at this index, and joins
+	/// its chain. Its value is the total of the chain, whatever its other dice
+	/// show: `i32::MAX` or `i32::MIN` by the sign of the mean face value,
+	/// or `0` if that mean is `0`.
+	Saturates(usize)
+}
+
+impl Origin
+{
+	/// Answer the index of the die from which the die descends, if any.
+	///
+	/// # Returns
+	/// The index that the origin names, or `None` if the roll that filled the
+	/// record rolled the die.
+	#[inline]
+	pub const fn link(&self) -> Option<usize>
+	{
+		match self
+		{
+			Self::Rolled => None,
+			Self::Replaces(index)
+			| Self::Extends(index)
+			| Self::Saturates(index) => Some(*index)
 		}
 	}
 }

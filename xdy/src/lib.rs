@@ -69,11 +69,12 @@
 //!   replaces `results`, `lowest_dropped`, and `highest_dropped`. Each [`Die`]
 //!   holds its [`value`](Die::value); its [`fate`](Die::fate), which is
 //!   [`Fate::Kept`], [`Fate::Dropped`] if a drop or keep crossed it out, or
-//!   [`Fate::Rerolled`] if a reroll did; and, if a reroll rolled it, the index
-//!   of the die that it [`replaces`](Die::replaces). Where you read
-//!   `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind
-//!   that a reroll appends its replacements, so a record may hold more dice
-//!   than its roll did.
+//!   [`Fate::Rerolled`] if a reroll did; and its [`origin`](Die::origin), which
+//!   is [`Origin::Rolled`] if the roll rolled it, or [`Origin::Replaces`] with
+//!   the index of the die that it replaces if a reroll rolled it. Where you
+//!   read `record.results`, read `record.dice.iter().map(|die| die.value)`, but
+//!   mind that a reroll appends its replacements, so a record may hold more
+//!   dice than its roll did.
 //! * [`RollingRecord::dropped`] replaces the methods `lowest_dropped` and
 //!   `highest_dropped`, answering every die that a drop or keep crossed out, in
 //!   the order rolled. Once keeps and rerolls may come between drops, the dice
@@ -268,11 +269,11 @@
 //! order rolled, whatever becomes of it. A drop or keep crosses out each die
 //! that it drops, and of equal dice, the first rolled. A reroll crosses out
 //! each die that it rolls again, and appends the die's replacement,
-//! [linked](Die::replaces) to the die that it replaces, so the whole chain of
-//! rerolls of each die can be traced. A record shows each crossed-out die with
-//! a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the [dice
-//! still kept](RollingRecord::kept) count toward the total, or toward any later
-//! clause.
+//! [linked](Origin::Replaces) to the die that it replaces, so the whole chain
+//! of rerolls of each die can be traced. A record shows each crossed-out die
+//! with a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the
+//! [dice still kept](RollingRecord::kept) count toward the total, or toward any
+//! later clause.
 //!
 //! Environmental variables permit background state to be associated with an
 //! evaluator, while formal parameters permit dynamic state to be passed into
@@ -402,7 +403,7 @@
 //! rolled, linked to it:
 //!
 //! ```rust
-//! use xdy::{Fate, evaluate};
+//! use xdy::{Fate, Origin, evaluate};
 //! use rand::rng;
 //!
 //! let result =
@@ -420,8 +421,8 @@
 //! for (index, die) in record.dice.iter().enumerate() {
 //!     if die.fate == Fate::Rerolled {
 //!         assert!(die.value == 1);
-//!         assert!(record.dice[index + 1..].iter().any(|d| d.replaces ==
-//!         Some(index)));
+//!         assert!(record.dice[index + 1..].iter().any(|d| d.origin ==
+//!         Origin::Replaces(index)));
 //!     }
 //! }
 //! ```

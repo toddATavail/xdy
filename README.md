@@ -50,7 +50,7 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 
 `0.15.0` adds keep and reroll clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). A reroll changes the value of a die after the roll, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
 
-* `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and, if a reroll rolled it, the index of the die that it `replaces`. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, so a record may hold more dice than its roll did.
+* `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and its `origin`, which is `Origin::Rolled` if the roll rolled it, or `Origin::Replaces` with the index of the die that it replaces if a reroll rolled it. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, so a record may hold more dice than its roll did.
 * `RollingRecord::dropped` replaces the methods `lowest_dropped` and `highest_dropped`, answering every die that a drop or keep crossed out, in the order rolled. Once keeps and rerolls may come between drops, the dice crossed out at each end no longer stand apart, so the record no longer says which end each came from. The new `rerolled` answers the dice that rerolls crossed out.
 * `RollingRecord::kept` answers the kept results in the order rolled, not ascending, so sort them if you relied on their order. `sum` is unchanged.
 * A rolling record prints its dice in the order rolled, each crossed-out die prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with the dropped dice set apart by semicolons.
@@ -215,7 +215,7 @@ assert!(result.result == 2 * total);
 Rerolling every `1` without limit. Each die that showed a `1` stays in the rolling record, crossed out, and its replacement follows the dice already rolled, linked to it:
 
 ```rust
-use xdy::{Fate, evaluate};
+use xdy::{Fate, Origin, evaluate};
 use rand::rng;
 
 let result =
@@ -232,7 +232,7 @@ assert!(result.result == kept.iter().sum::<i32>());
 for (index, die) in record.dice.iter().enumerate() {
     if die.fate == Fate::Rerolled {
         assert!(die.value == 1);
-        assert!(record.dice[index + 1..].iter().any(|d| d.replaces == Some(index)));
+        assert!(record.dice[index + 1..].iter().any(|d| d.origin == Origin::Replaces(index)));
     }
 }
 ```
