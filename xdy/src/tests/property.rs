@@ -141,6 +141,68 @@ fn test_optimized_programs()
 	});
 }
 
+/// Ensure that optimization never changes the distribution of a reroll, for
+/// every combination of a die, ordinary or with one face, constant or not; a
+/// predicate of every form, constant or not, that matches some faces, every
+/// face, or none; a limit of every form; and the clauses around it, of every
+/// kind, before it or after it, over values of the parameter that make every
+/// operand that is not constant match differently.
+#[test]
+fn test_optimized_rerolls()
+{
+	let dice = [
+		"3D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}", "[2:2]"
+	];
+	let predicates = [
+		"= 1",
+		"≠ 1",
+		"≤ 3",
+		"≥ 1",
+		"< 9",
+		"in []",
+		"in [2, 4]",
+		"in 2..2",
+		"in 1..=3",
+		"= {x}",
+		"in {x}..=4"
+	];
+	let limits = ["", " 0 times", " 2 times", " ∞ times", " {x} times"];
+	let clauses = [
+		"{dice} reroll {reroll}",
+		"{dice} drop lowest reroll {reroll}",
+		"{dice} reroll {reroll} keep highest",
+		"{dice} reroll {reroll} reroll {reroll}",
+		"{dice} reroll ≥ 2 ∞ times reroll {reroll}"
+	];
+	for dice in dice
+	{
+		for predicate in predicates
+		{
+			for limit in limits
+			{
+				let reroll = format!("{}{}", predicate, limit);
+				for clauses in clauses
+				{
+					let source = format!(
+						"{{x}}: {}",
+						clauses
+							.replace("{dice}", dice)
+							.replace("{reroll}", &reroll)
+					);
+					for x in -1..=4
+					{
+						check_optimization(&source, &[x], &[])
+							.map_err(|e| {
+								format!("{}, x = {}: {}", source, x, e)
+							})
+							.unwrap();
+					}
+				}
+			}
+		}
+	}
+}
+
 /// Run a property on [`CASES`] random inputs, recording failures under
 /// `proptest-regressions`, in the file that parallels this one. See
 /// [`check_within`].

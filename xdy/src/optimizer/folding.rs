@@ -1,19 +1,26 @@
 //! # Constant folding
 //!
 //! The constant folder is a simple optimizer that folds expressions with only
-//! constant operands into immediates. The constant folder requires the function
-//! to be in static single assignment (SSA) form.
+//! constant operands into immediates. It also folds a roll whose result its
+//! clauses leave known, applying them in order: a roll whose clauses keep no
+//! die is zero, e.g., `3D6 reroll ≤ 6 ∞ times`, since an unlimited reroll that
+//! matches every face crosses out every die; and a roll of dice with one face
+//! is that face times the dice kept, since no reroll can change it, e.g.,
+//! `3D1 reroll = 1` is `3`. The constant folder requires the function to be in
+//! static single assignment (SSA) form.
 
 use std::collections::HashMap;
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor,
-	KeepHighest, KeepLowest, Max, Mod, Mul, Neg, ProgramCounter, RegisterIndex,
-	Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord, ir::Instruction
+	KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg, ProgramCounter,
+	RegisterIndex, Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
+	RollingRecordIndex, Sub, SumRollingRecord, evaluator::ResultSet,
+	ir::Instruction
 };
 
+use super::{criteria, faces};
 use crate::{
 	Optimizer, add, div, exp, max, r#mod, mul, neg, primitives::keep_drops, sub
 };
@@ -125,30 +132,35 @@ impl InstructionVisitor<()> for ConstantFolder
 		if let Some((start, end)) = range.const_ops()
 		{
 			// We can fold the range if it contains one or fewer possible
-			// outcomes. An empty range is zero whatever it drops, but a range
-			// with a single value folds only if nothing may drop it: the
-			// grammar admits no drop expressions on ranges, but strength
-			// reduction turns 1Dn into [1:n], drops and all. Folding involves
-			// eliminating the instruction completely and replacing its rolling
-			// record with the new constant value. When we subsequently
-			// encounter the corresponding SumRollingRecord instruction, we
-			// will eliminate it also and replace its destination register with
-			// the new constant value.
-			match end.saturating_sub(start).saturating_add(1)
+			// outcomes, or if its clauses cross out its die. An empty range is
+			// zero whatever its clauses do, but a range with a single value is
+			// that value only if its clauses keep its die: the grammar admits
+			// no clauses on ranges, but strength reduction turns 1Dn into
+			// [1:n], clauses and all. Folding involves eliminating the
+			// instruction completely and replacing its rolling record with the
+			// new constant value. When we subsequently encounter the
+			// corresponding SumRollingRecord instruction, we will eliminate it
+			// also and replace its destination register with the new constant
+			// value.
+			if end < start
 			{
-				..=0 =>
+				// The range is empty, so the result is zero.
+				self.replace(range.dest, Immediate(0));
+				return Ok(())
+			}
+			let faces = faces(&(*range).into());
+			match self.kept_dice(range.dest, Some(1), &faces)
+			{
+				Some(0) =>
 				{
-					// The range is empty, so the result is zero.
+					// The die is crossed out, so the result is zero.
 					self.replace(range.dest, Immediate(0));
 					return Ok(())
 				},
-				1 if self
-					.find_drop_instructions(range.dest)
-					.next()
-					.is_none() =>
+				Some(_) if start == end =>
 				{
 					// The range contains a single value, which must be the
-					// result.
+					// result, however the die was rerolled.
 					self.replace(range.dest, Immediate(start));
 					return Ok(())
 				},
@@ -193,25 +205,31 @@ impl InstructionVisitor<()> for ConstantFolder
 			self.replace(roll.dest, Immediate(0));
 			return Ok(())
 		}
-		if let Some((count, faces)) = roll.const_ops()
-			// Scan forward for any drop or keep expressions that target the
-			// same rolling record, and apply them, in order, to the count of
-			// dice.
-			&& let Some(kept) = self.kept_dice(roll.dest, count)
+		if let AddressingMode::Immediate(Immediate(faces)) = roll.faces
 		{
-			if kept == 0
+			// Scan forward for any clauses that target the same rolling
+			// record, and apply them, in order, to the count of dice, which
+			// need not be constant if the clauses cross out every die.
+			let count = roll.const_ops().map(|(count, _)| count);
+			let die = super::faces(&(*roll).into());
+			match self.kept_dice(roll.dest, count, &die)
 			{
-				// All dice are dropped, so the contribution is zero, however
-				// many faces the dice have.
-				self.replace(roll.dest, Immediate(0));
-				return Ok(())
-			}
-			else if faces == 1
-			{
-				// The dice have only one face, so the result is the count of
-				// dice kept.
-				self.replace(roll.dest, Immediate(kept));
-				return Ok(())
+				Some(0) =>
+				{
+					// Every die is crossed out, so the contribution is zero,
+					// however many dice there are and faces they have.
+					self.replace(roll.dest, Immediate(0));
+					return Ok(())
+				},
+				Some(kept) if faces == 1 =>
+				{
+					// The dice have only one face, which no reroll can change,
+					// so the result is the count of dice kept.
+					self.replace(roll.dest, Immediate(kept));
+					return Ok(())
+				},
+				_ =>
+				{}
 			}
 		}
 		// The roll can't be folded, but we may still need to allocate a new
@@ -254,27 +272,30 @@ impl InstructionVisitor<()> for ConstantFolder
 			self.replace(roll.dest, Immediate(0));
 			return Ok(())
 		}
-		if let Some(count) = roll.const_ops()
-			// Scan forward for any drop or keep expressions that target the
-			// same rolling record, and apply them, in order, to the count of
-			// dice.
-			&& let Some(kept) = self.kept_dice(roll.dest, count)
+		// Scan forward for any clauses that target the same rolling record, and
+		// apply them, in order, to the count of dice, which need not be
+		// constant if the clauses cross out every die.
+		let faces = faces(&roll.clone().into());
+		match self.kept_dice(roll.dest, roll.const_ops(), &faces)
 		{
-			if kept == 0
+			Some(0) =>
 			{
-				// All dice are dropped, so the contribution is zero, whatever
-				// the faces of the dice.
+				// Every die is crossed out, so the contribution is zero,
+				// however many dice there are and whatever their faces.
 				self.replace(roll.dest, Immediate(0));
 				return Ok(())
-			}
-			if roll.distinct_faces() == 1
+			},
+			Some(kept) if roll.distinct_faces() == 1 =>
 			{
-				// There's only one distinct face, so multiply the count of
-				// dice kept by the face value to get the result.
+				// There's only one distinct face, which no reroll can change,
+				// so multiply the count of dice kept by the face value to get
+				// the result.
 				let face = roll.faces[0];
 				self.replace(roll.dest, Immediate(kept.saturating_mul(face)));
 				return Ok(())
-			}
+			},
+			_ =>
+			{}
 		}
 		// The roll can't be folded, but we may still need to allocate a new
 		// rolling record due to renumbering. The operands are guaranteed to be
@@ -408,9 +429,8 @@ impl InstructionVisitor<()> for ConstantFolder
 			AddressingMode::Immediate(_) =>
 			{
 				// The rolling record is an immediate value, so the roll must
-				// have been folded away, which it is only if it rolls no dice
-				// or only zeros, which every reroll leaves zero. Eliminate the
-				// reroll instruction.
+				// have been folded away, which it is only if its result is
+				// known despite its rerolls. Eliminate the reroll instruction.
 				Ok(())
 			},
 			AddressingMode::RollingRecord(dest) =>
@@ -626,36 +646,101 @@ impl ConstantFolder
 	}
 
 	/// Answer how many of the specified number of dice of a roll remain kept
-	/// after every subsequent drop and keep that targets its rolling record,
-	/// unless a reroll targets it too, since folding declines to fold rolls
-	/// that are rerolled.
-	/// These apply in order, since a keep counts from the dice still kept,
+	/// after every subsequent clause that targets its rolling record. The
+	/// clauses apply in order, since a keep counts from the dice still kept,
 	/// and so does not commute with drops or other keeps: a drop of `c` drops
 	/// `c` of the dice still kept, or none if `c` is zero or less, and a keep
-	/// of `c` drops [all but `c`](keep_drops) of them, or all of them if `c`
-	/// is zero or less.
+	/// of `c` drops [all but `c`](keep_drops) of them, or all of them if `c` is
+	/// zero or less. A reroll crosses out every die still kept if it is
+	/// unlimited and its predicate matches every face of the die, since no
+	/// reroll could ever stop; any other reroll replaces each die that it
+	/// crosses out, and so keeps as many dice as it found. Once no die is kept,
+	/// none is kept after any clause, so neither the count of dice nor the
+	/// counts of the later clauses need be known.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record of the roll.
-	/// - `count`: The number of dice, which is positive.
+	/// - `count`: The number of dice, which is positive, or `None` if it is not
+	///   constant.
+	/// - `faces`: The faces of the die, exactly.
 	///
 	/// # Returns
-	/// The number of dice kept, which is never negative, or `None` if the
-	/// count of some drop or keep is not constant, or if a reroll targets the
-	/// record.
-	fn kept_dice(&self, dest: RollingRecordIndex, count: i32) -> Option<i32>
+	/// The number of dice kept, which is never negative, or `None` if it
+	/// depends on a count of dice, a drop, or a keep that is not constant, or
+	/// on whether a predicate that is not constant matches every face.
+	fn kept_dice(
+		&self,
+		dest: RollingRecordIndex,
+		count: Option<i32>,
+		faces: &ResultSet
+	) -> Option<i32>
 	{
 		self.find_drop_instructions(dest)
-			.try_fold(count, |kept, clause| {
-				let count = self.resolved_count(clause)?;
-				let dropped = match clause
+			.fold(count, |kept, clause| match (kept, clause)
+			{
+				(Some(0), _) => Some(0),
+				(_, Instruction::Reroll(reroll)) =>
 				{
-					Instruction::KeepLowest(_)
-					| Instruction::KeepHighest(_) => keep_drops(kept, 0, 0, count),
-					_ => count.clamp(0, kept)
-				};
-				Some(kept - dropped)
+					self.rerolled_dice(kept, reroll, faces)
+				},
+				(Some(kept), clause) =>
+				{
+					let count = self.resolved_count(clause)?;
+					let dropped = match clause
+					{
+						Instruction::KeepLowest(_)
+						| Instruction::KeepHighest(_) => keep_drops(kept, 0, 0, count),
+						_ => count.clamp(0, kept)
+					};
+					Some(kept - dropped)
+				},
+				(None, _) => None
 			})
+	}
+
+	/// Answer how many of the specified number of dice of a roll remain kept
+	/// after the specified reroll, which crosses out every die still kept if
+	/// it is unlimited and its predicate matches every face of the die, and
+	/// otherwise keeps as many dice as it found.
+	///
+	/// # Parameters
+	/// - `kept`: The number of dice kept before the reroll, or `None` if it is
+	///   not known.
+	/// - `reroll`: The reroll, relative to the original function.
+	/// - `faces`: The faces of the die, exactly.
+	///
+	/// # Returns
+	/// The number of dice kept after the reroll, or `None` if it is not known.
+	fn rerolled_dice(
+		&self,
+		kept: Option<i32>,
+		reroll: &Reroll,
+		faces: &ResultSet
+	) -> Option<i32>
+	{
+		match reroll.limit
+		{
+			Limit::Times(_) => kept,
+			Limit::Unlimited =>
+			{
+				let criteria =
+					criteria(&reroll.predicate.map(|op| self.replacement(op)));
+				if faces.is_subset(&criteria.certain)
+				{
+					// The predicate surely matches every face.
+					Some(0)
+				}
+				else if !faces.is_subset(&criteria.possible)
+				{
+					// The predicate surely misses some face.
+					kept
+				}
+				else
+				{
+					None
+				}
+			}
+		}
 	}
 
 	/// Answer the count of the specified drop or keep instruction, if it is

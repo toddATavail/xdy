@@ -35,7 +35,11 @@ use dce::DeadCodeEliminator;
 use folding::ConstantFolder;
 use reduction::StrengthReducer;
 
-use crate::{AddressingMode, Function, Instruction};
+use crate::{
+	AddressingMode, EvaluationBounds, Function, Immediate, Instruction,
+	Predicate, RollingRecordKind,
+	evaluator::{Criteria, ResultSet}
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Optimizers.                                 //
@@ -218,6 +222,76 @@ fn ssa_violation(function: &Function) -> Option<usize>
 			Some(AddressingMode::Immediate(_)) | None => false
 		}
 	})
+}
+
+/// Answer the bounds of an operand as the passes know them: a single value
+/// for an [immediate](Immediate), and the whole of `i32` otherwise.
+///
+/// # Parameters
+/// - `op`: The operand.
+///
+/// # Returns
+/// The bounds of the operand.
+fn operand_bounds(op: AddressingMode) -> EvaluationBounds
+{
+	match op
+	{
+		AddressingMode::Immediate(Immediate(value)) => value.into(),
+		_ => EvaluationBounds::unconstrained()
+	}
+}
+
+/// Answer the faces that a die of the specified roll may show, given the
+/// operands of the roll as they stand. A die without faces, or an empty
+/// range, shows only the face `0`.
+///
+/// # Parameters
+/// - `roll`: The roll, a [range](crate::RollRange), [standard
+///   dice](crate::RollStandardDice), or [custom dice](crate::RollCustomDice).
+///
+/// # Returns
+/// The faces, which are exact if every operand of the roll that decides its
+/// faces is an [immediate](Immediate), and otherwise include every face that
+/// the die may have.
+///
+/// # Panics
+/// If the instruction is not a roll.
+fn faces(roll: &Instruction) -> ResultSet
+{
+	let kind = match roll
+	{
+		Instruction::RollRange(range) => RollingRecordKind::Range {
+			start: operand_bounds(range.start),
+			end: operand_bounds(range.end)
+		},
+		Instruction::RollStandardDice(roll) => RollingRecordKind::Standard {
+			count: operand_bounds(roll.count),
+			faces: operand_bounds(roll.faces)
+		},
+		Instruction::RollCustomDice(roll) => RollingRecordKind::Custom {
+			count: operand_bounds(roll.count),
+			faces: roll.faces.clone()
+		},
+		_ => unreachable!("not a roll: {}", roll)
+	};
+	kind.faces()
+}
+
+/// Answer the [criteria](Criteria) to which the specified predicate of a
+/// [reroll](crate::Reroll) may resolve, given its operands as they stand. If
+/// every operand is an [immediate](Immediate), then the predicate resolves to
+/// a single criterion, which the criteria's `certain` and `possible` results
+/// both match exactly.
+///
+/// # Parameters
+/// - `predicate`: The predicate.
+///
+/// # Returns
+/// The criteria: `certain` holds the results that the predicate surely
+/// matches, and `possible` the results that it may match.
+fn criteria(predicate: &Predicate) -> Criteria
+{
+	Criteria::new(predicate, operand_bounds)
 }
 
 ////////////////////////////////////////////////////////////////////////////////

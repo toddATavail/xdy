@@ -160,8 +160,8 @@ graph TD
 |------|--------|
 | **CSE** | Identifies identical instructions and replaces duplicates with references to the first occurrence |
 | **Constant commuting** | Puts immediate operands first in commutative operators, and merges chained constants, e.g., `(x + 1) + 2` → `x + 3`, wherever the result is exact despite saturation, creating folding opportunities |
-| **Constant folding** | Evaluates instructions whose operands are all immediates at compile time |
-| **Strength reduction** | Replaces expensive operations with cheaper equivalents (e.g., `x * 2` → `x + x`, `1D6` → `[1:6]`) |
+| **Constant folding** | Evaluates instructions whose operands are all immediates at compile time, and folds rolls whose results their clauses leave known, e.g., `3D1 reroll = 1` → `3` and `3D6 reroll ≤ 6 ∞ times` → `0` |
+| **Strength reduction** | Replaces expensive operations with cheaper equivalents (e.g., `x * 2` → `x + x`, `1D6` → `[1:6]`), and eliminates rerolls that cannot change any die, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1` |
 | **Dead code elimination** | Removes instructions whose results are never consumed |
 | **Register coalescing** | Colors the live ranges of the registers by a linear scan, so that registers whose live ranges do not overlap share one, reducing the register bank size; breaks SSA form, so it runs last |
 

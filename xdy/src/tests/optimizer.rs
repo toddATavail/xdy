@@ -459,13 +459,14 @@ fn assemble_body(
 	.unwrap()
 }
 
-/// Test that neither constant folding nor strength reduction folds a roll
-/// that a reroll targets, even when its dice show only one face, since an
-/// unlimited reroll that matches that face crosses out every die, and that the
-/// rolls that they still fold, which roll no dice or only zeros, sum to zero
-/// whatever their rerolls.
+/// Test that constant folding folds a roll that a reroll targets whenever
+/// its result is known: when its dice show only one face, which no reroll can
+/// change, unless an unlimited reroll that matches that face crosses out every
+/// die; when an unlimited reroll matches every face of its die, whichever
+/// clauses precede or follow it; and when it rolls no dice or only zeros. Every
+/// set of passes agrees on the result.
 #[test]
-fn test_rerolls_are_not_folded()
+fn test_rerolls_fold_when_their_results_are_known()
 {
 	for (roll, clauses, expected) in [
 		("standard dice 3D1", &["reroll = 1 unlimited times"][..], 0),
@@ -496,7 +497,23 @@ fn test_rerolls_are_not_folded()
 		),
 		("standard dice 0D6", &["reroll < 9 unlimited times"], 0),
 		("standard dice 3D0", &["reroll = 0 up to 3 times"], 0),
-		("range 3:1", &["reroll = 0 unlimited times"], 0)
+		("range 3:1", &["reroll = 0 unlimited times"], 0),
+		("standard dice 3D6", &["reroll <= 6 unlimited times"], 0),
+		("range 1:6", &["reroll in 1..7 unlimited times"], 0),
+		(
+			"custom dice 2D[1, 3]",
+			&["reroll in [1, 3] unlimited times"],
+			0
+		),
+		(
+			"standard dice 3D6",
+			&[
+				"reroll = 1 unlimited times",
+				"reroll != 7 unlimited times",
+				"drop lowest 1"
+			],
+			0
+		)
 	]
 	{
 		let clauses = clauses
@@ -525,6 +542,15 @@ fn test_rerolls_are_not_folded()
 				.unwrap()
 				.result;
 			assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
+			if passes.contains(Pass::ConstantFolding)
+			{
+				assert_eq!(
+					optimized.to_string().split_once("body:\n").unwrap().1,
+					format!("\t\treturn {expected}\n"),
+					"{:?}",
+					passes
+				);
+			}
 		}
 	}
 }

@@ -6,19 +6,26 @@
 //! with `0`, and the expression `x * 1` can be replaced with `x`. It also
 //! implements special rules for reducing the strength of dice rolls, such as
 //! transforming `1D6` into `[1:6]` instead (as range expressions are cheaper
-//! because they don't have to loop). The strength reducer requires the function
-//! to be in static single assignment (SSA) form.
+//! because they don't have to loop). It eliminates rerolls that cannot change
+//! any die: those limited to zero times or fewer, limited rerolls of dice with
+//! one face, and rerolls whose predicates match none of the results that the
+//! dice still kept may show, which it tracks through the clauses of each roll,
+//! e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`. The
+//! strength reducer requires the function to be in static single assignment
+//! (SSA) form.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg,
+	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg,
 	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	evaluator::ResultSet
 };
 
+use super::{criteria, faces};
 use crate::Optimizer;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,6 +67,10 @@ pub struct StrengthReducer
 	/// count, whichever dice it drops, and the sum is the count times the
 	/// face.
 	faces: HashMap<RollingRecordIndex, i32>,
+
+	/// The results that the dice of each rolling record may show, relative to
+	/// the original function, for each roll that remains a roll.
+	results: HashMap<RollingRecordIndex, Results>,
 
 	/// The replacement instructions.
 	instructions: Vec<Instruction>
@@ -119,6 +130,7 @@ impl Optimizer<()> for StrengthReducer
 			// Reset the optimizer state.
 			self.replacements.clear();
 			self.faces.clear();
+			self.results.clear();
 			self.next_register = RegisterIndex(start_register);
 			self.next_rolling_record = RollingRecordIndex::default();
 			self.instructions.clear();
@@ -133,6 +145,11 @@ impl InstructionVisitor<()> for StrengthReducer
 		// Resolve the bounds once, as for arithmetic instructions.
 		let (start, end) =
 			(self.replacement(range.start), self.replacement(range.end));
+		self.track_roll(RollRange {
+			dest: range.dest,
+			start,
+			end
+		});
 		// If the bounds are equal, then we can replace the roll with the sole
 		// value in the range, unless its result may be dropped.
 		if start == end && !self.dropped.contains(&range.dest)
@@ -160,6 +177,11 @@ impl InstructionVisitor<()> for StrengthReducer
 		// themselves.
 		let (count, faces) =
 			(self.replacement(roll.count), self.replacement(roll.faces));
+		self.track_roll(RollStandardDice {
+			dest: roll.dest,
+			count,
+			faces
+		});
 		if let AddressingMode::Immediate(Immediate(1)) = faces
 			&& !self.kept.contains(&roll.dest)
 		{
@@ -192,6 +214,7 @@ impl InstructionVisitor<()> for StrengthReducer
 		roll: &RollCustomDice
 	) -> Result<(), ()>
 	{
+		self.track_roll(roll.clone());
 		// If the die has only one distinct face, then every die shows it, so
 		// we can replace the roll with its count of dice, or zero if the count
 		// is negative. The sum multiplies the count by the face.
@@ -439,7 +462,45 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			unreachable!("a reroll of a roll reduced to a value")
 		};
-		self.emit(reroll.map(dest, |op| self.replacement(op)));
+		let new = reroll.map(dest, |op| self.replacement(op));
+		let criteria = criteria(&new.predicate);
+		let unlimited = match new.limit
+		{
+			// A limit of zero or less rerolls nothing, so we can eliminate the
+			// reroll.
+			Limit::Times(AddressingMode::Immediate(Immediate(..=0))) =>
+			{
+				return Ok(())
+			},
+			Limit::Times(_) => false,
+			Limit::Unlimited => true
+		};
+		let results = self.results.get_mut(&reroll.dest).unwrap();
+		// If the predicate cannot match any result that the dice still kept may
+		// show, then the reroll crosses out nothing, so we can eliminate it. If
+		// the die has only one face, then a limited reroll replaces each die
+		// that it crosses out with that same face, so we can eliminate it too.
+		if !results.live.meets(&criteria.possible)
+			|| (!unlimited && results.faces.len() == 1)
+		{
+			return Ok(())
+		}
+		// Update the results that the dice still kept may show. An unlimited
+		// reroll that surely matches every face crosses out every die still
+		// kept; any other unlimited reroll leaves only faces that the
+		// predicate misses, though which faces these are may not be known; and
+		// a limited reroll may leave any face at all, since the limit may stop
+		// it on a face that the predicate matches.
+		results.live = match unlimited
+		{
+			true if results.faces.is_subset(&criteria.certain) =>
+			{
+				ResultSet::default()
+			},
+			true => results.faces.difference(&criteria.certain),
+			false => results.faces.clone()
+		};
+		self.emit(new);
 		Ok(())
 	}
 
@@ -940,6 +1001,30 @@ impl StrengthReducer
 		}
 	}
 
+	/// Begin to track the results that the dice of a roll may show, which are
+	/// all of the faces of its die.
+	///
+	/// # Parameters
+	/// - `roll`: The roll, whose rolling record is relative to the original
+	///   function, and whose operands are relative to the optimized function.
+	fn track_roll(&mut self, roll: impl Into<Instruction>)
+	{
+		let roll = roll.into();
+		let faces = faces(&roll);
+		let Some(AddressingMode::RollingRecord(dest)) = roll.destination()
+		else
+		{
+			unreachable!("a roll without a rolling record")
+		};
+		self.results.insert(
+			dest,
+			Results {
+				live: faces.clone(),
+				faces
+			}
+		);
+	}
+
 	/// Replace a roll of dice that all show the same face with its count of
 	/// dice, or zero if the count is negative, which rolls nothing. The drops
 	/// from the rolling record then subtract from the count, and its sum
@@ -1013,4 +1098,22 @@ impl StrengthReducer
 	{
 		self.instructions.push(inst.into());
 	}
+}
+
+/// The results that the dice of a rolling record may show, as a [strength
+/// reducer](StrengthReducer) tracks them, to eliminate the rerolls that cannot
+/// match any of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Results
+{
+	/// The faces that the die of the record may show, which include every face
+	/// that it may have, if its faces are not constant.
+	faces: ResultSet,
+
+	/// The results that the dice still kept may show, which are among the
+	/// [faces](Self::faces): all of them at first, and fewer after an
+	/// unlimited reroll, which leaves only the faces that its predicate
+	/// misses. Drops and keeps leave them as they were, since they leave
+	/// some of the same dice.
+	live: ResultSet
 }
