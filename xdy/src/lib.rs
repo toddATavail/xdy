@@ -52,6 +52,65 @@
 //! Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for
 //! the optional features.
 //!
+//! ## Upgrading from 0.14
+//!
+//! `0.15.0` adds keep and reroll clauses (see [Language
+//! features](#language-features)). A reroll changes the value of a die after
+//! the roll, which the counts of the lowest and highest dice dropped, by which
+//! a rolling record described its drops, cannot express. So a [`RollingRecord`]
+//! now holds its dice in the order rolled, each kept or crossed out. Every
+//! expression that `0.14` accepts answers the same totals, bounds, and
+//! distributions, but code that reads rolling records, or that matches or
+//! visits the IR, the AST, or diagnostics exhaustively, must change. I regret
+//! the churn, and hope that the steps below make the move painless:
+//!
+//! * [`RollingRecord::dice`], a vector of [`Die`]s in the order rolled,
+//!   replaces `results`, `lowest_dropped`, and `highest_dropped`. Each [`Die`]
+//!   holds its [`value`](Die::value); its [`fate`](Die::fate), which is
+//!   [`Fate::Kept`], [`Fate::Dropped`] if a drop or keep crossed it out, or
+//!   [`Fate::Rerolled`] if a reroll did; and, if a reroll rolled it, the index
+//!   of the die that it [`replaces`](Die::replaces). Where you read
+//!   `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind
+//!   that a reroll appends its replacements, so a record may hold more dice
+//!   than its roll did.
+//! * [`RollingRecord::dropped`] replaces the methods `lowest_dropped` and
+//!   `highest_dropped`, answering every die that a drop or keep crossed out, in
+//!   the order rolled. Once keeps and rerolls may come between drops, the dice
+//!   crossed out at each end no longer stand apart, so the record no longer
+//!   says which end each came from. The new
+//!   [`rerolled`](RollingRecord::rerolled) answers the dice that rerolls
+//!   crossed out.
+//! * [`RollingRecord::kept`] answers the kept results in the order rolled, not
+//!   ascending, so sort them if you relied on their order.
+//!   [`sum`](RollingRecord::sum) is unchanged.
+//! * A rolling record prints its dice in the order rolled, each crossed-out die
+//!   prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with
+//!   the dropped dice set apart by semicolons.
+//! * With the `serde` feature, a rolling record serializes its `dice`, so a
+//!   record serialized by `0.14` does not deserialize.
+//! * A drop crosses out the lowest or highest of the dice still kept, and of
+//!   equal dice, the first rolled. The new [`RollingRecord::keep_lowest`],
+//!   [`keep_highest`](RollingRecord::keep_highest), and
+//!   [`reroll`](RollingRecord::reroll) apply keeps and rerolls to a record, as
+//!   [`drop_lowest`](RollingRecord::drop_lowest) and
+//!   [`drop_highest`](RollingRecord::drop_highest) apply drops.
+//! * [`Instruction`] gains [`KeepLowest`], [`KeepHighest`], and [`Reroll`], and
+//!   [`InstructionVisitor`] requires
+//!   [`visit_keep_lowest`](InstructionVisitor::visit_keep_lowest),
+//!   [`visit_keep_highest`](InstructionVisitor::visit_keep_highest), and
+//!   [`visit_reroll`](InstructionVisitor::visit_reroll). A [`Reroll`] holds a
+//!   [`Predicate`] and a [`Limit`], and its predicate resolves to the
+//!   [`Criterion`] that [`RollingRecord::reroll`] takes.
+//! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, and `Reroll`,
+//!   and [`ast::ASTVisitor`] requires
+//!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),
+//!   [`visit_keep_highest`](ast::ASTVisitor::visit_keep_highest), and
+//!   [`visit_reroll`](ast::ASTVisitor::visit_reroll).
+//! * [`diagnostics::DiagnosticKind`] gains the kinds that diagnose malformed
+//!   keep and reroll clauses.
+//! * [`Class`] gains [`rerolls`](Class::rerolls), which says whether some
+//!   reroll may reroll or cross out a die.
+//!
 //! ## Upgrading from 0.13
 //!
 //! `0.14.0` replaces histograms with exact probability distributions. Through
@@ -122,8 +181,23 @@
 //!   …
 //! * Drop highest: `4D6 drop highest`, `4D6 drop highest 1`, `2D8 drop highest
 //!   2`, …
-//! * Chained drops, applied in the order written: `4D6 drop lowest drop
-//!   highest`, `5D4 drop lowest 2 drop highest 2`, …
+//! * Keep lowest: `4D6 keep lowest`, `4D6 keep lowest 3`, `2D20 keep lowest`, …
+//! * Keep highest: `4D6 keep highest 3`, `2D20 keep highest`, `5D10 keep
+//!   highest {k}`, …
+//! * Reroll, once, a given number of times, or without limit: `1D6 reroll = 1`,
+//!   `2D8 reroll ≥ 5`, `2D8 reroll >= 5 1 time`, `2D8 reroll ≤ 2 3 times`,
+//!   `{n}: 3D6 reroll = 1 {n} times`, `1D6 reroll = 1 unlimited times`, `1D6
+//!   reroll < 3 ∞ times`, …
+//! * Reroll predicates:
+//!   * Comparisons with a threshold: `= 1`, `≠ 3` or `!= 3`, `< 3`, `≤ 2` or
+//!     `<= 2`, `> 5`, `≥ 5` or `>= 5`, `< {dc}`, `= (1D6)`, …
+//!   * Lists of integers: `in [1, 2]`, `in [-1]`, `in []`, …
+//!   * Ranges, half-open or inclusive: `in 1..3`, `in 1..=3`, `in -1..=1`, `in
+//!     1..={x}`, `in (1D4)..=6`, …
+//! * Chained drops, keeps, and rerolls, applied in the order written: `4D6 drop
+//!   lowest drop highest`, `4D6 drop lowest keep lowest 2`, `5D6 keep highest 3
+//!   drop lowest`, `4D6 drop lowest reroll = 1`, `4D6 reroll = 1 drop lowest`,
+//!   …
 //! * Formal parameters: `{x}: 1D6 + {x}`, `{y}: 1D6 + {y}`, `{x}, {y}:
 //!   {x}D{y}`, …
 //! * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
@@ -133,9 +207,45 @@
 //!
 //! A standard die with zero or fewer faces always rolls `0`, so `3D-6` is `0`.
 //! A drop clause without a count drops a single die, and a count of zero or
-//! less drops nothing. A drop count never begins with a minus, so `4D6 drop
-//! lowest -1` is `(4D6 drop lowest) - 1`, just as it reads. Integer division
-//! truncates toward zero, and a division or remainder by zero answers zero.
+//! less drops nothing. A keep clause without a count keeps a single die, and a
+//! count of zero or less keeps nothing. A keep counts from the dice that
+//! earlier clauses left kept, so `4D6 drop lowest keep lowest 2` keeps the
+//! second and third lowest dice, but `4D6 keep lowest 2 drop lowest` keeps only
+//! the second lowest. A drop or keep count never begins with a minus, so `4D6
+//! drop lowest -1` is `(4D6 drop lowest) - 1`, just as it reads. Integer
+//! division truncates toward zero, and a division or remainder by zero answers
+//! zero.
+//!
+//! A reroll clause rolls again each die still kept that its predicate matches,
+//! once unless it says how many times, so `2D8 reroll ≤ 2 3 times` rolls each
+//! die that shows `1` or `2` again until it shows more or has been rolled again
+//! three times. A count of zero or less rerolls nothing. An unlimited reroll
+//! rolls each matching die again until it no longer matches, so each die falls
+//! as though rolled from the faces that the predicate does not match: `1D6
+//! reroll = 1 unlimited times` rolls `2` through `6`, each equally likely. If
+//! the predicate matches every face of the die, no reroll could ever stop, so
+//! instead each matching die is crossed out, and counts as `0`: `3D6 reroll ≤ 6
+//! unlimited times` is `0`. A threshold, like a range endpoint or a count, may
+//! be a constant, a name, a binding, or a group, and is rolled once, before any
+//! die is rolled again, so `1D6 reroll = (1D6)` rerolls against one target. A
+//! list holds only integers, as the faces of a custom die do. A range `M..N`
+//! holds `M` up to but not including `N`, and `M..=N` holds `N` too, and a
+//! range that is empty or inverted, such as `5..2`, matches nothing. `M..=N`
+//! differs from `[M:N]` by design: `[M:N]` rolls one value of the range, but
+//! `M..=N` names every value of it. Like drops and keeps, rerolls apply in the
+//! order written, each to the dice that the clauses before it left kept, so
+//! `4D6 drop lowest reroll = 1` rerolls the `1`s that survive the drop, but
+//! `4D6 reroll = 1 drop lowest` drops the lowest die after the reroll.
+//!
+//! A [rolling record](RollingRecord) keeps every die that it rolls, in the
+//! order rolled, whatever becomes of it. A drop or keep crosses out each die
+//! that it drops, and of equal dice, the first rolled. A reroll crosses out
+//! each die that it rolls again, and appends the die's replacement,
+//! [linked](Die::replaces) to the die that it replaces, so the whole chain of
+//! rerolls of each die can be traced. A record shows each crossed-out die with
+//! a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the [dice
+//! still kept](RollingRecord::kept) count toward the total, or toward any later
+//! clause.
 //!
 //! Environmental variables permit background state to be associated with an
 //! evaluator, while formal parameters permit dynamic state to be passed into
@@ -258,6 +368,35 @@
 //! let total = result.records[0].kept().iter().sum::<i32>();
 //! assert!(3 <= total && total <= 18);
 //! assert!(result.result == 2 * total);
+//! ```
+//!
+//! Rerolling every `1` without limit. Each die that showed a `1` stays in the
+//! rolling record, crossed out, and its replacement follows the dice already
+//! rolled, linked to it:
+//!
+//! ```rust
+//! use xdy::{Fate, evaluate};
+//! use rand::rng;
+//!
+//! let result =
+//!     evaluate("3D4 reroll = 1 unlimited times", vec![], vec![], &mut
+//!     rng()).unwrap();
+//! let record = &result.records[0];
+//!
+//! // Three dice are kept, none of which shows a `1`, and only they count.
+//! let kept = record.kept();
+//! assert!(kept.len() == 3);
+//! assert!(kept.iter().all(|&value| 2 <= value && value <= 4));
+//! assert!(result.result == kept.iter().sum::<i32>());
+//!
+//! // Every die crossed out showed a `1`, and a later die replaces it.
+//! for (index, die) in record.dice.iter().enumerate() {
+//!     if die.fate == Fate::Rerolled {
+//!         assert!(die.value == 1);
+//!         assert!(record.dice[index + 1..].iter().any(|d| d.replaces ==
+//!         Some(index)));
+//!     }
+//! }
 //! ```
 //!
 //! ### Repeated evaluation
@@ -584,10 +723,12 @@
 //! exact: an optimized function answers exactly what the unoptimized one does,
 //! even where arithmetic saturates. The optimizer runs its passes repeatedly,
 //! in predefined order, until a fixed point is reached, and then coalesces
-//! registers once. It takes time linear in the length of the function.
-//! [`compile`] and [`evaluate`] optimize fully; [`compile_unoptimized`] and
-//! [`evaluate_unoptimized`] skip the optimizer, and [`StandardOptimizer`] runs
-//! any chosen set of [`Passes`].
+//! registers once. It takes time linear in the length of the function, except
+//! that each reroll takes time proportional to the runs of consecutive faces of
+//! its die, so many rerolls of custom dice with many scattered faces take
+//! longer. [`compile`] and [`evaluate`] optimize fully; [`compile_unoptimized`]
+//! and [`evaluate_unoptimized`] skip the optimizer, and [`StandardOptimizer`]
+//! runs any chosen set of [`Passes`].
 //!
 //! In `0.13.0`, the parser became an explicit-stack engine, and every other
 //! stage followed, so parsing, compilation, optimization, and diagnosis take
@@ -608,15 +749,16 @@
 //! distributions](#probability-distributions). Neither the compiler nor
 //! evaluator should panic or cause undefined behavior, even for invalid dice
 //! expressions and inputs, though client misuse of vector results can lead to
-//! panics. `unsafe` code appears in one place. In the [abstract
-//! syntax tree](ast), the [`Drop`] implementation of
-//! [`DiceExpression`](ast::DiceExpression) dismantles stacked drop clauses
-//! (e.g., `4D6 drop lowest drop highest`) without recursion or allocation,
-//! moving values out of place and back with [`ptr::read`](std::ptr::read) and
-//! [`ptr::write`](std::ptr::write). This is sound because every value has
-//! exactly one owner throughout, and nothing can unwind while a value is out of
-//! place. Dedicated tests check it under Miri: `cargo +nightly miri test -p xdy
-//! --lib tests::ast::test_miri`. No foreign function interfaces are involved.
+//! panics. `unsafe` code appears in one place. In the [abstract syntax
+//! tree](ast), the [`Drop`] implementation of
+//! [`DiceExpression`](ast::DiceExpression) dismantles stacked drop, keep, and
+//! reroll clauses (e.g., `4D6 drop lowest keep highest 2 reroll = 1`) without
+//! recursion or allocation, moving values out of place and back with
+//! [`ptr::read`](std::ptr::read) and [`ptr::write`](std::ptr::write). This is
+//! sound because every value has exactly one owner throughout, and nothing can
+//! unwind while a value is out of place. Dedicated tests check it under Miri:
+//! `cargo +nightly miri test -p xdy --lib tests::ast::test_miri`. No foreign
+//! function interfaces are involved.
 //!
 //! ## Cargo features
 //!
