@@ -78,9 +78,9 @@ use super::{
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
 	DropLowest, EvaluationBounds, Evaluator, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul, Neg, Predicate,
-	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordKind, Sub, SumRollingRecord,
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod, Mul, Neg,
+	Predicate, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordKind, Sub, SumRollingRecord,
 	evaluator::{BoundsEvaluator, Criteria, LeastDice, ResultSet}
 };
 
@@ -136,9 +136,9 @@ pub struct Class
 	/// on it.
 	pub correlated: bool,
 
-	/// Whether some multiplication, division, remainder, exponentiation, or
-	/// maximum combines two distinct random values, whose pairs the pass
-	/// enumerates.
+	/// Whether some multiplication, division, remainder, exponentiation,
+	/// maximum, or minimum combines two distinct random values, whose pairs
+	/// the pass enumerates.
 	pub pairwise: bool,
 
 	/// Whether some reroll may reroll a die, or cross it out, so that some
@@ -1583,8 +1583,8 @@ enum Op
 	/// Multiplication, which pairs its operands.
 	Mul,
 
-	/// Division, remainder, exponentiation, or maximum, which pair their
-	/// operands.
+	/// Division, remainder, exponentiation, maximum, or minimum, which pair
+	/// their operands.
 	Other
 }
 
@@ -1964,6 +1964,12 @@ impl InstructionVisitor<()> for Pricing<'_>
 	}
 
 	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.pairwise(inst.dest.0, inst.op1, inst.op2, Op::Other);
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
 	{
 		self.pairwise(inst.dest.0, inst.op1, inst.op2, Op::Other);
 		Ok(())

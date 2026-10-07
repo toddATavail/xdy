@@ -234,6 +234,30 @@ fn test_optimize_max()
 	}
 }
 
+/// Test that the optimizer folds a constant [minimum](crate::Min).
+#[test]
+fn test_optimize_min()
+{
+	for (body, expected) in [
+		("@1 <- 3 min 5\n\t\treturn @1", "return 3"),
+		(
+			"@1 <- -2147483648 min 5\n\t\treturn @1",
+			"return -2147483648"
+		)
+	]
+	{
+		let registers = body.matches("<-").count() + 1;
+		let text = format!(
+			"Function({{x}}@0) r#{} ⚅#0\n\textern[]\n\tbody:\n\t\t{}\n",
+			registers, body
+		);
+		let function = crate::Assembler::assemble(&text).unwrap();
+		let optimized = optimize(function, Passes::all()).to_string();
+		let actual = optimized.trim().split_once("body:\n\t\t").unwrap().1;
+		assert_eq!(actual, expected, "{}", body);
+	}
+}
+
 /// Test that register coalescing never lets a write that nothing reads clobber
 /// a register that is live across it.
 #[test]

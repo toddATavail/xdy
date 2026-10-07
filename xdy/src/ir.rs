@@ -8,7 +8,7 @@
 //!
 //! # Instruction set architecture
 //!
-//! The ISA has 18 instructions across seven categories:
+//! The ISA has 19 instructions across seven categories:
 //!
 //! | Category | Instructions | Destination | Sources |
 //! |----------|-------------|-------------|---------|
@@ -17,7 +17,7 @@
 //! | **Keep** | `KeepLowest`, `KeepHighest` | `⚅N` | addressing mode |
 //! | **Reroll** | `Reroll` | `⚅N` | predicate, limit |
 //! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
-//! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Neg` | `@N` | addressing modes |
+//! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Min`, `Neg` | `@N` | addressing modes |
 //! | **Control** | `Return` | — | addressing mode |
 //!
 //! # Addressing modes
@@ -794,6 +794,29 @@ impl Display for Max
 	}
 }
 
+/// Instruction: Compute the lesser of two values.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Min
+{
+	/// The destination register for the result.
+	pub dest: RegisterIndex,
+
+	/// The first operand.
+	pub op1: AddressingMode,
+
+	/// The second operand.
+	pub op2: AddressingMode
+}
+
+impl Display for Min
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(f, "{} <- {} min {}", self.dest, self.op1, self.op2)
+	}
+}
+
 /// Instruction: Compute the negation of a value, saturating on overflow.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -884,6 +907,9 @@ pub enum Instruction
 	/// Compute the [greater](Max) of two values.
 	Max(Max),
 
+	/// Compute the [lesser](Min) of two values.
+	Min(Min),
+
 	/// [Negate](Neg) a value.
 	Neg(Neg),
 
@@ -917,6 +943,7 @@ impl Instruction
 			Self::Mod(inst) => Some(inst.dest.into()),
 			Self::Exp(inst) => Some(inst.dest.into()),
 			Self::Max(inst) => Some(inst.dest.into()),
+			Self::Min(inst) => Some(inst.dest.into()),
 			Self::Neg(inst) => Some(inst.dest.into()),
 			Self::Return(_) => None
 		}
@@ -951,6 +978,7 @@ impl Instruction
 			Self::Mod(inst) => vec![inst.op1, inst.op2],
 			Self::Exp(inst) => vec![inst.op1, inst.op2],
 			Self::Max(inst) => vec![inst.op1, inst.op2],
+			Self::Min(inst) => vec![inst.op1, inst.op2],
 			Self::Neg(inst) => vec![inst.op],
 			Self::Return(inst) => vec![inst.src]
 		}
@@ -1255,6 +1283,25 @@ impl Instruction
 		Self::Max(Max { dest, op1, op2 })
 	}
 
+	/// Create an instruction to compute the lesser of two values.
+	///
+	/// # Parameters
+	/// - `dest`: The destination register.
+	/// - `op1`: The first operand.
+	/// - `op2`: The second operand.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn min(
+		dest: RegisterIndex,
+		op1: AddressingMode,
+		op2: AddressingMode
+	) -> Self
+	{
+		Self::Min(Min { dest, op1, op2 })
+	}
+
 	/// Create an instruction to negate a value.
 	///
 	/// # Parameters
@@ -1305,6 +1352,7 @@ impl Display for Instruction
 			Self::Mod(inst) => write!(f, "{}", inst),
 			Self::Exp(inst) => write!(f, "{}", inst),
 			Self::Max(inst) => write!(f, "{}", inst),
+			Self::Min(inst) => write!(f, "{}", inst),
 			Self::Neg(inst) => write!(f, "{}", inst),
 			Self::Return(inst) => write!(f, "{}", inst)
 		}
@@ -1389,6 +1437,11 @@ impl From<Exp> for Instruction
 impl From<Max> for Instruction
 {
 	fn from(inst: Max) -> Self { Self::Max(inst) }
+}
+
+impl From<Min> for Instruction
+{
+	fn from(inst: Min) -> Self { Self::Min(inst) }
 }
 
 impl From<Neg> for Instruction
@@ -1620,6 +1673,20 @@ impl TryFrom<Instruction> for Max
 		match inst
 		{
 			Instruction::Max(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for Min
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::Min(inst) => Ok(inst),
 			_ => Err(())
 		}
 	}
@@ -2086,6 +2153,15 @@ pub trait InstructionVisitor<E>
 	/// An error if the visitor fails to visit the instruction.
 	fn visit_max(&mut self, inst: &Max) -> Result<(), E>;
 
+	/// Visit a minimum instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_min(&mut self, inst: &Min) -> Result<(), E>;
+
 	/// Visit a negation instruction.
 	///
 	/// # Parameters
@@ -2157,6 +2233,7 @@ where
 			Instruction::Mod(inst) => visitor.visit_mod(inst),
 			Instruction::Exp(inst) => visitor.visit_exp(inst),
 			Instruction::Max(inst) => visitor.visit_max(inst),
+			Instruction::Min(inst) => visitor.visit_min(inst),
 			Instruction::Neg(inst) => visitor.visit_neg(inst),
 			Instruction::Return(inst) => visitor.visit_return(inst)
 		}
@@ -2550,6 +2627,17 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 	}
 
 	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers.entry(inst.op1).or_default().insert(self.pc);
+		self.readers.entry(inst.op2).or_default().insert(self.pc);
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
 	{
 		self.writers
 			.entry(inst.dest.into())

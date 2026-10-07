@@ -258,7 +258,8 @@ fn test_assemble_binary_arithmetic()
 		("/", Instruction::div),
 		("%", Instruction::r#mod),
 		("^", Instruction::exp),
-		("max", Instruction::max)
+		("max", Instruction::max),
+		("min", Instruction::min)
 	]
 	{
 		let text = format!(
@@ -304,6 +305,30 @@ Function({x}@0) r#2 ⚅#0
 			RegisterIndex(1),
 			Immediate(-5).into(),
 			RegisterIndex(0).into()
+		)
+	);
+	assert_eq!(function.to_string().trim(), text.trim());
+}
+
+/// Assemble a minimum of a register and a negative immediate, and ensure that
+/// it prints as it assembled.
+#[test]
+fn test_assemble_min()
+{
+	let text = "\
+Function({x}@0) r#2 ⚅#0
+\textern[]
+\tbody:
+\t\t@1 <- @0 min -5
+\t\treturn @1
+";
+	let function = Assembler::assemble(text).unwrap();
+	assert_eq!(
+		function.instructions[0],
+		Instruction::min(
+			RegisterIndex(1),
+			RegisterIndex(0).into(),
+			Immediate(-5).into()
 		)
 	);
 	assert_eq!(function.to_string().trim(), text.trim());

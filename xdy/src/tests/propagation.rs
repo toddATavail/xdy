@@ -618,6 +618,48 @@ fn test_max()
 	assert_eq!(distribution, weights(&[(3, 3), (4, 1), (5, 1), (6, 1)]));
 }
 
+/// Ensure that the pass takes the [minimum](crate::Min) of every outcome.
+#[test]
+fn test_min()
+{
+	let distribution = propagate_assembly(
+		"Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll range 1:6
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 min 3
+		return @1"
+	);
+	assert_eq!(distribution, weights(&[(1, 1), (2, 1), (3, 4)]));
+}
+
+/// Ensure that the pass takes the [minimum](crate::Min) of two independent
+/// random values by pairing their outcomes, that the estimate classifies the
+/// minimum as pairwise, and that it bounds the pass, optimized or not.
+#[test]
+fn test_min_of_random_values()
+{
+	let assembly = "Function() r#3 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 1D6
+		@1 <- sum rolling record ⚅1
+		@2 <- @0 min @1
+		return @2";
+	// The lesser of two dice is `k` in `(7 - k)² - (6 - k)² = 13 - 2k` of the
+	// 36 pairs.
+	assert_eq!(
+		propagate_assembly(assembly),
+		weights(&[(1, 11), (2, 9), (3, 7), (4, 5), (5, 3), (6, 1)])
+	);
+	let evaluator = Evaluator::new(Assembler::assemble(assembly).unwrap());
+	assert!(estimate(&evaluator, []).unwrap().class.pairwise);
+	estimated_assembly(assembly);
+}
+
 /// Ensure that arguments and externals enter as fixed values, which may be
 /// read any number of times.
 #[test]

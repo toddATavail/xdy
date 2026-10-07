@@ -21,11 +21,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg,
-	Predicate, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordIndex, SourceSpan, Sub,
-	SumRollingRecord, add, div, exp, max, r#mod, mul, neg, parser::ParseError,
-	roll_custom_dice, roll_range, roll_standard_dice, sub
+	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
+	Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	SourceSpan, Sub, SumRollingRecord, add, div, exp, max, min, r#mod, mul,
+	neg, parser::ParseError, roll_custom_dice, roll_range, roll_standard_dice,
+	sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -819,6 +820,15 @@ where
 		let op1 = self.value(inst.op1);
 		let op2 = self.value(inst.op2);
 		self.set_register(inst.dest, max(op1, op2));
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min)
+	-> Result<(), EvaluationError<'static>>
+	{
+		let op1 = self.value(inst.op1);
+		let op2 = self.value(inst.op2);
+		self.set_register(inst.dest, min(op1, op2));
 		Ok(())
 	}
 
@@ -2879,6 +2889,15 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		let op1 = self.value(inst.op1);
 		let op2 = self.value(inst.op2);
 		self.set_register(inst.dest, op1.max(op2));
+		self.set_sum(inst.dest, self.sum(inst.op1) || self.sum(inst.op2));
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
+	{
+		let op1 = self.value(inst.op1);
+		let op2 = self.value(inst.op2);
+		self.set_register(inst.dest, op1.min(op2));
 		self.set_sum(inst.dest, self.sum(inst.op1) || self.sum(inst.op2));
 		Ok(())
 	}

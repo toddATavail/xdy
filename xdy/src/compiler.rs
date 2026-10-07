@@ -1310,6 +1310,12 @@ impl Function
 				check_mode(inst.op1, register_seen)?;
 				check_mode(inst.op2, register_seen)?;
 			},
+			Instruction::Min(inst) =>
+			{
+				check_register(inst.dest, register_seen)?;
+				check_mode(inst.op1, register_seen)?;
+				check_mode(inst.op2, register_seen)?;
+			},
 			Instruction::Neg(inst) =>
 			{
 				check_register(inst.dest, register_seen)?;

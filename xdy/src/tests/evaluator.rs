@@ -485,6 +485,59 @@ Function({x}@0) r#2 ⚅#0
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                                  Minimum.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that a [minimum](crate::Min) evaluates to the lesser of its operands,
+/// and that its bounds are the lesser of the operands' bounds.
+#[test]
+fn test_min()
+{
+	let mut evaluator = Evaluator::new(
+		crate::Assembler::assemble(
+			"\
+Function({x}@0) r#2 ⚅#0
+\textern[]
+\tbody:
+\t\t@1 <- @0 min 0
+\t\treturn @1
+"
+		)
+		.unwrap()
+	);
+	for (x, expected) in [
+		(i32::MIN, i32::MIN),
+		(-3, -3),
+		(0, 0),
+		(5, 0),
+		(i32::MAX, 0)
+	]
+	{
+		// The seed is arbitrary, since the function rolls nothing.
+		let evaluation = evaluator
+			.evaluate([x], &mut StdRng::seed_from_u64(0))
+			.unwrap();
+		assert_eq!(evaluation.result, expected, "{}", x);
+		assert_eq!(evaluation.dice, 0, "{}", x);
+	}
+	for ((min, max), expected) in
+		[((-3, 5), (-3, 0)), ((-7, -2), (-7, -2)), ((2, 9), (0, 0))]
+	{
+		let bounds = evaluator
+			.bounds_over([Some((min, max).into())], [])
+			.unwrap();
+		assert_eq!(
+			(bounds.value.min, bounds.value.max),
+			expected,
+			"[{}, {}]",
+			min,
+			max
+		);
+		assert_eq!(bounds.dice, 0);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                              Unsummed rolls.                               //
 ////////////////////////////////////////////////////////////////////////////////
 

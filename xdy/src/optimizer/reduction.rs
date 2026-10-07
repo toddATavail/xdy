@@ -19,9 +19,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg,
-	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
+	Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
 	evaluator::ResultSet
 };
 
@@ -853,6 +853,16 @@ impl InstructionVisitor<()> for StrengthReducer
 		let dest = self.next_register();
 		self.replace(inst.dest, dest);
 		self.emit(Max { dest, op1, op2 });
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
+	{
+		let op1 = self.replacement(inst.op1);
+		let op2 = self.replacement(inst.op2);
+		let dest = self.next_register();
+		self.replace(inst.dest, dest);
+		self.emit(Min { dest, op1, op2 });
 		Ok(())
 	}
 

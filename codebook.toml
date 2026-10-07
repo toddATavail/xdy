@@ -2,6 +2,7 @@ words = [
     "AST's",
     "Dvoretzky",
     "Eof",
+    "ISA",
     "Indenter",
     "Kiefer",
     "Massart",

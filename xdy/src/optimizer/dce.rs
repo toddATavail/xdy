@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
 	DependencyAnalyzer, Div, DropHighest, DropLowest, Exp, Function,
-	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Mod, Mul,
-	Neg, Optimizer, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
-	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod,
+	Mul, Neg, Optimizer, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -313,6 +313,21 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 			let dest = self.next_register();
 			self.replace(inst.dest, dest);
 			self.emit(Max {
+				dest,
+				op1: self.replacement(inst.op1),
+				op2: self.replacement(inst.op2)
+			});
+		}
+		Ok(())
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
+	{
+		if self.has_readers(*inst)
+		{
+			let dest = self.next_register();
+			self.replace(inst.dest, dest);
+			self.emit(Min {
 				dest,
 				op1: self.replacement(inst.op1),
 				op2: self.replacement(inst.op2)

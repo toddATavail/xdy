@@ -1140,3 +1140,22 @@ pub fn neg(op: i32) -> i32 { op.saturating_neg() }
 /// ```
 #[inline]
 pub fn max(op1: i32, op2: i32) -> i32 { op1.max(op2) }
+
+/// Computes the lesser of the two operands.
+///
+/// # Parameters
+/// - `op1`: The first operand.
+/// - `op2`: The second operand.
+///
+/// # Returns
+/// The lesser of the operands.
+///
+/// # Examples
+/// ```rust
+/// # use xdy::min;
+/// assert_eq!(min(1, 2), 1);
+/// assert_eq!(min(0, -3), -3);
+/// assert_eq!(min(i32::MIN, i32::MAX), i32::MIN);
+/// ```
+#[inline]
+pub fn min(op1: i32, op2: i32) -> i32 { op1.min(op2) }

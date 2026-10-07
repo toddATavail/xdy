@@ -90,9 +90,10 @@ use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
 	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
 	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max,
-	Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
-	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
-	SumRollingRecord, Weight, add, div, exp, max, r#mod, mul, neg, sub
+	Min, Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll,
+	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	Sub, SumRollingRecord, Weight, add, div, exp, max, min, r#mod, mul, neg,
+	sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1976,6 +1977,13 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		self.binary(inst.dest, inst.op1, inst.op2, max, |xs, ys, meter| {
 			pairwise(&xs, &ys, max, meter)
+		})
+	}
+
+	fn visit_min(&mut self, inst: &Min) -> Result<(), Halt>
+	{
+		self.binary(inst.dest, inst.op1, inst.op2, min, |xs, ys, meter| {
+			pairwise(&xs, &ys, min, meter)
 		})
 	}
 

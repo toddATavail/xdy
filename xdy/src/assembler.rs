@@ -67,7 +67,7 @@
 //! SPACE             ::= " "
 //! INDEX             ::= DIGIT+
 //! INTEGER           ::= "-"? DIGIT+
-//! BINARY_OP         ::= "+" | "-" | "*" | "/" | "%" | "^" | "max"
+//! BINARY_OP         ::= "+" | "-" | "*" | "/" | "%" | "^" | "max" | "min"
 //! COMPARATOR        ::= "=" | "!=" | "<" | "<=" | ">" | ">="
 //! EOL               ::= "\n" | "\r\n"
 //! EOF               ::= the end of the input
@@ -1456,7 +1456,10 @@ enum BinaryOp
 	Exp,
 
 	// Maximum.
-	Max
+	Max,
+
+	// Minimum.
+	Min
 }
 
 /// Parse the sigil or keyword for a binary arithmetic operator.
@@ -1478,7 +1481,8 @@ fn binary_op(input: Span) -> AsmResult<BinaryOp>
 		value(BinaryOp::Div, char('/')),
 		value(BinaryOp::Mod, char('%')),
 		value(BinaryOp::Exp, char('^')),
-		value(BinaryOp::Max, tag("max"))
+		value(BinaryOp::Max, tag("max")),
+		value(BinaryOp::Min, tag("min"))
 	))
 	.parse(input)
 }
@@ -1517,7 +1521,8 @@ fn register_tail(input: Span, dest: RegisterIndex) -> AsmResult<Instruction>
 			BinaryOp::Div => Instruction::div(dest, op1, op2),
 			BinaryOp::Mod => Instruction::r#mod(dest, op1, op2),
 			BinaryOp::Exp => Instruction::exp(dest, op1, op2),
-			BinaryOp::Max => Instruction::max(dest, op1, op2)
+			BinaryOp::Max => Instruction::max(dest, op1, op2),
+			BinaryOp::Min => Instruction::min(dest, op1, op2)
 		};
 		Ok((tail, inst))
 	})();

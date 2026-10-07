@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
 	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor,
-	KeepHighest, KeepLowest, Limit, Max, Mod, Mul, Neg, ProgramCounter,
+	KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul, Neg, ProgramCounter,
 	RegisterIndex, Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
 	RollingRecordIndex, Sub, SumRollingRecord, evaluator::ResultSet,
 	ir::Instruction
@@ -22,7 +22,8 @@ use crate::{
 
 use super::{criteria, faces};
 use crate::{
-	Optimizer, add, div, exp, max, r#mod, mul, neg, primitives::keep_drops, sub
+	Optimizer, add, div, exp, max, min, r#mod, mul, neg,
+	primitives::keep_drops, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -542,6 +543,16 @@ impl InstructionVisitor<()> for ConstantFolder
 		)
 	}
 
+	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
+	{
+		self.maybe_fold_binary_instruction(
+			*inst,
+			|| (inst.op1, inst.op2),
+			min,
+			|dest, op1, op2| Min { dest, op1, op2 }
+		)
+	}
+
 	fn visit_neg(&mut self, inst: &Neg) -> Result<(), ()>
 	{
 		// Resolve the operand once, as for binary instructions.
@@ -1043,6 +1054,21 @@ impl GetConstantOperands<(i32, i32)> for Max
 	}
 }
 
+impl GetConstantOperands<(i32, i32)> for Min
+{
+	fn const_ops(&self) -> Option<(i32, i32)>
+	{
+		match (self.op1, self.op2)
+		{
+			(
+				AddressingMode::Immediate(Immediate(op1)),
+				AddressingMode::Immediate(Immediate(op2))
+			) => Some((op1, op2)),
+			_ => None
+		}
+	}
+}
+
 impl GetConstantOperands<i32> for Neg
 {
 	fn const_ops(&self) -> Option<i32>
@@ -1123,6 +1149,10 @@ impl GetConstantOperands<(i32, Option<i32>)> for Instruction
 			Instruction::Max(max) =>
 			{
 				max.const_ops().map(|(op1, op2)| (op1, Some(op2)))
+			},
+			Instruction::Min(min) =>
+			{
+				min.const_ops().map(|(op1, op2)| (op1, Some(op2)))
 			},
 			Instruction::Neg(neg) =>
 			{
