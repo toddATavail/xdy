@@ -33,19 +33,25 @@ specification's reroll does:
   of the rerolled law (`bind_rollDice_bagDraws`).
 - A setup's reroll (`Setup.reroll`) describes the specification's reroll of
   its records as every later instruction views them (`Record.view`, the kept
-  results and the die), whether it does nothing, crosses out, or rewrites
-  (`Setup.law_reroll`); and so a mixture's reroll describes the reroll of the
-  mixture's law, independent of the operands' (`mixtureLaw_reroll`,
+  results and the die), whether it does nothing, crosses out, rewrites, or
+  pools (`Setup.law_reroll`); and so a mixture's reroll describes the reroll
+  of the mixture's law, independent of the operands' (`mixtureLaw_reroll`,
   `law_reroll_resolved`). The view, not the record, since the Rust leaves a
   setup that the reroll cannot change with its drops, and crosses out by
   dropping, where the specification's record keeps only its kept results.
-- The proofs ask that every setup be even, that every result be a face of its
-  die, and that every die have a face (`Setup.Faithful`, `Setup.Faced`), as
-  every roll (`Setup.faithful_roll`), drop and keep (`Setup.Faithful.of_eq`),
-  and reroll that does not pool (`Setup.reroll_of_not_pools`) leaves them.
 - Dice after a drop, or fixed results, are not alike, so the reroll pools the
-  multisets of the dice still kept (`Roll.rerollPool`, `Roll::pool`), whose
-  law `Setup.law_reroll` takes as a hypothesis, `Setup.Pools`.
+  multisets of the dice still kept (`Roll.rerollPool`, `Roll::pool`). For
+  each outcome of the roll, the specification rerolls the kept results that
+  the criterion matches and leaves the survivors (`survivors_spec`), so the
+  multiset that it leaves is the survivors joined with each outcome of the
+  replacements (`bagDraws_kept`); the Rust weighs each by `G^(K − k)`, so that
+  every outcome weighs `Gᴷ` in all, and the pool is the outcomes followed by
+  their replacements (`weighted_flatMap`, `Setup.rerolls_of_pools`).
+- The proofs ask that every setup be well formed, that every result be a face
+  of its die, and that every die have a face (`Setup.Faithful`,
+  `Setup.Faced`), as every roll (`Setup.faithful_roll`), drop and keep
+  (`Setup.Faithful.of_eq`), and reroll (`Setup.reroll_invariants`) leaves
+  them.
 
 ```mermaid
 flowchart TD
@@ -1245,6 +1251,725 @@ def Roll.rerollPool (ρ : Roll) (lowest highest : Nat) (c : Criterion)
     (Roll.custom matched law).outcomes.map fun o =>
       (join rest o.1, e.2 * padding ^ (kept - matched) * o.2))
 
+/-! ## The law of a pool -/
+
+/--
+Weighted values, if some weight is positive, give each value its share of the
+total weight.
+
+# Parameters
+- `default`: The value if no weight is positive.
+- `l`: The values, each with its weight.
+- `x`: The value.
+
+# Hypotheses
+- `hW`: The total weight is positive.
+-/
+theorem weighted_apply {α : Type} [DecidableEq α] (default : α)
+    (l : List (α × Nat)) (hW : (l.map (·.2)).sum ≠ 0) (x : α) :
+    weighted default l x =
+      (l.map fun e => (e.2 : ℝ≥0∞) * if e.1 = x then 1 else 0).sum /
+        (((l.map (·.2)).sum : Nat) : ℝ≥0∞) := by
+  rw [← Outcomes.tsum_weighted default l hW (fun y => if y = x then 1 else 0)]
+  rw [tsum_eq_single x fun y hy => by simp [hy]]
+  simp
+
+/--
+Weighted values can take each value of positive weight.
+
+# Parameters
+- `e`: A value with its weight.
+
+# Hypotheses
+- `he`: `e` is among the values.
+- `h0`: Its weight is positive.
+-/
+theorem mem_support_weighted_of_mem {α : Type} {d : α} {l : List (α × Nat)}
+    {e : α × Nat} (he : e ∈ l) (h0 : e.2 ≠ 0) :
+    e.1 ∈ (weighted d l).support := by
+  have hx : e.1 ∈ l.flatMap fun p => List.replicate p.2 p.1 :=
+    List.mem_flatMap.mpr ⟨e, he, List.mem_replicate.mpr ⟨h0, rfl⟩⟩
+  have hne := List.ne_nil_of_mem hx
+  unfold weighted
+  simp only [hne, ↓reduceDIte, PMF.mem_support_ofMultiset_iff,
+    Multiset.mem_toFinset, Multiset.mem_coe]
+  exact hx
+
+/-- A sum over a list of lists sums the sums of the lists. -/
+private theorem sum_flatMap {α : Type} (l : List α) (f : α → List Nat) :
+    (l.flatMap f).sum = (l.map fun a => (f a).sum).sum := by
+  induction l with
+  | nil => rfl
+  | cons a l ih => simp [List.flatMap_cons, ih]
+
+/--
+Weighted values that list, for each outer value, the inner values that it
+leads to, each weighed by the outer value's weight, a scale, and its own
+weight, are the outer values followed by the inner, if every outer value of
+positive weight scales its inner values to the same total: the law of a pool,
+whose multisets `Roll::pool` in `propagation/record.rs` weighs by
+`b · G^(K − k) · v`, so that the survivors and replacements of every outcome
+of the roll weigh `Gᴷ` in all.
+
+# Parameters
+- `d`, `d₀`, `dh`: The defaults of the flattened, outer, and inner values.
+- `l`: The outer values, each with its weight.
+- `h`: The inner values of each outer value, each with its weight.
+- `c`: The scale of each outer value's inner values.
+- `f`: The value that each outer and inner value lead to.
+- `T`: The common total.
+
+# Hypotheses
+- `hT`: The common total is positive.
+- `hl`: The total weight of the outer values is positive.
+- `hc`: Every outer value of positive weight scales its inner values to the
+  common total.
+-/
+theorem weighted_flatMap {α β γ : Type} [DecidableEq γ] (d : γ) (d₀ : α)
+    (dh : α → β) (l : List (α × Nat)) (h : α → List (β × Nat))
+    (c : α → Nat) (f : α → β → γ) (T : Nat) (hT : T ≠ 0)
+    (hl : (l.map (·.2)).sum ≠ 0)
+    (hc : ∀ e ∈ l, e.2 ≠ 0 → c e.1 * ((h e.1).map (·.2)).sum = T) :
+    weighted d (l.flatMap fun e =>
+        (h e.1).map fun o => (f e.1 o.1, e.2 * c e.1 * o.2)) =
+      (weighted d₀ l).bind fun a => (weighted (dh a) (h a)).map (f a) := by
+  -- The total of the flattened weights.
+  have htot : ((l.flatMap fun e =>
+      (h e.1).map fun o => (f e.1 o.1, e.2 * c e.1 * o.2)).map (·.2)).sum =
+        (l.map (·.2)).sum * T := by
+    rw [List.map_flatMap, sum_flatMap, ← List.sum_map_mul_right]
+    refine congrArg List.sum (List.map_congr_left fun e he => ?_)
+    simp only [List.map_map, Function.comp_def]
+    rw [show (fun o : β × Nat => e.2 * c e.1 * o.2) =
+      fun o => (e.2 * c e.1) * o.2 from rfl, List.sum_map_mul_left]
+    by_cases h0 : e.2 = 0
+    · simp [h0]
+    · rw [mul_assoc, hc e he h0]
+  have hST : (l.map (·.2)).sum * T ≠ 0 := Nat.mul_ne_zero hl hT
+  ext z
+  rw [weighted_apply d _ (htot ▸ hST), htot, PMF.bind_apply,
+    Outcomes.tsum_weighted d₀ l hl]
+  -- Each element's share.
+  have hterm : ∀ e ∈ l, (e.2 : ℝ≥0∞) * ((weighted (dh e.1) (h e.1)).map
+      (f e.1)) z =
+        (((h e.1).map fun o => (f e.1 o.1, e.2 * c e.1 * o.2)).map
+          fun e' => (e'.2 : ℝ≥0∞) * if e'.1 = z then 1 else 0).sum /
+          (T : ℝ≥0∞) := by
+    intro e he
+    by_cases h0 : e.2 = 0
+    · simp [h0, Function.comp_def]
+    have hH : ((h e.1).map (·.2)).sum ≠ 0 := fun hH =>
+      hT (by rw [← hc e he h0, hH, mul_zero])
+    have hc0 : c e.1 ≠ 0 := fun hc0 =>
+      hT (by rw [← hc e he h0, hc0, zero_mul])
+    rw [Outcomes.map_apply_eq_tsum, Outcomes.tsum_weighted _ _ hH,
+      ← hc e he h0, ← mul_div_assoc, Nat.cast_mul,
+      ← ENNReal.mul_div_mul_left _ _ (Nat.cast_ne_zero.mpr hc0)
+        (ENNReal.natCast_ne_top _)]
+    congr 1
+    simp only [List.map_map, Function.comp_def, ← List.sum_map_mul_left]
+    refine congrArg List.sum (List.map_congr_left fun o _ => ?_)
+    push_cast
+    split_ifs <;> ring
+  rw [List.map_congr_left hterm, List.map_flatMap]
+  have hsum : ∀ (l : List (α × Nat)) (g : α × Nat → List ℝ≥0∞),
+      (l.flatMap g).sum = (l.map fun e => (g e).sum).sum := by
+    intro l g
+    induction l with
+    | nil => rfl
+    | cons a l ih => simp [List.flatMap_cons, ih]
+  rw [hsum]
+  simp only [ENNReal.div_eq_inv_mul, ← List.sum_map_mul_left]
+  refine congrArg List.sum (List.map_congr_left fun e _ =>
+    congrArg List.sum (List.map_congr_left fun o _ => ?_))
+  rw [Nat.cast_mul, ENNReal.mul_inv (.inr (ENNReal.natCast_ne_top _))
+    (.inl (ENNReal.natCast_ne_top _))]
+  ring
+
+namespace Roll
+
+/--
+The weights of a well-formed roll's outcomes sum to its total, which is
+positive.
+
+# Parameters
+- `ρ`: The roll.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+-/
+theorem sum_outcomes (ρ : Roll) (hρ : ρ.WellFormed) :
+    (ρ.outcomes.map (·.2)).sum = ρ.total ∧ ρ.total ≠ 0 := by
+  have h := ρ.tsum_law_sorted hρ fun _ => 1
+  simp only [Nat.cast_one, mul_one, PMF.tsum_coe] at h
+  have hi : OrderStatistics.integral ρ.outcomes
+      (fun rs => (fun _ => 1) (expand rs)) =
+      (ρ.outcomes.map (·.2)).sum := by
+    simp [OrderStatistics.integral]
+  rw [hi] at h
+  have hT : ρ.total ≠ 0 := fun hT => by
+    rw [hT, Nat.cast_zero] at h
+    generalize (ρ.outcomes.map (·.2)).sum = n at h
+    by_cases h0 : (n : ℝ≥0∞) = 0
+    · rw [h0, ENNReal.zero_div] at h
+      exact one_ne_zero h
+    · rw [ENNReal.div_zero h0] at h
+      exact ENNReal.one_ne_top h
+  refine ⟨?_, hT⟩
+  have := (ENNReal.div_eq_one_iff (Nat.cast_ne_zero.mpr hT)
+    (ENNReal.natCast_ne_top _)).mp h.symm
+  exact_mod_cast this
+
+/--
+The law of the record that a well-formed roll fills, sorted, is its outcomes,
+weighed and expanded.
+
+# Parameters
+- `ρ`: The roll.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+-/
+theorem map_sorted_law_weighted (ρ : Roll) (hρ : ρ.WellFormed) :
+    ρ.law.map Record.sorted = (weighted [] ρ.outcomes).map expand := by
+  obtain ⟨hS, hT⟩ := ρ.sum_outcomes hρ
+  ext ys
+  rw [map_sorted_law ρ hρ, Outcomes.map_apply_eq_tsum,
+    Outcomes.tsum_weighted _ _ (hS ▸ hT), hS]
+  congr 1
+  simp only [OrderStatistics.integral, Nat.cast_list_sum, List.map_map]
+  refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+  simp only [Function.comp_apply]
+  split_ifs <;> simp
+
+/-- Every multiset of the program, from faces of positive weight, has positive
+weight. -/
+private theorem weight_pos_outcomeStates :
+    ∀ (die : List (Int × Nat)), (∀ q ∈ die, 0 < q.2) →
+      ∀ (J : Nat) (e : List (Int × Nat) × Nat),
+        e ∈ Outcomes.outcomeStates die J → 0 < e.2 := by
+  intro die
+  induction die using List.reverseRecOn with
+  | nil =>
+    intro _ J e he
+    simp only [Outcomes.outcomeStates, List.foldl_nil, Outcomes.initial] at he
+    split at he
+    · simp_all
+    · simp at he
+  | append_singleton die face ih =>
+    intro hpos J e he
+    rw [Outcomes.outcomeStates_append] at he
+    simp only [Outcomes.outcomeStep, List.mem_flatMap, List.mem_range,
+      List.mem_map] at he
+    obtain ⟨m, hm, e', he', rfl⟩ := he
+    exact Nat.mul_pos (Nat.mul_pos (Nat.choose_pos (by omega))
+      (Nat.pow_pos (hpos face (by simp))))
+      (ih (fun q hq => hpos q (by simp [hq])) _ e' he')
+
+/--
+Every outcome of a well-formed roll has positive weight, as `Roll::outcomes`
+in `propagation/record.rs` weighs them.
+
+# Parameters
+- `ρ`: The roll.
+- `e`: An outcome with its weight.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `he`: `e` is an outcome of the roll.
+-/
+theorem weight_pos_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.outcomes) : 0 < e.2 := by
+  have hdice : ∀ (n : Nat) (die : List (Int × Nat)), (∀ q ∈ die, 0 < q.2) →
+      e ∈ diceOutcomes n die → 0 < e.2 := by
+    intro n die hpos he
+    unfold diceOutcomes at he
+    split at he
+    · simp_all
+    split at he
+    · simp_all
+    exact weight_pos_outcomeStates die hpos n e he
+  cases ρ with
+  | range start stop =>
+    simp only [outcomes] at he
+    split at he
+    · simp_all
+    · simp only [List.mem_map] at he
+      obtain ⟨i, _, rfl⟩ := he
+      exact Nat.one_pos
+  | standard count faces =>
+    exact hdice _ _ (fun q hq => by
+      simp only [OrderStatistics.standardFaces, List.mem_map] at hq
+      obtain ⟨i, _, rfl⟩ := hq
+      exact Nat.one_pos) he
+  | custom count faces => exact hdice _ _ hρ.2 he
+  | fixed rs =>
+    simp only [outcomes, List.mem_singleton] at he
+    subst he
+    exact Nat.one_pos
+  | pool outcomes => exact (hρ.2.1 e he).2
+
+/--
+Every outcome of a well-formed roll holds the sorted results of a record that
+the roll can fill.
+
+# Parameters
+- `ρ`: The roll.
+- `e`: An outcome with its weight.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `he`: `e` is an outcome of the roll.
+-/
+theorem exists_sorted_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.outcomes) :
+    ∃ r ∈ ρ.law.support, r.sorted = expand e.1 := by
+  have hm : expand e.1 ∈ (ρ.law.map Record.sorted).support := by
+    rw [ρ.map_sorted_law_weighted hρ, PMF.support_map]
+    exact ⟨e.1, mem_support_weighted_of_mem he
+      (weight_pos_of_mem_outcomes hρ he).ne', rfl⟩
+  rw [PMF.support_map] at hm
+  exact hm
+
+/--
+Every outcome of a well-formed roll holds its number of results.
+
+# Parameters
+- `ρ`: The roll.
+- `e`: An outcome with its weight.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `he`: `e` is an outcome of the roll.
+-/
+theorem length_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.outcomes) :
+    (expand e.1).length = ρ.results := by
+  obtain ⟨r, hr, hre⟩ := exists_sorted_of_mem_outcomes hρ he
+  rw [← hre, Record.sorted, List.length_mergeSort]
+  exact (mem_support_law hρ.even hr).1
+
+end Roll
+
+/-- The values of a list at positions from `lo` to just before `st`, the
+first at position `j`, as `survivors` in `propagation/record.rs` places
+results. -/
+private def window (lo st : Int) : Int → List Int → List Int
+  | _, [] => []
+  | j, x :: xs =>
+    (if lo ≤ j ∧ j < st then [x] else []) ++ window lo st (j + 1) xs
+
+/-- The values at positions from `lo` to just before `st` drop those before
+`lo` and take those before `st`. -/
+private theorem window_eq (lo st : Int) :
+    ∀ (j : Int) (xs : List Int), window lo st j xs =
+      (xs.drop (lo - j).toNat).take (st - Max.max lo j).toNat
+  | _, [] => by simp [window]
+  | j, x :: xs => by
+    rw [window, window_eq lo st (j + 1) xs]
+    split_ifs with h
+    · rw [show (lo - j).toNat = 0 by omega,
+        show (lo - (j + 1)).toNat = 0 by omega,
+        show (st - Max.max lo j).toNat =
+          (st - Max.max lo (j + 1)).toNat + 1 by omega]
+      simp
+    · by_cases hj : j < lo
+      · rw [show (lo - j).toNat = (lo - (j + 1)).toNat + 1 by omega,
+          show Max.max lo (j + 1) = Max.max lo j by omega]
+        simp
+      · rw [show (st - Max.max lo (j + 1)).toNat = 0 by omega,
+          show (st - Max.max lo j).toNat = 0 by omega]
+        simp
+
+/-- The positions from `j` to just before `j + m` that lie from `lo` to just
+before `st`, as `survivors` in `propagation/record.rs` places copies. -/
+private def placed (lo st j : Int) (m : Nat) : Nat :=
+  (Max.max 0 (Min.min st (j + m) - Max.max lo j)).toNat
+
+/-- Copies of a value, before the rest, place as many of their positions as
+the window holds. -/
+private theorem window_replicate_append (lo st v : Int) (ys : List Int) :
+    ∀ (m : Nat) (j : Int), window lo st j (List.replicate m v ++ ys) =
+      List.replicate (placed lo st j m) v ++ window lo st (j + m) ys
+  | 0, j => by
+    rw [show placed lo st j 0 = 0 by simp only [placed]; omega]
+    simp
+  | m + 1, j => by
+    rw [List.replicate_succ, List.cons_append, window,
+      window_replicate_append lo st v ys m (j + 1)]
+    rw [show j + 1 + (m : Int) = j + ((m + 1 : Nat) : Int) by push_cast; ring]
+    split_ifs with h
+    · rw [show placed lo st j (m + 1) = placed lo st (j + 1) m + 1 by
+        simp only [placed]; push_cast; omega]
+      simp [List.replicate_succ]
+    · rw [show placed lo st j (m + 1) = placed lo st (j + 1) m by
+        simp only [placed]; push_cast; omega]
+      simp
+
+/-- The survivors from a position on are the window's values that a criterion
+does not match, and the matched, the number that it does. -/
+private theorem survivorsFrom_spec (lo st : Int) (c : Criterion) :
+    ∀ (j : Int) (rs : List (Int × Nat)),
+      Roll.expand (survivorsFrom lo st c j rs).1 =
+          (window lo st j (Roll.expand rs)).filter (!c.matches ·) ∧
+        (survivorsFrom lo st c j rs).2 =
+          (window lo st j (Roll.expand rs)).countP c.matches
+  | _, [] => by simp [survivorsFrom, window, Roll.expand]
+  | j, (v, m) :: rest => by
+    obtain ⟨ih₁, ih₂⟩ := survivorsFrom_spec lo st c (j + m) rest
+    have hx : Roll.expand ((v, m) :: rest) =
+        List.replicate m v ++ Roll.expand rest := by
+      simp [Roll.expand]
+    rw [hx, window_replicate_append]
+    simp only [survivorsFrom, placed]
+    generalize (Max.max 0 (Min.min st (j + m) - Max.max lo j)).toNat = n
+    rcases hs : survivorsFrom lo st c (j + m) rest with ⟨sv, mt⟩
+    rw [hs] at ih₁ ih₂
+    dsimp only at ih₁ ih₂ ⊢
+    split_ifs with h0 hm
+    · subst h0
+      simp [ih₁, ih₂]
+    · simp [List.filter_append, List.countP_append, ih₁, ih₂, hm,
+        List.countP_replicate]
+      omega
+    · simp only [Roll.expand] at ih₁
+      simp [List.filter_append, List.countP_append, ih₁, ih₂, hm,
+        List.countP_replicate, Roll.expand]
+
+/--
+The results that `survivors` leaves are the kept results that the criterion
+does not match, and the number that it answers is the number of kept results
+that it does, as a record of the results views them (`Record.kept`).
+
+# Parameters
+- `rs`: The distinct results, each with its number of copies.
+- `lowest`: The number of lowest results dropped.
+- `highest`: The number of highest results dropped.
+- `c`: The criterion.
+-/
+theorem survivors_spec (rs : List (Int × Nat)) (lowest highest : Nat)
+    (c : Criterion) :
+    Roll.expand (survivors rs lowest highest c).1 =
+        (((Roll.expand rs).drop lowest).take
+          ((Roll.expand rs).length - lowest - highest)).filter
+            (!c.matches ·) ∧
+      (survivors rs lowest highest c).2 =
+        (((Roll.expand rs).drop lowest).take
+          ((Roll.expand rs).length - lowest - highest)).countP c.matches := by
+  have hlen : (Roll.expand rs).length = ((rs.map (·.2)).sum : Nat) := by
+    simp [Roll.expand, List.length_flatMap]
+  have hw : window lowest (((rs.map (·.2)).sum : Nat) - (highest : Int)) 0
+      (Roll.expand rs) = ((Roll.expand rs).drop lowest).take
+        ((Roll.expand rs).length - lowest - highest) := by
+    rw [window_eq, hlen]
+    congr 2
+    omega
+  rw [← hw]
+  exact survivorsFrom_spec _ _ c 0 rs
+
+/--
+The union of two multisets of fixed results holds the results of both.
+
+# Parameters
+- `xs`, `ys`: The distinct results of each, each with its number of copies.
+-/
+theorem perm_expand_join (xs ys : List (Int × Nat)) :
+    (Roll.expand (join xs ys)).Perm (Roll.expand xs ++ Roll.expand ys) := by
+  rw [join]
+  exact (expand_tally_perm _).trans
+    (by rw [Roll.expand, List.flatMap_append]; rfl)
+
+/--
+The results that a reroll leaves of two lists of results are the results that
+it leaves of each, independently.
+
+# Parameters
+- `step`: The law of the result that each result leaves.
+- `xs`, `ys`: The results.
+-/
+theorem bagDraws_append (step : Int → PMF Int) (xs ys : List Int) :
+    bagDraws step (xs ++ ys) =
+      lift (· + ·) (bagDraws step xs) (bagDraws step ys) := by
+  induction xs with
+  | nil =>
+    simp only [List.nil_append, bagDraws, lift, PMF.pure_bind, zero_add]
+    exact (PMF.map_id _).symm
+  | cons x xs ih =>
+    simp only [List.cons_append, bagDraws, ih, lift, PMF.bind_bind,
+      PMF.map_bind, PMF.bind_map, PMF.map_comp, Function.comp_def]
+    refine congrArg _ (funext fun a => congrArg _ (funext fun M =>
+      congrArg (PMF.map · _) (funext fun N => ?_)))
+    exact (Multiset.cons_add _ _ _).symm
+
+/--
+The results that a reroll leaves depend only on the laws of the results that
+it leaves of the results present.
+
+# Hypotheses
+- `h`: The laws agree on every result present.
+-/
+theorem bagDraws_congr {step step' : Int → PMF Int} {xs : List Int}
+    (h : ∀ x ∈ xs, step x = step' x) :
+    bagDraws step xs = bagDraws step' xs := by
+  induction xs with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [bagDraws, h x List.mem_cons_self,
+      ih fun y hy => h y (List.mem_cons_of_mem _ hy)]
+
+/--
+A reroll that leaves every result as it was leaves them.
+
+# Hypotheses
+- `h`: Every result leaves itself.
+-/
+theorem bagDraws_pure {step : Int → PMF Int} {xs : List Int}
+    (h : ∀ x ∈ xs, step x = PMF.pure x) :
+    bagDraws step xs = PMF.pure (xs : Multiset Int) := by
+  rw [bagDraws_congr h]
+  induction xs with
+  | nil => rfl
+  | cons x xs ih =>
+    rw [bagDraws, ih fun y hy => h y (List.mem_cons_of_mem _ hy)]
+    simp [lift, PMF.pure_bind, PMF.pure_map]
+
+/--
+Results that a reroll replaces alike are as many dice of the replacement.
+
+# Parameters
+- `P`: The law of every replacement.
+- `xs`: The results.
+-/
+theorem bagDraws_const (P : PMF Int) (xs : List Int) :
+    bagDraws (fun _ => P) xs =
+      (rollDice (xs.length : Int) P).map
+        fun r => (r.results : Multiset Int) := by
+  have hc : ∀ ys : List Int, ys.length = xs.length →
+      bagDraws (fun _ => P) ys = bagDraws (fun _ => P) xs := by
+    intro ys
+    induction ys generalizing xs with
+    | nil => intro h; rw [List.eq_nil_of_length_eq_zero h.symm]
+    | cons y ys ih =>
+      intro h
+      cases xs with
+      | nil => cases h
+      | cons x xs =>
+        simp only [bagDraws, ih xs (by simpa using h)]
+  have := bind_rollDice_bagDraws (xs.length : Int) (PMF.pure 0) fun _ => P
+  rw [Outcomes.rollDice_pure, PMF.pure_bind, PMF.pure_bind] at this
+  rw [← this]
+  exact (hc _ (by simp)).symm
+
+/--
+The multiset of the results of dice of weighted faces is the outcomes of the
+custom roll of those dice, weighed and expanded.
+
+# Parameters
+- `k`: The number of dice.
+
+# Hypotheses
+- `hg`: The custom roll of the dice is well formed.
+-/
+theorem map_bag_rollDice_weighted (k : Int) {g : List (Int × Nat)}
+    (hg : (Roll.custom k g).WellFormed) :
+    (rollDice k (weightedDie g)).map (fun r => (r.results : Multiset Int)) =
+      (weighted [] (Roll.custom k g).outcomes).map
+        fun o => (Roll.expand o : Multiset Int) := by
+  have h := congrArg (PMF.map (fun xs : List Int => (xs : Multiset Int)))
+    (Roll.map_sorted_law_weighted _ hg)
+  simp only [PMF.map_comp, Roll.law] at h
+  refine Eq.trans ?_ (h.trans (congrArg (PMF.map · _) rfl))
+  refine map_congr_support fun r _ => ?_
+  simp only [Function.comp_apply, Record.sorted]
+  exact (Multiset.coe_eq_coe.mpr (List.mergeSort_perm _ _)).symm
+
+/--
+Rerolling the kept results of a multiset of fixed results leaves, as a
+multiset, the survivors joined with each outcome of the replacements of the
+results that the criterion matches, as `Roll::pool` in
+`propagation/record.rs` joins them, weighed as those outcomes are.
+
+# Parameters
+- `rs`: The distinct results, each with its number of copies.
+- `lowest`: The number of lowest results dropped.
+- `highest`: The number of highest results dropped.
+- `c`: The criterion.
+
+# Hypotheses
+- `hg`: Every custom roll of dice of the final results of a matched die, `g`,
+  is well formed.
+-/
+theorem bagDraws_kept (rs : List (Int × Nat)) (lowest highest : Nat)
+    (c : Criterion) {g : List (Int × Nat)}
+    (hg : ∀ k : Int, (Roll.custom k g).WellFormed) :
+    bagDraws (fun x => if c.matches x then weightedDie g else PMF.pure x)
+        (((Roll.expand rs).drop lowest).take
+          ((Roll.expand rs).length - lowest - highest)) =
+      (weighted [] (Roll.custom ((survivors rs lowest highest c).2 : Int)
+          g).outcomes).map
+        fun o => (Roll.expand (join (survivors rs lowest highest c).1 o) :
+          Multiset Int) := by
+  obtain ⟨h₁, h₂⟩ := survivors_spec rs lowest highest c
+  generalize ((Roll.expand rs).drop lowest).take
+    ((Roll.expand rs).length - lowest - highest) = W at h₁ h₂
+  rw [bagDraws_perm _ ((List.filter_append_perm (!c.matches ·) W).symm),
+    bagDraws_append, bagDraws_pure fun x hx => by
+      have := (List.mem_filter.mp hx).2
+      simp only [Bool.not_eq_eq_eq_not, Bool.not_true] at this
+      simp [this],
+    bagDraws_congr (step' := fun _ => weightedDie g) fun x hx => by
+      have := (List.mem_filter.mp hx).2
+      simp only [Bool.not_not] at this
+      simp [this],
+    bagDraws_const]
+  have hlen : ((W.filter fun x => !!c.matches x).length : Int) =
+      ((survivors rs lowest highest c).2 : Int) := by
+    rw [h₂, List.countP_eq_length_filter]
+    simp
+  rw [hlen, map_bag_rollDice_weighted _ (hg _), lift, PMF.pure_bind,
+    PMF.map_comp, ← h₁]
+  refine congrArg (PMF.map · _) (funext fun o => ?_)
+  simp only [Function.comp_apply, Multiset.coe_add]
+  exact (Multiset.coe_eq_coe.mpr (perm_expand_join _ _)).symm
+
+/--
+A tally ascends strictly, and counts each value at least once.
+
+# Parameters
+- `xs`: The values.
+-/
+theorem tally_wellFormed (xs : List Int) :
+    (tally xs).Pairwise (fun a b => a.1 < b.1) ∧ ∀ p ∈ tally xs, 0 < p.2 := by
+  have hnd : (xs.dedup.mergeSort (· ≤ ·)).Nodup :=
+    (List.nodup_dedup xs).perm (List.mergeSort_perm _ _).symm
+  have hs : (xs.dedup.mergeSort (· ≤ ·)).Pairwise (· ≤ ·) := by
+    simpa using List.pairwise_mergeSort (le := fun a b : Int => decide (a ≤ b))
+      (fun a b c hab hbc => by simp at *; omega)
+      (fun a b => by simp; omega) xs.dedup
+  refine ⟨?_, fun p hp => ?_⟩
+  · rw [tally, List.pairwise_map]
+    exact (hs.and hnd).imp fun ⟨hle, hne⟩ => lt_of_le_of_ne hle hne
+  · simp only [tally, List.mem_map, List.mem_mergeSort, List.mem_dedup] at hp
+    obtain ⟨x, hx, rfl⟩ := hp
+    exact List.count_pos_iff.mpr hx
+
+/--
+The survivors of an outcome of a well-formed roll and the results that the
+criterion matches are, together, the results still kept.
+
+# Parameters
+- `lowest`: The number of lowest results dropped.
+- `highest`: The number of highest results dropped.
+- `c`: The criterion.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `he`: `e` is an outcome of the roll.
+-/
+theorem survivors_count {ρ : Roll} {e : List (Int × Nat) × Nat}
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.outcomes) (lowest highest : Nat)
+    (c : Criterion) :
+    (Roll.expand (survivors e.1 lowest highest c).1).length +
+        (survivors e.1 lowest highest c).2 =
+      ρ.results - lowest - highest := by
+  obtain ⟨h₁, h₂⟩ := survivors_spec e.1 lowest highest c
+  rw [h₁, h₂, ← List.countP_eq_length_filter]
+  generalize hW : ((Roll.expand e.1).drop lowest).take
+    ((Roll.expand e.1).length - lowest - highest) = W
+  have hlen : W.length = ρ.results - lowest - highest := by
+    rw [← hW]
+    simp only [List.length_take, List.length_drop,
+      Roll.length_of_mem_outcomes hρ he]
+    omega
+  rw [← hlen, List.length_eq_countP_add_countP c.matches, Nat.add_comm]
+  simp
+
+/-- The replacements of `k` dice still kept that a criterion matches, and the
+padding of the other `K − k`, weigh `Gᴷ` in all. -/
+private theorem sum_replacements {g : List (Int × Nat)} {G : Nat}
+    (hglen : (Roll.expand g).length = G) (hG : G ≠ 0)
+    (hgw : ∀ k : Int, (Roll.custom k g).WellFormed) {k K : Nat}
+    (hkK : k ≤ K) :
+    G ^ (K - k) * ((Roll.custom (k : Int) g).outcomes.map (·.2)).sum =
+      G ^ K := by
+  have hgne : g ≠ [] := fun h => hG (by rw [← hglen, h]; rfl)
+  have htot : OrderStatistics.total g = G := by
+    rw [← hglen, OrderStatistics.total]
+    simp [Roll.expand, List.length_flatMap]
+  rw [(Roll.sum_outcomes _ (hgw _)).1, Roll.total]
+  by_cases hk0 : k = 0
+  · simp [hk0]
+  · split_ifs with hpos
+    · rw [htot, Int.toNat_natCast, ← pow_add, Nat.sub_add_cancel hkK]
+    · exact absurd ⟨by omega, hgne⟩ hpos
+
+/-- Weighted results hold as many results as their weights. -/
+private theorem length_expand (rs : List (Int × Nat)) :
+    (Roll.expand rs).length = (rs.map (·.2)).sum := by
+  simp [Roll.expand, List.length_flatMap]
+
+/--
+The pool that a reroll leaves of a well-formed roll is well formed, as
+`Roll::pool` in `propagation/record.rs` makes it: it holds a multiset, each
+multiset ascends strictly, with positive copies and positive weight, and each
+holds the results still kept.
+
+# Parameters
+- `lowest`: The number of lowest results dropped.
+- `highest`: The number of highest results dropped.
+- `c`: The criterion.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `hG`: The padding is positive.
+- `hgw`: Every custom roll of dice of the final results is well formed.
+-/
+theorem Roll.wellFormed_rerollPool {ρ : Roll} {lowest highest : Nat}
+    {c : Criterion} {G : Nat} {g : List (Int × Nat)} (hρ : ρ.WellFormed)
+    (hG : G ≠ 0)
+    (hgw : ∀ k : Int, (Roll.custom k g).WellFormed) :
+    (ρ.rerollPool lowest highest c G g).WellFormed := by
+  set K := ρ.results - lowest - highest
+  let sv : List (Int × Nat) → List (Int × Nat) × Nat := fun rs =>
+    survivors rs lowest highest c
+  have hne : ∀ τ : Roll, τ.WellFormed → τ.outcomes ≠ [] := fun τ hτ h => by
+    have := τ.sum_outcomes hτ
+    rw [h] at this
+    exact this.2 this.1.symm
+  -- Every multiset of the pool is well formed and holds the dice still kept.
+  have hmem : ∀ x ∈ (ρ.rerollPool lowest highest c G g).outcomes,
+      ((x.1.Pairwise (fun a b => a.1 < b.1) ∧ ∀ p ∈ x.1, 0 < p.2) ∧
+        0 < x.2) ∧ (x.1.map (·.2)).sum = K := by
+    intro x hx
+    simp only [Roll.rerollPool, Roll.outcomes, List.mem_flatMap,
+      List.mem_map] at hx
+    obtain ⟨e, he, o, ho, rfl⟩ := hx
+    have hcount := survivors_count hρ he lowest highest c
+    have ho' : o ∈ (Roll.custom ((sv e.1).2 : Int) g).outcomes := ho
+    refine ⟨⟨tally_wellFormed _, Nat.mul_pos (Nat.mul_pos
+      (Roll.weight_pos_of_mem_outcomes hρ he) (Nat.pow_pos
+        (Nat.pos_of_ne_zero hG)))
+      (Roll.weight_pos_of_mem_outcomes (hgw _) ho')⟩, ?_⟩
+    rw [← length_expand, (perm_expand_join _ _).length_eq, List.length_append,
+      Roll.length_of_mem_outcomes (hgw _) ho']
+    simp only [Roll.results, Int.toNat_natCast]
+    exact hcount
+  refine ⟨?_, fun x hx => (hmem x hx).1, ?_⟩
+  · obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ (hne ρ hρ)
+    obtain ⟨o, ho⟩ := List.exists_mem_of_ne_nil _
+      (hne _ (hgw ((sv e.1).2 : Int)))
+    exact List.ne_nil_of_mem (List.mem_flatMap.mpr ⟨e, he,
+      List.mem_map.mpr ⟨o, ho, rfl⟩⟩)
+  · intro x hx
+    rw [(hmem x hx).2]
+    change x ∈ (ρ.rerollPool lowest highest c G g).outcomes at hx
+    change K = (Roll.pool (ρ.rerollPool lowest highest c G g).outcomes).results
+    generalize (ρ.rerollPool lowest highest c G g).outcomes = es at hmem hx ⊢
+    cases es with
+    | nil => cases hx
+    | cons e₀ es =>
+      exact ((hmem e₀ List.mem_cons_self).2).symm
+
 /-! ## Rerolling a setup -/
 
 namespace Setup
@@ -1449,6 +2174,62 @@ theorem resolve_redraw {d : Die} {c : Criterion} {limit : Option Nat}
       exact .inl ⟨n, rfl, fun h0 => hn (.inl h0), rfl, rfl⟩
 
 end Effect
+
+/-- The positions of the draws are faces of the die. -/
+private theorem mem_draws (c : Criterion) (faces : List Int) {x : Int} :
+    ∀ k, x ∈ draws c faces k → x ∈ faces
+  | 0, h => h
+  | k + 1, h => by
+    rw [draws, List.mem_flatMap] at h
+    obtain ⟨y, hy, hx⟩ := h
+    split at hx
+    · exact hx
+    · rw [List.eq_of_mem_replicate hx]
+      exact mem_draws c faces k hy
+
+/-- The final results of a die that a reroll may change are faces of the die,
+and weigh the padding, which is positive. -/
+private theorem redraw_law {d : Die} {c : Criterion} {limit : Option Nat}
+    {padding : Nat} {law : List (Int × Nat)}
+    (h : Effect.resolve d c limit = .redraw padding law) :
+    (Roll.expand law).length = padding ∧ padding ≠ 0 ∧
+      ∀ x ∈ Roll.expand law, x ∈ d.faces := by
+  obtain ⟨hm, hcase⟩ := Effect.resolve_redraw h
+  have hFlen : d.faces.length ≠ 0 := fun h0 =>
+    hm (Nat.eq_zero_of_le_zero (h0 ▸ List.countP_le_length))
+  have hmle := List.countP_le_length (p := c.matches) (l := d.faces)
+  rcases hcase with ⟨n, rfl, _, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
+  · exact ⟨length_expand_limitedLaw _ _ _,
+      Nat.mul_ne_zero (pow_ne_zero _ hFlen) hFlen, fun x hx =>
+        mem_draws c _ _ ((expand_limitedLaw_perm d c n).mem_iff.mp hx)⟩
+  · exact ⟨length_expand_unlimitedLaw _ _, by omega, fun x hx =>
+      List.mem_of_mem_filter ((expand_unlimitedLaw_perm d c).mem_iff.mp hx)⟩
+
+/--
+The final results of a die that a reroll may change ascend strictly, each of
+positive weight, so that every custom roll of them is well formed.
+
+# Parameters
+- `k`: The number of dice.
+
+# Hypotheses
+- `h`: The reroll may change the dice still kept.
+-/
+theorem wellFormed_of_redraw {d : Die} {c : Criterion} {limit : Option Nat}
+    {padding : Nat} {law : List (Int × Nat)}
+    (h : Effect.resolve d c limit = .redraw padding law) (k : Int) :
+    (Roll.custom k law).WellFormed := by
+  obtain ⟨hm, hcase⟩ := Effect.resolve_redraw h
+  obtain ⟨hpw, hpos⟩ := tally_wellFormed d.faces
+  rcases hcase with ⟨n, rfl, _, rfl, rfl⟩ | ⟨rfl, _, rfl, rfl⟩
+  · refine ⟨by rw [limitedLaw, List.pairwise_map]; exact hpw, fun p hp => ?_⟩
+    simp only [limitedLaw, List.mem_map] at hp
+    obtain ⟨q, hq, rfl⟩ := hp
+    refine Nat.mul_pos (hpos q hq) ?_
+    split
+    · exact Nat.pow_pos (Nat.pos_of_ne_zero hm)
+    · exact Nat.add_pos_right _ (Nat.pow_pos (Nat.pos_of_ne_zero hm))
+  · exact ⟨hpw.filter _, fun p hp => hpos p (List.mem_of_mem_filter hp)⟩
 
 /-! ## Rerolls that leave the kept results -/
 
@@ -1807,10 +2588,116 @@ private theorem expand_dice_ne_nil {ρ : Roll} (halike : ρ.alike)
   | pool => simp [Roll.alike] at halike
 
 /--
+If a reroll may change the dice still kept of a setup, the specification
+rerolls each record that it describes by the final results of a matched die.
+
+# Hypotheses
+- `he`: The reroll may change the dice still kept.
+-/
+theorem reroll_of_redraw {s : Setup} {c : Criterion} {limit : Option Nat}
+    {G : Nat} {g : List (Int × Nat)}
+    (he : Effect.resolve s.replacement c limit = .redraw G g) :
+    ∀ r ∈ s.law.support, Spec.reroll r c limit =
+      rerollKept r.die r.kept c.matches (weightedDie g) := by
+  obtain ⟨hm, hcase⟩ := Effect.resolve_redraw he
+  have hF : s.replacement.faces ≠ [] := fun h => hm (by simp [h])
+  intro r hr
+  have hdie := (mem_support_law_die hr).1
+  rcases hcase with ⟨n, rfl, hn, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
+  · rw [reroll_some c hn (by rw [hdie]; exact hF), hdie]
+  · have hw : ¬r.die.facesWithin c = true := by
+      rw [hdie, Die.facesWithin, List.all_eq_true]
+      exact fun h => hmF (List.countP_eq_length.mpr h)
+    rw [reroll_none hw, hdie]
+
+/--
+A reroll that pools a well-formed setup describes the specification's reroll
+of the records that it describes, as every later instruction views them.
+Mirrors `Roll::pool` in `propagation/record.rs`: the specification rerolls
+the kept results of each record in place, and the multiset that it leaves,
+by `bagDraws_kept`, is the survivors of the record's outcome joined with each
+outcome of the replacements, whose weights `weighted_flatMap` gathers, since
+every outcome weighs `Gᴷ` in all.
+
+# Hypotheses
+- `hs`: The setup is well formed.
+- `hp`: The reroll pools the setup.
+-/
+theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
+    (hs : s.WellFormed) (hp : s.Pools c limit) : s.Rerolls c limit := by
+  obtain ⟨ρ, G, g, hρ, hk, he, hal⟩ := hp
+  have hρw := hs ρ hρ
+  obtain ⟨hglen, hG, _⟩ := redraw_law he
+  have hgw := wellFormed_of_redraw he
+  set D := s.replacement with hD
+  set L := s.lowest
+  set H := s.highest
+  set K := ρ.results - L - H
+  let step : Int → PMF Int := fun x =>
+    if c.matches x then weightedDie g else PMF.pure x
+  let F : List Int → PMF (List Int × Die) := fun ys =>
+    (bagDraws step ((ys.drop L).take (ys.length - L - H))).map (bagView D)
+  -- The specification's reroll, viewed.
+  have hrhs : (s.law.bind fun r => Spec.reroll r c limit).map Record.view =
+      (weighted [] ρ.outcomes).bind fun rs => F (Roll.expand rs) := by
+    rw [PMF.map_bind, bind_congr_support (g := fun r =>
+      (bagDraws step r.kept).map (bagView D)) fun r hr => by
+        rw [reroll_of_redraw he r hr, map_view_rerollKept,
+          (mem_support_law_die hr).1]]
+    have hlaw : s.law = ρ.law.map fun r =>
+        { r with lowest := L, highest := H, die := D } := by
+      simp [law, hρ, hD, L, H]
+    rw [hlaw, PMF.bind_map]
+    have : ∀ r : Record,
+        (bagDraws step ({ r with lowest := L, highest := H, die := D } :
+          Record).kept).map (bagView D) = F r.sorted := fun r => by
+      simp only [F, Record.kept, Record.sorted, List.length_mergeSort]
+    simp only [Function.comp_def, this]
+    rw [show (ρ.law.bind fun r => F r.sorted) =
+        (ρ.law.map Record.sorted).bind F from
+          (PMF.bind_map ρ.law Record.sorted F).symm,
+      ρ.map_sorted_law_weighted hρw, PMF.bind_map]
+    rfl
+  -- The pool, as `weighted_flatMap` reads it.
+  let sv : List (Int × Nat) → List (Int × Nat) × Nat := fun rs =>
+    survivors rs L H c
+  let hh : List (Int × Nat) → List (List (Int × Nat) × Nat) := fun rs =>
+    (Roll.custom ((sv rs).2 : Int) g).outcomes
+  let P := ρ.outcomes.flatMap fun e => (hh e.1).map fun o =>
+    (join (sv e.1).1 o.1, e.2 * G ^ (K - (sv e.1).2) * o.2)
+  have hs' : s.reroll c limit = { roll := some (.pool P), die := some D } := by
+    have hk' : ¬s.results - s.lowest - s.highest = 0 := hk
+    have he' : Effect.resolve s.replacement c limit = .redraw G g := he
+    have hal' : ¬(ρ.alike = true ∧ s.lowest = 0 ∧ s.highest = 0) := hal
+    simp only [reroll, hρ, hk', he', hal', ↓reduceIte]
+    rfl
+  -- Every outcome weighs `Gᴷ` in all.
+  have hc : ∀ e ∈ ρ.outcomes, e.2 ≠ 0 →
+      G ^ (K - (sv e.1).2) * ((hh e.1).map (·.2)).sum = G ^ K :=
+    fun e he0 _ => sum_replacements hglen hG hgw (by
+      have := survivors_count hρw he0 L H c
+      show (survivors e.1 L H c).2 ≤ ρ.results - L - H
+      omega)
+  rw [Rerolls, hrhs, hs']
+  simp only [law, Roll.law, Option.map_some, Option.getD_some, replacement,
+    PMF.map_comp, P]
+  rw [weighted_flatMap _ [] (fun _ => []) ρ.outcomes hh
+      (fun a => G ^ (K - (sv a).2)) (fun a o => join (sv a).1 o) (G ^ K)
+      (pow_ne_zero _ hG)
+      ((ρ.sum_outcomes hρw).1 ▸ (ρ.sum_outcomes hρw).2) hc,
+    PMF.map_bind]
+  refine congrArg _ (funext fun rs => ?_)
+  simp only [F, step, bagDraws_kept rs L H c hgw, PMF.map_comp]
+  refine map_congr_support fun o _ => ?_
+  simp only [Function.comp_apply]
+  rw [Record.view_of_undropped rfl rfl]
+  simp [bagView, Record.sorted, sv]
+
+/--
 A reroll of a setup describes the specification's reroll of the records that
-it describes, as every later instruction views them, if it does nothing,
-crosses out every die still kept, or rewrites the dice; and if it pools them,
-as `hpool` grants. Mirrors `Setup::reroll` in `propagation/mixture.rs`.
+it describes, as every later instruction views them, whether it does nothing,
+crosses out every die still kept, rewrites the dice, or pools them
+(`rerolls_of_pools`). Mirrors `Setup::reroll` in `propagation/mixture.rs`.
 
 # Parameters
 - `c`: The criterion.
@@ -1818,14 +2705,14 @@ as `hpool` grants. Mirrors `Setup::reroll` in `propagation/mixture.rs`.
   limit.
 
 # Hypotheses
-- `hs`: The setup is even.
+- `hs`: The setup is well formed.
 - `hfaith`: Every result of the setup is a face of its die.
 - `hfaced`: Every die of the setup has a face.
-- `hpool`: If the reroll pools the setup, it rerolls as specified.
 -/
 theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.Even) (hfaith : s.Faithful) (hfaced : s.Faced)
-    (hpool : s.Pools c limit → s.Rerolls c limit) : s.Rerolls c limit := by
+    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced) :
+    s.Rerolls c limit := by
+  have hev : s.Even := fun ρ h => (hs ρ h).even
   have hkf : ∀ r ∈ s.law.support, ∀ x ∈ r.kept,
       x ∈ s.replacement.faces :=
     fun r hr x hx => hfaith r hr x (by
@@ -1834,7 +2721,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
   have hdie := fun r (hr : r ∈ s.law.support) => (mem_support_law_die hr).1
   have hempty : s.results - s.lowest - s.highest = 0 →
       ∀ r ∈ s.law.support, r.kept = [] := fun h r hr => by
-    obtain ⟨hlen, hl, hh⟩ := mem_support_law hs hr
+    obtain ⟨hlen, hl, hh⟩ := mem_support_law hev hr
     have := Record.length_kept r
     rw [hlen, hl, hh, h] at this
     exact List.eq_nil_of_length_eq_zero this
@@ -1878,7 +2765,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
       · exact PMF.map_const _ _
       obtain ⟨hd, hl, _⟩ := mem_support_law_die hr
       obtain ⟨hlen, _, _⟩ := mem_support_law
-        (s := { s with lowest := s.results }) (fun ρ' h => hs ρ' h) hr
+        (s := { s with lowest := s.results }) (fun ρ' h => hev ρ' h) hr
       have := Record.length_kept r
       rw [hlen, hl] at this
       simp only [Record.view, hd, List.eq_nil_of_length_eq_zero
@@ -1887,28 +2774,11 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
     | redraw G g =>
       by_cases hal : ρ.alike ∧ s.lowest = 0 ∧ s.highest = 0
       · obtain ⟨halike, hl0, hh0⟩ := hal
-        obtain ⟨hm, hcase⟩ := Effect.resolve_redraw he
-        set D := s.replacement with hD
-        have hF : D.faces ≠ [] := fun h => hm (by simp [h])
-        have hFlen : D.faces.length ≠ 0 := by simpa using hF
-        have hmle := List.countP_le_length (p := c.matches) (l := D.faces)
         -- The law of a matched die, its padding, and the specification's
         -- reroll of each record by it.
-        have hlaw : (Roll.expand g).length = G ∧ G ≠ 0 ∧
-            ∀ r ∈ s.law.support, Spec.reroll r c limit =
-              rerollKept r.die r.kept c.matches (weightedDie g) := by
-          rcases hcase with
-            ⟨n, rfl, hn, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
-          · refine ⟨length_expand_limitedLaw _ _ _,
-              Nat.mul_ne_zero (pow_ne_zero _ hFlen) hFlen, fun r hr => ?_⟩
-            rw [reroll_some c hn (by rw [hdie r hr]; exact hF), hdie r hr]
-          · refine ⟨length_expand_unlimitedLaw _ _, by omega,
-              fun r hr => ?_⟩
-            have hw : ¬r.die.facesWithin c = true := by
-              rw [hdie r hr, Die.facesWithin, List.all_eq_true]
-              exact fun h => hmF (List.countP_eq_length.mpr h)
-            rw [reroll_none hw, hdie r hr]
-        obtain ⟨hglen, hG, hreroll⟩ := hlaw
+        obtain ⟨hglen, hG, _⟩ := redraw_law he
+        have hreroll := reroll_of_redraw he
+        set D := s.replacement with hD
         let step : Int → PMF Int := fun x =>
           if c.matches x then weightedDie g else PMF.pure x
         -- The dice have faces.
@@ -1951,7 +2821,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         simp only [Function.comp_apply]
         rw [Record.view_of_undropped rfl rfl]
         simp [bagView, Record.sorted]
-      · exact hpool ⟨ρ, G, g, hρ, hk, he, hal⟩
+      · exact rerolls_of_pools hs ⟨ρ, G, g, hρ, hk, he, hal⟩
 
 end Setup
 
@@ -1969,13 +2839,10 @@ are independent of it (`law_reroll_resolved`).
 - `κ`: The law of the criterion and the limit, as the operands resolve them.
 
 # Hypotheses
-- `hμ`: Every setup is even, faithful to its die, and has faces.
-- `hpool`: Every reroll that pools a setup rerolls as specified.
+- `hμ`: Every setup is well formed, faithful to its die, and has faces.
 -/
 theorem mixtureLaw_reroll {μ : PMF Setup} {κ : PMF (Criterion × Option Nat)}
-    (hμ : ∀ s ∈ μ.support, s.Even ∧ s.Faithful ∧ s.Faced)
-    (hpool : ∀ s ∈ μ.support, ∀ q ∈ κ.support,
-      s.Pools q.1 q.2 → s.Rerolls q.1 q.2) :
+    (hμ : ∀ s ∈ μ.support, s.WellFormed ∧ s.Faithful ∧ s.Faced) :
     (mixtureLaw (lift (fun s q => s.reroll q.1 q.2) μ κ)).map Record.view =
       ((lift Prod.mk (mixtureLaw μ) κ).bind fun p =>
         reroll p.1 p.2.1 p.2.2).map Record.view := by
@@ -1989,7 +2856,7 @@ theorem mixtureLaw_reroll {μ : PMF Setup} {κ : PMF (Criterion × Option Nat)}
     (g := fun q : Criterion × Option Nat =>
       (s.law.bind fun r => reroll r q.1 q.2).map Record.view)
     fun q hq => by
-      have h := Setup.law_reroll q.1 q.2 he hf hc (hpool s hs q hq)
+      have h := Setup.law_reroll q.1 q.2 he hf hc
       rw [Setup.Rerolls] at h
       exact h).trans ?_
   simp only [PMF.map_bind]
@@ -2170,42 +3037,76 @@ theorem faithful_roll {ρ : Roll} (h : ρ.alike) :
 
 end Setup
 
-/-- The positions of the draws are faces of the die. -/
-private theorem mem_draws (c : Criterion) (faces : List Int) {x : Int} :
-    ∀ k, x ∈ draws c faces k → x ∈ faces
-  | 0, h => h
-  | k + 1, h => by
-    rw [draws, List.mem_flatMap] at h
-    obtain ⟨y, hy, hx⟩ := h
-    split at hx
-    · exact hx
-    · rw [List.eq_of_mem_replicate hx]
-      exact mem_draws c faces k hy
-
-/-- The final results of a die that a reroll may change are faces of the die,
-and weigh the padding, which is positive. -/
-private theorem redraw_law {d : Die} {c : Criterion} {limit : Option Nat}
-    {padding : Nat} {law : List (Int × Nat)}
-    (h : Effect.resolve d c limit = .redraw padding law) :
-    (Roll.expand law).length = padding ∧ padding ≠ 0 ∧
-      ∀ x ∈ Roll.expand law, x ∈ d.faces := by
-  obtain ⟨hm, hcase⟩ := Effect.resolve_redraw h
-  have hFlen : d.faces.length ≠ 0 := fun h0 =>
-    hm (Nat.eq_zero_of_le_zero (h0 ▸ List.countP_le_length))
-  have hmle := List.countP_le_length (p := c.matches) (l := d.faces)
-  rcases hcase with ⟨n, rfl, _, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
-  · exact ⟨length_expand_limitedLaw _ _ _,
-      Nat.mul_ne_zero (pow_ne_zero _ hFlen) hFlen, fun x hx =>
-        mem_draws c _ _ ((expand_limitedLaw_perm d c n).mem_iff.mp hx)⟩
-  · exact ⟨length_expand_unlimitedLaw _ _, by omega, fun x hx =>
-      List.mem_of_mem_filter ((expand_unlimitedLaw_perm d c).mem_iff.mp hx)⟩
-
 namespace Setup
 
+/-- The pool that a reroll leaves of a setup faithful to its die is faithful
+to it too: each survivor is a result of the setup, and each replacement is a
+final result of a matched die, which is a face. -/
+private theorem faithful_rerollPool {s : Setup} {ρ : Roll} {c : Criterion}
+    {limit : Option Nat} {G : Nat} {g : List (Int × Nat)}
+    (hρ : s.roll = some ρ) (hs : s.WellFormed) (hfaith : s.Faithful)
+    (he : Effect.resolve s.replacement c limit = .redraw G g) :
+    ({ roll := some (ρ.rerollPool s.lowest s.highest c G g),
+       die := some s.replacement } : Setup).Faithful := by
+  have hρw := hs ρ hρ
+  obtain ⟨hglen, hG, hgf⟩ := redraw_law he
+  have hgw := wellFormed_of_redraw he
+  have hgne : Roll.expand g ≠ [] := fun h => hG (by rw [← hglen, h]; rfl)
+  -- Every multiset of the pool holds only faces of the die.
+  have hfaces : ∀ e ∈ (ρ.rerollPool s.lowest s.highest c G g).outcomes,
+      ∀ x ∈ Roll.expand e.1, x ∈ s.replacement.faces := by
+    intro e he x hx
+    simp only [Roll.rerollPool, Roll.outcomes, List.mem_flatMap,
+      List.mem_map] at he
+    obtain ⟨a, ha, o, ho, rfl⟩ := he
+    have ho' : o ∈ (Roll.custom
+        ((survivors a.1 s.lowest s.highest c).2 : Int) g).outcomes := ho
+    rcases List.mem_append.mp ((perm_expand_join _ _).mem_iff.mp hx) with
+      hx | hx
+    · -- A survivor is a kept result of the setup.
+      rw [(survivors_spec a.1 s.lowest s.highest c).1] at hx
+      have hx := List.mem_of_mem_drop (List.mem_of_mem_take
+        (List.mem_of_mem_filter hx))
+      obtain ⟨r, hr, hre⟩ := Roll.exists_sorted_of_mem_outcomes hρw ha
+      rw [← hre, Record.sorted] at hx
+      refine hfaith ⟨r.results, s.lowest, s.highest, s.replacement⟩ ?_ x
+        ((List.mergeSort_perm _ _).mem_iff.mp hx)
+      rw [law, PMF.support_map, hρ]
+      exact ⟨r, hr, rfl⟩
+    · -- A replacement is a final result of a matched die.
+      obtain ⟨r, hr, hre⟩ := Roll.exists_sorted_of_mem_outcomes (hgw _) ho'
+      rw [← hre, Record.sorted] at hx
+      simp only [Roll.law, PMF.support_map, Set.mem_image] at hr
+      obtain ⟨r', hr', rfl⟩ := hr
+      have := (mem_support_rollDice hr').2.2.2 x
+        ((List.mergeSort_perm _ _).mem_iff.mp hx)
+      rcases mem_of_mem_support_customDie this with h | ⟨h, _⟩
+      · exact hgf x h
+      · exact absurd h hgne
+  intro r hr x hx
+  simp only [law, Option.map_some, Option.getD_some, Roll.rerollPool,
+    Roll.law, PMF.map_comp, PMF.support_map, Set.mem_image] at hr
+  obtain ⟨rs, hrs, rfl⟩ := hr
+  simp only [Function.comp_apply] at hx
+  simp only [replacement, Option.getD_some]
+  rcases mem_support_weighted hrs with ⟨e, he, rfl⟩ | rfl
+  · exact hfaces e he x hx
+  · generalize hP : (ρ.rerollPool s.lowest s.highest c G g).outcomes = P
+      at hfaces
+    change x ∈ Roll.expand
+      (((ρ.rerollPool s.lowest s.highest c G g).outcomes.head?.map
+        (·.1)).getD []) at hx
+    rw [hP] at hx
+    cases P with
+    | nil => simp [Roll.expand] at hx
+    | cons e P => exact hfaces e List.mem_cons_self x hx
+
 /--
-A reroll that does not pool a setup leaves it even, faithful to its die, and
-with faces, so that the law of a later reroll holds of it too
-(`law_reroll`).
+A reroll leaves a setup well formed, faithful to its die, and with faces, so
+that the law of a later reroll holds of it too (`law_reroll`): a rewrite
+tallies the faces of its dice (`tally_wellFormed`), and a pool holds
+multisets of the results still kept (`Roll.wellFormed_rerollPool`), each a
+survivor or a final result of a matched die.
 
 # Parameters
 - `c`: The criterion.
@@ -2213,15 +3114,13 @@ with faces, so that the law of a later reroll holds of it too
   limit.
 
 # Hypotheses
-- `hs`: The setup is even.
+- `hs`: The setup is well formed.
 - `hfaith`: Every result of the setup is a face of its die.
 - `hfaced`: Every die of the setup has a face.
-- `hnp`: The reroll does not pool the setup.
 -/
-theorem reroll_of_not_pools {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.Even) (hfaith : s.Faithful) (hfaced : s.Faced)
-    (hnp : ¬s.Pools c limit) :
-    (s.reroll c limit).Even ∧ (s.reroll c limit).Faithful ∧
+theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
+    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced) :
+    (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faithful ∧
       (s.reroll c limit).Faced := by
   cases hρ : s.roll with
   | none =>
@@ -2241,11 +3140,20 @@ theorem reroll_of_not_pools {s : Setup} (c : Criterion) (limit : Option Nat)
       exact ⟨hs, Faithful.of_eq (s := s)
         (s' := { s with lowest := s.results }) rfl rfl hfaith, hfaced⟩
     | redraw G g =>
-      have hal : ρ.alike ∧ s.lowest = 0 ∧ s.highest = 0 :=
-        Classical.byContradiction fun hal =>
-          hnp ⟨ρ, G, g, hρ, hk, he, hal⟩
-      obtain ⟨halike, hl0, hh0⟩ := hal
       obtain ⟨hglen, hG, hgf⟩ := redraw_law he
+      by_cases hal : ρ.alike ∧ s.lowest = 0 ∧ s.highest = 0
+      swap
+      · have hs' : s.reroll c limit =
+            { roll := some (ρ.rerollPool s.lowest s.highest c G g),
+              die := some s.replacement } := by
+          simp only [reroll, hρ, hk, he, hal, ↓reduceIte]
+        rw [hs']
+        exact ⟨fun ρ' h => by
+            cases h
+            exact Roll.wellFormed_rerollPool (hs ρ hρ) hG
+              (wellFormed_of_redraw he),
+          faithful_rerollPool hρ hs hfaith he, fun ρ' h => by cases h; trivial⟩
+      obtain ⟨halike, hl0, hh0⟩ := hal
       have hs' : s.reroll c limit =
           { roll := some (ρ.rewrite c G g), die := some s.replacement } := by
         have hk' : ¬s.results - 0 - 0 = 0 := by rwa [hl0, hh0] at hk
@@ -2282,7 +3190,8 @@ theorem reroll_of_not_pools {s : Setup} (c : Criterion) (limit : Option Nat)
         exact List.ne_nil_of_mem ((expand_rewriteFaces_perm _ c G g).mem_iff.mpr
           (List.mem_flatMap.mpr ⟨y, hy, hz⟩))
       rw [hs']
-      refine ⟨fun ρ' h => by cases h; trivial, ?_, fun ρ' h => ?_⟩
+      refine ⟨fun ρ' h => by cases h; exact tally_wellFormed _, ?_,
+        fun ρ' h => ?_⟩
       · intro r hr x hx
         simp only [law, Option.map_some, Option.getD_some, Roll.rewrite,
           Roll.law, PMF.map_comp, PMF.support_map, Set.mem_image] at hr

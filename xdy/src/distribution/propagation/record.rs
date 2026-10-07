@@ -1160,7 +1160,14 @@ impl Roll
 	/// # Notes
 	/// `Roll.rerollPool`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the pool,
 	/// with `survivors` and `join`, though it does not merge the multisets that
-	/// coincide.
+	/// coincide, and `Setup.rerolls_of_pools` proves that it has the law of the
+	/// multiset that the specification's reroll leaves of the dice still kept:
+	/// the survivors are the kept results that the criterion does not match
+	/// (`survivors_spec`), the replacements of the `k` that it does are
+	/// independent draws of the redraw's law (`bagDraws_kept`), and since every
+	/// outcome weighs `Gᴷ` in all, the pool is the outcomes followed by their
+	/// replacements (`weighted_flatMap`). `Roll.wellFormed_rerollPool` proves
+	/// that every multiset holds the dice still kept.
 	pub(super) fn pool(
 		&self,
 		lowest: i32,

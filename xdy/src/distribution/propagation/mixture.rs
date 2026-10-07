@@ -142,16 +142,16 @@ impl Setup
 	///
 	/// # Notes
 	/// `Setup.reroll`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the reroll,
-	/// and `Setup.law_reroll` proves that, if it does nothing, crosses out, or
-	/// rewrites, the rerolled setup describes the specification's reroll of
-	/// the setup's records, as every later instruction views them: their kept
-	/// results and their die, which is all that any reads. Only the view
-	/// agrees, since a setup that the reroll cannot change keeps its drops, and
-	/// one that it crosses out drops every die still kept, where the
-	/// specification's record keeps only its kept results. The proof asks that
-	/// every result be a face of the die, as `Setup.faithful_roll` and
-	/// `Setup.reroll_of_not_pools` prove of every roll and every reroll that
-	/// does not pool.
+	/// and `Setup.law_reroll` proves that, whether it does nothing, crosses
+	/// out, rewrites, or pools, the rerolled setup describes the
+	/// specification's reroll of the setup's records, as every later
+	/// instruction views them: their kept results and their die, which is all
+	/// that any reads. Only the view agrees, since a setup that the reroll
+	/// cannot change keeps its drops, and one that it crosses out drops every
+	/// die still kept, where the specification's record keeps only its kept
+	/// results. The proof asks that every result be a face of the die, as
+	/// `Setup.faithful_roll` and `Setup.reroll_invariants` prove of every roll
+	/// and every reroll.
 	fn reroll(
 		&self,
 		criterion: &Criterion,
