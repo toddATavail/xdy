@@ -1357,6 +1357,11 @@ impl World
 	///
 	/// # Errors
 	/// [`Halt`] if reading would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `bind_value_product_joint`, in `lean/spec/XdySpec/World.lean`, proves
+	/// that the values of the operands in a world have `jointLaw`, which reads
+	/// each distinct register once.
 	fn read_joint(
 		&mut self,
 		ops: &[AddressingMode],
@@ -1867,6 +1872,12 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), Halt>
 	{
+		// `law_reroll`, in `lean/spec/XdySpec/World.lean`, proves that the
+		// record has the law of the reroll over independent records and joint
+		// outcomes of the operands, and `law_reroll_resolved` and
+		// `mixtureLaw_reroll`, in `lean/spec/XdySpec/Reroll.lean`, that
+		// rerolling every setup by each resolution of the operands describes
+		// it, as every later instruction views the record.
 		let Self { world, meter } = self;
 		let ops = inst.operands();
 		let joint = world.read_joint(&ops, meter)?;

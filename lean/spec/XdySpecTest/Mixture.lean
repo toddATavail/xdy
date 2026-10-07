@@ -54,13 +54,13 @@ example : weightedDie [(2, 1), (1, 2)] = customDie [1, 2, 1] :=
 -- Dropping the lowest of two dice describes the setup that drops it.
 example : twoD6.law.map (·.dropLowest 1) =
     ({ roll := some (.standard 2 6), lowest := 1 } : Setup).law := by
-  rw [Setup.law_dropLowest]
+  rw [Setup.law_dropLowest (by simp [Setup.Even, twoD6, Roll.Even])]
   rfl
 
 -- Keeping the highest of two dice describes the setup that drops the lowest.
 example : twoD6.law.map (·.keepHighest 1) =
     ({ roll := some (.standard 2 6), lowest := 1 } : Setup).law := by
-  rw [Setup.law_keepHighest]
+  rw [Setup.law_keepHighest (by simp [Setup.Even, twoD6, Roll.Even])]
   rfl
 
 -- A roll of a random count of dice mixes the dice of each count.
@@ -79,7 +79,8 @@ example (κ : PMF Int) :
       lift Record.dropLowest
         ((rollDice 3 (standardDie 6)).map fun r =>
           { r with die := .standard 6 }) κ := by
-  rw [mixtureLaw_dropLowest, mixtureLaw_pure, Setup.law_roll]
+  rw [mixtureLaw_dropLowest (by simp [Setup.Even, Roll.Even]), mixtureLaw_pure,
+    Setup.law_roll]
   rfl
 
 -- So is dropping the highest.
@@ -89,7 +90,8 @@ example (κ : PMF Int) :
       lift Record.dropHighest
         ((rollDice 3 (standardDie 6)).map fun r =>
           { r with die := .standard 6 }) κ := by
-  rw [mixtureLaw_dropHighest, mixtureLaw_pure, Setup.law_roll]
+  rw [mixtureLaw_dropHighest (by simp [Setup.Even, Roll.Even]), mixtureLaw_pure,
+    Setup.law_roll]
   rfl
 
 -- Keeping a random count of the lowest of three dice is lemma 1's lift of
@@ -100,7 +102,8 @@ example (κ : PMF Int) :
       lift Record.keepLowest
         ((rollDice 3 (standardDie 6)).map fun r =>
           { r with die := .standard 6 }) κ := by
-  rw [mixtureLaw_keepLowest, mixtureLaw_pure, Setup.law_roll]
+  rw [mixtureLaw_keepLowest (by simp [Setup.Even, Roll.Even]), mixtureLaw_pure,
+    Setup.law_roll]
   rfl
 
 -- So is keeping the highest.
@@ -110,7 +113,8 @@ example (κ : PMF Int) :
       lift Record.keepHighest
         ((rollDice 3 (standardDie 6)).map fun r =>
           { r with die := .standard 6 }) κ := by
-  rw [mixtureLaw_keepHighest, mixtureLaw_pure, Setup.law_roll]
+  rw [mixtureLaw_keepHighest (by simp [Setup.Even, Roll.Even]), mixtureLaw_pure,
+    Setup.law_roll]
   rfl
 
 -- A record never rolled is empty, and sums to `0`.
@@ -216,10 +220,26 @@ example : ({ roll := some (.fixed [(1, 1)]), die := some (.range 1 6) } :
     Setup).law = PMF.pure { results := [1], die := .range 1 6 } := by
   simp [Setup.law, Roll.law, Roll.expand, Setup.replacement, PMF.pure_map]
 
+/-! ## Pools -/
+
+/-- A pool of two multisets of two results. -/
+private def pool : Roll := .pool [([(1, 2)], 1), ([(1, 1), (2, 1)], 3)]
+
+#guard pool.results == 2
+#guard pool.replacement == .none
+#guard (Roll.pool []).results == 0
+
+-- Every record that an even pool fills holds its number of results.
+example {r : Record} (h : r ∈ pool.law.support) :
+    r.results.length = 2 :=
+  (Roll.mem_support_law (by simp [pool, Roll.Even, Roll.results]) h).1
+
 /-! ## Docstring examples, verbatim -/
 
 #guard keptSum [(1, 2), (4, 1)] 1 0 == 5
 #guard keptSum [(1, 1), (i32Max, 2)] 0 0 == i32Max
+
+example : weighted 7 ([] : List (Int × Nat)) = PMF.pure 7 := by simp [weighted]
 
 example : weightedDie [] = PMF.pure 0 := by simp [weightedDie, customDie]
 

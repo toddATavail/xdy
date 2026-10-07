@@ -78,7 +78,8 @@ pub(super) enum Roll
 	/// fixed results: each multiset of them, as [fixed results](Self::Results)
 	/// hold one, with the positive number of branches that reach it, in
 	/// ascending order of multiset. Every multiset holds the same number of
-	/// results.
+	/// results, which `Roll.Even`, in `lean/spec/XdySpec/Mixture.lean`, names,
+	/// and on which the laws of drops and keeps there rest.
 	Pool(Vec<(Vec<(i32, i32)>, Weight)>)
 }
 
@@ -286,7 +287,8 @@ impl Roll
 	///
 	/// # Notes
 	/// `Roll.mem_support_law`, in `lean/spec/XdySpec/Mixture.lean`, proves that
-	/// every record that the roll fills holds this many results.
+	/// every record that the roll fills holds this many results, if every
+	/// multiset of a pool holds as many as the first.
 	pub(super) fn results(&self) -> i32
 	{
 		match self
@@ -949,6 +951,16 @@ pub(super) struct Redraw<'c>
 ///
 /// # Errors
 /// [`Halt`] if the resolution would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `Effect.resolve`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the
+/// resolution. `weightedDie_limitedLaw` proves that the limited law weighs
+/// each final result as the specification's `limitedReplacement` draws it, and
+/// `weightedDie_unlimitedLaw` that the unlimited law is the die's conditional
+/// law, given that it does not match; `length_expand_limitedLaw` and
+/// `length_expand_unlimitedLaw` prove that each weighs the padding in all, and
+/// `unmatchedPaths_mul` and `unmatchedPaths_self` that `unmatched` is the sum
+/// that it closes.
 pub(super) fn redraw<'c>(
 	die: &Die,
 	criterion: &'c Criterion,
@@ -1058,6 +1070,14 @@ impl Roll
 	///
 	/// # Panics
 	/// If the roll is fixed results or a pool.
+	///
+	/// # Notes
+	/// `Roll.rewrite`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the rewrite,
+	/// and `weightedDie_rewriteFaces` proves that each rewritten die falls as
+	/// the die, each face that the criterion matches redrawn. The specification
+	/// rerolls the kept results in ascending order rather than each die in
+	/// roll order, which `bind_rollDice_bagDraws` proves leaves the same
+	/// multisets of results.
 	pub(super) fn rewrite(
 		&self,
 		redraw: &Redraw,
@@ -1136,6 +1156,11 @@ impl Roll
 	///
 	/// # Errors
 	/// [`Halt`] if the reroll would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `Roll.rerollPool`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the pool,
+	/// with `survivors` and `join`, though it does not merge the multisets that
+	/// coincide.
 	pub(super) fn pool(
 		&self,
 		lowest: i32,

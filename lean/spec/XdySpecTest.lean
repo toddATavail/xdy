@@ -11,6 +11,7 @@ import XdySpecTest.OrderStatistics
 import XdySpecTest.Outcomes
 import XdySpecTest.Paths
 import XdySpecTest.Record
+import XdySpecTest.Reroll
 import XdySpecTest.Semantics
 import XdySpecTest.World
 

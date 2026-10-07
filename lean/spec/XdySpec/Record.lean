@@ -489,6 +489,176 @@ theorem sort_eq_sort_iff {r r' : Record} :
   · intro h
     rw [sort, sort, h]
 
+/-! ## What later instructions read -/
+
+/--
+What every later instruction reads of a record: its kept results, in
+ascending order, and its die. A sum reads the kept results, a drop or keep
+narrows them (`kept_dropLowest`, `kept_dropHighest`), and a reroll rerolls
+them from the die, so records of the same view are alike to every later
+instruction (`view_dropLowest`, `view_dropHighest`, `view_keepLowest`,
+`view_keepHighest`, `sum_eq_of_view`). The Rust forward pass describes a
+record after a reroll only up to its view: it leaves a setup that the reroll
+cannot change with its drops, and crosses out every die still kept of one
+that the reroll crosses out by dropping them.
+
+# Parameters
+- `r`: The record.
+
+# Returns
+The kept results and the die.
+
+# Examples
+```lean
+#guard ({ results := [4, 1, 3], lowest := 1 } : Record).view == ([3, 4], .none)
+```
+-/
+def view (r : Record) : List Int × Die := (r.kept, r.die)
+
+/--
+A record keeps as many results as its drops leave.
+
+# Parameters
+- `r`: The record.
+-/
+theorem length_kept (r : Record) :
+    r.kept.length = r.results.length - r.lowest - r.highest := by
+  simp only [kept, sorted, List.length_take, List.length_drop,
+    List.length_mergeSort]
+  omega
+
+/--
+Dropping the lowest results drops the lowest kept results, or every kept
+result if there are not enough.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to drop.
+-/
+theorem kept_dropLowest (r : Record) (count : Int) :
+    (r.dropLowest count).kept = r.kept.drop count.toNat := by
+  have hlen : (r.results.mergeSort (· ≤ ·)).length = r.results.length :=
+    List.length_mergeSort _
+  simp only [kept, sorted, dropLowest, accumulate, List.drop_take,
+    List.drop_drop]
+  by_cases h : r.lowest + count.toNat ≤ r.results.length
+  · rw [Nat.min_eq_left h]
+    congr 1
+    omega
+  · rw [Nat.min_eq_right (by omega), List.drop_eq_nil_of_le (by omega),
+      List.drop_eq_nil_of_le (by omega), List.take_nil, List.take_nil]
+
+/--
+Dropping the highest results drops the highest kept results, or every kept
+result if there are not enough.
+
+# Parameters
+- `r`: The record.
+- `count`: The number of results to drop.
+-/
+theorem kept_dropHighest (r : Record) (count : Int) :
+    (r.dropHighest count).kept =
+      r.kept.take (r.kept.length - count.toNat) := by
+  rw [length_kept]
+  simp only [kept, sorted, dropHighest, accumulate, List.take_take]
+  congr 1
+  omega
+
+/--
+Records of the same view are alike after dropping their lowest results.
+
+# Parameters
+- `count`: The number of results to drop.
+
+# Hypotheses
+- `h`: The records have the same view.
+-/
+theorem view_dropLowest {r r' : Record} (h : r.view = r'.view)
+    (count : Int) : (r.dropLowest count).view = (r'.dropLowest count).view := by
+  simp only [view, Prod.ext_iff] at h ⊢
+  rw [kept_dropLowest, kept_dropLowest, h.1]
+  exact ⟨rfl, h.2⟩
+
+/--
+Records of the same view are alike after dropping their highest results.
+
+# Parameters
+- `count`: The number of results to drop.
+
+# Hypotheses
+- `h`: The records have the same view.
+-/
+theorem view_dropHighest {r r' : Record} (h : r.view = r'.view)
+    (count : Int) :
+    (r.dropHighest count).view = (r'.dropHighest count).view := by
+  simp only [view, Prod.ext_iff] at h ⊢
+  rw [kept_dropHighest, kept_dropHighest, h.1]
+  exact ⟨rfl, h.2⟩
+
+/-- A keep counts the results that it drops from those still kept. -/
+private theorem keepDrops_kept (r : Record) (count : Int) :
+    Xdy.Record.keepDrops r.results.length r.lowest r.highest count =
+      Xdy.Record.keepDrops r.kept.length 0 0 count := by
+  simp only [Xdy.Record.keepDrops, length_kept, Nat.sub_zero]
+
+/--
+Records of the same view are alike after keeping their lowest results.
+
+# Parameters
+- `count`: The number of results to keep.
+
+# Hypotheses
+- `h`: The records have the same view.
+-/
+theorem view_keepLowest {r r' : Record} (h : r.view = r'.view)
+    (count : Int) : (r.keepLowest count).view = (r'.keepLowest count).view := by
+  have hk : r.kept = r'.kept := (Prod.ext_iff.mp h).1
+  rw [keepLowest, keepLowest, keepDrops_kept, keepDrops_kept r', hk]
+  exact view_dropHighest h _
+
+/--
+Records of the same view are alike after keeping their highest results.
+
+# Parameters
+- `count`: The number of results to keep.
+
+# Hypotheses
+- `h`: The records have the same view.
+-/
+theorem view_keepHighest {r r' : Record} (h : r.view = r'.view)
+    (count : Int) :
+    (r.keepHighest count).view = (r'.keepHighest count).view := by
+  have hk : r.kept = r'.kept := (Prod.ext_iff.mp h).1
+  rw [keepHighest, keepHighest, keepDrops_kept, keepDrops_kept r', hk]
+  exact view_dropLowest h _
+
+/--
+Records of the same view sum alike.
+
+# Hypotheses
+- `h`: The records have the same view.
+-/
+theorem sum_eq_of_view {r r' : Record} (h : r.view = r'.view) :
+    r.sum = r'.sum := by
+  have hk : r.kept = r'.kept := (Prod.ext_iff.mp h).1
+  rw [sum, sum, hk]
+
+/--
+A record without drops views its results sorted.
+
+# Parameters
+- `r`: The record.
+
+# Hypotheses
+- `hl`, `hh`: The record drops nothing.
+-/
+theorem view_of_undropped {r : Record} (hl : r.lowest = 0)
+    (hh : r.highest = 0) :
+    r.view = (r.sorted, r.die) := by
+  simp only [view, kept, hl, hh, List.drop_zero, Nat.sub_zero]
+  rw [show r.results.length = r.sorted.length from
+    (List.length_mergeSort _).symm, List.take_length]
+
 end Record
 
 end Xdy.Spec

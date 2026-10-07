@@ -34,6 +34,12 @@ mixture's operations act on that law as the instructions do:
   counts, which a setup can count itself, since it fixes the number of
   results and drops of every record that it fills (`Setup.mem_support_law`,
   `Setup.law_keepLowest`, `Setup.law_keepHighest`).
+- A pool, which a reroll leaves after a drop, holds each multiset of the
+  results with its weight, and fills the record with each by its weight
+  (`weighted`). The laws of drops and keeps hold of even setups
+  (`Setup.Even`), whose pools' multisets each hold as many results as the
+  first, as `Roll::pool` makes them (`Roll.Even`). `XdySpec/Reroll.lean`
+  proves the laws of rerolls.
 - The sum of a mixture is the mixture of its setups' sums
   (`map_sum_mixtureLaw`), as `Mixture::sum` mixes them, and a setup without a
   roll sums to `0` (`Setup.map_sum_law_of_none`). The sums of ranges without
@@ -80,6 +86,60 @@ noncomputable def weightedDie (faces : List (Int × Nat)) : PMF Int :=
   customDie (faces.flatMap fun p => List.replicate p.2 p.1)
 
 /--
+The law of weighted values: each value equally likely by position once every
+value is repeated as many times as its weight, or a certain default if no
+weight is positive, as `weightedDie` weighs faces.
+
+# Parameters
+- `default`: The value if no weight is positive.
+- `l`: The values, each with its weight.
+
+# Returns
+The law.
+
+# Examples
+```lean
+example : weighted 7 ([] : List (Int × Nat)) = PMF.pure 7 := by simp [weighted]
+```
+-/
+noncomputable def weighted {α : Type} (default : α) (l : List (α × Nat)) :
+    PMF α :=
+  if h : (l.flatMap fun p => List.replicate p.2 p.1) = [] then PMF.pure default
+  else PMF.ofMultiset (l.flatMap fun p => List.replicate p.2 p.1 : List α)
+    (by simpa using h)
+
+/--
+A die of weighted faces weighs its faces, with `0` if no weight is positive.
+
+# Parameters
+- `faces`: The faces, each with its weight.
+-/
+theorem weightedDie_eq_weighted (faces : List (Int × Nat)) :
+    weightedDie faces = weighted 0 faces := rfl
+
+/--
+Every value that weighted values can take is one of them, or the default.
+
+# Parameters
+- `default`: The default.
+- `l`: The values, each with its weight.
+- `x`: The value taken.
+
+# Hypotheses
+- `h`: The law can take `x`.
+-/
+theorem mem_support_weighted {α : Type} {default : α} {l : List (α × Nat)}
+    {x : α} (h : x ∈ (weighted default l).support) :
+    (∃ e ∈ l, e.1 = x) ∨ x = default := by
+  unfold weighted at h
+  split at h
+  · exact .inr ((PMF.mem_support_pure_iff _ _).mp h)
+  · simp only [PMF.mem_support_ofMultiset_iff, Multiset.mem_toFinset,
+      Multiset.mem_coe, List.mem_flatMap] at h
+    obtain ⟨e, he, hx⟩ := h
+    exact .inl ⟨e, he, (List.eq_of_mem_replicate hx).symm⟩
+
+/--
 A custom die's faces, weighed by multiplicity, have the law of the die, as a
 custom roll of `propagation/record.rs` holds its die's `distinct_faces`.
 
@@ -119,6 +179,11 @@ inductive Roll where
   /-- The results of a roll, fixed by conditioning on them: each distinct
   result, in ascending order, with its number of copies. -/
   | fixed (results : List (Int × Nat))
+  /-- The results that a reroll leaves after a drop, or on fixed results:
+  each multiset of them, as `fixed` holds one, with its weight, in ascending
+  order of multiset. Every multiset holds the same number of results
+  (`Roll.Even`). -/
+  | pool (outcomes : List (List (Int × Nat) × Nat))
   deriving DecidableEq, Repr
 
 namespace Roll
@@ -148,8 +213,9 @@ The law of the record that a roll fills.
 
 # Returns
 The law of the range or of the dice, as `step` rolls them, with the die that
-the roll shows, or a certain record of the fixed results, in ascending order,
-without a die.
+the roll shows, a certain record of the fixed results, in ascending order,
+without a die, or a mixture of such records, one for each multiset of a pool,
+weighed by its weight.
 -/
 noncomputable def law : Roll → PMF Record
   | .range start stop => rollRange start stop
@@ -160,6 +226,9 @@ noncomputable def law : Roll → PMF Record
     (rollDice count (weightedDie faces)).map fun r =>
       { r with die := .ofFaces (expand faces) }
   | .fixed results => PMF.pure { results := expand results }
+  | .pool outcomes =>
+    (weighted ((outcomes.head?.map (·.1)).getD []) outcomes).map fun rs =>
+      { results := expand rs }
 
 /--
 The number of results in the record that a roll fills. Mirrors `results` in
@@ -170,7 +239,8 @@ The number of results in the record that a roll fills. Mirrors `results` in
 
 # Returns
 One for a range, even an empty one, the number of dice, which is `0` if it is
-negative, or the number of fixed results.
+negative, the number of fixed results, or the number in the first multiset of
+a pool, or `0` if it has none.
 
 # Examples
 ```lean
@@ -182,6 +252,24 @@ def results : Roll → Nat
   | .range .. => 1
   | .standard count _ | .custom count _ => count.toNat
   | .fixed results => (results.map (·.2)).sum
+  | .pool [] => 0
+  | .pool ((rs, _) :: _) => (rs.map (·.2)).sum
+
+/--
+Whether every multiset of a pool holds its number of results, as
+`Roll::pool` in `propagation/record.rs` makes them, so that every record that
+the roll fills holds them (`Roll.mem_support_law`). Every other roll is even.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+Whether the roll is even.
+-/
+def Even : Roll → Prop
+  | .pool outcomes =>
+    ∀ e ∈ outcomes, (e.1.map (·.2)).sum = (pool outcomes).results
+  | _ => True
 
 /--
 The die from which a reroll draws the replacements of the dice of a roll, if
@@ -192,8 +280,8 @@ the roll shows it. Mirrors `replacement` in `propagation/record.rs`.
 
 # Returns
 The range, the standard die, or the custom die's faces, repeated as many times
-as their weights, or no die for fixed results, which no longer show the die
-that rolled them.
+as their weights, or no die for fixed results or a pool, which no longer show
+the die that rolled them.
 
 # Examples
 ```lean
@@ -205,11 +293,11 @@ def replacement : Roll → Die
   | .range start stop => .range start stop
   | .standard _ faces => .standard faces
   | .custom _ faces => .ofFaces (expand faces)
-  | .fixed _ => .none
+  | .fixed _ | .pool _ => .none
 
 /--
-Every record that a roll can fill holds its number of results, drops none of
-them, and holds the die that the roll shows.
+Every record that a roll can fill drops none of its results, and holds the
+die that the roll shows.
 
 # Parameters
 - `ρ`: The roll.
@@ -218,7 +306,52 @@ them, and holds the die that the roll shows.
 # Hypotheses
 - `h`: The roll can fill `r`.
 -/
-theorem mem_support_law {ρ : Roll} {r : Record} (h : r ∈ ρ.law.support) :
+theorem mem_support_law_die {ρ : Roll} {r : Record}
+    (h : r ∈ ρ.law.support) :
+    r.lowest = 0 ∧ r.highest = 0 ∧ r.die = ρ.replacement := by
+  cases ρ with
+  | range start stop =>
+    simp only [law, rollRange] at h
+    split at h
+    · simp only [PMF.mem_support_pure_iff] at h
+      subst h
+      simp [replacement]
+    · simp only [PMF.support_map, Set.mem_image] at h
+      obtain ⟨x, _, rfl⟩ := h
+      simp [replacement]
+  | standard count faces =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    obtain ⟨hl, hh, _, _⟩ := mem_support_rollDice hr
+    exact ⟨hl, hh, rfl⟩
+  | custom count faces =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    obtain ⟨hl, hh, _, _⟩ := mem_support_rollDice hr
+    exact ⟨hl, hh, rfl⟩
+  | fixed rs =>
+    simp only [law, PMF.mem_support_pure_iff] at h
+    subst h
+    simp [replacement]
+  | pool outcomes =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨_, _, rfl⟩ := h
+    simp [replacement]
+
+/--
+Every record that an even roll can fill holds its number of results, drops
+none of them, and holds the die that the roll shows.
+
+# Parameters
+- `ρ`: The roll.
+- `r`: The record.
+
+# Hypotheses
+- `hρ`: The roll is even.
+- `h`: The roll can fill `r`.
+-/
+theorem mem_support_law {ρ : Roll} {r : Record} (hρ : ρ.Even)
+    (h : r ∈ ρ.law.support) :
     r.results.length = ρ.results ∧ r.lowest = 0 ∧ r.highest = 0 ∧
       r.die = ρ.replacement := by
   cases ρ with
@@ -245,6 +378,16 @@ theorem mem_support_law {ρ : Roll} {r : Record} (h : r ∈ ρ.law.support) :
     simp only [law, PMF.mem_support_pure_iff] at h
     subst h
     simp [results, expand, List.length_flatMap, replacement]
+  | pool outcomes =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    refine ⟨?_, rfl, rfl, rfl⟩
+    simp only [expand, List.length_flatMap, List.length_replicate]
+    rcases mem_support_weighted hrs with ⟨e, he, rfl⟩ | rfl
+    · exact hρ e he
+    · cases outcomes with
+      | nil => rfl
+      | cons e _ => rfl
 
 end Roll
 
@@ -291,6 +434,18 @@ die if it has no roll.
 -/
 def replacement (s : Setup) : Die :=
   s.die.getD ((s.roll.map Roll.replacement).getD .none)
+
+/--
+Whether a setup's roll, if any, is even (`Roll.Even`), as every setup of
+`mixture.rs` is.
+
+# Parameters
+- `s`: The setup.
+
+# Returns
+Whether the setup is even.
+-/
+def Even (s : Setup) : Prop := ∀ ρ ∈ s.roll, ρ.Even
 
 /--
 The law of the record that a setup describes.
@@ -365,7 +520,7 @@ def keepHighest (s : Setup) (count : Int) : Setup :=
   s.dropLowest (Xdy.Record.keepDrops s.results s.lowest s.highest count)
 
 /--
-Every record that a setup's roll can fill holds the setup's number of
+Every record that an even setup's roll can fill holds the setup's number of
 results.
 
 # Parameters
@@ -373,103 +528,120 @@ results.
 - `r`: The record.
 
 # Hypotheses
+- `hs`: The setup is even.
 - `h`: The setup's roll, or its absence, can fill `r`.
 -/
-theorem mem_support_roll {s : Setup} {r : Record}
+theorem mem_support_roll {s : Setup} {r : Record} (hs : s.Even)
     (h : r ∈ ((s.roll.map Roll.law).getD (PMF.pure {})).support) :
     r.results.length = s.results := by
-  cases hs : s.roll with
+  cases hρ : s.roll with
   | none =>
-    simp only [hs, Option.map_none, Option.getD_none,
+    simp only [hρ, Option.map_none, Option.getD_none,
       PMF.mem_support_pure_iff] at h
     subst h
-    simp [results, hs]
+    simp [results, hρ]
   | some ρ =>
-    simp only [hs, Option.map_some, Option.getD_some] at h
-    simp [results, hs, (Roll.mem_support_law h).1]
+    simp only [hρ, Option.map_some, Option.getD_some] at h
+    simp [results, hρ, (Roll.mem_support_law (hs ρ hρ) h).1]
 
 /--
-Dropping the lowest results of the records that a setup describes describes
-the setup with its drop updated, since it clamps to the same number of
-results.
+Dropping the lowest results of the records that an even setup describes
+describes the setup with its drop updated, since it clamps to the same number
+of results.
 
 # Parameters
 - `s`: The setup.
 - `count`: The number of results to drop.
+
+# Hypotheses
+- `hs`: The setup is even.
 -/
-theorem law_dropLowest (s : Setup) (count : Int) :
+theorem law_dropLowest {s : Setup} (hs : s.Even) (count : Int) :
     s.law.map (·.dropLowest count) = (s.dropLowest count).law := by
   simp only [law, PMF.map_comp]
   refine map_congr_support fun r hr => ?_
-  have hlen := mem_support_roll hr
+  have hlen := mem_support_roll hs hr
   simp only [Function.comp_apply, dropLowest, ← hlen]
   rfl
 
 /--
-Dropping the highest results of the records that a setup describes describes
-the setup with its drop updated, since it clamps to the same number of
-results.
+Dropping the highest results of the records that an even setup describes
+describes the setup with its drop updated, since it clamps to the same number
+of results.
 
 # Parameters
 - `s`: The setup.
 - `count`: The number of results to drop.
+
+# Hypotheses
+- `hs`: The setup is even.
 -/
-theorem law_dropHighest (s : Setup) (count : Int) :
+theorem law_dropHighest {s : Setup} (hs : s.Even) (count : Int) :
     s.law.map (·.dropHighest count) = (s.dropHighest count).law := by
   simp only [law, PMF.map_comp]
   refine map_congr_support fun r hr => ?_
-  have hlen := mem_support_roll hr
+  have hlen := mem_support_roll hs hr
   simp only [Function.comp_apply, dropHighest, ← hlen]
   rfl
 
 /--
-Every record that a setup describes holds the setup's number of results and
-its drops.
+Every record that an even setup describes holds the setup's number of results
+and its drops.
 
 # Parameters
 - `s`: The setup.
 - `r`: The record.
 
 # Hypotheses
+- `hs`: The setup is even.
 - `h`: The setup describes `r`.
 -/
-theorem mem_support_law {s : Setup} {r : Record} (h : r ∈ s.law.support) :
+theorem mem_support_law {s : Setup} {r : Record} (hs : s.Even)
+    (h : r ∈ s.law.support) :
     r.results.length = s.results ∧ r.lowest = s.lowest ∧
       r.highest = s.highest := by
   rw [law, PMF.support_map] at h
   obtain ⟨r', hr', rfl⟩ := h
-  exact ⟨mem_support_roll (r := r') hr', rfl, rfl⟩
+  exact ⟨mem_support_roll (r := r') hs hr', rfl, rfl⟩
 
 /--
-Keeping the lowest results of the records that a setup describes describes
-the setup with its keep applied, since every such record has the setup's
-number of results and drops, and so drops as many as the setup's keep.
+Keeping the lowest results of the records that an even setup describes
+describes the setup with its keep applied, since every such record has the
+setup's number of results and drops, and so drops as many as the setup's
+keep.
 
 # Parameters
 - `s`: The setup.
 - `count`: The number of results to keep.
+
+# Hypotheses
+- `hs`: The setup is even.
 -/
-theorem law_keepLowest (s : Setup) (count : Int) :
+theorem law_keepLowest {s : Setup} (hs : s.Even) (count : Int) :
     s.law.map (·.keepLowest count) = (s.keepLowest count).law := by
-  rw [keepLowest, ← law_dropHighest]
+  rw [keepLowest, ← law_dropHighest hs]
   refine map_congr_support fun r hr => ?_
-  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hr
+  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hs hr
   simp only [Record.keepLowest, hlen, hlow, hhigh]
 
 /--
-Keeping the highest results of the records that a setup describes describes
-the setup with its keep applied, since every such record has the setup's
-number of results and drops, and so drops as many as the setup's keep.
+Keeping the highest results of the records that an even setup describes
+describes the setup with its keep applied, since every such record has the
+setup's number of results and drops, and so drops as many as the setup's
+keep.
 
 # Parameters
 - `s`: The setup.
 - `count`: The number of results to keep.
+
+# Hypotheses
+- `hs`: The setup is even.
 -/
-theorem law_keepHighest (s : Setup) (count : Int) :
+theorem law_keepHighest {s : Setup} (hs : s.Even) (count : Int) :
     s.law.map (·.keepHighest count) = (s.keepHighest count).law := by
-  rw [keepHighest, ← law_dropLowest]
+  rw [keepHighest, ← law_dropLowest hs]
   refine map_congr_support fun r hr => ?_
-  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hr
+  obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hs hr
   simp only [Record.keepHighest, hlen, hlow, hhigh]
 
 /--
@@ -483,7 +655,7 @@ theorem law_roll (ρ : Roll) : ({ roll := some ρ } : Setup).law = ρ.law := by
   simp only [law, Option.map_some, Option.getD_some]
   conv_rhs => rw [← PMF.map_id ρ.law]
   refine map_congr_support fun r hr => ?_
-  obtain ⟨_, hl, hh, hd⟩ := Roll.mem_support_law hr
+  obtain ⟨hl, hh, hd⟩ := Roll.mem_support_law_die hr
   cases r
   simp_all [replacement]
 
@@ -553,15 +725,20 @@ drops a record whose count is independent of it.
 # Parameters
 - `μ`: The law of the setups.
 - `κ`: The law of the count.
+
+# Hypotheses
+- `hμ`: Every setup is even.
 -/
-theorem mixtureLaw_dropLowest (μ : PMF Setup) (κ : PMF Int) :
+theorem mixtureLaw_dropLowest {μ : PMF Setup}
+    (hμ : ∀ s ∈ μ.support, s.Even) (κ : PMF Int) :
     mixtureLaw (lift Setup.dropLowest μ κ) =
       lift Record.dropLowest (mixtureLaw μ) κ := by
   simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
-  refine congrArg μ.bind (funext fun s => ?_)
+  refine bind_congr_support fun s hs => ?_
   calc κ.bind (Setup.law ∘ s.dropLowest)
       _ = κ.bind fun c => s.law.map (·.dropLowest c) :=
-        congrArg κ.bind (funext fun c => (Setup.law_dropLowest s c).symm)
+        congrArg κ.bind
+          (funext fun c => (Setup.law_dropLowest (hμ s hs) c).symm)
       _ = _ := by
         simp only [← PMF.bind_pure_comp]
         exact PMF.bind_comm _ _ _
@@ -574,15 +751,20 @@ Dropping the highest results of every setup by every count describes lemma
 # Parameters
 - `μ`: The law of the setups.
 - `κ`: The law of the count.
+
+# Hypotheses
+- `hμ`: Every setup is even.
 -/
-theorem mixtureLaw_dropHighest (μ : PMF Setup) (κ : PMF Int) :
+theorem mixtureLaw_dropHighest {μ : PMF Setup}
+    (hμ : ∀ s ∈ μ.support, s.Even) (κ : PMF Int) :
     mixtureLaw (lift Setup.dropHighest μ κ) =
       lift Record.dropHighest (mixtureLaw μ) κ := by
   simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
-  refine congrArg μ.bind (funext fun s => ?_)
+  refine bind_congr_support fun s hs => ?_
   calc κ.bind (Setup.law ∘ s.dropHighest)
       _ = κ.bind fun c => s.law.map (·.dropHighest c) :=
-        congrArg κ.bind (funext fun c => (Setup.law_dropHighest s c).symm)
+        congrArg κ.bind
+          (funext fun c => (Setup.law_dropHighest (hμ s hs) c).symm)
       _ = _ := by
         simp only [← PMF.bind_pure_comp]
         exact PMF.bind_comm _ _ _
@@ -595,15 +777,20 @@ lift of the keep over the mixture's law and the count's, as
 # Parameters
 - `μ`: The law of the setups.
 - `κ`: The law of the count.
+
+# Hypotheses
+- `hμ`: Every setup is even.
 -/
-theorem mixtureLaw_keepLowest (μ : PMF Setup) (κ : PMF Int) :
+theorem mixtureLaw_keepLowest {μ : PMF Setup}
+    (hμ : ∀ s ∈ μ.support, s.Even) (κ : PMF Int) :
     mixtureLaw (lift Setup.keepLowest μ κ) =
       lift Record.keepLowest (mixtureLaw μ) κ := by
   simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
-  refine congrArg μ.bind (funext fun s => ?_)
+  refine bind_congr_support fun s hs => ?_
   calc κ.bind (Setup.law ∘ s.keepLowest)
       _ = κ.bind fun c => s.law.map (·.keepLowest c) :=
-        congrArg κ.bind (funext fun c => (Setup.law_keepLowest s c).symm)
+        congrArg κ.bind
+          (funext fun c => (Setup.law_keepLowest (hμ s hs) c).symm)
       _ = _ := by
         simp only [← PMF.bind_pure_comp]
         exact PMF.bind_comm _ _ _
@@ -616,15 +803,20 @@ Keeping the highest results of every setup by every count describes lemma
 # Parameters
 - `μ`: The law of the setups.
 - `κ`: The law of the count.
+
+# Hypotheses
+- `hμ`: Every setup is even.
 -/
-theorem mixtureLaw_keepHighest (μ : PMF Setup) (κ : PMF Int) :
+theorem mixtureLaw_keepHighest {μ : PMF Setup}
+    (hμ : ∀ s ∈ μ.support, s.Even) (κ : PMF Int) :
     mixtureLaw (lift Setup.keepHighest μ κ) =
       lift Record.keepHighest (mixtureLaw μ) κ := by
   simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map]
-  refine congrArg μ.bind (funext fun s => ?_)
+  refine bind_congr_support fun s hs => ?_
   calc κ.bind (Setup.law ∘ s.keepHighest)
       _ = κ.bind fun c => s.law.map (·.keepHighest c) :=
-        congrArg κ.bind (funext fun c => (Setup.law_keepHighest s c).symm)
+        congrArg κ.bind
+          (funext fun c => (Setup.law_keepHighest (hμ s hs) c).symm)
       _ = _ := by
         simp only [← PMF.bind_pure_comp]
         exact PMF.bind_comm _ _ _
@@ -889,7 +1081,7 @@ theorem Setup.map_sum_law_range_dropped (start stop : Int)
         Record.sum = PMF.pure 0 := by
   rw [Setup.law_some]
   refine map_sum_const _ fun r hr => Record.sum_eq_zero_of_dropped _ ?_
-  have := (Roll.mem_support_law hr).1
+  have := (Roll.mem_support_law (ρ := .range start stop) trivial hr).1
   simp only [Roll.results] at this
   show r.results.length ≤ lowest + highest
   omega

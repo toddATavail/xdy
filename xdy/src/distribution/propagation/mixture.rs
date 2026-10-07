@@ -21,12 +21,13 @@
 //! `lean/spec/XdySpec/Mixture.lean` gives each setup the law of the record
 //! that it fills, and a mixture the mixture of its setups' laws, and proves
 //! that rolling, dropping, keeping and summing a mixture act on that law as the
-//! instructions do on the record. When those operands are rolls with
-//! fixed operands, every path through them is equally likely, and the mixture
-//! weighs each outcome by the number of paths that reach it. When some path to
-//! a setup is likelier than another, the least common multiple of the paths'
-//! denominators may be a proper divisor of `W · L`, though each outcome still
-//! weighs its probability over `W · L`.
+//! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` proves that
+//! rerolling does, as every later instruction views the record. When those
+//! operands are rolls with fixed operands, every path through them is equally
+//! likely, and the mixture weighs each outcome by the number of paths that
+//! reach it. When some path to a setup is likelier than another, the least
+//! common multiple of the paths' denominators may be a proper divisor of
+//! `W · L`, though each outcome still weighs its probability over `W · L`.
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
@@ -138,6 +139,19 @@ impl Setup
 	/// # Panics
 	/// If the setup holds fixed results without their die, which the
 	/// [plan](super::plan::rerolled) prevents.
+	///
+	/// # Notes
+	/// `Setup.reroll`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the reroll,
+	/// and `Setup.law_reroll` proves that, if it does nothing, crosses out, or
+	/// rewrites, the rerolled setup describes the specification's reroll of
+	/// the setup's records, as every later instruction views them: their kept
+	/// results and their die, which is all that any reads. Only the view
+	/// agrees, since a setup that the reroll cannot change keeps its drops, and
+	/// one that it crosses out drops every die still kept, where the
+	/// specification's record keeps only its kept results. The proof asks that
+	/// every result be a face of the die, as `Setup.faithful_roll` and
+	/// `Setup.reroll_of_not_pools` prove of every roll and every reroll that
+	/// does not pool.
 	fn reroll(
 		&self,
 		criterion: &Criterion,
@@ -440,6 +454,12 @@ impl Mixture
 	///
 	/// # Errors
 	/// [`Halt`] if the reroll would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `mixtureLaw_reroll`, in `lean/spec/XdySpec/Reroll.lean`, proves that the
+	/// mixture then describes, as every later instruction views it, the
+	/// specification's reroll of the record's law, independent of the
+	/// resolutions' law, as `law_reroll` and `law_reroll_resolved` give it.
 	pub(super) fn reroll(
 		&mut self,
 		rerolls: &[(Criterion, Option<i32>, Weight)],

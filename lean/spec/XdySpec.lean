@@ -11,6 +11,7 @@ import XdySpec.OrderStatistics
 import XdySpec.Outcomes
 import XdySpec.Paths
 import XdySpec.Record
+import XdySpec.Reroll
 import XdySpec.Semantics
 import XdySpec.World
 

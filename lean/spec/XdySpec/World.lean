@@ -52,6 +52,12 @@ the pass's operations act on it:
   `law_dropHighest`), as a keep is of the keep (`law_keepLowest`,
   `law_keepHighest`). Each is the law that the visit of its instruction in
   `propagation.rs` computes.
+- Any number of operands have their joint law, as `read_joint` reads them:
+  each distinct register once, independently (`jointLaw`,
+  `bind_value_product_joint`). So a reroll binds the record's law,
+  independent of its operands', to the reroll at each record and reading of
+  the operands (`law_reroll`), as `visit_reroll` rerolls every setup by each
+  joint outcome.
 
 That the plan's analysis keeps the law of states such a world, in each world
 of its open splits, is the invariant that these laws serve, proved in
@@ -1843,6 +1849,157 @@ theorem law_of_record_operand {i : Instruction} {d : Nat}
   exact bind_congr_support fun s hs =>
     hk s ((has_of_mem_support_product hs _).mpr hi)
 
+/-! ## Many operands -/
+
+/--
+The registers that some operands read, each once.
+
+# Parameters
+- `ops`: The operands.
+
+# Returns
+Their registers, without repetition.
+
+# Examples
+```lean
+#guard (jointRegisters [.register 2, .immediate 1, .register 2]).length == 1
+```
+-/
+def jointRegisters (ops : List AddressingMode) : List Nat :=
+  (ops.filterMap fun
+    | .register r => some r
+    | _ => none).dedup
+
+/--
+The live locations that some operands read, each once.
+
+# Parameters
+- `ops`: The operands.
+
+# Returns
+Their registers, as locations, without repetition.
+-/
+def jointLocations (ops : List AddressingMode) : List Location :=
+  (jointRegisters ops).map .register
+
+/--
+Read an operand from values of the registers.
+
+# Parameters
+- `v`: The value of each register.
+- `op`: The operand.
+
+# Returns
+The immediate, the register's value, or `0` for a rolling record, as
+`State.value` reads one.
+-/
+def readValue (v : Nat → Int) : AddressingMode → Int
+  | .immediate c => c
+  | .register r => v r
+  | .rollingRecord _ => 0
+
+/--
+The joint law of some registers, each drawn independently from its law, and
+every other register `0`.
+
+# Parameters
+- `laws`: The laws of the live locations.
+- `rs`: The registers.
+
+# Returns
+The law of the value of every register.
+-/
+noncomputable def registersLaw (laws : (ℓ : Location) → PMF (Content ℓ))
+    (rs : List Nat) : PMF (Nat → Int) :=
+  rs.foldr
+    (fun r R => lift (fun (x : Int) v => Function.update v r x)
+      (laws (.register r)) R)
+    (PMF.pure fun _ => 0)
+
+/--
+The joint law of some operands in a world, as `read_joint` in
+`propagation.rs` reads them: each register once, independently, so that
+operands that name the same register share its value.
+
+# Parameters
+- `laws`: The laws of the live locations.
+- `ops`: The operands.
+
+# Returns
+The law of the reading of every operand, which agrees with `State.value` on
+`ops` and is otherwise of no interest.
+-/
+noncomputable def jointLaw (laws : (ℓ : Location) → PMF (Content ℓ))
+    (ops : List AddressingMode) : PMF (AddressingMode → Int) :=
+  (registersLaw laws (jointRegisters ops)).map readValue
+
+/-- A world of distinct registers, read at those registers alone, is their
+joint law. -/
+private theorem map_registers_product {rs : List Nat} (hnd : rs.Nodup)
+    (hrs : ∀ r ∈ rs, base.Has (.register r)) :
+    (product base (rs.map .register) laws).map
+        (fun s r => if r ∈ rs then s.value (.register r) else 0) =
+      registersLaw laws rs := by
+  induction rs with
+  | nil => simp [PMF.pure_map, registersLaw]
+  | cons r rs ih =>
+    rw [List.nodup_cons] at hnd
+    have hrs' : ∀ r' ∈ rs, base.Has (.register r') :=
+      fun r' h => hrs r' (.tail _ h)
+    rw [List.map_cons, product_cons, registersLaw, List.foldr_cons,
+      ← registersLaw, ← ih hnd.2 hrs']
+    simp only [lift, PMF.map_bind, PMF.map_comp]
+    refine congrArg _ (funext fun x => map_congr_support fun s hs =>
+      funext fun r' => ?_)
+    have hr : s.Has (.register r) :=
+      (has_of_mem_support_product hs _).mpr (hrs r (.head _))
+    simp only [Function.comp_apply, Function.update_apply, List.mem_cons]
+    by_cases h : r' = r
+    · subst h
+      simp only [true_or, ↓reduceIte]
+      exact State.get_set_self (ℓ := .register r') hr x
+    · have hne : Location.register r ≠ .register r' := fun h' => by
+        cases h'
+        exact h rfl
+      simp only [h, false_or, ↓reduceIte]
+      split_ifs
+      · exact State.get_set_ne hne x
+      · rfl
+
+/--
+Some operands' values in a world have their joint law, through any kernel
+that reads nothing else of them. Mirrors `read_joint` in `propagation.rs`.
+Generalizes `map_value_product_pair` to any number of operands.
+
+# Parameters
+- `ops`: The operands.
+- `k`: The kernel, applied to the reading of every operand.
+
+# Hypotheses
+- `hk`: Readings that agree on `ops` have the same image under `k`.
+- `hops`: The base has the operands' registers.
+-/
+theorem bind_value_product_joint {β : Type} {ops : List AddressingMode}
+    {k : (AddressingMode → Int) → PMF β}
+    (hk : ∀ v w : AddressingMode → Int,
+      (∀ op ∈ ops, v op = w op) → k v = k w)
+    (hops : ∀ ℓ ∈ jointLocations ops, base.Has ℓ) :
+    (product base (jointLocations ops) laws).bind (fun s => k s.value) =
+      (jointLaw laws ops).bind k := by
+  have hnd : (jointRegisters ops).Nodup := List.nodup_dedup _
+  have hrs : ∀ r ∈ jointRegisters ops, base.Has (.register r) :=
+    fun r h => hops _ (List.mem_map_of_mem h)
+  rw [jointLaw, ← map_registers_product hnd hrs, PMF.map_comp, PMF.bind_map]
+  refine congrArg _ (funext fun s => hk _ _ fun op hop => ?_)
+  cases op with
+  | immediate c => rfl
+  | rollingRecord r => rfl
+  | register r =>
+    have : r ∈ jointRegisters ops := by
+      simp only [jointRegisters, List.mem_dedup, List.mem_filterMap]
+      exact ⟨.register r, hop, rfl⟩
+    simp [readValue, this]
+
 /-! ## The law of each instruction -/
 
 /--
@@ -2108,5 +2265,53 @@ theorem law_keepHighest {d : Nat} {c : AddressingMode}
       exact congrArg PMF.pure (State.get_set_self hs _)) hd hd hc).trans ?_
   simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]
   exact congrArg _ (funext fun r => PMF.bind_pure_comp _ _)
+
+/--
+A reroll writes its record's law, bound independently to the joint law of its
+operands, to the reroll at each record and each reading of its operands, as
+`visit_reroll` in `propagation.rs` reads them with `read_joint`, resolves each
+joint outcome to a criterion and a limit, and rerolls every setup of the
+record by each.
+
+# Parameters
+- `d`: The rolling record.
+- `p`: The predicate.
+- `l`: The limit.
+
+# Hypotheses
+- `hd`: The base has the rolling record.
+- `hops`: The base has the operands' registers.
+-/
+theorem law_reroll {d : Nat} {p : Predicate} {l : Limit}
+    (hd : base.Has (.record d))
+    (hops : ∀ ℓ ∈ jointLocations (p.operands ++ l.operands),
+      base.Has ℓ) :
+    ((product base (.record d :: jointLocations (p.operands ++ l.operands))
+        laws).bind (step · (.reroll d p l))).map (·.get (.record d)) =
+      (lift Prod.mk (laws (.record d))
+          (jointLaw laws (p.operands ++ l.operands))).bind
+        fun q => reroll q.1 (p.resolve q.2) (l.resolve q.2) := by
+  rw [PMF.map_bind, product_cons]
+  simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]
+  refine congrArg _ (funext fun r => ?_)
+  have hrec : ∀ op : AddressingMode,
+      (Location.record d).isOperand op = false :=
+    fun op => by cases op <;> rfl
+  rw [← bind_value_product_joint (k := fun v => reroll r (p.resolve v)
+    (l.resolve v)) (fun v w h => by
+      rw [Predicate.resolve_congr fun op hop =>
+          h op (List.mem_append_left _ hop),
+        Limit.resolve_congr fun op hop =>
+          h op (List.mem_append_right _ hop)]) hops]
+  refine bind_congr_support fun s hs => ?_
+  have hs' : s.Has (.record d) := (has_of_mem_support_product hs _).mpr hd
+  simp only [step, PMF.map_comp,
+    State.resolve_set (fun op _ => hrec op),
+    State.resolve_set_limit (fun op _ => hrec op)]
+  rw [show (s.set (.record d) r).record d = r from State.get_set_self hs' r]
+  conv_rhs => rw [← PMF.map_id (reroll r _ _)]
+  refine congrArg (PMF.map · _) (funext fun x => ?_)
+  exact State.get_set_self (ℓ := .record d)
+    ((State.has_set _ _ _ _).mpr hs') x
 
 end Xdy.Spec

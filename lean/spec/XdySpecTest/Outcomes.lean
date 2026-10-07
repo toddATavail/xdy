@@ -128,4 +128,9 @@ example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
 #guard ({ roll := some (.fixed [(1, 2), (3, 1)]), highest := 1 } : Setup).held
   == { results := [1, 1, 3], highest := 1 }
 
+-- A pool's outcomes are its multisets, which total its weights.
+#guard (Roll.pool [([(1, 2)], 1), ([(1, 1), (2, 1)], 3)]).outcomes ==
+  [([(1, 2)], 1), ([(1, 1), (2, 1)], 3)]
+#guard (Roll.pool [([(1, 2)], 1), ([(1, 1), (2, 1)], 3)]).total == 4
+
 end Xdy.Spec.Test.Outcomes

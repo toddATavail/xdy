@@ -24,7 +24,9 @@ on one, changes nothing that any later instruction can tell:
 - So every roll's outcomes (`Roll.outcomes`), over its total (`Roll.total`),
   are the law of the record that it fills, sorted
   (`Roll.tsum_law_sorted`, `Roll.map_sorted_law`), and each outcome is fixed
-  results in ascending order (`Roll.wellFormed_of_mem_outcomes`).
+  results in ascending order (`Roll.wellFormed_of_mem_outcomes`). A pool's
+  outcomes are its multisets, whose weights are its law
+  (`Outcomes.tsum_weighted`).
 - A setup's outcomes keep its die and its drops, and are the law of its record
   read as the oracle reads it, sorted (`Setup.tsum_law_toOracle`,
   `Setup.map_toOracle_law`); each describes a certain record, already sorted
@@ -264,7 +266,9 @@ namespace Roll
 /--
 A roll as `propagation/record.rs` keeps it: a custom die's distinct faces, as
 `distinct_faces` counts them, and fixed results, as `Roll::outcomes` fixes
-them, ascend strictly, each at least once.
+them, ascend strictly, each at least once; and a pool, as `Roll::pool` makes
+it, holds at least one multiset, each of fixed results so formed, of positive
+weight, and each of as many results.
 
 # Parameters
 - `ρ`: The roll.
@@ -275,7 +279,26 @@ Whether the roll is well formed. Ranges and standard dice always are.
 def WellFormed : Roll → Prop
   | .custom _ faces | .fixed faces =>
     faces.Pairwise (fun a b => a.1 < b.1) ∧ ∀ p ∈ faces, 0 < p.2
+  | .pool outcomes =>
+    outcomes ≠ [] ∧
+      (∀ e ∈ outcomes, (e.1.Pairwise (fun a b => a.1 < b.1) ∧
+        ∀ p ∈ e.1, 0 < p.2) ∧ 0 < e.2) ∧
+      (Roll.pool outcomes).Even
   | _ => True
+
+/--
+A well-formed roll is even.
+
+# Parameters
+- `ρ`: The roll.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+-/
+theorem WellFormed.even {ρ : Roll} (hρ : ρ.WellFormed) : ρ.Even := by
+  cases ρ with
+  | pool outcomes => exact hρ.2.2
+  | _ => trivial
 
 /--
 The total weight of a roll: the number of its branches. Mirrors `total` in
@@ -287,7 +310,7 @@ The total weight of a roll: the number of its branches. Mirrors `total` in
 # Returns
 The width of a range, or the total weight of the die raised to the number of
 dice, or `1` for an empty range, no dice, dice without faces, and fixed
-results.
+results, or the total weight of the multisets of a pool.
 
 # Examples
 ```lean
@@ -304,6 +327,7 @@ def total : Roll → Nat
     if 0 < count ∧ faces ≠ [] then OrderStatistics.total faces ^ count.toNat
     else 1
   | .fixed _ => 1
+  | .pool outcomes => (outcomes.map (·.2)).sum
 
 /--
 The outcomes of `n` dice of a die: the multisets of the program, unless there
@@ -350,6 +374,7 @@ def outcomes : Roll → List (List (Int × Nat) × Nat)
   | .standard count faces => diceOutcomes count.toNat (standardFaces faces)
   | .custom count faces => diceOutcomes count.toNat faces
   | .fixed results => [(results, 1)]
+  | .pool outcomes => outcomes
 
 /--
 The results of a multiset that ascends strictly are sorted.
@@ -409,6 +434,7 @@ theorem wellFormed_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
     simp only [outcomes, List.mem_singleton] at he
     subst he
     exact hρ
+  | pool outcomes => exact (hρ.2.1 e he).1
 
 end Roll
 
@@ -559,6 +585,52 @@ theorem tsum_rollRange_sorted {start stop : Int} (h : start ≤ stop)
   simp [faces, Function.comp_def]
 
 /--
+A sum against weighted values weighs each value by its weight over the total.
+
+# Parameters
+- `default`: The default.
+- `l`: The values, each with its weight.
+- `f`: The function summed.
+
+# Hypotheses
+- `hW`: The total weight is positive.
+-/
+theorem tsum_weighted {α : Type} (default : α)
+    (l : List (α × Nat)) (hW : (l.map (·.2)).sum ≠ 0)
+    (f : α → ℝ≥0∞) :
+    ∑' x, weighted default l x * f x =
+      (l.map fun e => (e.2 : ℝ≥0∞) * f e.1).sum /
+        (((l.map (·.2)).sum : Nat) : ℝ≥0∞) := by
+  classical
+  have hsum : ∀ l : List (α × Nat),
+      ((l.flatMap fun p => List.replicate p.2 p.1).map f).sum =
+        (l.map fun e => (e.2 : ℝ≥0∞) * f e.1).sum := by
+    intro l
+    induction l with
+    | nil => rfl
+    | cons e l ih => simp [List.flatMap_cons, List.sum_append, ← ih]
+  rw [← hsum]
+  set xs := l.flatMap fun p => List.replicate p.2 p.1 with hxs
+  have hlen : xs.length = (l.map (·.2)).sum := by
+    simp [xs, List.length_flatMap]
+  have hne : xs ≠ [] := fun h => hW (by rw [← hlen, h]; rfl)
+  have hlaw : weighted default l = PMF.ofMultiset (xs : Multiset α)
+      (by simpa using hne) := by
+    unfold weighted
+    simp only [← hxs, hne, ↓reduceDIte]
+  rw [hlaw, ← hlen]
+  rw [tsum_eq_sum (s := (xs : Multiset α).toFinset) fun x hx => by
+    simp only [PMF.ofMultiset_apply]
+    rw [Multiset.count_eq_zero.mpr (by simpa using hx)]
+    simp]
+  simp only [PMF.ofMultiset_apply, ENNReal.div_eq_inv_mul]
+  have : (xs.map f).sum = ((xs : Multiset α).map f).sum := by simp
+  rw [this, Finset.sum_multiset_map_count, Finset.mul_sum]
+  refine Finset.sum_congr rfl fun x _ => ?_
+  rw [nsmul_eq_mul, Multiset.coe_card]
+  exact mul_assoc _ _ _
+
+/--
 A transformed law gives each value the mass of the outcomes that it comes
 from.
 
@@ -623,6 +695,20 @@ theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (ψ : List Int → Nat
       Outcomes.sorted_of_pairwise (r := { results := expand rs })
         (expand_pairwise hρ.1)]
     simp [OrderStatistics.integral]
+  | pool es =>
+    obtain ⟨hne, hmem, _⟩ := hρ
+    have hW : (es.map (·.2)).sum ≠ 0 := by
+      obtain ⟨e, es, rfl⟩ := List.exists_cons_of_ne_nil hne
+      have := (hmem e (by simp)).2
+      simp only [List.map_cons, List.sum_cons]
+      omega
+    simp only [law, outcomes, total, tsum_map_mul]
+    rw [Outcomes.tsum_weighted _ es hW]
+    congr 1
+    simp only [OrderStatistics.integral, Nat.cast_list_sum, List.map_map]
+    refine congrArg List.sum (List.map_congr_left fun e he => ?_)
+    simp [Outcomes.sorted_of_pairwise (r := { results := expand e.1 })
+      (expand_pairwise (hmem e he).1.1)]
 
 /--
 The law of the results of the record that a roll fills, sorted, gives each

@@ -91,6 +91,34 @@ example (r : Record) : r.kept.Pairwise (· ≤ ·) := Record.kept_pairwise r
 #guard (Record.ofOracle ((Xdy.Record.push {} 2 |>.push 1).dropLowest 1)).kept
   == [2]
 
+/-! ## Views -/
+
+/-- Records of every drop of `1, 1, 3, 5, 6`, in two orders. -/
+private def dropped : List (Record × Record) :=
+  (List.range 6).flatMap fun lo => (List.range 6).map fun hi =>
+    ({ results := [5, 1, 6, 1, 3], lowest := lo, highest := hi },
+      { results := [6, 5, 3, 1, 1], lowest := lo, highest := hi })
+
+-- Drops narrow the kept results, as `kept_dropLowest` and `kept_dropHighest`
+-- state.
+#guard dropped.all fun (r, _) => (List.range 7).all fun c =>
+  (r.dropLowest c).kept == r.kept.drop c &&
+    (r.dropHighest c).kept == r.kept.take (r.kept.length - c)
+-- Records of the same view, here of the same kept results in another order
+-- or with drops undone, are alike to every drop, keep and sum.
+#guard dropped.all fun (r, r') => r.view == r'.view &&
+  (List.range 7).all fun c =>
+    (r.dropLowest c).view == (r'.dropLowest c).view &&
+      (r.keepHighest c).view == (r'.keepHighest c).view
+#guard (List.range 4).all fun c =>
+  let r : Record := { results := [5, 1, 6, 1, 3], lowest := 1, highest := 2 }
+  let r' : Record := { results := [3, 1] }
+  r.view == r'.view && (r.keepLowest c).view == (r'.keepLowest c).view &&
+    (r.dropHighest c).view == (r'.dropHighest c).view && r.sum == r'.sum
+-- A record that drops every result views nothing kept, however it drops them.
+#guard ({ results := [2, 1], lowest := 2, highest := 2 } : Record).view ==
+  ({ results := [] } : Record).view
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (({} : Record).push 3 |>.push 1 |>.push 2).results == [3, 1, 2]
@@ -113,5 +141,7 @@ example (r : Record) : r.kept.Pairwise (· ≤ ·) := Record.kept_pairwise r
   == [1, 3]
 #guard (Record.toOracle { results := [3, 1, 2], lowest := 1 }).results
   == [1, 2, 3]
+
+#guard ({ results := [4, 1, 3], lowest := 1 } : Record).view == ([3, 4], .none)
 
 end Xdy.Spec.Test

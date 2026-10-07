@@ -265,6 +265,46 @@ example :
   law_keepHighest hasRecord
     (by simp [operandLocations, has 0 (by decide)])
 
+-- A reroll of an empty record on a roll's value, once, writes the reroll of
+-- the record at each value of the operand, independently of the record.
+example :
+    ((product base (.record 0 :: jointLocations
+        ((Predicate.eq (.register 0)).operands ++
+          (Limit.times (.immediate 1)).operands)) rolls).bind
+        (step · (.reroll 0 (.eq (.register 0)) (.times (.immediate 1))))).map
+          (·.get (.record 0)) =
+      (lift Prod.mk (PMF.pure {}) (jointLaw rolls
+          ((Predicate.eq (.register 0)).operands ++
+            (Limit.times (.immediate 1)).operands))).bind fun q =>
+        reroll q.1 ((Predicate.eq (.register 0)).resolve q.2)
+          ((Limit.times (.immediate 1)).resolve q.2) :=
+  law_reroll hasRecord (by
+    simp [jointLocations, jointRegisters, Predicate.operands, Limit.operands,
+      has 0 (by decide)])
+
+-- Operands that name the same register share its value.
+example :
+    (product base (jointLocations [.register 0, .register 0]) rolls).bind
+        (fun s => PMF.pure (s.value (.register 0), s.value (.register 0))) =
+      roll.map fun x => (x, x) := by
+  rw [bind_value_product_joint (k := fun v =>
+      PMF.pure (v (.register 0), v (.register 0))) (fun v w h => by
+        rw [h _ (by simp)])
+    (by simp [jointLocations, jointRegisters, has 0 (by decide)])]
+  simp [jointLaw, registersLaw, jointRegisters, lift, rolls, readValue,
+    PMF.bind_map, Function.comp_def]
+  exact PMF.bind_pure_comp _ _
+
+-- Operands of no register read their immediates.
+example (laws : (ℓ : Location) → PMF (Content ℓ)) :
+    jointLaw laws [.immediate 3] = PMF.pure (readValue fun _ => 0) := by
+  simp [jointLaw, registersLaw, jointRegisters, PMF.pure_map]
+
+#guard (jointRegisters
+  [.register 2, .immediate 1, .register 0, .register 2]).length == 2
+#guard readValue (fun r => r + 10) (.register 2) == 12
+#guard readValue (fun r => r + 10) (.immediate 2) == 2
+
 /-! ## Docstring examples, verbatim -/
 
 example (base : State) (laws : (ℓ : Location) → PMF (Content ℓ)) :
@@ -284,5 +324,7 @@ example (laws : (ℓ : Location) → PMF (Content ℓ)) :
     pairLaw laws (.register 1) (.register 1) =
       (laws (.register 1)).map fun x => (x, x) := by
   simp [pairLaw]
+
+#guard (jointRegisters [.register 2, .immediate 1, .register 2]).length == 1
 
 end Xdy.Spec.Test.World
