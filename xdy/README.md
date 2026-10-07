@@ -159,9 +159,9 @@ graph TD
 | Pass | Effect |
 |------|--------|
 | **CSE** | Identifies identical instructions and replaces duplicates with references to the first occurrence |
-| **Constant commuting** | Puts immediate operands first in commutative operators, and merges chained constants, e.g., `(x + 1) + 2` → `x + 3`, wherever the result is exact despite saturation, creating folding opportunities |
+| **Constant commuting** | Puts immediate operands first in commutative operators, and merges chained constants, e.g., `(x + 1) + 2` → `x + 3` and `min(min(x, 5), 3)` → `min(x, 3)`, wherever the result is exact despite saturation, creating folding opportunities |
 | **Constant folding** | Evaluates instructions whose operands are all immediates at compile time, and folds rolls whose results their clauses leave known, e.g., `3D1 reroll = 1` → `3` and `3D6 reroll ≤ 6 ∞ times` → `0` |
-| **Strength reduction** | Replaces expensive operations with cheaper equivalents (e.g., `x * 2` → `x + x`, `1D6` → `[1:6]`), and eliminates rerolls that cannot change any die, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1` |
+| **Strength reduction** | Replaces expensive operations with cheaper equivalents (e.g., `x * 2` → `x + x`, `1D6` → `[1:6]`, `{x}D1 keep highest 2` → `min(max(x, 0), 2)`), eliminates a maximum or minimum whose operands' bounds prove that one always wins, e.g., `max(x, 0)` where `x` is the sum of `1D6`, and eliminates rerolls that cannot change any die, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1` |
 | **Dead code elimination** | Removes instructions whose results are never consumed |
 | **Register coalescing** | Colors the live ranges of the registers by a linear scan, so that registers whose live ranges do not overlap share one, reducing the register bank size; breaks SSA form, so it runs last |
 
@@ -312,7 +312,7 @@ All arithmetic instructions saturate on overflow/underflow.
 | `Mod` | `@N <- A % B` | Saturating remainder; `x % 0 = 0` |
 | `Exp` | `@N <- A ^ B` | Saturating exponentiation; `0^0 = 1`, `1^n = 1`, `(-1)^n = ±1`, and otherwise `x^(-n) = 0` |
 | `Max` | `@N <- A max B` | The greater of `A` and `B`; the optimizer uses it to clamp, e.g., a negative count of dice to `0`, without rolling |
-| `Min` | `@N <- A min B` | The lesser of `A` and `B` |
+| `Min` | `@N <- A min B` | The lesser of `A` and `B`; the optimizer uses it to cap, e.g., a count of dice at the count that a keep keeps, without rolling |
 | `Neg` | `@N <- -A` | Saturating negation |
 
 ### Control instructions

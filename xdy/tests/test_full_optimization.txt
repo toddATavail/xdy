@@ -3051,12 +3051,11 @@ Function({x}@0) r#1 ⚅#1
 
 {x}: {x}D1 keep highest 2
 =
-Function({x}@0) r#1 ⚅#1
+Function({x}@0) r#1 ⚅#0
 	extern[]
 	body:
-		⚅0 <- roll standard dice @0D1
-		⚅0 <- keep highest 2 from ⚅0
-		@0 <- sum rolling record ⚅0
+		@0 <- 0 max @0
+		@0 <- 2 min @0
 		return @0
 
 1D6 keep highest
@@ -3643,4 +3642,28 @@ Function({x}@0) r#1 ⚅#1
 		⚅0 <- reroll = 1 up to @0 times from ⚅0
 		⚅0 <- reroll = 1 unlimited times from ⚅0
 		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: {x}D1 drop lowest 1 keep highest 2 drop lowest 1
+=
+Function({x}@0) r#1 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 max @0
+		@0 <- @0 - 1
+		@0 <- 0 max @0
+		@0 <- 2 min @0
+		@0 <- @0 - 1
+		@0 <- 0 max @0
+		return @0
+
+{x}, {y}: {x}D[3, 3] keep lowest {y}
+=
+Function({x}@0, {y}@1) r#2 ⚅#0
+	extern[]
+	body:
+		@0 <- 0 max @0
+		@1 <- 0 max @1
+		@0 <- @0 min @1
+		@0 <- 3 * @0
 		return @0

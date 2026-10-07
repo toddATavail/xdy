@@ -1,14 +1,14 @@
 //! # Commutation
 //!
 //! Commutative operations can reorder their operands without changing the
-//! meaning or result. Addition, multiplication, and maximum are commutative,
-//! so this pass puts the operands of each such instruction in a canonical
-//! order, immediates before registers, which lets common subexpression
-//! elimination recognize `{x} + 1` and `1 + {x}` as the same. It also merges an
-//! instruction that applies a constant to the result of another that applies a
-//! constant, e.g., `(x + 1) + 2`, into one that applies a single constant,
-//! e.g., `x + 3`, creating new opportunities for constant folding and strength
-//! reduction.
+//! meaning or result. Addition, multiplication, maximum, and minimum are
+//! commutative, so this pass puts the operands of each such instruction in a
+//! canonical order, immediates before registers, which lets common
+//! subexpression elimination recognize `{x} + 1` and `1 + {x}` as the same. It
+//! also merges an instruction that applies a constant to the result of another
+//! that applies a constant, e.g., `(x + 1) + 2`, into one that applies a single
+//! constant, e.g., `x + 3`, creating new opportunities for constant folding and
+//! strength reduction.
 //!
 //! The arithmetic of the dice language saturates at the bounds of `i32`, so
 //! regrouping is not exact in general: `(x + 1) + y` and `(x + y) + 1` differ
@@ -22,6 +22,7 @@
 //! | `(x * a) * b`              | `x * (a * b)`   | `a` and `b` are positive and their product fits |
 //! | `(x / a) / b`              | `x / (a * b)`   | `a` and `b` are positive and their product fits |
 //! | `max(max(x, a), b)`        | `max(x, max(a, b))` | always                    |
+//! | `min(min(x, a), b)`        | `min(x, min(a, b))` | always                    |
 //!
 //! Addends that share a sign push a saturating sum toward the same bound, so
 //! saturating once or twice agrees; a positive multiplier preserves the sign
@@ -37,8 +38,8 @@
 use std::collections::HashMap;
 
 use crate::{
-	Add, AddressingMode, Div, Immediate, Instruction, Max, Mul, RegisterIndex,
-	Sub
+	Add, AddressingMode, Div, Immediate, Instruction, Max, Min, Mul,
+	RegisterIndex, Sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,7 +67,10 @@ enum Application
 	Quotient(i32),
 
 	/// `max(x, floor)`.
-	Floor(i32)
+	Floor(i32),
+
+	/// `min(x, ceiling)`.
+	Ceiling(i32)
 }
 
 impl ConstantCommuter
@@ -174,6 +178,11 @@ impl ConstantCommuter
 				op1: Imm(Immediate(c)),
 				op2: Reg(x)
 			}) => (dest, x, Application::Floor(c)),
+			Instruction::Min(Min {
+				dest,
+				op1: Imm(Immediate(c)),
+				op2: Reg(x)
+			}) => (dest, x, Application::Ceiling(c)),
 			_ => return None
 		};
 		Some((dest, (operand, application)))
@@ -210,6 +219,11 @@ fn canonical(instruction: &Instruction) -> Instruction
 		{
 			let (op1, op2) = order(op1, op2);
 			Max { dest, op1, op2 }.into()
+		},
+		Instruction::Min(Min { dest, op1, op2 }) =>
+		{
+			let (op1, op2) = order(op1, op2);
+			Min { dest, op1, op2 }.into()
 		},
 		ref instruction => instruction.clone()
 	}
@@ -253,6 +267,11 @@ fn merge(inner: Application, outer: Application) -> Option<Application>
 		(Application::Floor(a), Application::Floor(b)) =>
 		{
 			Some(Application::Floor(a.max(b)))
+		},
+		// So is the minimum.
+		(Application::Ceiling(a), Application::Ceiling(b)) =>
+		{
+			Some(Application::Ceiling(a.min(b)))
 		},
 		_ => None
 	}
@@ -307,6 +326,12 @@ fn emit(
 		Application::Floor(floor) => Max {
 			dest,
 			op1: c(floor),
+			op2: x
+		}
+		.into(),
+		Application::Ceiling(ceiling) => Min {
+			dest,
+			op1: c(ceiling),
 			op2: x
 		}
 		.into()

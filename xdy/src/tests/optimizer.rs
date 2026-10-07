@@ -21,7 +21,9 @@ use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
 	Evaluator, Pass, Passes,
-	support::{compile_valid, optimize, read_compilation_test_cases}
+	distribution::propagation::meter::{Budget, Unobserved},
+	support::{compile_valid, optimize, read_compilation_test_cases},
+	tests::property::agree
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -234,15 +236,32 @@ fn test_optimize_max()
 	}
 }
 
-/// Test that the optimizer folds a constant [minimum](crate::Min).
+/// Test that the optimizer folds a constant [minimum](crate::Min), applies its
+/// identities, and gathers the constants of a chain of minima so that they
+/// fold.
 #[test]
 fn test_optimize_min()
 {
 	for (body, expected) in [
+		// Constant folding.
 		("@1 <- 3 min 5\n\t\treturn @1", "return 3"),
 		(
 			"@1 <- -2147483648 min 5\n\t\treturn @1",
 			"return -2147483648"
+		),
+		// The greatest value is the identity.
+		("@1 <- @0 min 2147483647\n\t\treturn @1", "return @0"),
+		// The least value absorbs.
+		(
+			"@1 <- -2147483648 min @0\n\t\treturn @1",
+			"return -2147483648"
+		),
+		// The minimum is idempotent.
+		("@1 <- @0 min @0\n\t\treturn @1", "return @0"),
+		// Commutation gathers the constants of a chain, which then fold.
+		(
+			"@1 <- @0 min 3\n\t\t@2 <- 5 min @1\n\t\treturn @2",
+			"@0 <- 3 min @0\n\t\treturn @0"
 		)
 	]
 	{
@@ -255,6 +274,126 @@ fn test_optimize_min()
 		let optimized = optimize(function, Passes::all()).to_string();
 		let actual = optimized.trim().split_once("body:\n\t\t").unwrap().1;
 		assert_eq!(actual, expected, "{}", body);
+	}
+}
+
+/// Test that the strength reducer eliminates a [maximum](crate::Max) or a
+/// [minimum](crate::Min) whose operands' bounds prove that one of them always
+/// wins, and keeps one whose operands' bounds overlap, and that the optimized
+/// function agrees with the original, distribution for distribution, at the
+/// [edges](EDGES) of the arithmetic.
+#[test]
+fn test_optimize_max_and_min_by_bounds()
+{
+	let roll = |records: &str| {
+		records
+			.split(' ')
+			.enumerate()
+			.map(|(index, range)| {
+				format!(
+					"⚅{index} <- roll range {range}\n\t\t@{} <- sum rolling \
+					 record ⚅{index}\n\t\t",
+					index + 1
+				)
+			})
+			.collect::<String>()
+	};
+	for (records, tail, expected) in [
+		// A floor that a die never falls below.
+		(
+			"1:6",
+			"@2 <- @1 max 0\n\t\treturn @2",
+			"⚅0 <- roll range 1:6\n\t\t@0 <- sum rolling record ⚅0\n\t\t\
+			 return @0"
+		),
+		// A ceiling that a die never rises above.
+		(
+			"1:6",
+			"@2 <- 9 min @1\n\t\treturn @2",
+			"⚅0 <- roll range 1:6\n\t\t@0 <- sum rolling record ⚅0\n\t\t\
+			 return @0"
+		),
+		// A floor above every face.
+		("1:6", "@2 <- @1 max 9\n\t\treturn @2", "return 9"),
+		// A ceiling below every face.
+		("1:6", "@2 <- @1 min 0\n\t\treturn @2", "return 0"),
+		// Dice that never overlap, but for a tie.
+		(
+			"1:3 3:6",
+			"@3 <- @1 max @2\n\t\treturn @3",
+			"⚅0 <- roll range 3:6\n\t\t@0 <- sum rolling record ⚅0\n\t\t\
+			 return @0"
+		),
+		(
+			"1:3 3:6",
+			"@3 <- @2 min @1\n\t\treturn @3",
+			"⚅0 <- roll range 1:3\n\t\t@0 <- sum rolling record ⚅0\n\t\t\
+			 return @0"
+		),
+		// Dice that overlap.
+		(
+			"1:4 3:6",
+			"@3 <- @1 max @2\n\t\treturn @3",
+			"⚅0 <- roll range 1:4\n\t\t@0 <- sum rolling record ⚅0\n\t\t\
+			 ⚅1 <- roll range 3:6\n\t\t@1 <- sum rolling record ⚅1\n\t\t\
+			 @0 <- @0 max @1\n\t\treturn @0"
+		),
+		// A floor above a ceiling, either way around.
+		(
+			"",
+			"@1 <- @0 max 5\n\t\t@2 <- @1 min 3\n\t\treturn @2",
+			"return 3"
+		),
+		(
+			"",
+			"@1 <- @0 min 3\n\t\t@2 <- @1 max 5\n\t\treturn @2",
+			"return 5"
+		),
+		// A floor below a ceiling.
+		(
+			"",
+			"@1 <- @0 max 3\n\t\t@2 <- @1 min 5\n\t\treturn @2",
+			"@0 <- 3 max @0\n\t\t@0 <- 5 min @0\n\t\treturn @0"
+		)
+	]
+	{
+		let rolls = if records.is_empty()
+		{
+			String::new()
+		}
+		else
+		{
+			roll(records)
+		};
+		let records = rolls.matches('⚅').count() / 2;
+		let body = format!("{rolls}{tail}");
+		let registers = body.matches("<-").count() - records + 1;
+		let function = crate::Assembler::assemble(&format!(
+			"Function({{x}}@0) r#{registers} ⚅#{records}\n\textern[]\n\t\
+			 body:\n\t\t{body}\n"
+		))
+		.unwrap();
+		let optimized = optimize(function.clone(), Passes::all());
+		let text = optimized.to_string();
+		let actual = text.trim().split_once("body:\n\t\t").unwrap().1;
+		assert_eq!(actual, expected, "{}", body);
+		for x in EDGES
+		{
+			let distribution = |function: &crate::Function| {
+				Evaluator::new(function.clone())
+					.plan_distribution([x])
+					.unwrap()
+					.build(Budget::UNLIMITED, &Unobserved)
+					.unwrap()
+			};
+			assert!(
+				agree(&distribution(&function), &distribution(&optimized)),
+				"{} at {}\noptimized:\n{}",
+				body,
+				x,
+				optimized
+			);
+		}
 	}
 }
 
@@ -327,6 +466,60 @@ fn test_keeps_are_not_folded_as_drops()
 					.unwrap()
 					.result;
 				assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
+			}
+		}
+	}
+}
+
+/// Test that strength reduction reduces a roll of dice that show one face to
+/// its count of dice even when keeps whose counts are not constant follow,
+/// capping the count with a [minimum](crate::Min), and that the reduced
+/// function agrees with the original, distribution for distribution, for every
+/// count from negative to beyond the dice rolled.
+#[test]
+fn test_keeps_reduce_to_counts()
+{
+	for source in [
+		"{x}: {x}D1 keep highest 2",
+		"{x}: 4D1 keep lowest {x}",
+		"{x}: {x}D1 drop lowest 1 keep highest 2 drop lowest 1",
+		"{x}: 5D1 keep highest {x} drop lowest 1 keep lowest {x}",
+		"{x}: {x}D[3, 3] keep lowest {x} - 2",
+		"{x}: (1D{x})D1 keep highest {x}"
+	]
+	{
+		let unoptimized = compile_valid(source);
+		for passes in [Pass::StrengthReduction.into(), Passes::all()]
+		{
+			let optimized = optimize(unoptimized.clone(), passes);
+			assert!(
+				optimized.to_string().matches("roll").count()
+					< unoptimized.to_string().matches("roll").count(),
+				"{}: {:?}\n{}",
+				source,
+				passes,
+				optimized
+			);
+			for x in -2..=6
+			{
+				let distribution = |function: &crate::Function| {
+					Evaluator::new(function.clone())
+						.plan_distribution([x])
+						.unwrap()
+						.build(Budget::UNLIMITED, &Unobserved)
+						.unwrap()
+				};
+				assert!(
+					agree(
+						&distribution(&unoptimized),
+						&distribution(&optimized)
+					),
+					"{} at {}: {:?}\noptimized:\n{}",
+					source,
+					x,
+					passes,
+					optimized
+				);
 			}
 		}
 	}

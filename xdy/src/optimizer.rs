@@ -38,7 +38,7 @@ use reduction::StrengthReducer;
 use crate::{
 	AddressingMode, EvaluationBounds, Function, Immediate, Instruction,
 	Predicate, RollingRecordKind,
-	evaluator::{Criteria, ResultSet}
+	evaluator::{BoundsEvaluator, Criteria, ResultSet}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -241,6 +241,36 @@ fn operand_bounds(op: AddressingMode) -> EvaluationBounds
 	}
 }
 
+/// Answer the bounds of every register of a function, over every binding of
+/// its parameters and external variables, as the [bounds
+/// evaluator](BoundsEvaluator) computes them.
+///
+/// # Parameters
+/// - `function`: The function, in [static single assignment
+///   form](StandardOptimizer#static-single-assignment-form), so that each
+///   register holds the value of the sole instruction that writes it.
+///
+/// # Returns
+/// The bounds of each register, by index, which contain every value that it
+/// may hold over any binding.
+fn register_bounds(function: &Function) -> Vec<EvaluationBounds>
+{
+	let mut bounds = BoundsEvaluator::new(function);
+	// Every binding is unconstrained, so the arity always agrees.
+	bounds
+		.seed(
+			vec![None; function.arity()],
+			[],
+			EvaluationBounds::unconstrained()
+		)
+		.unwrap();
+	for instruction in &function.instructions
+	{
+		bounds.step(instruction);
+	}
+	bounds.registers().to_vec()
+}
+
 /// Answer the faces that a die of the specified roll may show, given the
 /// operands of the roll as they stand. A die without faces, or an empty
 /// range, shows only the face `0`.
@@ -326,7 +356,9 @@ pub enum Pass
 	ConstantFolding = 0x04,
 
 	/// Reduce the strength of expressions by replacing expensive operations
-	/// with cheaper ones. Iterate until no further changes are made.
+	/// with cheaper ones, and eliminate a maximum or minimum whose operands'
+	/// bounds prove that one always wins. Iterate until no further changes are
+	/// made.
 	StrengthReduction = 0x08,
 
 	/// Eliminate dead code by removing instructions whose results are never

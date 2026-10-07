@@ -3252,7 +3252,7 @@ impl EvaluationBounds
 	///
 	/// # Returns
 	/// The bounds of the result.
-	fn min(self, rhs: EvaluationBounds) -> Self
+	pub(crate) fn min(self, rhs: EvaluationBounds) -> Self
 	{
 		Self {
 			min: self.min.min(rhs.min),

@@ -6,26 +6,37 @@
 //! with `0`, and the expression `x * 1` can be replaced with `x`. It also
 //! implements special rules for reducing the strength of dice rolls, such as
 //! transforming `1D6` into `[1:6]` instead (as range expressions are cheaper
-//! because they don't have to loop). It eliminates rerolls that cannot change
-//! any die: those limited to zero times or fewer, limited rerolls of dice with
-//! one face, and rerolls whose predicates match none of the results that the
-//! dice still kept may show, which it tracks through the clauses of each roll,
-//! e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`. The
-//! strength reducer requires the function to be in static single assignment
-//! (SSA) form.
+//! because they don't have to loop), and a roll of dice that all show one face,
+//! e.g., `{x}D1 keep highest 2`, with its count of dice, which its drops reduce
+//! and its keeps cap with a [minimum](Min). It eliminates rerolls that cannot
+//! change any die: those limited to zero times or fewer, limited rerolls of
+//! dice with one face, and rerolls whose predicates match none of the results
+//! that the dice still kept may show, which it tracks through the clauses of
+//! each roll, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`.
+//!
+//! The strength reducer knows the bounds of every register, as the [bounds
+//! evaluator](crate::evaluator::BoundsEvaluator) computes them over every
+//! binding, and eliminates a [maximum](Max) or [minimum](Min) whose operands'
+//! bounds prove that one of them always wins, e.g., `max(x, 0)` where `x` is
+//! the sum of `1D6`, or `min(max(x, 5), 3)`, which is always `3`. The identity
+//! and absorbing elements of each, the extremes of `i32`, are cases of this
+//! rule.
+//!
+//! The strength reducer requires the function to be in static single
+//! assignment (SSA) form.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, Immediate, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
-	Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
-	evaluator::ResultSet
+	DropHighest, DropLowest, EvaluationBounds, Exp, Function, Immediate,
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min,
+	Mod, Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
+	SumRollingRecord, evaluator::ResultSet
 };
 
-use super::{criteria, faces};
+use super::{criteria, faces, register_bounds};
 use crate::Optimizer;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -55,17 +66,28 @@ pub struct StrengthReducer
 	/// reroll can remove that value.
 	dropped: HashSet<RollingRecordIndex>,
 
-	/// The rolling records that keep or reroll instructions target, relative
-	/// to the original function. A roll into one of them is never [reduced to
-	/// its count of dice](Self::reduce_to_count), since the reduction accounts
-	/// for drops but not for keeps or rerolls.
-	kept: HashSet<RollingRecordIndex>,
+	/// The rolling records that reroll instructions target, relative to the
+	/// original function. A roll into one of them is never [reduced to its
+	/// count of dice](Self::reduce_to_count), since the reduction accounts for
+	/// drops and keeps but not for rerolls.
+	rerolled: HashSet<RollingRecordIndex>,
+
+	/// The bounds of each register of the original function, over every
+	/// binding, by index. A replacement holds the same value as its original,
+	/// so these bound the replacements too.
+	original_bounds: Vec<EvaluationBounds>,
+
+	/// The bounds of the registers of the optimized function, as far as they
+	/// are known, which bound the [greatest](Self::greater) and
+	/// [least](Self::lesser) of operands. A register absent from the map is
+	/// unconstrained.
+	bounds: HashMap<RegisterIndex, EvaluationBounds>,
 
 	/// The sole face of each rolling record, relative to the original
 	/// function, that was reduced to its count of dice, which is never
 	/// negative. Every die shows the same face, so a drop subtracts from the
-	/// count, whichever dice it drops, and the sum is the count times the
-	/// face.
+	/// count and a keep caps it, whichever dice they cross out, and the sum is
+	/// the count times the face.
 	faces: HashMap<RollingRecordIndex, i32>,
 
 	/// The results that the dice of each rolling record may show, relative to
@@ -88,6 +110,7 @@ impl Optimizer<()> for StrengthReducer
 		self.next_register = RegisterIndex(start_register);
 		loop
 		{
+			self.original_bounds = register_bounds(&function);
 			self.dropped = function
 				.instructions
 				.iter()
@@ -101,13 +124,11 @@ impl Optimizer<()> for StrengthReducer
 					_ => None
 				})
 				.collect();
-			self.kept = function
+			self.rerolled = function
 				.instructions
 				.iter()
 				.filter_map(|inst| match inst
 				{
-					Instruction::KeepLowest(keep) => Some(keep.dest),
-					Instruction::KeepHighest(keep) => Some(keep.dest),
 					Instruction::Reroll(reroll) => Some(reroll.dest),
 					_ => None
 				})
@@ -129,6 +150,7 @@ impl Optimizer<()> for StrengthReducer
 			function.instructions = self.instructions.clone();
 			// Reset the optimizer state.
 			self.replacements.clear();
+			self.bounds.clear();
 			self.faces.clear();
 			self.results.clear();
 			self.next_register = RegisterIndex(start_register);
@@ -183,7 +205,7 @@ impl InstructionVisitor<()> for StrengthReducer
 			faces
 		});
 		if let AddressingMode::Immediate(Immediate(1)) = faces
-			&& !self.kept.contains(&roll.dest)
+			&& !self.rerolled.contains(&roll.dest)
 		{
 			self.reduce_to_count(roll.dest, roll.count, 1);
 			return Ok(());
@@ -218,7 +240,7 @@ impl InstructionVisitor<()> for StrengthReducer
 		// If the die has only one distinct face, then every die shows it, so
 		// we can replace the roll with its count of dice, or zero if the count
 		// is negative. The sum multiplies the count by the face.
-		if roll.distinct_faces() == 1 && !self.kept.contains(&roll.dest)
+		if roll.distinct_faces() == 1 && !self.rerolled.contains(&roll.dest)
 		{
 			self.reduce_to_count(roll.dest, roll.count, roll.faces[0]);
 			return Ok(());
@@ -421,36 +443,50 @@ impl InstructionVisitor<()> for StrengthReducer
 
 	fn visit_keep_lowest(&mut self, keep: &KeepLowest) -> Result<(), ()>
 	{
-		// A roll that keeps is never reduced to a value, so its record remains
-		// a record. A keep keeps nothing for a count of zero or less, so,
-		// unlike a drop, it is never eliminated.
-		let AddressingMode::RollingRecord(dest) = self.replacement(keep.dest)
-		else
+		match self.replacement(keep.dest)
 		{
-			unreachable!("a keep of a roll reduced to a value")
-		};
-		self.emit(KeepLowest {
-			dest,
-			count: self.replacement(keep.count)
-		});
-		Ok(())
+			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
+			{
+				// The roll was reduced to its count of dice, which all show the
+				// same face, so keeping dice caps the count.
+				self.keep_from_count(keep.dest, keep.count);
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// A keep keeps nothing for a count of zero or less, so, unlike
+				// a drop, it is never eliminated.
+				self.emit(KeepLowest {
+					dest,
+					count: self.replacement(keep.count)
+				});
+				Ok(())
+			}
+		}
 	}
 
 	fn visit_keep_highest(&mut self, keep: &KeepHighest) -> Result<(), ()>
 	{
-		// A roll that keeps is never reduced to a value, so its record remains
-		// a record. A keep keeps nothing for a count of zero or less, so,
-		// unlike a drop, it is never eliminated.
-		let AddressingMode::RollingRecord(dest) = self.replacement(keep.dest)
-		else
+		match self.replacement(keep.dest)
 		{
-			unreachable!("a keep of a roll reduced to a value")
-		};
-		self.emit(KeepHighest {
-			dest,
-			count: self.replacement(keep.count)
-		});
-		Ok(())
+			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
+			{
+				// The roll was reduced to its count of dice, which all show the
+				// same face, so keeping dice caps the count.
+				self.keep_from_count(keep.dest, keep.count);
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// A keep keeps nothing for a count of zero or less, so, unlike
+				// a drop, it is never eliminated.
+				self.emit(KeepHighest {
+					dest,
+					count: self.replacement(keep.count)
+				});
+				Ok(())
+			}
+		}
 	}
 
 	fn visit_reroll(&mut self, reroll: &Reroll) -> Result<(), ()>
@@ -529,6 +565,10 @@ impl InstructionVisitor<()> for StrengthReducer
 						count =>
 						{
 							let dest = self.next_register();
+							self.bound(
+								dest,
+								self.operand_bounds(count) * face.into()
+							);
 							self.emit(Mul {
 								dest,
 								op1: count,
@@ -818,51 +858,17 @@ impl InstructionVisitor<()> for StrengthReducer
 
 	fn visit_max(&mut self, inst: &Max) -> Result<(), ()>
 	{
-		let op1 = self.replacement(inst.op1);
-		let op2 = self.replacement(inst.op2);
-		// The least value is the identity of the maximum, so we can eliminate
-		// the maximum.
-		if let AddressingMode::Immediate(Immediate(i32::MIN)) = op1
-		{
-			self.replace(inst.dest, op2);
-			return Ok(())
-		}
-		if let AddressingMode::Immediate(Immediate(i32::MIN)) = op2
-		{
-			self.replace(inst.dest, op1);
-			return Ok(())
-		}
-		// The greatest value absorbs any other, so we can fold the maximum.
-		if let AddressingMode::Immediate(Immediate(i32::MAX)) = op1
-		{
-			self.replace(inst.dest, op1);
-			return Ok(())
-		}
-		if let AddressingMode::Immediate(Immediate(i32::MAX)) = op2
-		{
-			self.replace(inst.dest, op2);
-			return Ok(())
-		}
-		// The maximum of a value and itself is the value.
-		if op1 == op2
-		{
-			self.replace(inst.dest, op1);
-			return Ok(())
-		}
-		// Otherwise, just copy the instruction over.
-		let dest = self.next_register();
-		self.replace(inst.dest, dest);
-		self.emit(Max { dest, op1, op2 });
+		let max = self
+			.greater(self.replacement(inst.op1), self.replacement(inst.op2));
+		self.replace(inst.dest, max);
 		Ok(())
 	}
 
 	fn visit_min(&mut self, inst: &Min) -> Result<(), ()>
 	{
-		let op1 = self.replacement(inst.op1);
-		let op2 = self.replacement(inst.op2);
-		let dest = self.next_register();
-		self.replace(inst.dest, dest);
-		self.emit(Min { dest, op1, op2 });
+		let min =
+			self.lesser(self.replacement(inst.op1), self.replacement(inst.op2));
+		self.replace(inst.dest, min);
 		Ok(())
 	}
 
@@ -924,7 +930,129 @@ impl StrengthReducer
 		new: impl Into<AddressingMode>
 	)
 	{
-		self.replacements.insert(old.into(), new.into());
+		let (old, new) = (old.into(), new.into());
+		// The replacement holds the same value as the original, so it shares
+		// the original's bounds.
+		if let (AddressingMode::Register(old), AddressingMode::Register(new)) =
+			(old, new)
+		{
+			self.bound(new, self.original_bounds[old.0]);
+		}
+		self.replacements.insert(old, new);
+	}
+
+	/// Narrow the bounds of the specified register of the optimized function
+	/// to their intersection with the specified bounds.
+	///
+	/// # Parameters
+	/// - `reg`: The register, relative to the optimized function.
+	/// - `bounds`: Bounds that contain every value that the register may hold.
+	fn bound(&mut self, reg: RegisterIndex, bounds: EvaluationBounds)
+	{
+		let current = self
+			.bounds
+			.entry(reg)
+			.or_insert(EvaluationBounds::unconstrained());
+		*current =
+			(current.min.max(bounds.min), current.max.min(bounds.max)).into();
+	}
+
+	/// Answer the bounds of the specified operand of the optimized function.
+	///
+	/// # Parameters
+	/// - `op`: The operand, an immediate or a register, relative to the
+	///   optimized function.
+	///
+	/// # Returns
+	/// The bounds of the operand: a single value for an immediate, and the
+	/// known bounds of a register, or the whole of `i32` if none are known.
+	fn operand_bounds(&self, op: AddressingMode) -> EvaluationBounds
+	{
+		match op
+		{
+			AddressingMode::Immediate(Immediate(value)) => value.into(),
+			AddressingMode::Register(reg) => self
+				.bounds
+				.get(&reg)
+				.copied()
+				.unwrap_or(EvaluationBounds::unconstrained()),
+			AddressingMode::RollingRecord(_) =>
+			{
+				unreachable!("a rolling record has no value")
+			}
+		}
+	}
+
+	/// Answer an operand whose value is the greater of the specified
+	/// operands: either operand, if their bounds prove that it is never less
+	/// than the other, or else a new register that a [maximum](Max) computes.
+	/// The least value of `i32` is the identity of the maximum and the
+	/// greatest absorbs any other, so either is eliminated thus, as is the
+	/// maximum of two constants.
+	///
+	/// # Parameters
+	/// - `op1`: The first operand, relative to the optimized function.
+	/// - `op2`: The second operand, relative to the optimized function.
+	///
+	/// # Returns
+	/// The greater operand, relative to the optimized function.
+	fn greater(
+		&mut self,
+		op1: AddressingMode,
+		op2: AddressingMode
+	) -> AddressingMode
+	{
+		let (bounds1, bounds2) =
+			(self.operand_bounds(op1), self.operand_bounds(op2));
+		// The maximum of a value and itself is the value.
+		if op1 == op2 || bounds1.min >= bounds2.max
+		{
+			return op1
+		}
+		if bounds2.min >= bounds1.max
+		{
+			return op2
+		}
+		let dest = self.next_register();
+		self.bound(dest, bounds1.max(bounds2));
+		self.emit(Max { dest, op1, op2 });
+		dest.into()
+	}
+
+	/// Answer an operand whose value is the lesser of the specified operands:
+	/// either operand, if their bounds prove that it is never greater than the
+	/// other, or else a new register that a [minimum](Min) computes. The
+	/// greatest value of `i32` is the identity of the minimum and the least
+	/// absorbs any other, so either is eliminated thus, as is the minimum of
+	/// two constants.
+	///
+	/// # Parameters
+	/// - `op1`: The first operand, relative to the optimized function.
+	/// - `op2`: The second operand, relative to the optimized function.
+	///
+	/// # Returns
+	/// The lesser operand, relative to the optimized function.
+	fn lesser(
+		&mut self,
+		op1: AddressingMode,
+		op2: AddressingMode
+	) -> AddressingMode
+	{
+		let (bounds1, bounds2) =
+			(self.operand_bounds(op1), self.operand_bounds(op2));
+		// The minimum of a value and itself is the value.
+		if op1 == op2 || bounds1.max <= bounds2.min
+		{
+			return op1
+		}
+		if bounds2.max <= bounds1.min
+		{
+			return op2
+		}
+		let dest = self.next_register();
+		self.bound(dest, bounds1.min(bounds2));
+		self.emit(Min { dest, op1, op2 });
+		dest.into()
 	}
 
 	/// Look up the replacement of the specified operand, falling back to the
@@ -982,33 +1110,19 @@ impl StrengthReducer
 	}
 
 	/// Answer an operand whose value is that of the specified operand, or zero
-	/// if that is negative: a constant, clamped at compile time, or else a new
-	/// register that a [maximum](Max) computes.
+	/// if that is negative: the operand itself, if it is never negative, a
+	/// constant, clamped at compile time, or else a new register that a
+	/// [maximum](Max) computes.
 	///
 	/// # Parameters
 	/// - `op`: The operand, relative to the optimized function.
 	///
 	/// # Returns
 	/// The clamped operand, relative to the optimized function.
+	#[inline]
 	fn at_least_zero(&mut self, op: AddressingMode) -> AddressingMode
 	{
-		match op
-		{
-			AddressingMode::Immediate(Immediate(value)) =>
-			{
-				Immediate(value.max(0)).into()
-			},
-			op =>
-			{
-				let dest = self.next_register();
-				self.emit(Max {
-					dest,
-					op1: op,
-					op2: Immediate(0).into()
-				});
-				dest.into()
-			}
-		}
+		self.greater(op, Immediate(0).into())
 	}
 
 	/// Begin to track the results that the dice of a roll may show, which are
@@ -1037,8 +1151,8 @@ impl StrengthReducer
 
 	/// Replace a roll of dice that all show the same face with its count of
 	/// dice, or zero if the count is negative, which rolls nothing. The drops
-	/// from the rolling record then subtract from the count, and its sum
-	/// multiplies the count by the face.
+	/// from the rolling record then subtract from the count, its keeps cap the
+	/// count, and its sum multiplies the count by the face.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record of the roll, relative to the original
@@ -1088,6 +1202,10 @@ impl StrengthReducer
 			(count, dropped) =>
 			{
 				let difference = self.next_register();
+				self.bound(
+					difference,
+					self.operand_bounds(count) - self.operand_bounds(dropped)
+				);
 				self.emit(Sub {
 					dest: difference,
 					op1: count,
@@ -1096,6 +1214,30 @@ impl StrengthReducer
 				self.at_least_zero(difference.into())
 			}
 		};
+		self.replace(dest, remaining);
+	}
+
+	/// Keep dice of a rolling record that was [reduced to its count of
+	/// dice](Self::reduce_to_count). Every die shows the same face, so
+	/// whichever dice the keep keeps, it caps the count of dice at its count,
+	/// or at zero if that is negative.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record, relative to the original function.
+	/// - `kept`: The count of dice to keep, relative to the original function.
+	fn keep_from_count(
+		&mut self,
+		dest: RollingRecordIndex,
+		kept: AddressingMode
+	)
+	{
+		debug_assert!(
+			self.faces.contains_key(&dest),
+			"a keep from a value that is not a count of dice"
+		);
+		let count = self.replacement(dest);
+		let kept = self.at_least_zero(self.replacement(kept));
+		let remaining = self.lesser(count, kept);
 		self.replace(dest, remaining);
 	}
 
