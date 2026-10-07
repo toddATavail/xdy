@@ -48,7 +48,7 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 
 ## Upgrading from 0.14
 
-`0.15.0` adds keep and reroll clauses (see [Language features](#language-features)). A reroll changes the value of a die after the roll, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
+`0.15.0` adds keep and reroll clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). A reroll changes the value of a die after the roll, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
 
 * `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and, if a reroll rolled it, the index of the die that it `replaces`. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, so a record may hold more dice than its roll did.
 * `RollingRecord::dropped` replaces the methods `lowest_dropped` and `highest_dropped`, answering every die that a drop or keep crossed out, in the order rolled. Once keeps and rerolls may come between drops, the dice crossed out at each end no longer stand apart, so the record no longer says which end each came from. The new `rerolled` answers the dice that rerolls crossed out.
@@ -56,9 +56,10 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 * A rolling record prints its dice in the order rolled, each crossed-out die prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with the dropped dice set apart by semicolons.
 * With the `serde` feature, a rolling record serializes its `dice`, so a record serialized by `0.14` does not deserialize.
 * A drop crosses out the lowest or highest of the dice still kept, and of equal dice, the first rolled. The new `RollingRecord::keep_lowest`, `keep_highest`, and `reroll` apply keeps and rerolls to a record, as `drop_lowest` and `drop_highest` apply drops.
-* `Instruction` gains `KeepLowest`, `KeepHighest`, and `Reroll`, and `InstructionVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, and `visit_reroll`. A `Reroll` holds a `Predicate` and a `Limit`, and its predicate resolves to the `Criterion` that `RollingRecord::reroll` takes.
+* `Instruction` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Min`, and `InstructionVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_min`. A `Reroll` holds a `Predicate` and a `Limit`, and its predicate resolves to the `Criterion` that `RollingRecord::reroll` takes. A `Min` answers the lesser of its operands, as `Max` answers the greater.
 * `ast::DiceExpression` gains `KeepLowest`, `KeepHighest`, and `Reroll`, and `ast::ASTVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, and `visit_reroll`.
-* `diagnostics::DiagnosticKind` gains the kinds that diagnose malformed keep and reroll clauses.
+* `ast::Expression` gains `Extremum`, whose `ast::Extremum` holds a `Direction`, `Highest` or `Lowest`, and its arguments in the order written. `ast::ASTVisitor` requires `visit_extremum`, which receives the outputs of the arguments in order, and offers `enter_extremum`, which does nothing by default.
+* `diagnostics::DiagnosticKind` gains the kinds that diagnose malformed keep and reroll clauses, and malformed calls of `highest` and `lowest`.
 * `Class` gains `rerolls`, which says whether some reroll may reroll or cross out a die.
 
 ## Upgrading from 0.13
@@ -92,6 +93,7 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
   * Exponentiation: `2 ^ 3`, `2 ^ 1D4`, `2D6 ^ 1D8`, …
 * Grouping: `(1 + 2) * 3`, `1 + (2 * 3D4)`, `(3 * 2)D5`, `4D(5 - 2)`, …
 * Ranges, i.e., a single value chosen uniformly between two bounds, inclusive: `[1:6]`, `[3:18]`, `[{x}:2 * {x}]`, …
+* Greatest and least of two or more expressions: `highest(1D20, 1D20)`, `highest(1D6 - 2, 1)`, `lowest({POW} * 5, 99)`, `lowest(highest(1D4, 1D6), 1D8)`, …
 * Drop lowest: `4D6 drop lowest`, `4D6 drop lowest 1`, `2D8 drop lowest 2`, …
 * Drop highest: `4D6 drop highest`, `4D6 drop highest 1`, `2D8 drop highest 2`, …
 * Keep lowest: `4D6 keep lowest`, `4D6 keep lowest 3`, `2D20 keep lowest`, …
@@ -110,6 +112,8 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 A standard die with zero or fewer faces always rolls `0`, so `3D-6` is `0`. A drop clause without a count drops a single die, and a count of zero or less drops nothing. A keep clause without a count keeps a single die, and a count of zero or less keeps nothing. A keep counts from the dice that earlier clauses left kept, so `4D6 drop lowest keep lowest 2` keeps the second and third lowest dice, but `4D6 keep lowest 2 drop lowest` keeps only the second lowest. A drop or keep count never begins with a minus, so `4D6 drop lowest -1` is `(4D6 drop lowest) - 1`, just as it reads. Integer division truncates toward zero, and a division or remainder by zero answers zero.
 
 A reroll clause rolls again each die still kept that its predicate matches, once unless it says how many times, so `2D8 reroll ≤ 2 3 times` rolls each die that shows `1` or `2` again until it shows more or has been rolled again three times. A count of zero or less rerolls nothing. An unlimited reroll rolls each matching die again until it no longer matches, so each die falls as though rolled from the faces that the predicate does not match: `1D6 reroll = 1 unlimited times` rolls `2` through `6`, each equally likely. If the predicate matches every face of the die, no reroll could ever stop, so instead each matching die is crossed out, and counts as `0`: `3D6 reroll ≤ 6 unlimited times` is `0`. A threshold, like a range endpoint or a count, may be a constant, a name, a binding, or a group, and is rolled once, before any die is rolled again, so `1D6 reroll = (1D6)` rerolls against one target. A list holds only integers, as the faces of a custom die do. A range `M..N` holds `M` up to but not including `N`, and `M..=N` holds `N` too, and a range that is empty or inverted, such as `5..2`, matches nothing. `M..=N` differs from `[M:N]` by design: `[M:N]` rolls one value of the range, but `M..=N` names every value of it. Like drops and keeps, rerolls apply in the order written, each to the dice that the clauses before it left kept, so `4D6 drop lowest reroll = 1` rerolls the `1`s that survive the drop, but `4D6 reroll = 1 drop lowest` drops the lowest die after the reroll.
+
+A call of `highest` or `lowest` takes two or more arguments, each a full expression, separated by commas, and answers the greatest or least of their values, so `lowest({POW} * 5, 99)` caps a value at `99`, and `highest(1D6 - 2, 1)` floors one at `1`. Its arguments are values, not pools of dice: `highest(4D6)` would answer the sum of `4D6`, not its highest die, which is `4D6 keep highest`. So a call of one argument is an error, for which the [diagnostics](#diagnostics) suggest `4D6 keep highest`. Every argument is evaluated, left to right, and nothing short-circuits, so every die that any argument rolls appears in the records of the evaluation. A call may stand wherever an expression may begin, but must be grouped as a dice count, faces, the count of a clause, or an operand of a reroll, as in `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and `highest` still name its direction, so `4D6 drop lowest(2)` drops the lowest `2` dice.
 
 A rolling record keeps every die that it rolls, in the order rolled, whatever becomes of it. A drop or keep crosses out each die that it drops, and of equal dice, the first rolled. A reroll crosses out each die that it rolls again, and appends the die's replacement, linked to the die that it replaces, so the whole chain of rerolls of each die can be traced. A record shows each crossed-out die with a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the dice still kept count toward the total, or toward any later clause.
 
@@ -442,6 +446,20 @@ assert!(result.diagnostics.iter().all(|diagnostic| matches!(
     DiagnosticKind::BareIdentifier
 )));
 assert_eq!(result.corrected_source.as_deref(), Some("{x}, {y}: {x}D{y}"));
+```
+
+The doctor also explains that the arguments of `highest` and `lowest` are values, not pools of dice, and suggests the keep clause that was likely meant:
+
+```rust
+use xdy::diagnostics::{DiagnosticKind, diagnose};
+
+let result = diagnose("highest(4D6)");
+assert_eq!(result.diagnostics.len(), 1);
+assert!(matches!(
+    result.diagnostics[0].kind,
+    DiagnosticKind::LoneArgument
+));
+assert_eq!(result.corrected_source.as_deref(), Some("4D6 keep highest"));
 ```
 
 ## Performance

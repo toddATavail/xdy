@@ -49,7 +49,7 @@ graph LR
 
 **Validator.** The `Validator` performs semantic checks on the parsed AST before code generation. It catches duplicate formal parameter names and enforces the invariants of local bindings — use-before-bind (including self-reference), rebinding, and collision with a formal parameter — with room for further checks as downstream language features demand them. See [Semantic validation](#semantic-validation).
 
-**Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. An `ASTVisitor` folds the AST bottom-up: optional `enter_*` hooks run before a node's children, and each `visit_*` method runs after them, receiving their outputs. The walk uses an explicit stack rather than recursion, so it handles ASTs of any depth. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record, except that a drop, keep, or reroll instruction rewrites in place the rolling record that it modifies. Every optimizer pass but register coalescing requires this form. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout. Keeping validation as a separate pass lets the compiler's `ASTVisitor::Error` be `Infallible`.
+**Compiler.** The `Compiler` implements the `ASTVisitor` trait and walks the AST in a single pass to emit IR instructions. An `ASTVisitor` folds the AST bottom-up: optional `enter_*` hooks run before a node's children, and each `visit_*` method runs after them, receiving their outputs. The walk uses an explicit stack rather than recursion, so it handles ASTs of any depth. It uses static single assignment (SSA) form — every instruction writes to a fresh register or rolling record, except that a drop, keep, or reroll instruction rewrites in place the rolling record that it modifies. Every optimizer pass but register coalescing requires this form. Parameters are allocated first (in declaration order), then external variables (depth-first, left-to-right), ensuring deterministic register layout. A call of `highest` or `lowest` evaluates its arguments left to right, then chains `Max` or `Min` over their registers from the left, so `highest(a, b, c)` computes `(a max b) max c`. Keeping validation as a separate pass lets the compiler's `ASTVisitor::Error` be `Infallible`.
 
 **Optimizer.** The `StandardOptimizer` applies five transformation passes in a fixed-point loop, then a final register coalescing pass. See [Optimizer](#optimizer) below.
 
@@ -311,8 +311,8 @@ All arithmetic instructions saturate on overflow/underflow.
 | `Div` | `@N <- A / B` | Saturating division; `x / 0 = 0` |
 | `Mod` | `@N <- A % B` | Saturating remainder; `x % 0 = 0` |
 | `Exp` | `@N <- A ^ B` | Saturating exponentiation; `0^0 = 1`, `1^n = 1`, `(-1)^n = ±1`, and otherwise `x^(-n) = 0` |
-| `Max` | `@N <- A max B` | The greater of `A` and `B`; the optimizer uses it to clamp, e.g., a negative count of dice to `0`, without rolling |
-| `Min` | `@N <- A min B` | The lesser of `A` and `B`; the optimizer uses it to cap, e.g., a count of dice at the count that a keep keeps, without rolling |
+| `Max` | `@N <- A max B` | The greater of `A` and `B`; `highest(…)` chains it over its arguments, and the optimizer uses it to clamp, e.g., a negative count of dice to `0`, without rolling |
+| `Min` | `@N <- A min B` | The lesser of `A` and `B`; `lowest(…)` chains it over its arguments, and the optimizer uses it to cap, e.g., a count of dice at the count that a keep keeps, without rolling |
 | `Neg` | `@N <- -A` | Saturating negation |
 
 ### Control instructions

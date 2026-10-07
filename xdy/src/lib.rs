@@ -54,7 +54,8 @@
 //!
 //! ## Upgrading from 0.14
 //!
-//! `0.15.0` adds keep and reroll clauses (see [Language
+//! `0.15.0` adds keep and reroll clauses, and the greatest and least of
+//! expressions, `highest(…)` and `lowest(…)` (see [Language
 //! features](#language-features)). A reroll changes the value of a die after
 //! the roll, which the counts of the lowest and highest dice dropped, by which
 //! a rolling record described its drops, cannot express. So a [`RollingRecord`]
@@ -94,20 +95,29 @@
 //!   [`reroll`](RollingRecord::reroll) apply keeps and rerolls to a record, as
 //!   [`drop_lowest`](RollingRecord::drop_lowest) and
 //!   [`drop_highest`](RollingRecord::drop_highest) apply drops.
-//! * [`Instruction`] gains [`KeepLowest`], [`KeepHighest`], and [`Reroll`], and
-//!   [`InstructionVisitor`] requires
+//! * [`Instruction`] gains [`KeepLowest`], [`KeepHighest`], [`Reroll`], and
+//!   [`Min`], and [`InstructionVisitor`] requires
 //!   [`visit_keep_lowest`](InstructionVisitor::visit_keep_lowest),
-//!   [`visit_keep_highest`](InstructionVisitor::visit_keep_highest), and
-//!   [`visit_reroll`](InstructionVisitor::visit_reroll). A [`Reroll`] holds a
+//!   [`visit_keep_highest`](InstructionVisitor::visit_keep_highest),
+//!   [`visit_reroll`](InstructionVisitor::visit_reroll), and
+//!   [`visit_min`](InstructionVisitor::visit_min). A [`Reroll`] holds a
 //!   [`Predicate`] and a [`Limit`], and its predicate resolves to the
-//!   [`Criterion`] that [`RollingRecord::reroll`] takes.
+//!   [`Criterion`] that [`RollingRecord::reroll`] takes. A [`Min`] answers the
+//!   lesser of its operands, as [`Max`] answers the greater.
 //! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, and `Reroll`,
 //!   and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),
 //!   [`visit_keep_highest`](ast::ASTVisitor::visit_keep_highest), and
 //!   [`visit_reroll`](ast::ASTVisitor::visit_reroll).
+//! * [`ast::Expression`] gains [`Extremum`](ast::Expression::Extremum), whose
+//!   [`ast::Extremum`] holds a [`Direction`](ast::Direction), `Highest` or
+//!   `Lowest`, and its arguments in the order written. [`ast::ASTVisitor`]
+//!   requires [`visit_extremum`](ast::ASTVisitor::visit_extremum), which
+//!   receives the outputs of the arguments in order, and offers
+//!   [`enter_extremum`](ast::ASTVisitor::enter_extremum), which does nothing by
+//!   default.
 //! * [`diagnostics::DiagnosticKind`] gains the kinds that diagnose malformed
-//!   keep and reroll clauses.
+//!   keep and reroll clauses, and malformed calls of `highest` and `lowest`.
 //! * [`Class`] gains [`rerolls`](Class::rerolls), which says whether some
 //!   reroll may reroll or cross out a die.
 //!
@@ -177,6 +187,9 @@
 //! * Grouping: `(1 + 2) * 3`, `1 + (2 * 3D4)`, `(3 * 2)D5`, `4D(5 - 2)`, …
 //! * Ranges, i.e., a single value chosen uniformly between two bounds,
 //!   inclusive: `[1:6]`, `[3:18]`, `[{x}:2 * {x}]`, …
+//! * Greatest and least of two or more expressions: `highest(1D20, 1D20)`,
+//!   `highest(1D6 - 2, 1)`, `lowest({POW} * 5, 99)`, `lowest(highest(1D4, 1D6),
+//!   1D8)`, …
 //! * Drop lowest: `4D6 drop lowest`, `4D6 drop lowest 1`, `2D8 drop lowest 2`,
 //!   …
 //! * Drop highest: `4D6 drop highest`, `4D6 drop highest 1`, `2D8 drop highest
@@ -236,6 +249,20 @@
 //! order written, each to the dice that the clauses before it left kept, so
 //! `4D6 drop lowest reroll = 1` rerolls the `1`s that survive the drop, but
 //! `4D6 reroll = 1 drop lowest` drops the lowest die after the reroll.
+//!
+//! A call of `highest` or `lowest` takes two or more arguments, each a full
+//! expression, separated by commas, and answers the greatest or least of their
+//! values, so `lowest({POW} * 5, 99)` caps a value at `99`, and `highest(1D6 -
+//! 2, 1)` floors one at `1`. Its arguments are values, not pools of dice:
+//! `highest(4D6)` would answer the sum of `4D6`, not its highest die, which is
+//! `4D6 keep highest`. So a call of one argument is an error, for which the
+//! [diagnostics](#diagnostics-and-validation) suggest `4D6 keep highest`. Every
+//! argument is evaluated, left to right, and nothing short-circuits, so every
+//! die that any argument rolls appears in the records of the evaluation. A call
+//! may stand wherever an expression may begin, but must be grouped as a dice
+//! count, faces, the count of a clause, or an operand of a reroll, as in
+//! `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and `highest`
+//! still name its direction, so `4D6 drop lowest(2)` drops the lowest `2` dice.
 //!
 //! A [rolling record](RollingRecord) keeps every die that it rolls, in the
 //! order rolled, whatever becomes of it. A drop or keep crosses out each die
@@ -685,6 +712,22 @@
 //!     DiagnosticKind::BareIdentifier
 //! )));
 //! assert_eq!(result.corrected_source.as_deref(), Some("{x}, {y}: {x}D{y}"));
+//! ```
+//!
+//! The doctor also explains that the arguments of `highest` and `lowest` are
+//! values, not pools of dice, and suggests the keep clause that was likely
+//! meant:
+//!
+//! ```rust
+//! use xdy::diagnostics::{DiagnosticKind, diagnose};
+//!
+//! let result = diagnose("highest(4D6)");
+//! assert_eq!(result.diagnostics.len(), 1);
+//! assert!(matches!(
+//!     result.diagnostics[0].kind,
+//!     DiagnosticKind::LoneArgument
+//! ));
+//! assert_eq!(result.corrected_source.as_deref(), Some("4D6 keep highest"));
 //! ```
 //!
 //! Every AST node carries a [`SourceSpan`] referencing its byte range in the
