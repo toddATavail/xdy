@@ -1205,7 +1205,7 @@ impl RollingRecordKind<i32>
 	/// # Returns
 	/// The saturated value. An uninitialized record has no die, so its value
 	/// is `0`.
-	fn saturated_value(&self) -> i32
+	pub(crate) fn saturated_value(&self) -> i32
 	{
 		// The sign of the sum of the faces is the sign of their mean.
 		let sum = match self
