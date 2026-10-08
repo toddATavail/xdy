@@ -1032,8 +1032,11 @@ fn test_chains_follow_links()
 /// Test that the sum and every drop and keep count each chain still kept as
 /// one die, worth the sum of its kept dice, or the value of its saturated die;
 /// that crossing out a chain crosses out every kept die of it, and leaves the
-/// dice that a reroll crossed out as they were; and that of equal chains, the
-/// one whose earliest kept die was rolled first is crossed out first.
+/// dice that a reroll crossed out as they were; that of chains of equal
+/// totals, the lesser by their contents is crossed out first by a drop of the
+/// lowest, and the greater by a drop of the highest; and that of identical
+/// chains, the one whose earliest kept die was rolled first is crossed out
+/// first.
 #[test]
 fn test_chains_count_as_one_die()
 {
@@ -1063,13 +1066,14 @@ fn test_chains_count_as_one_die()
 	for (clause, count, expected, sum) in [
 		(drop_lowest, 1, "0D6: [6, ~3, 5, 4, 2, ~1, 3]", 20),
 		(drop_lowest, 2, "0D6: [6, ~3, 5, ~4, 2, ~1, 3]", 16),
-		// The chains worth 8 tie, and the first, whose earliest kept die is
-		// the `6`, goes first.
-		(drop_highest, 1, "0D6: [~6, 3, 5, 4, ~2, ~1, 3]", 15),
+		// The chains worth 8 tie, and the second, whose kept dice are
+		// `[3, 5]`, is the greater, since the first's are `[2, 6]`.
+		(drop_highest, 1, "0D6: [6, 3, ~5, 4, 2, ~1, ~3]", 15),
 		(drop_highest, 2, "0D6: [~6, 3, ~5, 4, ~2, ~1, ~3]", 7),
-		// Of the chains worth 8, keeping the highest crosses out the first.
+		// Of the chains worth 8, keeping the highest crosses out the lesser,
+		// and keeping the lowest the greater.
 		(keep_highest, 1, "0D6: [~6, ~3, 5, ~4, ~2, ~1, 3]", 8),
-		(keep_lowest, 3, "0D6: [~6, 3, 5, 4, ~2, ~1, 3]", 15),
+		(keep_lowest, 3, "0D6: [6, 3, ~5, 4, 2, ~1, ~3]", 15),
 		(keep_lowest, 4, "0D6: [6, 3, 5, 4, 2, ~1, 3]", 23),
 		(drop_lowest, 9, "0D6: [~6, ~3, ~5, ~4, ~2, ~1, ~3]", 0),
 		(keep_highest, 0, "0D6: [~6, ~3, ~5, ~4, ~2, ~1, ~3]", 0)
@@ -1081,9 +1085,9 @@ fn test_chains_count_as_one_die()
 		assert_eq!(record.sum(), sum, "{}", expected);
 		assert_eq!(record.rerolled(), vec![1], "{}", expected);
 	}
-	// Of equal chains, the earliest kept die decides, not the first die: the
-	// replacement of the `1` that begins the first chain was rolled after the
-	// `3`, so the `3` is crossed out first.
+	// Of identical chains, the earliest kept die decides, not the first die:
+	// the replacement of the `1` that begins the first chain was rolled
+	// after the `3`, so the `3` is crossed out first.
 	let mut record = record(6, &[]);
 	record.dice = vec![
 		die(1, Origin::Rolled),
@@ -1283,13 +1287,33 @@ fn test_chains_without_extensions_are_dice()
 	}
 }
 
+/// A chain still kept, as [`test_chains_agree_with_sorted_totals`] orders
+/// them: its total, its kept dice in ascending order, and the value of its last
+/// kept die that no die extends.
+type Chain = (i32, Vec<i32>, Option<i32>);
+
 /// Test that drops and keeps over random records with chains keep the same
-/// totals as dropping from the ends of the sorted totals of the chains, which
-/// a reference computes by following each die's links to the die that begins
-/// its chain, and that crossing out a chain leaves none of its dice kept.
+/// chains as dropping from the ends of the chains sorted by their totals and
+/// then their contents, which a reference computes by following each die's
+/// links to the die that begins its chain, and that crossing out a chain
+/// leaves none of its dice kept.
 #[test]
 fn test_chains_agree_with_sorted_totals()
 {
+	/// Answer whether some die extends the specified die, or any die that it
+	/// replaces.
+	fn extended(record: &RollingRecord, index: usize) -> bool
+	{
+		record.dice.iter().any(|die| {
+			matches!(
+				die.origin,
+				Origin::Extends(link) | Origin::Saturates(link) if link == index
+			)
+		}) || matches!(
+			record.dice[index].origin,
+			Origin::Replaces(link) if link < index && extended(record, link)
+		)
+	}
 	/// Answer the index of the first die of the chain of the specified die.
 	fn root(record: &RollingRecord, index: usize) -> usize
 	{
@@ -1299,15 +1323,21 @@ fn test_chains_agree_with_sorted_totals()
 			_ => index
 		}
 	}
-	/// Answer the totals of the chains still kept, by first die.
-	fn totals(record: &RollingRecord) -> Vec<(usize, i32)>
+	/// Answer the totals of the chains still kept, each with its kept dice in
+	/// ascending order and the value of its last kept die that no die
+	/// extends, by first die.
+	fn totals(record: &RollingRecord) -> Vec<(usize, Chain)>
 	{
-		let mut chains = std::collections::BTreeMap::<usize, Vec<Die>>::new();
+		let mut chains =
+			std::collections::BTreeMap::<usize, Vec<(usize, Die)>>::new();
 		for (index, die) in record.dice.iter().enumerate()
 		{
 			if die.is_kept()
 			{
-				chains.entry(root(record, index)).or_default().push(*die);
+				chains
+					.entry(root(record, index))
+					.or_default()
+					.push((index, *die));
 			}
 		}
 		chains
@@ -1315,23 +1345,26 @@ fn test_chains_agree_with_sorted_totals()
 			.map(|(root, dice)| {
 				// The earliest saturated die decides, should several share a
 				// chain.
-				let saturated = dice
-					.iter()
-					.find(|die| matches!(die.origin, Origin::Saturates(_)));
+				let saturated = dice.iter().find(|(_, die)| {
+					matches!(die.origin, Origin::Saturates(_))
+				});
+				let mut values =
+					dice.iter().map(|(_, die)| die.value).collect::<Vec<_>>();
+				values.sort();
 				let total = match saturated
 				{
-					Some(die) => die.value,
+					Some((_, die)) => die.value,
 					None =>
 					{
-						let mut values = dice
-							.iter()
-							.map(|die| die.value)
-							.collect::<Vec<_>>();
-						values.sort();
 						values.iter().fold(0i32, |a, b| a.saturating_add(*b))
-					}
+					},
 				};
-				(root, total)
+				let end = dice
+					.iter()
+					.rev()
+					.find(|(index, _)| !extended(record, *index))
+					.map(|(_, die)| die.value);
+				(root, (total, values, end))
 			})
 			.collect()
 	}
@@ -1369,7 +1402,7 @@ fn test_chains_agree_with_sorted_totals()
 		}
 		let mut sorted = totals(&record)
 			.into_iter()
-			.map(|(_, total)| total)
+			.map(|(_, chain)| chain)
 			.collect::<Vec<_>>();
 		sorted.sort();
 		let before = record.clone();
@@ -1377,7 +1410,7 @@ fn test_chains_agree_with_sorted_totals()
 		let count = rng.random_range(-1..=kept + 1);
 		let keep = (kept - count.clamp(0, kept)) as usize;
 		let lowest = rng.random_bool(0.5);
-		let expected: Vec<i32> = match (rng.random_bool(0.5), lowest)
+		let expected: Vec<Chain> = match (rng.random_bool(0.5), lowest)
 		{
 			(true, true) =>
 			{
@@ -1402,13 +1435,15 @@ fn test_chains_agree_with_sorted_totals()
 		};
 		let mut actual = totals(&record)
 			.into_iter()
-			.map(|(_, total)| total)
+			.map(|(_, chain)| chain)
 			.collect::<Vec<_>>();
 		actual.sort();
 		assert_eq!(actual, expected, "{} -> {}", before, record);
 		assert_eq!(
 			record.sum(),
-			expected.iter().fold(0i32, |a, b| a.saturating_add(*b)),
+			expected
+				.iter()
+				.fold(0i32, |a, (b, ..)| a.saturating_add(*b)),
 			"{}",
 			record
 		);
