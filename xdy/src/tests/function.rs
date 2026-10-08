@@ -209,6 +209,61 @@ fn malformed() -> Vec<(Function, FunctionError, &'static str)>
 		),
 		(
 			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::explode(
+						RollingRecordIndex(0),
+						Predicate::Eq(AddressingMode::Immediate(Immediate(6))),
+						Limit::Times(AddressingMode::Register(RegisterIndex(
+							7
+						)))
+					)
+				)
+			},
+			FunctionError::RegisterOutOfBounds {
+				index: 7,
+				register_count: 3,
+				instruction: 1
+			},
+			"instruction 1: register @7 exceeds declared register count r#3"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::explode(
+						RollingRecordIndex(2),
+						Predicate::In(vec![6]),
+						Limit::Unlimited
+					)
+				)
+			},
+			FunctionError::RollingRecordOutOfBounds {
+				index: 2,
+				rolling_record_count: 1,
+				instruction: 1
+			},
+			"instruction 1: rolling record ⚅2 exceeds declared rolling record \
+			 count ⚅#1"
+		),
+		(
+			|f| {
+				f.instructions.insert(
+					1,
+					Instruction::explode(
+						RollingRecordIndex(0),
+						Predicate::Lt(AddressingMode::RollingRecord(
+							RollingRecordIndex(0)
+						)),
+						Limit::Unlimited
+					)
+				)
+			},
+			FunctionError::UnexpectedRollingRecordOperand { instruction: 1 },
+			"instruction 1: rolling record operand is not permitted here"
+		),
+		(
+			|f| {
 				f.instructions.pop();
 			},
 			FunctionError::MissingReturn,
@@ -360,6 +415,40 @@ Function({a}@0) r#2 ⚅#1
 \t\t⚅0 <- reroll in [1, 3] unlimited times from ⚅0
 \t\t⚅0 <- reroll in 1..@0 unlimited times from ⚅0
 \t\t⚅0 <- reroll in -1..=1 unlimited times from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+"
+	)
+	.unwrap();
+	let json = serde_json::to_string(&function).unwrap();
+	let actual: Function = serde_json::from_str(&json).unwrap();
+	assert_eq!(actual, function);
+}
+
+/// Test that functions that explode, with every form of predicate and both
+/// kinds of limit, among rerolls and drops, survive the round trip through
+/// `serde`.
+#[cfg(feature = "serde")]
+#[test]
+fn test_serde_round_trip_explodes()
+{
+	let function = Assembler::assemble(
+		"\
+Function({a}@0) r#2 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- explode = 6 up to 1 times from ⚅0
+\t\t⚅0 <- explode != @0 up to @0 times from ⚅0
+\t\t⚅0 <- explode < 2 unlimited times from ⚅0
+\t\t⚅0 <- explode <= 2 unlimited times from ⚅0
+\t\t⚅0 <- explode > 5 unlimited times from ⚅0
+\t\t⚅0 <- explode >= 5 unlimited times from ⚅0
+\t\t⚅0 <- explode in [1, 3] unlimited times from ⚅0
+\t\t⚅0 <- explode in 1..@0 unlimited times from ⚅0
+\t\t⚅0 <- explode in -1..=1 unlimited times from ⚅0
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t⚅0 <- keep highest 3 from ⚅0
 \t\t@1 <- sum rolling record ⚅0
 \t\treturn @1
 "

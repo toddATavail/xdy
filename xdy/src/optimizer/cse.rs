@@ -9,9 +9,10 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, Instruction, InstructionVisitor,
-	KeepHighest, KeepLowest, Max, Min, Mod, Mul, Neg, RegisterIndex, Reroll,
-	Return, RollCustomDice, RollRange, RollStandardDice, Sub, SumRollingRecord
+	DropHighest, DropLowest, Exp, Explode, Function, Instruction,
+	InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod, Mul, Neg,
+	RegisterIndex, Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
+	Sub, SumRollingRecord
 };
 
 use super::Optimizer;
@@ -185,6 +186,15 @@ impl InstructionVisitor<()> for CommonSubexpressionEliminator
 		// rolling records are not affected by this optimization, so we don't
 		// need to allocate replacements for them.
 		self.emit(reroll.map(reroll.dest, |op| self.replacement(op)));
+		Ok(())
+	}
+
+	fn visit_explode(&mut self, explode: &Explode) -> Result<(), ()>
+	{
+		// Dice instructions are not pure, so they cannot be eliminated. The
+		// rolling records are not affected by this optimization, so we don't
+		// need to allocate replacements for them.
+		self.emit(explode.map(explode.dest, |op| self.replacement(op)));
 		Ok(())
 	}
 
@@ -507,6 +517,15 @@ impl CanScrub for Reroll
 	}
 }
 
+impl CanScrub for Explode
+{
+	fn scrub(&self) -> Self
+	{
+		// The destination is a rolling record, so it unaffected.
+		self.clone()
+	}
+}
+
 impl CanScrub for SumRollingRecord
 {
 	fn scrub(&self) -> Self
@@ -644,6 +663,7 @@ impl CanScrub for Instruction
 			Instruction::KeepLowest(inst) => inst.scrub().into(),
 			Instruction::KeepHighest(inst) => inst.scrub().into(),
 			Instruction::Reroll(inst) => inst.scrub().into(),
+			Instruction::Explode(inst) => inst.scrub().into(),
 			Instruction::SumRollingRecord(inst) => inst.scrub().into(),
 			Instruction::Add(inst) => inst.scrub().into(),
 			Instruction::Sub(inst) => inst.scrub().into(),

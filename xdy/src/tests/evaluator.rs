@@ -2471,3 +2471,815 @@ fn test_reroll_bounds_dice()
 		);
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 Explodes.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that an explode keeps each matching die, appends its extensions,
+/// linked to it, after the dice already rolled, and finishes each die before
+/// beginning the next; that only the dice still kept explode; and that the sum
+/// and every later keep count each chain as one die, worth its total.
+#[test]
+fn test_explode_appends_linked_extensions()
+{
+	// A die whose only face is `2` always rolls a `2`, and so does a die whose
+	// only face is `6` always roll a `6`, so the extensions are known, even
+	// though the record holds other results.
+	let kind = |faces| RollingRecordKind::Custom {
+		count: 3,
+		faces: vec![faces]
+	};
+	let mut rng = StdRng::seed_from_u64(0);
+	let mut record = record_of(kind(2), &[6, 3, 6]);
+	assert_eq!(
+		record.explode(&mut rng, &Criterion::Within(6..=6), Some(1)),
+		2
+	);
+	assert_eq!(record.to_string(), "3d[2]: [6, 3, 6, 2, 2]");
+	let links = record.dice.iter().map(|die| die.origin).collect::<Vec<_>>();
+	assert_eq!(
+		links,
+		[
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Extends(0),
+			Origin::Extends(2)
+		]
+	);
+	assert!(record.dice.iter().all(Die::is_kept));
+	assert_eq!(record.chains(), vec![vec![0, 3], vec![1], vec![2, 4]]);
+	assert_eq!(record.sum(), 19);
+	// Of the chains worth `8`, `3`, and `8`, keeping the highest crosses out
+	// the `3` and then the `8` whose earliest die was rolled first.
+	record.keep_highest(1);
+	assert_eq!(record.to_string(), "3d[2]: [~6, ~3, 6, ~2, 2]");
+	assert_eq!(record.dropped(), vec![6, 3, 2]);
+	assert_eq!(record.sum(), 8);
+	// Each die finishes its chain before the next begins: the first `6` and
+	// its extensions precede the extensions of the second, and each chain
+	// stops at the limit, though its last die still matches.
+	let mut record = record_of(kind(6), &[6, 1, 6]);
+	assert_eq!(
+		record.explode(&mut rng, &Criterion::Within(6..=6), Some(2)),
+		4
+	);
+	assert_eq!(record.to_string(), "3d[6]: [6, 1, 6, 6, 6, 6, 6]");
+	let links = record.dice.iter().map(|die| die.origin).collect::<Vec<_>>();
+	assert_eq!(
+		links,
+		[
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Rolled,
+			Origin::Extends(0),
+			Origin::Extends(3),
+			Origin::Extends(2),
+			Origin::Extends(5)
+		]
+	);
+	assert_eq!(record.sum(), 37);
+	// Only the dice still kept explode.
+	let mut record = record_of(kind(2), &[6, 6]);
+	record.drop_lowest(1);
+	assert_eq!(
+		record.explode(&mut rng, &Criterion::Within(6..=6), Some(1)),
+		1
+	);
+	assert_eq!(record.to_string(), "3d[2]: [~6, 6, 2]");
+	assert_eq!(record.dice[2].origin, Origin::Extends(1));
+	assert_eq!(record.sum(), 8);
+}
+
+/// Test that a chain grows only from its end: a later explode extends only
+/// the die that nothing extends yet, and a replacement takes the place in its
+/// chain of the die that it replaces, so that rerolling a die of a chain that
+/// some die extends leaves its replacement extended, and rerolling the end of
+/// a chain leaves its replacement free to grow. A later reroll acts on each
+/// die of a chain alone.
+#[test]
+fn test_explode_grows_chains_from_their_ends()
+{
+	let mut rng = StdRng::seed_from_u64(0);
+	let only = |face| RollingRecordKind::Custom {
+		count: 1,
+		faces: vec![face]
+	};
+	let six = Criterion::Within(6..=6);
+	let one = Criterion::Within(1..=1);
+	let mut record = record_of(only(6), &[6]);
+	assert_eq!(record.explode(&mut rng, &six, Some(1)), 1);
+	assert_eq!(record.explode(&mut rng, &six, Some(1)), 1);
+	let links = record.dice.iter().map(|die| die.origin).collect::<Vec<_>>();
+	assert_eq!(
+		links,
+		[Origin::Rolled, Origin::Extends(0), Origin::Extends(1)]
+	);
+	assert_eq!(record.chains(), vec![vec![0, 1, 2]]);
+	assert_eq!(record.sum(), 18);
+	// Reroll both dice of the chain `[6, 6]`, and then explode: the
+	// replacement of the first takes its place, which the second extends, so
+	// only the replacement of the second grows the chain.
+	let mut record = record_of(only(1), &[]);
+	record.dice = vec![die(6, Origin::Rolled), die(6, Origin::Extends(0))];
+	assert_eq!(record.reroll(&mut rng, &six, Some(1)), 2);
+	assert_eq!(record.to_string(), "1d[1]: [~6, ~6, 1, 1]");
+	assert_eq!(record.explode(&mut rng, &one, Some(1)), 1);
+	assert_eq!(record.dice[4].origin, Origin::Extends(3));
+	assert_eq!(record.to_string(), "1d[1]: [~6, ~6, 1, 1, 1]");
+	assert_eq!(record.chains(), vec![vec![0, 1, 2, 3, 4]]);
+	assert_eq!(record.sum(), 3);
+	// Reroll the end of the chain `[1, 6]`: its replacement ends the chain.
+	let mut record = record_of(only(1), &[]);
+	record.dice = vec![die(1, Origin::Rolled), die(6, Origin::Extends(0))];
+	assert_eq!(record.reroll(&mut rng, &six, Some(1)), 1);
+	assert_eq!(record.explode(&mut rng, &one, Some(1)), 1);
+	assert_eq!(record.dice[3].origin, Origin::Extends(2));
+	assert_eq!(record.to_string(), "1d[1]: [1, ~6, 1, 1]");
+	assert_eq!(record.sum(), 3);
+	// A later reroll rerolls the `1` of the chain `[6, 1]` alone.
+	let mut record = record_of(only(5), &[]);
+	record.dice = vec![die(6, Origin::Rolled), die(1, Origin::Extends(0))];
+	assert_eq!(record.reroll(&mut rng, &one, Some(1)), 1);
+	assert_eq!(record.to_string(), "1d[5]: [6, ~1, 5]");
+	assert_eq!(record.dice[2].origin, Origin::Replaces(1));
+	assert_eq!(record.chains(), vec![vec![0, 1, 2]]);
+	assert_eq!(record.sum(), 11);
+}
+
+/// Test the degenerate explodes: a limit of zero or less explodes nothing; an
+/// unlimited explode that matches every face rolls nothing, but appends to
+/// every matching die a saturated die, worth `i32::MAX` or `i32::MIN` by the
+/// sign of the mean face value, or `0` if that mean is `0`; a die without faces
+/// and an empty range show only the face `0`; later rerolls and explodes leave
+/// saturated chains alone, but act on the other chains; and a record without
+/// dice is unchanged.
+#[test]
+fn test_explode_saturates()
+{
+	let mut rng = StdRng::seed_from_u64(0);
+	let standard = |faces| RollingRecordKind::Standard { count: 3, faces };
+	let custom = |faces: &[i32]| RollingRecordKind::Custom {
+		count: 2,
+		faces: faces.to_vec()
+	};
+	let everything = Criterion::Outside(RangeInclusive::new(1, 0));
+	for limit in [0, -1, i32::MIN]
+	{
+		let mut record = record_of(standard(6), &[1, 2, 3]);
+		assert_eq!(record.explode(&mut rng, &everything, Some(limit)), 0);
+		assert_eq!(record.to_string(), "3D6: [1, 2, 3]");
+	}
+	for (kind, results, criterion, expected, sum) in [
+		(
+			standard(6),
+			&[1, 6, 3][..],
+			Criterion::Within(1..=6),
+			"3D6: [1, 6, 3, ∞, ∞, ∞]",
+			i32::MAX
+		),
+		(
+			standard(1),
+			&[1],
+			Criterion::Within(1..=1),
+			"3D1: [1, ∞]",
+			i32::MAX
+		),
+		(
+			custom(&[-3, 1]),
+			&[1, -3],
+			Criterion::Within(-3..=1),
+			"2d[-3, 1]: [1, -3, -∞, -∞]",
+			i32::MIN
+		),
+		(
+			custom(&[-1, 1]),
+			&[1, -1],
+			Criterion::Outside(0..=0),
+			"2d[-1, 1]: [1, -1, 0, 0]",
+			0
+		),
+		(
+			standard(0),
+			&[0, 0],
+			Criterion::Within(0..=0),
+			"3D0: [0, 0, 0, 0]",
+			0
+		),
+		(
+			standard(-1),
+			&[0],
+			Criterion::Among(vec![0]),
+			"3D-1: [0, 0]",
+			0
+		),
+		(
+			RollingRecordKind::Range { start: 4, end: 2 },
+			&[0],
+			Criterion::Within(0..=0),
+			"[4:2]: [0, 0]",
+			0
+		),
+		(
+			RollingRecordKind::Range { start: -5, end: 2 },
+			&[-1],
+			Criterion::Within(-5..=2),
+			"[-5:2]: [-1, -∞]",
+			i32::MIN
+		),
+		(
+			RollingRecordKind::Range { start: -2, end: 2 },
+			&[2],
+			Criterion::Within(-2..=2),
+			"[-2:2]: [2, 0]",
+			0
+		),
+		(
+			RollingRecordKind::Range {
+				start: i32::MIN,
+				end: i32::MAX
+			},
+			&[7],
+			Criterion::Within(i32::MIN..=i32::MAX),
+			"[-2147483648:2147483647]: [7, -∞]",
+			i32::MIN
+		),
+		// A die that shows no face of its die does not match, so only the
+		// `6` saturates.
+		(
+			custom(&[6]),
+			&[6, 3],
+			Criterion::Within(6..=6),
+			"2d[6]: [6, 3, ∞]",
+			i32::MAX
+		)
+	]
+	{
+		let mut record = record_of(kind, results);
+		assert_eq!(
+			record.explode(&mut rng, &criterion, None),
+			0,
+			"{}",
+			expected
+		);
+		assert_eq!(record.to_string(), expected);
+		assert_eq!(record.sum(), sum, "{}", expected);
+		let saturated = record
+			.dice
+			.iter()
+			.filter(|die| matches!(die.origin, Origin::Saturates(_)))
+			.count();
+		assert_eq!(
+			saturated,
+			results.iter().filter(|&&r| criterion.matches(r)).count(),
+			"{}",
+			expected
+		);
+		// Later rerolls and explodes leave the saturated chains alone.
+		if saturated == results.len()
+		{
+			let before = record.clone();
+			assert_eq!(record.explode(&mut rng, &everything, Some(2)), 0);
+			assert_eq!(record.explode(&mut rng, &everything, None), 0);
+			assert_eq!(record.reroll(&mut rng, &everything, Some(2)), 0);
+			assert_eq!(record.reroll(&mut rng, &everything, None), 0);
+			assert_eq!(record, before, "{}", expected);
+		}
+	}
+	// Later rerolls and explodes act on the chains that do not saturate, die by
+	// die, and leave the saturated chains alone.
+	let mut record = record_of(custom(&[6]), &[6, 3]);
+	assert_eq!(record.explode(&mut rng, &Criterion::Within(6..=6), None), 0);
+	assert_eq!(record.to_string(), "2d[6]: [6, 3, ∞]");
+	assert_eq!(
+		record.reroll(&mut rng, &Criterion::Within(3..=3), Some(1)),
+		1
+	);
+	assert_eq!(record.to_string(), "2d[6]: [6, ~3, ∞, 6]");
+	assert_eq!(
+		record.explode(&mut rng, &Criterion::Within(6..=6), Some(1)),
+		1
+	);
+	assert_eq!(record.to_string(), "2d[6]: [6, ~3, ∞, 6, 6]");
+	assert_eq!(record.dice[4].origin, Origin::Extends(3));
+	assert_eq!(record.reroll(&mut rng, &everything, None), 0);
+	assert_eq!(record.to_string(), "2d[6]: [6, ~3, ∞, ~6, ~6]");
+	assert_eq!(record.chains(), vec![vec![0, 2], vec![1, 3, 4]]);
+	assert_eq!(record.sum(), i32::MAX);
+	// No dice, and an uninitialized record, have nothing to explode.
+	for kind in [standard(6), RollingRecordKind::Uninitialized]
+	{
+		let mut record = record_of(kind, &[]);
+		assert_eq!(record.explode(&mut rng, &everything, None), 0);
+		assert_eq!(record.explode(&mut rng, &everything, Some(3)), 0);
+		assert!(record.dice.is_empty());
+	}
+}
+
+/// Test, over random records, criteria, and limits, that an explode keeps its
+/// invariants: it changes no die already rolled; every extension follows the
+/// dice already rolled, links to the die that it extends, and shows a face of
+/// the die; each chain begins at a die kept and matching when the explode
+/// began, extends only dice that match, holds at most as many extensions as
+/// the limit, and ends at a die that no longer matches or that exhausted the
+/// limit; the chains follow one another in the order of the dice that begin
+/// them; every die stays kept; the explode rolls one die per extension; and
+/// an unlimited explode that matches every face rolls nothing, but saturates
+/// every matching die, by the sign of the mean face value.
+#[test]
+fn test_explode_invariants()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(5019827350198273);
+	for _ in 0..10_000
+	{
+		let (kind, faces): (_, Vec<i32>) = match rng.random_range(0..4)
+		{
+			0 =>
+			{
+				let faces = rng.random_range(-1..=6);
+				(
+					RollingRecordKind::Standard { count: 0, faces },
+					match faces <= 0
+					{
+						true => vec![0],
+						false => (1..=faces).collect()
+					}
+				)
+			},
+			1 =>
+			{
+				let faces = (0..rng.random_range(1..=4))
+					.map(|_| rng.random_range(-3..=3))
+					.collect::<Vec<_>>();
+				(
+					RollingRecordKind::Custom {
+						count: 0,
+						faces: faces.clone()
+					},
+					faces
+				)
+			},
+			_ =>
+			{
+				let start = rng.random_range(-3..=3);
+				let end = rng.random_range(-3..=3);
+				(
+					RollingRecordKind::Range { start, end },
+					match end < start
+					{
+						true => vec![0],
+						false => (start..=end).collect()
+					}
+				)
+			}
+		};
+		let len = rng.random_range(0..=5);
+		let results = (0..len)
+			.map(|_| faces[rng.random_range(0..faces.len())])
+			.collect::<Vec<_>>();
+		let mut record = record_of(kind, &results);
+		if rng.random_bool(0.5)
+		{
+			record.drop_lowest(rng.random_range(0..=2));
+		}
+		let criterion = match rng.random_range(0..3)
+		{
+			0 =>
+			{
+				let start = rng.random_range(-4..=4);
+				Criterion::within(start, rng.random_range(-4..=4))
+			},
+			1 =>
+			{
+				let start = rng.random_range(-4..=4);
+				Criterion::Outside(start..=rng.random_range(-4..=4))
+			},
+			_ =>
+			{
+				let mut values = (0..rng.random_range(0..=4))
+					.map(|_| rng.random_range(-4..=4))
+					.collect::<Vec<_>>();
+				values.sort();
+				values.dedup();
+				Criterion::Among(values)
+			}
+		};
+		let limit = match rng.random_bool(0.3)
+		{
+			true => None,
+			false => Some(rng.random_range(-1..=3))
+		};
+		let before = record.clone();
+		let rolled = record.explode(&mut rng, &criterion, limit);
+		let context = format!(
+			"{} explode {:?} {:?} -> {}",
+			before, criterion, limit, record
+		);
+		let len = before.dice.len();
+		assert_eq!(&record.dice[..len], &before.dice[..], "{}", context);
+		let starts = before
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|(_, die)| die.is_kept() && criterion.matches(die.value))
+			.map(|(index, _)| index)
+			.collect::<Vec<_>>();
+		if limit.is_none() && faces.iter().all(|f| criterion.matches(*f))
+		{
+			// Every face matches, so every matching die saturates.
+			let saturated = match faces.iter().sum::<i32>().signum()
+			{
+				1 => i32::MAX,
+				-1 => i32::MIN,
+				_ => 0
+			};
+			let expected = starts
+				.iter()
+				.map(|&index| Die::saturating(saturated, index))
+				.collect::<Vec<_>>();
+			assert_eq!(rolled, 0, "{}", context);
+			assert_eq!(&record.dice[len..], &expected[..], "{}", context);
+			continue
+		}
+		assert_eq!(record.dice.len() - len, rolled as usize, "{}", context);
+		assert!(record.dice[len..].iter().all(Die::is_kept), "{}", context);
+		// Follow each chain from the die that begins it.
+		let mut next = len;
+		for start in starts
+		{
+			let mut current = start;
+			let mut times = 0;
+			while next < record.dice.len()
+				&& record.dice[next].origin == Origin::Extends(current)
+			{
+				assert!(
+					criterion.matches(record.dice[current].value),
+					"{}",
+					context
+				);
+				assert!(
+					faces.contains(&record.dice[next].value),
+					"{}",
+					context
+				);
+				current = next;
+				next += 1;
+				times += 1;
+			}
+			let end = record.dice[current];
+			match limit
+			{
+				Some(limit) =>
+				{
+					assert!(times <= limit.max(0) as usize, "{}", context);
+					assert!(
+						!criterion.matches(end.value)
+							|| times == limit.max(0) as usize,
+						"{}",
+						context
+					);
+				},
+				None =>
+				{
+					assert!(!criterion.matches(end.value), "{}", context);
+				}
+			}
+		}
+		assert_eq!(next, record.dice.len(), "{}", context);
+		// Without saturation, the sum of the chains is the sum of the kept
+		// dice, which is far too small to overflow.
+		assert_eq!(
+			record.sum(),
+			record.kept().iter().sum::<i32>(),
+			"{}",
+			context
+		);
+	}
+}
+
+/// Answer an evaluator for a function that rolls the specified dice, explodes
+/// them by the specified clause, applies the specified further clauses, and
+/// sums the record.
+///
+/// # Parameters
+/// - `roll`: The roll, as the assembler reads it after `roll`.
+/// - `clause`: The predicate and limit of the explode, as the assembler reads
+///   them.
+/// - `clauses`: The further clauses, each as the assembler reads it before
+///   `from`.
+///
+/// # Returns
+/// The evaluator.
+fn explode_evaluator(roll: &str, clause: &str, clauses: &[&str]) -> Evaluator
+{
+	let clauses = clauses
+		.iter()
+		.map(|clause| format!("\t\t⚅0 <- {} from ⚅0\n", clause))
+		.collect::<String>();
+	Evaluator::new(
+		Assembler::assemble(&format!(
+			"Function({{t}}@0) r#2 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll \
+			 {}\n\t\t⚅0 <- explode {} from ⚅0\n{}\t\t@1 <- sum rolling \
+			 record ⚅0\n\t\treturn @1\n",
+			roll, clause, clauses
+		))
+		.unwrap()
+	)
+}
+
+/// Test that evaluation explodes as the instruction directs: it reads the
+/// threshold and limit from their registers, sums the chains, counts each
+/// extension as a die, and stays within the bounds, which are loose but
+/// sound; that an unlimited explode saturates, whether its predicate matches
+/// every face statically or only for the threshold given at runtime, toward
+/// the sign of the mean face value; and that drops and keeps after an explode
+/// cross out whole chains, and an explode after a keep explodes only the dice
+/// still kept.
+#[test]
+fn test_evaluation_explodes()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let mut rng = StdRng::seed_from_u64(7120398571203985);
+	for (clause, t, saturates) in [
+		("= @0 up to 2 times", 6, false),
+		("> @0 unlimited times", 4, false),
+		("in [5, 6] up to @0 times", 1, false),
+		("!= @0 up to 1 times", 3, false),
+		("in @0..=6 unlimited times", 1, true),
+		("<= @0 unlimited times", 6, true),
+		(">= 1 unlimited times", 0, true)
+	]
+	{
+		let mut evaluator = explode_evaluator("standard dice 4D6", clause, &[]);
+		let bounds = evaluator.bounds_over([Some(t.into())], []).unwrap();
+		assert_eq!(bounds.count, None, "{}", clause);
+		for _ in 0..200
+		{
+			let evaluation = evaluator.evaluate([t], &mut rng).unwrap();
+			let [record] = &evaluation.records[..]
+			else
+			{
+				panic!("expected one record: {:?}", evaluation.records)
+			};
+			assert_eq!(record.chains().len(), 4, "{}: {}", clause, record);
+			assert!(record.dice.iter().all(Die::is_kept), "{}", record);
+			assert_eq!(evaluation.result, record.clone().sum(), "{}", record);
+			assert!(bounds.value.contains(evaluation.result), "{}", record);
+			assert!(evaluation.dice <= bounds.dice, "{}", record);
+			match saturates
+			{
+				true =>
+				{
+					assert_eq!(evaluation.result, i32::MAX, "{}", record);
+					assert_eq!(evaluation.dice, 4, "{}", record);
+					assert!(record.to_string().ends_with("∞, ∞, ∞, ∞]"));
+				},
+				false =>
+				{
+					assert_eq!(
+						evaluation.dice,
+						record.dice.len() as u64,
+						"{}",
+						record
+					);
+					assert_eq!(
+						evaluation.result,
+						record.kept().iter().sum::<i32>(),
+						"{}",
+						record
+					);
+				}
+			}
+			if clause == "> @0 unlimited times"
+			{
+				// Every chain ends at a die that shows at most the threshold.
+				for chain in record.chains()
+				{
+					let end = record.dice[*chain.last().unwrap()];
+					assert!(end.value <= t, "{}", record);
+				}
+			}
+		}
+	}
+	// An explode that cannot match leaves the bounds as they were.
+	let evaluator =
+		explode_evaluator("standard dice 4D6", "= 7 unlimited times", &[]);
+	let bounds = evaluator.bounds_over([Some(0.into())], []).unwrap();
+	assert_eq!(bounds.value, (4, 24).into());
+	assert_eq!(bounds.count, Some(6u128.pow(4)));
+	assert_eq!(bounds.dice, 4);
+	// An unlimited explode of a die whose faces have a negative mean
+	// saturates to `i32::MIN`, and one whose faces have a zero mean to `0`.
+	for (roll, result, rendered) in [
+		("custom dice 2D[-3, 1]", i32::MIN, "-∞"),
+		("custom dice 2D[-1, 1]", 0, "0")
+	]
+	{
+		let mut evaluator =
+			explode_evaluator(roll, "<= @0 unlimited times", &[]);
+		let evaluation = evaluator.evaluate([1], &mut rng).unwrap();
+		assert_eq!(evaluation.result, result, "{}", roll);
+		assert_eq!(evaluation.dice, 2, "{}", roll);
+		assert!(
+			evaluation.records[0]
+				.to_string()
+				.ends_with(&format!(", {rendered}, {rendered}]")),
+			"{}",
+			evaluation.records[0]
+		);
+	}
+	// Drops and keeps after an explode cross out whole chains: of three
+	// chains of three `6`s, dropping the lowest crosses out the first, and
+	// keeping the highest keeps the last; whereas an explode after a keep
+	// explodes only the dice still kept.
+	for (clauses, result, dice, rendered) in [
+		(
+			&["drop lowest 1"][..],
+			36,
+			9,
+			"3d[6]: [~6, 6, 6, ~6, ~6, 6, 6, 6, 6]"
+		),
+		(
+			&["keep highest 1"],
+			18,
+			9,
+			"3d[6]: [~6, ~6, 6, ~6, ~6, ~6, ~6, 6, 6]"
+		),
+		(
+			&["keep highest 2", "explode = 6 up to 1 times"],
+			48,
+			11,
+			"3d[6]: [~6, 6, 6, ~6, ~6, 6, 6, 6, 6, 6, 6]"
+		)
+	]
+	{
+		let function = explode_evaluator(
+			"custom dice 3D[6]",
+			"= @0 up to 2 times",
+			clauses
+		)
+		.function;
+		for passes in [Passes::none(), Passes::all()]
+		{
+			let mut evaluator =
+				Evaluator::new(optimize(function.clone(), passes));
+			let evaluation = evaluator.evaluate([6], &mut rng).unwrap();
+			assert_eq!(evaluation.result, result, "{:?}", clauses);
+			assert_eq!(evaluation.dice, dice, "{:?}", clauses);
+			assert_eq!(
+				evaluation.records[0].to_string(),
+				rendered,
+				"{:?}",
+				clauses
+			);
+		}
+	}
+}
+
+/// Test that a metered evaluation charges each extension as a die, so that a
+/// budget bounds even an unlimited explode, and refuses the first extension
+/// that would exceed it; that metering within a sufficient budget does not
+/// disturb the draws; and that a saturated chain rolls nothing, so it costs
+/// nothing.
+#[test]
+fn test_dice_budget_meters_explodes()
+{
+	// The seed is arbitrary, chosen by smashing the keyboard. This is to
+	// ensure that the test cases are deterministic.
+	let seed = 9182375019283750;
+	let mut evaluator =
+		explode_evaluator("standard dice 4D6", ">= @0 unlimited times", &[]);
+	let mut extended = 0;
+	for i in 0..100
+	{
+		let unmetered = evaluator
+			.evaluate([4], &mut StdRng::seed_from_u64(seed + i))
+			.unwrap();
+		let dice = unmetered.dice;
+		assert!(dice >= 4);
+		let metered = evaluator
+			.evaluate_metered([4], &mut StdRng::seed_from_u64(seed + i), dice)
+			.unwrap();
+		assert_eq!(metered, unmetered);
+		let mut rng = StdRng::seed_from_u64(seed + i);
+		match dice
+		{
+			// No die exploded, so one die fewer refuses the roll itself.
+			4 => assert_eq!(
+				evaluator.evaluate_metered([4], &mut rng, dice - 1),
+				Err(EvaluationError::DiceBudgetExhausted {
+					requested: 4,
+					remaining: 3,
+					consumed: 0
+				})
+			),
+			_ =>
+			{
+				extended += 1;
+				assert_eq!(
+					evaluator.evaluate_metered([4], &mut rng, dice - 1),
+					Err(EvaluationError::DiceBudgetExhausted {
+						requested: 1,
+						remaining: 0,
+						consumed: dice - 1
+					})
+				)
+			}
+		}
+	}
+	assert!(extended > 0);
+	// An explode that matches every face saturates, rolling nothing.
+	let evaluation = evaluator
+		.evaluate_metered([1], &mut StdRng::seed_from_u64(seed), 4)
+		.unwrap();
+	assert_eq!(evaluation.result, i32::MAX);
+	assert_eq!(evaluation.dice, 4);
+}
+
+/// Test that the bounds of an explode are sound but loose: an explode that
+/// may extend a die gives up counting outcomes and bounds the sum of its
+/// record by the whole of `i32`, unless no chain is kept; a limited explode
+/// rolls at most the limit for each chain still kept, an unlimited one without
+/// bound, unless it matches every face, and saturates; an explode that cannot
+/// extend a die changes nothing; and a later reroll or explode of an exploded
+/// record may roll without bound.
+#[test]
+fn test_explode_bounds()
+{
+	let unconstrained = EvaluationBounds::unconstrained();
+	for (clauses, value, count, dice) in [
+		(
+			&["explode = 6 up to 2 times"][..],
+			unconstrained,
+			None,
+			4 + 4 * 2
+		),
+		(
+			&["explode = 6 up to 0 times"],
+			(4, 24).into(),
+			Some(1296),
+			4
+		),
+		(
+			&["explode = 7 up to 2 times"],
+			(4, 24).into(),
+			Some(1296),
+			4
+		),
+		(
+			&["explode = 6 unlimited times"],
+			unconstrained,
+			None,
+			u64::MAX
+		),
+		(&["explode >= 1 unlimited times"], unconstrained, None, 4),
+		(
+			&["keep highest 2", "explode = 6 up to 3 times"],
+			unconstrained,
+			None,
+			4 + 2 * 3
+		),
+		(
+			&["explode = 6 up to 1 times", "keep highest 0"],
+			0.into(),
+			None,
+			4 + 4
+		),
+		(
+			&["explode = 6 up to 1 times", "explode = 6 up to 1 times"],
+			unconstrained,
+			None,
+			4 + 4 + 4
+		),
+		(
+			&["explode = 6 up to 1 times", "reroll = 1 up to 1 times"],
+			unconstrained,
+			None,
+			u64::MAX
+		),
+		(
+			&["explode = 6 up to 1 times", "reroll = 7 up to 1 times"],
+			unconstrained,
+			None,
+			4 + 4
+		)
+	]
+	{
+		let clauses = clauses
+			.iter()
+			.map(|clause| format!("⚅0 <- {} from ⚅0\n", clause))
+			.collect::<String>();
+		let bounds = body_bounds(&format!(
+			"⚅0 <- roll standard dice 4D6\n{}@0 <- sum rolling record \
+			 ⚅0\nreturn @0",
+			clauses
+		));
+		assert_eq!(bounds.value, value, "{}", clauses);
+		assert_eq!(bounds.count, count, "{}", clauses);
+		assert_eq!(bounds.dice, dice, "{}", clauses);
+	}
+}

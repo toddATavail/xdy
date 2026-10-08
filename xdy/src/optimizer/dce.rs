@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
-	DependencyAnalyzer, Div, DropHighest, DropLowest, Exp, Function,
+	DependencyAnalyzer, Div, DropHighest, DropLowest, Exp, Explode, Function,
 	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod,
 	Mul, Neg, Optimizer, RegisterIndex, Reroll, Return, RollCustomDice,
 	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord
@@ -195,6 +195,16 @@ impl InstructionVisitor<()> for AnalyticalVisitor<'_>
 		{
 			let dest = self.replacement(reroll.dest).try_into().unwrap();
 			self.emit(reroll.map(dest, |op| self.replacement(op)));
+		}
+		Ok(())
+	}
+
+	fn visit_explode(&mut self, explode: &Explode) -> Result<(), ()>
+	{
+		if self.is_rolling_record_live(explode.dest)
+		{
+			let dest = self.replacement(explode.dest).try_into().unwrap();
+			self.emit(explode.map(dest, |op| self.replacement(op)));
 		}
 		Ok(())
 	}

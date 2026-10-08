@@ -602,6 +602,78 @@ Function({a}@0, {b}@1) r#3 ⚅#1
 	assert_eq!(function.to_string(), text);
 }
 
+/// Explodes with every form of predicate, both kinds of limit, and immediate,
+/// negative, and register operands, which round-trip through the text, among
+/// rerolls and drops of the same record.
+#[test]
+fn test_assemble_explode_clauses()
+{
+	let text = "\
+Function({a}@0, {b}@1) r#3 ⚅#1
+\textern[]
+\tbody:
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- explode = 6 up to 1 times from ⚅0
+\t\t⚅0 <- explode != @0 up to @1 times from ⚅0
+\t\t⚅0 <- explode < -2 unlimited times from ⚅0
+\t\t⚅0 <- explode <= @0 up to 0 times from ⚅0
+\t\t⚅0 <- explode > 5 up to -1 times from ⚅0
+\t\t⚅0 <- explode >= @1 unlimited times from ⚅0
+\t\t⚅0 <- explode in [6, -3, 6] up to 2 times from ⚅0
+\t\t⚅0 <- explode in [] unlimited times from ⚅0
+\t\t⚅0 <- explode in -3..@1 up to 1 times from ⚅0
+\t\t⚅0 <- explode in @0..=-1 unlimited times from ⚅0
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+";
+	let function = Assembler::assemble(text).unwrap();
+	let record = RollingRecordIndex(0);
+	let imm = |value| AddressingMode::Immediate(Immediate(value));
+	let reg = |index| AddressingMode::Register(RegisterIndex(index));
+	let expected = [
+		(Predicate::Eq(imm(6)), Limit::Times(imm(1))),
+		(Predicate::Ne(reg(0)), Limit::Times(reg(1))),
+		(Predicate::Lt(imm(-2)), Limit::Unlimited),
+		(Predicate::Le(reg(0)), Limit::Times(imm(0))),
+		(Predicate::Gt(imm(5)), Limit::Times(imm(-1))),
+		(Predicate::Ge(reg(1)), Limit::Unlimited),
+		(Predicate::In(vec![6, -3, 6]), Limit::Times(imm(2))),
+		(Predicate::In(Vec::new()), Limit::Unlimited),
+		(
+			Predicate::InRange {
+				start: imm(-3),
+				end: reg(1)
+			},
+			Limit::Times(imm(1))
+		),
+		(
+			Predicate::InRangeInclusive {
+				start: reg(0),
+				end: imm(-1)
+			},
+			Limit::Unlimited
+		)
+	];
+	for (i, (predicate, limit)) in expected.into_iter().enumerate()
+	{
+		assert_eq!(
+			function.instructions[i + 1],
+			Instruction::explode(record, predicate, limit)
+		);
+	}
+	assert_eq!(
+		function.instructions[11],
+		Instruction::reroll(
+			record,
+			Predicate::Eq(imm(1)),
+			Limit::Times(imm(1))
+		)
+	);
+	assert_eq!(function.to_string(), text);
+}
+
 /// Negative integer operands at every supported slot — regression check for the
 /// `@N <- -OP` vs `@N <- OP1 - OP2` tokenization corner.
 #[test]
@@ -1206,6 +1278,35 @@ fn test_reject_reroll_source_disagrees_with_destination()
 	};
 	assert_eq!(destination, 1);
 	assert_eq!(source, 0);
+}
+
+/// An `explode` instruction whose destination disagrees with its `from ⚅N`
+/// source yields [`AssemblyError::ExplodeSourceMismatch`], with the mismatched
+/// indices surfaced on the variant.
+#[test]
+fn test_reject_explode_source_disagrees_with_destination()
+{
+	let e = assert_rejects(
+		"Function() r#1 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅1 <- roll standard dice 3D6\n\t\t⚅1 <- explode = 6 up to 1 times from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n"
+	);
+	let AssemblyError::ExplodeSourceMismatch {
+		destination,
+		source,
+		..
+	} = e
+	else
+	{
+		panic!("expected ExplodeSourceMismatch, got: {:?}", e);
+	};
+	assert_eq!(destination, 1);
+	assert_eq!(source, 0);
+	assert!(
+		e.to_string().ends_with(
+			"explode destination ⚅1 disagrees with its `from` source ⚅0"
+		),
+		"{}",
+		e
+	);
 }
 
 /// A rolling record may not serve as a threshold, an endpoint, or a limit of

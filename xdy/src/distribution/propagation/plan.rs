@@ -175,10 +175,11 @@ impl Plan
 	pub(crate) fn steps(&self, pc: ProgramCounter) -> &[Step] { &self.0[pc.0] }
 }
 
-/// Answer whether a reroll reads the rolling record at the specified location
-/// after the specified instruction, before a roll refills it, so that a split
-/// that fixes the record's results must keep the die from which the reroll
-/// draws replacements. Only the roll that fills a record changes its die.
+/// Answer whether a reroll or explode reads the rolling record at the specified
+/// location after the specified instruction, before a roll refills it, so that
+/// a split that fixes the record's results must keep the die from which the
+/// reroll draws replacements, or the explode extensions. Only the roll that
+/// fills a record changes its die.
 ///
 /// # Parameters
 /// - `instructions`: The instructions of a function.
@@ -186,8 +187,8 @@ impl Plan
 /// - `location`: The location.
 ///
 /// # Returns
-/// `true` if the location is a rolling record that a later reroll reads before
-/// a roll refills it, `false` otherwise.
+/// `true` if the location is a rolling record that a later reroll or explode
+/// reads before a roll refills it, `false` otherwise.
 pub(crate) fn rerolled(
 	instructions: &[Instruction],
 	pc: ProgramCounter,
@@ -207,7 +208,7 @@ pub(crate) fn rerolled(
 		}
 		match inst
 		{
-			Instruction::Reroll(_) => return true,
+			Instruction::Reroll(_) | Instruction::Explode(_) => return true,
 			Instruction::RollRange(_)
 			| Instruction::RollStandardDice(_)
 			| Instruction::RollCustomDice(_) => return false,
@@ -314,13 +315,14 @@ impl Values
 					values[value].readers.push(pc);
 				}
 			}
-			// A reroll rolls dice too.
+			// A reroll or explode rolls dice too.
 			let rolls = matches!(
 				inst,
 				Instruction::RollRange(_)
 					| Instruction::RollStandardDice(_)
 					| Instruction::RollCustomDice(_)
 					| Instruction::Reroll(_)
+					| Instruction::Explode(_)
 			);
 			let random = rolls || read.iter().any(|&v| values[v].random);
 			let location = Location::written_by(inst);

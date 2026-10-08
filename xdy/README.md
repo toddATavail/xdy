@@ -20,6 +20,7 @@ This document covers the internal architecture for contributors and curious powe
 	* [Drop instructions](#drop-instructions)
 	* [Keep instructions](#keep-instructions)
 	* [Reroll instructions](#reroll-instructions)
+	* [Explode instructions](#explode-instructions)
 	* [Reduce instructions](#reduce-instructions)
 	* [Arithmetic instructions](#arithmetic-instructions)
 	* [Control instructions](#control-instructions)
@@ -132,7 +133,7 @@ graph TD
 
 All arithmetic saturates to `i32::MIN`/`i32::MAX`. Division by zero yields zero. `0^0 = 1`. A negative exponent yields zero, except that `1^n = 1` and `(-1)^n = ±1` for every `n`.
 
-`evaluate_metered()` evaluates within a caller-supplied dice budget. The IR never branches, and loops only to roll dice, as a reroll does, so every cost of evaluation beyond the size of the function is proportional to the dice rolled; each roll instruction charges its count against the budget, and each reroll one die, and a charge that would exceed it is refused with `DiceBudgetExhausted` before it draws from the RNG or allocates anything. Within the budget, metering never changes the RNG draws. Every `Evaluation` reports the dice it rolled in `dice`.
+`evaluate_metered()` evaluates within a caller-supplied dice budget. The IR never branches, and loops only to roll dice, as a reroll or explode does, so every cost of evaluation beyond the size of the function is proportional to the dice rolled; each roll instruction charges its count against the budget, and each reroll or extension one die, and a charge that would exceed it is refused with `DiceBudgetExhausted` before it draws from the RNG or allocates anything. Within the budget, metering never changes the RNG draws. Every `Evaluation` reports the dice it rolled in `dice`.
 
 The evaluator also provides `bounds_over()`, which computes static `min`/`max` bounds, (when possible) the total outcome count, and the worst-case number of dice rolled — without requiring an RNG.
 
@@ -185,7 +186,7 @@ Where no roll has random operands, every path through the expression, one branch
 
 A reroll may leave some setups of a mixture as they were, cross out the dice of others, rewrite the law of the dice of others, and pool the multisets of the dice still kept of others, so the estimate bounds the setups of each record by parts, each of one kind. It resolves each reroll against the die from which it draws, value by value where its operands take few values. A rewrite of dice none of which has been dropped follows the pass charge for charge, so its estimate is exact when its operands are fixed. The cost of a pool turns on how many dice still kept each outcome of the roll matches, so the estimate groups the multisets of the roll by the results that the reroll may match, and by those below them, when they lie in one run, as the faces that a comparison or a range matches do; and it charges the costliest groups. The estimate prices every world of a split of a record as its costliest, which is loose for a reroll after such a split, whose cost varies with the results that each world fixes; the compiler never reads a record twice, so only assembled functions split records.
 
-`DistributionPlan::build()` runs the pass within a `Budget` of steps and cells. Every operation charges the most that it may take before it takes any, so one that would exceed the budget is refused, before it expands anything, with `BuildError::BudgetExhausted`, which carries the estimate. The charges depend only on the function and its bindings, so a budget that suffices once always suffices, and one that covers the estimate never refuses. A roll charges its dice when it fills its record, so the budget bounds the number of dice too. After every charge that the budget admits, the pass reports its `Usage` so far, with the estimate, to a `Progress`, which may cancel the build, whereupon it answers `BuildError::Cancelled`; `Unobserved` ignores the reports. Either way, there is no partial distribution.
+`DistributionPlan::build()` runs the pass within a `Budget` of steps and cells. Every operation charges the most that it may take before it takes any, so one that would exceed the budget is refused, before it expands anything, with `BuildError::BudgetExhausted`, which carries the estimate. The charges depend only on the function and its bindings, so a budget that suffices once always suffices, and one that covers the estimate never refuses. A roll charges its dice when it fills its record, so the budget bounds the number of dice too. The pass does not yet propagate explosions, so `build()` refuses every function that explodes dice with `BuildError::Unbounded`, before it charges anything, and the estimate of such a function saturates every quantity; a caller may sample the function instead. After every charge that the budget admits, the pass reports its `Usage` so far, with the estimate, to a `Progress`, which may cancel the build, whereupon it answers `BuildError::Cancelled`; `Unobserved` ignores the reports. In every case, there is no partial distribution.
 
 ```mermaid
 graph TD
@@ -293,11 +294,23 @@ A reroll considers the results still kept when it begins, in the order rolled, a
 
 The bounds of a reroll are exact: an unlimited reroll narrows the results still kept to the faces that its predicate cannot match, over the bounds of its thresholds and endpoints, and may cross out every die only if its predicate may match every face. The count of outcomes counts each reroll as though each die still kept rolled in advance every reroll that it might need, so that every path is equally likely: a reroll limited to `K` times multiplies it by the branches of the die raised to `K`, and an unlimited reroll by the branches that its predicate does not match, both once for every die still kept, and a reroll that cannot happen leaves it unchanged.
 
+### Explode instructions
+
+| Instruction | Syntax | Semantics |
+|-------------|--------|-----------|
+| `Explode` | `⚅N <- explode P L from ⚅N` | Extend each chain of rolling record `N` still kept whose last result satisfies predicate `P` with another die, up to limit `L` times |
+
+The predicate `P` and the limit `L` take the same forms as those of a reroll, and are read once, before the first explosion.
+
+An explode considers the results still kept when it begins, in the order rolled, and finishes each before it begins the next: it rolls an extension of a matching result from the same die, and appends the extension to the record, linked to the result that it extends, which stays kept, repeating while the extension matches and the limit allows. The results that descend from one rolled result, by the links of extensions and replacements, form a _chain_, and the sum and every later drop and keep count each chain still kept as one result, worth its total, so that a drop or keep crosses out a chain whole. A chain grows only from its end: an explode skips every result that some other result extends, and a replacement takes the place of the result that it replaces in its chain, so a later reroll acts on each result of a chain alone, and a later explode extends only the end of each chain. An unlimited explode whose predicate matches every face of the die rolls nothing, but appends to every matching result one _saturated_ result, which stands for the endless chain, and which is worth `i32::MAX` or `i32::MIN` by the sign of the mean face value, or `0` if that mean is `0`; a saturated result decides the total of its chain, prints as `∞` or `-∞`, and costs no dice. Later rerolls and explodes leave saturated chains alone. A die without faces, or an empty range, shows only the face `0`.
+
+The bounds of an explode are, for now, sound but loose: an explode that may extend a result gives up counting outcomes, bounds the sum of its record by the whole of `i32` unless no chain is kept, and bounds the dice rolled by the limit for every chain still kept, or not at all for an unlimited explode that does not saturate, or for any later reroll or explode of the record. Constant folding and strength reduction leave a roll that an explode extends as it is, and never combine drops across an explode, and the [forward pass](#estimates-budgets-and-progress) refuses every function that explodes dice.
+
 ### Reduce instructions
 
 | Instruction | Syntax | Semantics |
 |-------------|--------|-----------|
-| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the results of rolling record `M` that no drop, keep, or reroll crossed out into register `N` (saturating) |
+| `SumRollingRecord` | `@N <- sum rolling record ⚅M` | Sum the results of rolling record `M` that no drop, keep, or reroll crossed out into register `N`, counting each [chain](#explode-instructions) as its total (saturating) |
 
 ### Arithmetic instructions
 

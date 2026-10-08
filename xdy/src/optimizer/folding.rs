@@ -6,18 +6,19 @@
 //! die is zero, e.g., `3D6 reroll ≤ 6 ∞ times`, since an unlimited reroll that
 //! matches every face crosses out every die; and a roll of dice with one face
 //! is that face times the dice kept, since no reroll can change it, e.g.,
-//! `3D1 reroll = 1` is `3`. The constant folder requires the function to be in
-//! static single assignment (SSA) form.
+//! `3D1 reroll = 1` is `3`. It does not yet fold a roll that an explode
+//! extends, whose chains may hold any number of dice. The constant folder
+//! requires the function to be in static single assignment (SSA) form.
 
 use std::collections::HashMap;
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, Exp, Function, Immediate, InstructionVisitor,
-	KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul, Neg, ProgramCounter,
-	RegisterIndex, Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord, evaluator::ResultSet,
-	ir::Instruction
+	DropHighest, DropLowest, Exp, Explode, Function, Immediate,
+	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
+	Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
+	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
+	evaluator::ResultSet, ir::Instruction
 };
 
 use super::{criteria, faces};
@@ -38,8 +39,9 @@ pub struct ConstantFolder
 	/// The previous version of the function body.
 	previous: Option<Vec<Instruction>>,
 
-	/// The program counters of the drop, keep, and reroll instructions of the
-	/// previous version of the function body, by the rolling record that they
+	/// The program counters of the drop, keep, reroll, and explode
+	/// instructions of the previous version of the function body, by the
+	/// rolling record that they
 	/// target, so that finding the clauses of a roll takes time proportional
 	/// to their number.
 	drops: HashMap<RollingRecordIndex, Vec<usize>>,
@@ -88,6 +90,7 @@ impl Optimizer<()> for ConstantFolder
 					Instruction::KeepLowest(keep) => keep.dest,
 					Instruction::KeepHighest(keep) => keep.dest,
 					Instruction::Reroll(reroll) => reroll.dest,
+					Instruction::Explode(explode) => explode.dest,
 					_ => continue
 				};
 				self.drops.entry(target).or_default().push(pc);
@@ -445,6 +448,33 @@ impl InstructionVisitor<()> for ConstantFolder
 		}
 	}
 
+	fn visit_explode(&mut self, explode: &Explode) -> Result<(), ()>
+	{
+		// The heavy lifting was already done when the roll instruction was
+		// encountered. We either rewrite the explode instruction in terms of
+		// the new rolling record or we eliminate it entirely.
+		match self.replacement(explode.dest)
+		{
+			AddressingMode::Immediate(_) =>
+			{
+				// The rolling record is an immediate value, so the roll must
+				// have been folded away, which it is only if it has no dice
+				// or its die shows only `0`, which explodes only into more
+				// `0`s, or saturates to `0`. Eliminate the explode
+				// instruction.
+				Ok(())
+			},
+			AddressingMode::RollingRecord(dest) =>
+			{
+				// The rolling record is a register, so we need to rewrite the
+				// explode instruction in terms of the new rolling record.
+				self.emit(explode.map(dest, |op| self.replacement(op)));
+				Ok(())
+			},
+			_ => unreachable!()
+		}
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		sum: &SumRollingRecord
@@ -667,7 +697,9 @@ impl ConstantFolder
 	/// reroll could ever stop; any other reroll replaces each die that it
 	/// crosses out, and so keeps as many dice as it found. Once no die is kept,
 	/// none is kept after any clause, so neither the count of dice nor the
-	/// counts of the later clauses need be known.
+	/// counts of the later clauses need be known. An explode makes the result
+	/// of the roll more than the count of the dice kept, so the dice of a roll
+	/// that an explode extends are never known.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record of the roll.
@@ -678,7 +710,8 @@ impl ConstantFolder
 	/// # Returns
 	/// The number of dice kept, which is never negative, or `None` if it
 	/// depends on a count of dice, a drop, or a keep that is not constant, or
-	/// on whether a predicate that is not constant matches every face.
+	/// on whether a predicate that is not constant matches every face, or if
+	/// an explode extends the dice.
 	fn kept_dice(
 		&self,
 		dest: RollingRecordIndex,
@@ -686,6 +719,14 @@ impl ConstantFolder
 		faces: &ResultSet
 	) -> Option<i32>
 	{
+		if self
+			.find_drop_instructions(dest)
+			.any(|clause| matches!(clause, Instruction::Explode(_)))
+		{
+			// Decline to fold an exploded roll until folding understands
+			// chains.
+			return None
+		}
 		self.find_drop_instructions(dest)
 			.fold(count, |kept, clause| match (kept, clause)
 			{
@@ -1121,6 +1162,7 @@ impl GetConstantOperands<(i32, Option<i32>)> for Instruction
 				drop.const_ops().map(|count| (count, None))
 			},
 			Instruction::Reroll(_) => None,
+			Instruction::Explode(_) => None,
 			Instruction::SumRollingRecord(_) => None,
 			Instruction::Add(add) =>
 			{

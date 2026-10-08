@@ -61,8 +61,8 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
-	Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
+	Unobserved, Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
@@ -421,6 +421,23 @@ fn ask_oracle(
 	Ok(distribution)
 }
 
+/// Answer whether the specified function explodes dice, which neither the
+/// forward pass nor the oracle does yet.
+///
+/// # Parameters
+/// - `function`: The function.
+///
+/// # Returns
+/// `true` if some instruction of the function explodes dice, `false`
+/// otherwise.
+fn explodes(function: &Function) -> bool
+{
+	function
+		.instructions
+		.iter()
+		.any(|inst| matches!(inst, Instruction::Explode(_)))
+}
+
 /// Append a test case to a report in the format of the distribution corpus,
 /// opening a new block unless the case has the same source as the one before
 /// it.
@@ -475,6 +492,8 @@ fn report_case(
 /// must agree with it exactly, as probabilities. Write the corpus, with the
 /// oracle's distribution in place of each case that disagrees, to
 /// `target/oracle/test_distributions.txt`, and list the cases that disagree.
+/// Neither the forward pass nor the oracle explodes dice yet, so the test skips
+/// every case that does, and keeps it as it is.
 #[test]
 #[ignore = "oracle: run with just oracle"]
 fn test_oracle_distribution_corpus()
@@ -489,15 +508,29 @@ fn test_oracle_distribution_corpus()
 		let case = format!("case {}: {source} {args:?} {externs:?}", index + 1);
 		// Compile exactly as the distribution tests do.
 		let function = optimize(compile_valid(source), Passes::all());
-		let actual =
-			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
-				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
 		let expected = Distribution::from_weights(
 			expected
 				.iter()
 				.map(|&(outcome, count)| (outcome, Weight::from(count)))
 		)
 		.unwrap();
+		if explodes(&function)
+		{
+			// The oracle does not yet explode dice, so keep the case as it is.
+			report_case(
+				&mut report,
+				previous,
+				source,
+				args,
+				externs,
+				&expected
+			);
+			previous = Some(source);
+			continue
+		}
+		let actual =
+			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
+				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
 		let agrees = agree(&expected, &actual);
 		if !agrees
 		{
@@ -797,6 +830,8 @@ fn check_oracle(
 		{
 			Ok(distribution) => distribution,
 			Err(BuildError::BudgetExhausted { .. }) => continue,
+			// Neither the forward pass nor the oracle explodes dice yet.
+			Err(BuildError::Unbounded) => continue,
 			Err(e) =>
 			{
 				return Err(TestCaseError::fail(format!("build failed: {e}")))

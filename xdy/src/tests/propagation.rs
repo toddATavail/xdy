@@ -3171,6 +3171,60 @@ fn test_build_refusals()
 	);
 }
 
+/// Ensure that the forward pass refuses every function that explodes dice,
+/// limited or not, before it charges anything, so that the build answers
+/// [`Unbounded`](BuildError::Unbounded) whatever its budget, rather than
+/// [`BudgetExhausted`](BuildError::BudgetExhausted), and that the estimate
+/// of such a function exceeds every budget but the unlimited one.
+#[test]
+fn test_build_refuses_explodes()
+{
+	for clause in ["= 6 up to 1 times", ">= 1 unlimited times"]
+	{
+		let evaluator = Evaluator::new(
+			Assembler::assemble(&format!(
+				"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll \
+				 standard dice 2D6\n\t\t⚅0 <- explode {clause} from ⚅0\n\t\t@0 \
+				 <- sum rolling record ⚅0\n\t\treturn @0\n"
+			))
+			.unwrap()
+		);
+		let plan = evaluator.plan_distribution([]).unwrap();
+		assert_eq!(
+			plan.estimate(),
+			Cost {
+				steps: u64::MAX,
+				cells: u64::MAX,
+				worlds: u64::MAX,
+				bits: u64::MAX,
+				class: Class::default()
+			},
+			"{}",
+			clause
+		);
+		for budget in [Budget::UNLIMITED, Budget { steps: 0, cells: 0 }]
+		{
+			assert_eq!(
+				plan.build(budget, &Unobserved),
+				Err(BuildError::Unbounded),
+				"{}",
+				clause
+			);
+		}
+		assert_eq!(
+			propagate(&evaluator, []),
+			Err(PropagationError::Unbounded),
+			"{}",
+			clause
+		);
+	}
+	assert_eq!(
+		BuildError::Unbounded.to_string(),
+		"no exact distribution: the function explodes dice, so sample it \
+		 instead"
+	);
+}
+
 /// Ensure that budgets, usages, and estimates serialize as their fields, and
 /// round trip.
 #[cfg(feature = "serde")]

@@ -8,7 +8,7 @@
 //!
 //! # Instruction set architecture
 //!
-//! The ISA has 19 instructions across seven categories:
+//! The ISA has 20 instructions across eight categories:
 //!
 //! | Category | Instructions | Destination | Sources |
 //! |----------|-------------|-------------|---------|
@@ -16,6 +16,7 @@
 //! | **Drop** | `DropLowest`, `DropHighest` | `⚅N` | addressing mode |
 //! | **Keep** | `KeepLowest`, `KeepHighest` | `⚅N` | addressing mode |
 //! | **Reroll** | `Reroll` | `⚅N` | predicate, limit |
+//! | **Explode** | `Explode` | `⚅N` | predicate, limit |
 //! | **Reduce** | `SumRollingRecord` | `@N` | `⚅N` |
 //! | **Arithmetic** | `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Max`, `Min`, `Neg` | `@N` | addressing modes |
 //! | **Control** | `Return` | — | addressing mode |
@@ -337,11 +338,97 @@ impl Display for Reroll
 	}
 }
 
-/// The predicate of a [reroll](Reroll): the test that a die must pass to be
-/// rerolled, whose thresholds and endpoints are operands, read once, before
-/// the first reroll. Each form keeps the shape in which it was written, so
-/// that a function prints as written; [`resolve`](Self::resolve) reduces it
-/// to the [set of results](Criterion) that it matches.
+/// Instruction: Explode the dice of a rolling record that satisfy a
+/// [predicate](Predicate), each up to a [limit](Limit) of times. The explode
+/// considers the dice that are still kept when it begins, in the order rolled,
+/// and finishes each die before it begins the next. It skips every die of a
+/// chain that a [saturated](crate::Origin::Saturates) die decides, and every
+/// die that another already extends, so that each chain grows only from its
+/// end; a replacement takes the place of the die that it replaces, so a die
+/// counts as extended if some die extends it or any die that it replaces. To a
+/// matching die, the explode appends an extension, rolled from the same die
+/// and [linked](crate::Origin::Extends) to it, and repeats with the extension
+/// while the extension matches and the limit allows. Every die stays kept, so
+/// a later sum, drop, or keep counts the whole chain as one die, worth its
+/// total. A limit of zero or less explodes nothing. An unlimited explode whose
+/// predicate matches every face of the die rolls nothing at all, but appends
+/// to every matching die one saturated die, which stands for the endless chain
+/// and is worth `i32::MAX` or `i32::MIN` by the sign of the mean face value,
+/// or `0` if that mean is `0`. A die without faces, or an empty range, shows
+/// only the face `0`.
+///
+/// The operands of the predicate and the limit are read once, before the
+/// first explosion.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Explode
+{
+	/// The [rolling record](RollingRecord) whose dice to explode.
+	pub dest: RollingRecordIndex,
+
+	/// The predicate that a die must satisfy to be exploded.
+	pub predicate: Predicate,
+
+	/// The number of times that each die may be exploded.
+	pub limit: Limit
+}
+
+impl Explode
+{
+	/// Answer the operands of the explode, other than its rolling record: those
+	/// of its predicate, in the order written, and then that of its limit, if
+	/// any.
+	///
+	/// # Returns
+	/// The operands.
+	pub fn operands(&self) -> Vec<AddressingMode>
+	{
+		let mut operands = self.predicate.operands();
+		operands.extend(self.limit.operand());
+		operands
+	}
+
+	/// Answer a copy of the explode whose rolling record and operands are
+	/// replaced by the specified functions, as when a pass renumbers them.
+	///
+	/// # Parameters
+	/// - `dest`: The replacement of the rolling record.
+	/// - `replace`: The function that replaces each operand.
+	///
+	/// # Returns
+	/// The copy.
+	pub fn map(
+		&self,
+		dest: RollingRecordIndex,
+		mut replace: impl FnMut(AddressingMode) -> AddressingMode
+	) -> Self
+	{
+		Self {
+			dest,
+			predicate: self.predicate.map(&mut replace),
+			limit: self.limit.map(&mut replace)
+		}
+	}
+}
+
+impl Display for Explode
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result
+	{
+		write!(
+			f,
+			"{} <- explode {} {} from {}",
+			self.dest, self.predicate, self.limit, self.dest
+		)
+	}
+}
+
+/// The predicate of a [reroll](Reroll) or [explode](Explode): the test that a
+/// die must pass to be rerolled or exploded, whose thresholds and endpoints
+/// are operands, read once, before the first reroll or explosion. Each form
+/// keeps the shape in which it was written, so that a function prints as
+/// written; [`resolve`](Self::resolve) reduces it to the [set of
+/// results](Criterion) that it matches.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Predicate
@@ -540,18 +627,18 @@ impl Display for Predicate
 	}
 }
 
-/// The limit of a [reroll](Reroll): the number of times that each die may be
-/// rerolled.
+/// The limit of a [reroll](Reroll) or [explode](Explode): the number of times
+/// that each die may be rerolled or exploded.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Limit
 {
-	/// Reroll each die at most this many times, or not at all if the count is
-	/// zero or less.
+	/// Reroll or explode each die at most this many times, or not at all if
+	/// the count is zero or less.
 	Times(AddressingMode),
 
-	/// Reroll each die until it no longer matches, or not at all if every face
-	/// of the die matches.
+	/// Reroll or explode each die until it no longer matches. If every face of
+	/// the die matches, a reroll rolls nothing, and an explode saturates.
 	Unlimited
 }
 
@@ -606,8 +693,9 @@ impl Display for Limit
 
 /// Instruction: Compute the result of a [rolling record](RollingRecord),
 /// ignoring any dice crossed out by [DropLowest], [DropHighest],
-/// [KeepLowest], [KeepHighest], or [Reroll]. The summation is clamped to the
-/// range of an `i32`.
+/// [KeepLowest], [KeepHighest], or [Reroll], and counting each
+/// [chain](RollingRecord::chains) that an [Explode] grew as one die, worth its
+/// total. The summation is clamped to the range of an `i32`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SumRollingRecord
@@ -883,6 +971,10 @@ pub enum Instruction
 	/// [Reroll the dice](Reroll) of a rolling record that satisfy a predicate.
 	Reroll(Reroll),
 
+	/// [Explode the dice](Explode) of a rolling record that satisfy a
+	/// predicate.
+	Explode(Explode),
+
 	/// [Sum a rolling record](SumRollingRecord).
 	SumRollingRecord(SumRollingRecord),
 
@@ -935,6 +1027,7 @@ impl Instruction
 			Self::KeepLowest(inst) => Some(inst.dest.into()),
 			Self::KeepHighest(inst) => Some(inst.dest.into()),
 			Self::Reroll(inst) => Some(inst.dest.into()),
+			Self::Explode(inst) => Some(inst.dest.into()),
 			Self::SumRollingRecord(inst) => Some(inst.dest.into()),
 			Self::Add(inst) => Some(inst.dest.into()),
 			Self::Sub(inst) => Some(inst.dest.into()),
@@ -965,6 +1058,12 @@ impl Instruction
 			Self::KeepLowest(inst) => vec![inst.dest.into(), inst.count],
 			Self::KeepHighest(inst) => vec![inst.dest.into(), inst.count],
 			Self::Reroll(inst) =>
+			{
+				let mut sources = vec![inst.dest.into()];
+				sources.extend(inst.operands());
+				sources
+			},
+			Self::Explode(inst) =>
 			{
 				let mut sources = vec![inst.dest.into()];
 				sources.extend(inst.operands());
@@ -1127,6 +1226,30 @@ impl Instruction
 	) -> Self
 	{
 		Self::Reroll(Reroll {
+			dest,
+			predicate,
+			limit
+		})
+	}
+
+	/// Create an instruction to explode the dice of a rolling record that
+	/// satisfy a predicate.
+	///
+	/// # Parameters
+	/// - `dest`: The destination rolling record.
+	/// - `predicate`: The predicate that a die must satisfy to be exploded.
+	/// - `limit`: The number of times that each die may be exploded.
+	///
+	/// # Returns
+	/// The instruction.
+	#[inline]
+	pub const fn explode(
+		dest: RollingRecordIndex,
+		predicate: Predicate,
+		limit: Limit
+	) -> Self
+	{
+		Self::Explode(Explode {
 			dest,
 			predicate,
 			limit
@@ -1344,6 +1467,7 @@ impl Display for Instruction
 			Self::KeepLowest(inst) => write!(f, "{}", inst),
 			Self::KeepHighest(inst) => write!(f, "{}", inst),
 			Self::Reroll(inst) => write!(f, "{}", inst),
+			Self::Explode(inst) => write!(f, "{}", inst),
 			Self::SumRollingRecord(inst) => write!(f, "{}", inst),
 			Self::Add(inst) => write!(f, "{}", inst),
 			Self::Sub(inst) => write!(f, "{}", inst),
@@ -1397,6 +1521,11 @@ impl From<KeepHighest> for Instruction
 impl From<Reroll> for Instruction
 {
 	fn from(inst: Reroll) -> Self { Self::Reroll(inst) }
+}
+
+impl From<Explode> for Instruction
+{
+	fn from(inst: Explode) -> Self { Self::Explode(inst) }
 }
 
 impl From<SumRollingRecord> for Instruction
@@ -1561,6 +1690,20 @@ impl TryFrom<Instruction> for Reroll
 		match inst
 		{
 			Instruction::Reroll(inst) => Ok(inst),
+			_ => Err(())
+		}
+	}
+}
+
+impl TryFrom<Instruction> for Explode
+{
+	type Error = ();
+
+	fn try_from(inst: Instruction) -> Result<Self, Self::Error>
+	{
+		match inst
+		{
+			Instruction::Explode(inst) => Ok(inst),
 			_ => Err(())
 		}
 	}
@@ -2078,6 +2221,15 @@ pub trait InstructionVisitor<E>
 	/// An error if the visitor fails to visit the instruction.
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), E>;
 
+	/// Visit an explode instruction.
+	///
+	/// # Parameters
+	/// - `inst`: The instruction to visit.
+	///
+	/// # Errors
+	/// An error if the visitor fails to visit the instruction.
+	fn visit_explode(&mut self, inst: &Explode) -> Result<(), E>;
+
 	/// Visit a sum rolling record instruction.
 	///
 	/// # Parameters
@@ -2222,6 +2374,7 @@ where
 			Instruction::KeepLowest(inst) => visitor.visit_keep_lowest(inst),
 			Instruction::KeepHighest(inst) => visitor.visit_keep_highest(inst),
 			Instruction::Reroll(inst) => visitor.visit_reroll(inst),
+			Instruction::Explode(inst) => visitor.visit_explode(inst),
 			Instruction::SumRollingRecord(inst) =>
 			{
 				visitor.visit_sum_rolling_record(inst)
@@ -2528,6 +2681,23 @@ impl InstructionVisitor<()> for DependencyAnalyzer<'_>
 	}
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
+	{
+		self.writers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		self.readers
+			.entry(inst.dest.into())
+			.or_default()
+			.insert(self.pc);
+		for op in inst.operands()
+		{
+			self.readers.entry(op).or_default().insert(self.pc);
+		}
+		Ok(())
+	}
+
+	fn visit_explode(&mut self, inst: &Explode) -> Result<(), ()>
 	{
 		self.writers
 			.entry(inst.dest.into())

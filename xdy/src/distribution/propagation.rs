@@ -89,11 +89,11 @@ use record::{Roll, clamp, convolve, distinct_faces};
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
 	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
-	Exp, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max,
-	Min, Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll,
-	Return, RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
-	Sub, SumRollingRecord, Weight, add, div, exp, max, min, r#mod, mul, neg,
-	sub
+	Exp, Explode, Instruction, InstructionVisitor, KeepHighest, KeepLowest,
+	Limit, Max, Min, Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex,
+	Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
+	RollingRecordIndex, Sub, SumRollingRecord, Weight, add, div, exp, max, min,
+	r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -153,9 +153,13 @@ impl Evaluator
 					EvaluationError::BadArity { expected, given }
 				},
 				PropagationError::Exhausted(_)
-				| PropagationError::Cancelled =>
+				| PropagationError::Cancelled
+				| PropagationError::Unbounded =>
 				{
-					unreachable!("estimation neither meters nor reports")
+					unreachable!(
+						"estimation neither meters nor reports, and prices \
+						 every explode"
+					)
 				}
 			})?;
 		Ok(DistributionPlan {
@@ -255,8 +259,10 @@ impl DistributionPlan<'_>
 	///   exceed the budget.
 	/// - [`Cancelled`](BuildError::Cancelled) if the progress cancels the
 	///   build.
+	/// - [`Unbounded`](BuildError::Unbounded) if the function explodes dice,
+	///   before the build charges anything.
 	///
-	/// Either way, there is no partial distribution.
+	/// In every case, there is no partial distribution.
 	///
 	/// # Panics
 	/// In debug builds, if the function is not
@@ -372,7 +378,8 @@ impl DistributionPlan<'_>
 				remaining,
 				consumed
 			},
-			PropagationError::Cancelled => BuildError::Cancelled
+			PropagationError::Cancelled => BuildError::Cancelled,
+			PropagationError::Unbounded => BuildError::Unbounded
 		})
 	}
 }
@@ -502,6 +509,8 @@ pub(crate) fn propagate(
 ///   the budget, which the pass refuses before the operation expands anything.
 /// - [`Cancelled`](PropagationError::Cancelled) if the progress cancels the
 ///   pass.
+/// - [`Unbounded`](PropagationError::Unbounded) if the function explodes dice,
+///   before the pass charges anything.
 ///
 /// # Panics
 /// In debug builds, if the function is not [valid](crate::Function::validate),
@@ -531,6 +540,14 @@ pub(crate) fn propagate_worlds(
 			expected: arity,
 			given: args.len()
 		})
+	}
+	if function
+		.instructions
+		.iter()
+		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	{
+		// The pass does not yet propagate explosions.
+		return Err(PropagationError::Unbounded)
 	}
 	let mut world = World {
 		registers: vec![Register::Point(0); function.register_count],
@@ -1913,6 +1930,11 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		Ok(())
 	}
 
+	fn visit_explode(&mut self, _inst: &Explode) -> Result<(), Halt>
+	{
+		unreachable!("the pass refuses every function that explodes dice")
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		inst: &SumRollingRecord
@@ -2032,12 +2054,16 @@ pub(crate) enum PropagationError
 
 	/// The [progress](Progress) cancelled the pass, before the operation that
 	/// it charged last expanded anything.
-	Cancelled
+	Cancelled,
+
+	/// The function explodes dice, which the pass does not yet propagate, so
+	/// it refused the function before it charged anything.
+	Unbounded
 }
 
-/// The reason that [`DistributionPlan::build`] answers no distribution. Either
-/// way, the build stopped before the operation that it charged last expanded
-/// anything.
+/// The reason that [`DistributionPlan::build`] answers no distribution.
+/// Whatever the reason, the build stopped before the operation that it charged
+/// last, if any, expanded anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildError
 {
@@ -2066,7 +2092,16 @@ pub enum BuildError
 	},
 
 	/// The [progress](Progress) cancelled the build.
-	Cancelled
+	Cancelled,
+
+	/// The function [explodes](crate::Explode) dice, whose chains may hold
+	/// any number of dice, so the build refused it before it charged anything.
+	/// This reports no defect, and no greater budget would help;
+	/// [sample](crate::Evaluator::sample) the function instead. For now, the
+	/// build refuses every function that explodes dice, and its
+	/// [estimate](DistributionPlan::estimate) exceeds every budget but the
+	/// [unlimited](Budget::UNLIMITED) one.
+	Unbounded
 }
 
 impl Display for BuildError
@@ -2088,7 +2123,12 @@ impl Display for BuildError
 				 estimated {} steps and {} cells",
 				estimate.steps, estimate.cells
 			),
-			BuildError::Cancelled => write!(f, "distribution build cancelled")
+			BuildError::Cancelled => write!(f, "distribution build cancelled"),
+			BuildError::Unbounded => write!(
+				f,
+				"no exact distribution: the function explodes dice, so sample \
+				 it instead"
+			)
 		}
 	}
 }

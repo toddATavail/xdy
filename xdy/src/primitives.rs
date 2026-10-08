@@ -421,7 +421,11 @@ impl RollingRecord
 	/// the next: cross out a matching die, roll its replacement from the same
 	/// die, append the replacement, [linked](Origin::Replaces) to the die that
 	/// it replaces, and repeat with the replacement while it matches and the
-	/// limit allows. A `limit` of zero or less rerolls nothing. If the
+	/// limit allows. Every die of a [chain](Self::chains) is rerolled alone,
+	/// except that the dice of a chain that a [saturated](Origin::Saturates)
+	/// die decides are left alone, since the endless chain for which the
+	/// saturated die stands has no finite die to reroll. A `limit` of zero or
+	/// less rerolls nothing. If the
 	/// limit is `None` and the criterion matches every face of the die,
 	/// then roll nothing, but cross out every matching die, so that each
 	/// contributes zero. A die without faces, or an empty range, shows only
@@ -526,11 +530,16 @@ impl RollingRecord
 	where
 		R: Rng + ?Sized
 	{
+		let saturated = self.saturated();
 		let matching = self
 			.dice
 			.iter()
 			.enumerate()
-			.filter(|(_, die)| die.is_kept() && criterion.matches(die.value))
+			.filter(|&(index, die)| {
+				die.is_kept()
+					&& !saturated[index]
+					&& criterion.matches(die.value)
+			})
 			.map(|(index, _)| index)
 			.collect::<Vec<_>>();
 		if limit.is_none() && self.kind.faces_within(criterion)
@@ -561,6 +570,170 @@ impl RollingRecord
 				self.dice[current].fate = Fate::Rerolled;
 				let value = self.kind.roll_die(rng);
 				self.dice.push(Die::replacing(value, current));
+				current = self.dice.len() - 1;
+			}
+		}
+		Some(rolled)
+	}
+
+	/// Explode the dice that are still kept and that the criterion matches,
+	/// each up to `limit` times, or until it no longer matches if `limit` is
+	/// `None`. Consider the dice in the order rolled, and finish each before
+	/// beginning the next: roll an extension of a matching die from the same
+	/// die, append the extension, [linked](Origin::Extends) to the die that it
+	/// extends, which stays kept, and repeat with the extension while it
+	/// matches and the limit allows. Every die stays kept, so the sum and every
+	/// later drop and keep count each [chain](Self::chains) as one die, worth
+	/// its total.
+	///
+	/// A chain grows only from its end, so skip every die that another already
+	/// extends; a replacement takes the place of the die that it replaces in
+	/// its chain, so a die counts as extended if some die extends it or any die
+	/// that it replaces. Skip, too, every die of a chain that a
+	/// [saturated](Origin::Saturates) die decides, whose endless chain has no
+	/// end from which to grow. A `limit` of zero or less explodes nothing.
+	///
+	/// If the limit is `None` and the criterion matches every face of the die,
+	/// then no chain could ever end, so roll nothing, but append to every
+	/// matching die one [saturated](Die::saturating) die, which stands for its
+	/// endless chain, and which is worth `i32::MAX` or `i32::MIN` by the sign
+	/// of the mean face value, or `0` if that mean is `0`. A die without faces,
+	/// or an empty range, shows only the face `0`.
+	///
+	/// # Type parameters
+	/// - `R`: The type of the pseudo-random number generator.
+	///
+	/// # Parameters
+	/// - `rng`: The pseudo-random number generator.
+	/// - `criterion`: The set of results to explode.
+	/// - `limit`: The number of times that each die may be exploded, or `None`
+	///   for no limit.
+	///
+	/// # Returns
+	/// The number of dice rolled, one for each extension.
+	///
+	/// # Notes
+	/// An unlimited explode that does not saturate terminates with probability
+	/// one, but the number of dice that it rolls is unbounded, as for an
+	/// unlimited [reroll](Self::reroll). The [evaluator](Evaluator)
+	/// [meters](Evaluator::evaluate_metered) every extension as a die, so that
+	/// a budget bounds them. A saturated die costs nothing, since nothing
+	/// rolls it.
+	///
+	/// # Examples
+	/// Explode the `6` of `[6, 3]` once, which appends its extension, so that
+	/// the chain of the `6` is worth the `6` and its extension together:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{Criterion, Die, Origin, RollingRecord, RollingRecordKind};
+	/// let mut rolling_record = RollingRecord {
+	///     kind: RollingRecordKind::Standard { count: 2, faces: 6 },
+	///     dice: [6, 3].into_iter().map(Die::kept).collect()
+	/// };
+	/// let rolled = rolling_record.explode(&mut rng(), &Criterion::Within(6..=6), Some(1));
+	/// assert_eq!(rolled, 1);
+	/// assert_eq!(rolling_record.dice.len(), 3);
+	/// assert_eq!(rolling_record.dice[2].origin, Origin::Extends(0));
+	/// assert_eq!(rolling_record.chains(), vec![vec![0, 2], vec![1]]);
+	/// let extension = rolling_record.dice[2].value;
+	/// assert_eq!(rolling_record.sum(), 6 + extension + 3);
+	/// ```
+	///
+	/// Explode every die of `2D6` without limit when it shows at least `1`,
+	/// which every face does, so each chain saturates:
+	///
+	/// ```rust
+	/// # use rand::{Rng, rng};
+	/// # use xdy::{Criterion, RollingRecord, roll_standard_dice};
+	/// let mut rolling_record = roll_standard_dice(&mut rng(), 2, 6);
+	/// let rolled = rolling_record.explode(&mut rng(), &Criterion::Within(1..=6), None);
+	/// assert_eq!(rolled, 0);
+	/// assert!(rolling_record.to_string().ends_with(", ∞, ∞]"));
+	/// assert_eq!(rolling_record.sum(), i32::MAX);
+	/// ```
+	pub fn explode<R>(
+		&mut self,
+		rng: &mut R,
+		criterion: &Criterion,
+		limit: Option<i32>
+	) -> u64
+	where
+		R: Rng + ?Sized
+	{
+		self.explode_within(rng, criterion, limit, u64::MAX)
+			.expect("no explode rolls `u64::MAX` dice")
+	}
+
+	/// Explode the dice that are still kept and that the criterion matches, as
+	/// [`explode`](Self::explode) does, but roll no more than `budget` dice.
+	///
+	/// # Type parameters
+	/// - `R`: The type of the pseudo-random number generator.
+	///
+	/// # Parameters
+	/// - `rng`: The pseudo-random number generator.
+	/// - `criterion`: The set of results to explode.
+	/// - `limit`: The number of times that each die may be exploded, or `None`
+	///   for no limit.
+	/// - `budget`: The greatest number of dice that the explode may roll.
+	///
+	/// # Returns
+	/// The number of dice rolled, or `None` if the explode needed to roll more
+	/// than `budget` dice, in which case it rolled exactly `budget` dice and
+	/// then stopped, drawing nothing more from the pRNG.
+	pub(crate) fn explode_within<R>(
+		&mut self,
+		rng: &mut R,
+		criterion: &Criterion,
+		limit: Option<i32>,
+		budget: u64
+	) -> Option<u64>
+	where
+		R: Rng + ?Sized
+	{
+		let saturated = self.saturated();
+		let extended = self.extended();
+		let matching = self
+			.dice
+			.iter()
+			.enumerate()
+			.filter(|&(index, die)| {
+				die.is_kept()
+					&& !saturated[index]
+					&& !extended[index]
+					&& criterion.matches(die.value)
+			})
+			.map(|(index, _)| index)
+			.collect::<Vec<_>>();
+		if limit.is_none() && self.kind.faces_within(criterion)
+		{
+			// Every face matches, so no chain could ever end. Roll nothing,
+			// but saturate every matching chain.
+			let value = self.kind.saturated_value();
+			for index in matching
+			{
+				self.dice.push(Die::saturating(value, index));
+			}
+			return Some(0)
+		}
+		let limit = limit.map(|limit| u64::try_from(limit).unwrap_or(0));
+		let mut rolled = 0u64;
+		for index in matching
+		{
+			let mut current = index;
+			let mut times = 0u64;
+			while criterion.matches(self.dice[current].value)
+				&& limit.is_none_or(|limit| times < limit)
+			{
+				if rolled == budget
+				{
+					return None
+				}
+				rolled += 1;
+				times += 1;
+				let value = self.kind.roll_die(rng);
+				self.dice.push(Die::extending(value, current));
 				current = self.dice.len() - 1;
 			}
 		}
@@ -773,6 +946,68 @@ impl RollingRecord
 		self.dice.iter().all(|die| die.origin == Origin::Rolled)
 	}
 
+	/// Answer, for each die, whether a kept [saturated](Origin::Saturates) die
+	/// decides its [chain](Self::chains).
+	///
+	/// # Returns
+	/// Whether each die belongs to a saturated chain, in the order rolled.
+	fn saturated(&self) -> Vec<bool>
+	{
+		if self.is_unlinked()
+		{
+			// Every die begins a chain of its own, and none saturates.
+			return vec![false; self.dice.len()]
+		}
+		let roots = self.roots();
+		let mut saturated = vec![false; self.dice.len()];
+		for (die, &root) in self.dice.iter().zip(&roots)
+		{
+			if die.is_kept() && matches!(die.origin, Origin::Saturates(_))
+			{
+				saturated[root] = true;
+			}
+		}
+		roots.into_iter().map(|root| saturated[root]).collect()
+	}
+
+	/// Answer, for each die, whether some die extends it or any die that it
+	/// replaces, so that an explosion may not extend it. A replacement takes
+	/// the place of the die that it replaces in its [chain](Self::chains), so
+	/// only the die at the end of the chain may grow it.
+	///
+	/// # Returns
+	/// Whether each die is extended, in the order rolled.
+	fn extended(&self) -> Vec<bool>
+	{
+		// The index of the die whose place in its chain each die takes: its
+		// own, unless it replaces an earlier die.
+		let mut places = Vec::with_capacity(self.dice.len());
+		for (index, die) in self.dice.iter().enumerate()
+		{
+			let place = match die.origin
+			{
+				Origin::Replaces(link) if link < index => places[link],
+				_ => index
+			};
+			places.push(place);
+		}
+		let mut extended = vec![false; self.dice.len()];
+		for (index, die) in self.dice.iter().enumerate()
+		{
+			match die.origin
+			{
+				Origin::Extends(link) | Origin::Saturates(link)
+					if link < index =>
+				{
+					extended[places[link]] = true;
+				},
+				_ =>
+				{}
+			}
+		}
+		places.into_iter().map(|place| extended[place]).collect()
+	}
+
 	/// Answer, for each die, the index of the die that begins its
 	/// [chain](Self::chains). A link that names no earlier die begins a chain
 	/// of its own.
@@ -962,6 +1197,42 @@ impl RollingRecordKind<i32>
 		}
 	}
 
+	/// Answer the value of a [saturated](Origin::Saturates) die of the kind,
+	/// which stands for an endless chain of its dice: `i32::MAX` or `i32::MIN`
+	/// by the sign of the mean face value, or `0` if that mean is `0`. A die
+	/// without faces, or an empty range, shows only the face `0`.
+	///
+	/// # Returns
+	/// The saturated value. An uninitialized record has no die, so its value
+	/// is `0`.
+	fn saturated_value(&self) -> i32
+	{
+		// The sign of the sum of the faces is the sign of their mean.
+		let sum = match self
+		{
+			RollingRecordKind::Range { start, end } if end < start => 0,
+			RollingRecordKind::Range { start, end } =>
+			{
+				*start as i128 + *end as i128
+			},
+			RollingRecordKind::Standard { faces, .. } =>
+			{
+				(*faces).max(0) as i128
+			},
+			RollingRecordKind::Custom { faces, .. } =>
+			{
+				faces.iter().map(|&face| face as i128).sum()
+			},
+			RollingRecordKind::Uninitialized => 0
+		};
+		match sum.signum()
+		{
+			1 => i32::MAX,
+			-1 => i32::MIN,
+			_ => 0
+		}
+	}
+
 	/// Answer whether the criterion matches every face of the die of the
 	/// kind. A die without faces, or an empty range, shows only the face `0`.
 	///
@@ -1008,7 +1279,8 @@ impl RollingRecordKind<i32>
 //                                 Criteria.                                  //
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The set of results that a [reroll](RollingRecord::reroll) rerolls: a
+/// The set of results that a [reroll](RollingRecord::reroll) rerolls, or that
+/// an [explode](RollingRecord::explode) explodes: a
 /// [predicate](crate::Predicate) whose operands are
 /// [resolved](crate::Predicate::resolve) to values.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

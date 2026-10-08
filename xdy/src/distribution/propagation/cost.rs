@@ -60,7 +60,11 @@
 //!
 //! Every quantity saturates rather than overflows, so an estimate that exceeds
 //! [`u64::MAX`] reports [`u64::MAX`], which no budget but the
-//! [unlimited](super::meter::Budget::UNLIMITED) one admits.
+//! [unlimited](super::meter::Budget::UNLIMITED) one admits. The pass does not
+//! yet propagate [explosions](crate::Explode), and
+//! [refuses](crate::BuildError::Unbounded) every function that explodes dice,
+//! so the estimate of such a function saturates every quantity, and its class
+//! describes nothing.
 
 use std::{
 	cmp::Reverse,
@@ -77,10 +81,11 @@ use super::{
 };
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
-	DropLowest, EvaluationBounds, Evaluator, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod, Mul, Neg,
-	Predicate, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordKind, Sub, SumRollingRecord,
+	DropLowest, EvaluationBounds, Evaluator, Exp, Explode, Function,
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod,
+	Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordKind, Sub,
+	SumRollingRecord,
 	evaluator::{BoundsEvaluator, Criteria, LeastDice, ResultSet}
 };
 
@@ -199,6 +204,21 @@ fn observe(
 		return Err(PropagationError::BadArity {
 			expected: arity,
 			given: args.len()
+		})
+	}
+	if function
+		.instructions
+		.iter()
+		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	{
+		// The pass refuses every function that explodes dice, so price it
+		// beyond every budget but the unlimited one.
+		return Ok(Cost {
+			steps: u64::MAX,
+			cells: u64::MAX,
+			worlds: u64::MAX,
+			bits: u64::MAX,
+			class: Class::default()
 		})
 	}
 	// The pass fixes every binding, and an unbound external variable holds
@@ -1736,6 +1756,11 @@ impl InstructionVisitor<()> for Pricing<'_>
 	{
 		self.keep(inst.dest.0, inst.count, true);
 		Ok(())
+	}
+
+	fn visit_explode(&mut self, _inst: &Explode) -> Result<(), ()>
+	{
+		unreachable!("the estimate prices no function that explodes dice")
 	}
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>

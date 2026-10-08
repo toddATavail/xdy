@@ -33,8 +33,8 @@
 //! instruction_line  ::= instruction (EOL | EOF)
 //! instruction       ::= roll_range | roll_standard_dice | roll_custom_dice
 //!                     | drop_lowest | drop_highest | keep_lowest
-//!                     | keep_highest | reroll | sum_rolling_record
-//!                     | binary_op | unary_neg | return
+//!                     | keep_highest | reroll | explode
+//!                     | sum_rolling_record | binary_op | unary_neg | return
 //! roll_range        ::= "⚅" INDEX "<-" "roll range" value_operand ":"
 //!                         value_operand
 //! roll_standard_dice::= "⚅" INDEX "<-" "roll standard dice" value_operand
@@ -50,6 +50,8 @@
 //! keep_highest      ::= "⚅" INDEX "<-" "keep highest" value_operand "from"
 //!                         "⚅" INDEX
 //! reroll            ::= "⚅" INDEX "<-" "reroll" predicate limit "from"
+//!                         "⚅" INDEX
+//! explode           ::= "⚅" INDEX "<-" "explode" predicate limit "from"
 //!                         "⚅" INDEX
 //! predicate         ::= COMPARATOR value_operand
 //!                     | "in" "[" (INTEGER ("," INTEGER)*)? "]"
@@ -84,11 +86,11 @@
 //!
 //! Rolling records (`⚅N`) are syntactically restricted to the slots where the
 //! intermediate representation expects them: the destination of every
-//! rolling instruction, the source of the `from` clause on the drop, keep, and
-//! reroll instructions, and the source of `sum rolling record`. They are not
-//! permitted anywhere else — in particular, not as operands of arithmetic,
-//! roll-count, drop-count, keep-count, reroll-predicate, reroll-limit, or
-//! return instructions — because
+//! rolling instruction, the source of the `from` clause on the drop, keep,
+//! reroll, and explode instructions, and the source of `sum rolling record`.
+//! They are not permitted anywhere else — in particular, not as operands of
+//! arithmetic, roll-count, drop-count, keep-count, reroll or explode predicate,
+//! reroll or explode limit, or return instructions — because
 //! [`Evaluator`](crate::Evaluator)'s operand-dispatch would otherwise
 //! unreachable-panic on an unmapped rolling record read.
 //!
@@ -296,7 +298,8 @@ impl Assembler
 				})
 			}
 		}
-		// Drop, keep, and reroll instructions must read back from their own
+		// Drop, keep, reroll, and explode instructions must read back from
+		// their own
 		// destination. The parser accepts two independent rolling record
 		// indices; the validator confirms they agree.
 		for raw_inst in &raw.instructions
@@ -346,6 +349,14 @@ impl Assembler
 				(Instruction::Reroll(inst), Some(src)) if inst.dest != src =>
 				{
 					return Err(AssemblyError::RerollSourceMismatch {
+						destination: inst.dest.0,
+						source: src.0,
+						location: raw_inst.location
+					})
+				},
+				(Instruction::Explode(inst), Some(src)) if inst.dest != src =>
+				{
+					return Err(AssemblyError::ExplodeSourceMismatch {
 						destination: inst.dest.0,
 						source: src.0,
 						location: raw_inst.location
@@ -524,6 +535,22 @@ pub enum AssemblyError
 		location: AssemblyLocation
 	},
 
+	/// An explode instruction's destination disagrees with its `from ⚅N`
+	/// source. [`Function`]'s [`Display`] impl always emits the same rolling
+	/// record on both sides; the assembler enforces the invariant so
+	/// hand-authored IR cannot desynchronize.
+	ExplodeSourceMismatch
+	{
+		/// The destination rolling record index.
+		destination: usize,
+
+		/// The `from` source rolling record index.
+		source: usize,
+
+		/// The source position of the offending instruction.
+		location: AssemblyLocation
+	},
+
 	/// The assembled [`Function`] is not [well formed](Function::validate). The
 	/// grammar already forbids some of these defects, such as non-canonical
 	/// names and rolling record operands, but the rest are possible in text.
@@ -554,6 +581,7 @@ impl AssemblyError
 			| Self::DropSourceMismatch { location, .. }
 			| Self::KeepSourceMismatch { location, .. }
 			| Self::RerollSourceMismatch { location, .. }
+			| Self::ExplodeSourceMismatch { location, .. }
 			| Self::Invalid { location, .. } => *location
 		}
 	}
@@ -647,6 +675,15 @@ impl Display for AssemblyError
 			} => write!(
 				f,
 				"reroll destination ⚅{} disagrees with its `from` source ⚅{}",
+				destination, source
+			),
+			Self::ExplodeSourceMismatch {
+				destination,
+				source,
+				..
+			} => write!(
+				f,
+				"explode destination ⚅{} disagrees with its `from` source ⚅{}",
 				destination, source
 			),
 			Self::Invalid { error, .. } => error.describe(f)
@@ -789,8 +826,9 @@ struct RawInstruction
 	location: AssemblyLocation,
 
 	/// For [`Instruction::DropLowest`], [`Instruction::DropHighest`],
-	/// [`Instruction::KeepLowest`], [`Instruction::KeepHighest`], and
-	/// [`Instruction::Reroll`], the `from ⚅N` clause's rolling record index.
+	/// [`Instruction::KeepLowest`], [`Instruction::KeepHighest`],
+	/// [`Instruction::Reroll`], and [`Instruction::Explode`], the `from ⚅N`
+	/// clause's rolling record index.
 	/// Validator compares this against the destination. `None` for any
 	/// other instruction.
 	drop_source: Option<RollingRecordIndex>
@@ -1353,7 +1391,32 @@ fn inst_reroll(input: Span) -> AsmResult<(Instruction, RollingRecordIndex)>
 	Ok((input, (Instruction::reroll(dest, predicate, limit), src)))
 }
 
-/// Parse the predicate of a `reroll` instruction: a comparison with a
+/// Parse an `explode` instruction, returning both the parsed [`Instruction`]
+/// and the `from ⚅N` source.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed instruction and its `from` source.
+///
+/// # Errors
+/// `nom` error if the input does not match.
+fn inst_explode(input: Span) -> AsmResult<(Instruction, RollingRecordIndex)>
+{
+	let (input, dest) = record_ref(input)?;
+	let (input, _) = delimited(hws, tag("<-"), hws).parse(input)?;
+	let (input, _) = kw("explode")(input)?;
+	let (input, predicate) = predicate(input)?;
+	let (input, _) = hws(input)?;
+	let (input, limit) = limit(input)?;
+	let (input, _) = delimited(hws, tag("from"), hws).parse(input)?;
+	let (input, src) = record_ref(input)?;
+	Ok((input, (Instruction::explode(dest, predicate, limit), src)))
+}
+
+/// Parse the predicate of a `reroll` or `explode` instruction: a comparison
+/// with a
 /// threshold, a list of literals, or a half-open or inclusive range.
 ///
 /// # Parameters
@@ -1412,7 +1475,7 @@ fn predicate(input: Span) -> AsmResult<Predicate>
 	alt((comparison, list, range)).parse(input)
 }
 
-/// Parse the limit of a `reroll` instruction.
+/// Parse the limit of a `reroll` or `explode` instruction.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -1592,7 +1655,7 @@ fn inst_return(input: Span) -> AsmResult<Instruction>
 ///
 /// # Returns
 /// The parsed instruction, paired with the `from ⚅N` source for drop, keep,
-/// and reroll instructions (or `None` for the other forms).
+/// reroll, and explode instructions (or `None` for the other forms).
 ///
 /// # Errors
 /// `nom` error if the instruction does not match any of the supported forms.
@@ -1611,7 +1674,8 @@ fn record_instruction(
 	let alt6 = map(inst_keep_lowest, |(i, src)| (i, Some(src)));
 	let alt7 = map(inst_keep_highest, |(i, src)| (i, Some(src)));
 	let alt8 = map(inst_reroll, |(i, src)| (i, Some(src)));
-	alt((alt1, alt2, alt3, alt4, alt5, alt6, alt7, alt8)).parse(input)
+	let alt9 = map(inst_explode, |(i, src)| (i, Some(src)));
+	alt((alt1, alt2, alt3, alt4, alt5, alt6, alt7, alt8, alt9)).parse(input)
 }
 
 /// Parse a single body instruction, discarding the leading horizontal

@@ -13,6 +13,8 @@
 //! dice with one face, and rerolls whose predicates match none of the results
 //! that the dice still kept may show, which it tracks through the clauses of
 //! each roll, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`.
+//! It does not yet reduce a roll that an explode extends, nor eliminate an
+//! explode, but keeps every explode in place, with the clauses around it.
 //!
 //! The strength reducer knows the bounds of every register, as the [bounds
 //! evaluator](crate::evaluator::BoundsEvaluator) computes them over every
@@ -29,9 +31,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _, Div,
-	DropHighest, DropLowest, EvaluationBounds, Exp, Function, Immediate,
-	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min,
-	Mod, Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return,
+	DropHighest, DropLowest, EvaluationBounds, Exp, Explode, Function,
+	Immediate, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit,
+	Max, Min, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return,
 	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
 	SumRollingRecord, evaluator::ResultSet
 };
@@ -60,16 +62,16 @@ pub struct StrengthReducer
 	/// The next rolling record to allocate.
 	next_rolling_record: RollingRecordIndex,
 
-	/// The rolling records that drop, keep, or reroll instructions target,
-	/// relative to the original function. A range into one of them must
-	/// remain a range, even if it has only one value, since a drop, keep, or
-	/// reroll can remove that value.
+	/// The rolling records that drop, keep, reroll, or explode instructions
+	/// target, relative to the original function. A range into one of them
+	/// must remain a range, even if it has only one value, since a drop, keep,
+	/// or reroll can remove that value, and an explode can add to it.
 	dropped: HashSet<RollingRecordIndex>,
 
-	/// The rolling records that reroll instructions target, relative to the
-	/// original function. A roll into one of them is never [reduced to its
-	/// count of dice](Self::reduce_to_count), since the reduction accounts for
-	/// drops and keeps but not for rerolls.
+	/// The rolling records that reroll or explode instructions target,
+	/// relative to the original function. A roll into one of them is never
+	/// [reduced to its count of dice](Self::reduce_to_count), since the
+	/// reduction accounts for drops and keeps but not for rerolls or explodes.
 	rerolled: HashSet<RollingRecordIndex>,
 
 	/// The bounds of each register of the original function, over every
@@ -121,6 +123,7 @@ impl Optimizer<()> for StrengthReducer
 					Instruction::KeepLowest(keep) => Some(keep.dest),
 					Instruction::KeepHighest(keep) => Some(keep.dest),
 					Instruction::Reroll(reroll) => Some(reroll.dest),
+					Instruction::Explode(explode) => Some(explode.dest),
 					_ => None
 				})
 				.collect();
@@ -130,6 +133,7 @@ impl Optimizer<()> for StrengthReducer
 				.filter_map(|inst| match inst
 				{
 					Instruction::Reroll(reroll) => Some(reroll.dest),
+					Instruction::Explode(explode) => Some(explode.dest),
 					_ => None
 				})
 				.collect();
@@ -537,6 +541,23 @@ impl InstructionVisitor<()> for StrengthReducer
 			false => results.faces.clone()
 		};
 		self.emit(new);
+		Ok(())
+	}
+
+	fn visit_explode(&mut self, explode: &Explode) -> Result<(), ()>
+	{
+		// A roll that explodes is never reduced to a value, so its record
+		// remains a record.
+		let AddressingMode::RollingRecord(dest) =
+			self.replacement(explode.dest)
+		else
+		{
+			unreachable!("an explode of a roll reduced to a value")
+		};
+		// An extension may show any face, which a later reroll may match.
+		let results = self.results.get_mut(&explode.dest).unwrap();
+		results.live = results.faces.clone();
+		self.emit(explode.map(dest, |op| self.replacement(op)));
 		Ok(())
 	}
 
@@ -1071,10 +1092,11 @@ impl StrengthReducer
 	}
 
 	/// Find the program counter of the last drop instruction that satisfies the
-	/// specified filter, provided that no keep or reroll of the specified
-	/// rolling record follows it. Drops of a record commute with one another,
-	/// but not with its keeps or rerolls, so a drop may combine with a later
-	/// one only if no keep or reroll separates them.
+	/// specified filter, provided that no keep, reroll, or explode of the
+	/// specified rolling record follows it. Drops of a record commute with one
+	/// another, but not with its keeps, rerolls, or explodes, so a drop may
+	/// combine with a later one only if no keep, reroll, or explode separates
+	/// them.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record, relative to the optimized function.
@@ -1097,6 +1119,7 @@ impl StrengthReducer
 					dest: kept, ..
 				})
 				| Instruction::Reroll(Reroll { dest: kept, .. })
+				| Instruction::Explode(Explode { dest: kept, .. })
 					if *kept == dest =>
 				{
 					return None
@@ -1265,7 +1288,8 @@ struct Results
 	/// The results that the dice still kept may show, which are among the
 	/// [faces](Self::faces): all of them at first, and fewer after an
 	/// unlimited reroll, which leaves only the faces that its predicate
-	/// misses. Drops and keeps leave them as they were, since they leave
-	/// some of the same dice.
+	/// misses, and all of them again after an explode, whose extensions may
+	/// show any face. Drops and keeps leave them as they were, since they
+	/// leave some of the same dice.
 	live: ResultSet
 }

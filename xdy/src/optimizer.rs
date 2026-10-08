@@ -77,9 +77,9 @@ pub trait Optimizer<E>
 ///
 /// - No instruction writes a register that holds a parameter or an external
 ///   variable, and at most one instruction writes each other register.
-/// - At most one roll writes each rolling record, before any drop, keep, or
-///   reroll of it. Drops, keeps, and rerolls rewrite the record in place, and
-///   are the only exception to single assignment.
+/// - At most one roll writes each rolling record, before any drop, keep,
+///   reroll, or explode of it. Drops, keeps, rerolls, and explodes rewrite the
+///   record in place, and are the only exception to single assignment.
 ///
 /// Register coalescence breaks SSA form, so it runs last, and a function that
 /// it has coalesced, or a function assembled by hand that reuses a register,

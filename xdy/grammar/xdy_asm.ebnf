@@ -22,6 +22,7 @@
               |  <keep_lowest>
               |  <keep_highest>
               |  <reroll>
+              |  <explode>
               |  <sum_rolling_record>
               |  <binary_op>
               |  <unary_neg>
@@ -42,6 +43,8 @@
 <keep_highest> ::= "⚅" <INDEX> "<-" "keep highest" <value_operand> "from" "⚅" <INDEX>
 
 <reroll> ::= "⚅" <INDEX> "<-" "reroll" <predicate> <limit> "from" "⚅" <INDEX>
+
+<explode> ::= "⚅" <INDEX> "<-" "explode" <predicate> <limit> "from" "⚅" <INDEX>
 
 <predicate> ::= <COMPARATOR> <value_operand>
              |  "in" "[" (<INTEGER> ("," <INTEGER>)*)? "]"

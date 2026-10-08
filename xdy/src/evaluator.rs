@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	Add, AddressingMode, CanAllocate, CanVisitInstructions as _,
-	CompilationError, Div, DropHighest, DropLowest, Exp, Function, Instruction,
-	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
-	Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
+	CompilationError, Div, DropHighest, DropLowest, Exp, Explode, Function,
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min,
+	Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
 	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
 	SourceSpan, Sub, SumRollingRecord, add, div, exp, max, min, r#mod, mul,
 	neg, parser::ParseError, roll_custom_dice, roll_range, roll_standard_dice,
@@ -43,7 +43,7 @@ use crate::{
 /// [reroll](crate::Reroll) rerolled, whose replacement follows the dice
 /// already rolled, [linked](Origin::Replaces) to it, so that each die's chain
 /// of rerolls can be traced. Only the [kept](Fate::Kept) dice reach the sum or
-/// any later drop, keep, or reroll.
+/// any later drop, keep, reroll, or [explode](crate::Explode).
 ///
 /// Every die descends, by its [origin](Die::origin), from a die that the roll
 /// that filled the record rolled, and every die that descends from the same
@@ -462,10 +462,10 @@ pub struct Evaluation
 	pub records: Vec<RollingRecord>,
 
 	/// The number of dice rolled, where a range counts as one die, and each
-	/// reroll as one more. This is exactly the consumption charged against the
-	/// budget of a [metered](Evaluator::evaluate_metered) evaluation, so a
-	/// caller that carries one budget across several evaluations can deduct
-	/// it.
+	/// reroll or extension as one more. This is exactly the consumption
+	/// charged against the budget of a
+	/// [metered](Evaluator::evaluate_metered) evaluation, so a caller that
+	/// carries one budget across several evaluations can deduct it.
 	#[cfg_attr(feature = "serde", serde(default))]
 	pub dice: u64
 }
@@ -626,7 +626,8 @@ impl Evaluator
 	/// the evaluation; there is no partial result.
 	///
 	/// The instructions of a compiled function never branch, and loop only to
-	/// roll dice, as a reroll does, which charges each die that it rolls, so
+	/// roll dice, as a reroll or explode does, which charges each die that it
+	/// rolls, so
 	/// every cost of evaluation beyond the size of the function is
 	/// proportional to the dice rolled. Metering the dice therefore meters the
 	/// whole evaluation.
@@ -840,6 +841,37 @@ where
 		// anything from the pRNG.
 		let record = &mut self.records[inst.dest.0];
 		match record.reroll_within(self.rng, &criterion, limit, self.remaining)
+		{
+			Some(rolled) =>
+			{
+				self.remaining -= rolled;
+				self.consumed = self.consumed.saturating_add(rolled);
+				Ok(())
+			},
+			None => Err(EvaluationError::DiceBudgetExhausted {
+				requested: 1,
+				remaining: 0,
+				consumed: self.consumed.saturating_add(self.remaining)
+			})
+		}
+	}
+
+	fn visit_explode(
+		&mut self,
+		inst: &Explode
+	) -> Result<(), EvaluationError<'static>>
+	{
+		// Read every operand once, before the first explosion.
+		let criterion = inst.predicate.resolve(|op| self.value(op));
+		let limit = match inst.limit
+		{
+			Limit::Times(count) => Some(self.value(count)),
+			Limit::Unlimited => None
+		};
+		// Each extension rolls one die, which the budget meters before it
+		// draws anything from the pRNG. A saturated die rolls nothing.
+		let record = &mut self.records[inst.dest.0];
+		match record.explode_within(self.rng, &criterion, limit, self.remaining)
 		{
 			Some(rolled) =>
 			{
@@ -1648,7 +1680,16 @@ struct RollingRecordBounds
 	/// the [faces](RollingRecordKind::faces) of its die, and which an
 	/// unlimited reroll narrows to those that its predicate cannot match, and
 	/// a limited reroll restores, since a replacement may show any face.
-	results: ResultSet
+	results: ResultSet,
+
+	/// Whether an [explode](crate::Explode) may have extended some die of the
+	/// record since its roll, which every roll clears. Until the bounds of
+	/// explosion are exact, the bounds of an exploded record are sound but
+	/// loose: a chain may hold any number of dice, and its total any value,
+	/// so `kept` counts the chains still kept rather than their dice,
+	/// `results` bounds no total, and the sum of the record may be any
+	/// value at all.
+	exploded: bool
 }
 
 impl RollingRecordKind<EvaluationBounds>
@@ -2078,8 +2119,8 @@ pub(crate) enum LeastDice
 	Singletons(ResultSet)
 }
 
-/// The criteria to which a reroll's [predicate](Predicate) may resolve, over
-/// the bounds of its operands.
+/// The criteria to which the [predicate](Predicate) of a reroll or explode may
+/// resolve, over the bounds of its operands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Criteria
 {
@@ -2295,7 +2336,9 @@ pub struct Bounds
 	/// positive, or, without limit, every face matches, counts nothing.
 	/// The count is `None` if the predicate or limit of a reroll, or the
 	/// number of dice still kept that a reroll that can happen rerolls, is
-	/// determined by a range or dice expression.
+	/// determined by a range or dice expression. It is also `None` once an
+	/// [explode](crate::Explode) may extend a die, since the paths through an
+	/// explosion are unequally likely.
 	pub count: Option<u128>,
 
 	/// An upper bound on the number of dice that the function may roll over
@@ -2308,7 +2351,9 @@ pub struct Bounds
 	/// like any other value. The bound is computed by interval arithmetic, so,
 	/// like [`value`](Self::value), it may over-approximate, e.g.,
 	/// `({a}@(1D6) + -{a})D6` always rolls exactly one die, but its bound is
-	/// `6`.
+	/// `6`. An unlimited [explode](crate::Explode) that may roll a die, or a
+	/// reroll or explode of a record that an explode may have extended,
+	/// saturates it.
 	pub dice: u64
 }
 
@@ -2694,6 +2739,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		};
 		record.kept = 1.into();
 		record.results = record.kind.faces();
+		record.exploded = false;
 		self.dice = self.dice.saturating_add(1);
 		if self.sum(inst.start) || self.sum(inst.end)
 		{
@@ -2725,6 +2771,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		};
 		record.kept = count.max(0.into());
 		record.results = record.kind.faces();
+		record.exploded = false;
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count) || self.sum(inst.faces)
 		{
@@ -2756,6 +2803,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		};
 		record.kept = count.max(0.into());
 		record.results = record.kind.faces();
+		record.exploded = false;
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count)
 		{
@@ -2813,6 +2861,22 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		// result that it may show.
 		let may_match =
 			kept.max > 0 && record.results.meets(&criteria.possible);
+		if record.exploded
+		{
+			// A chain may hold any number of dice, each of which the reroll
+			// rerolls alone, so give up counting and bound the dice loosely.
+			// A replacement may show any face, and the reroll may cross out
+			// every die of a chain, or none.
+			if may_match
+			{
+				self.count = None;
+				self.dice = u64::MAX;
+				let record = self.record_mut(inst.dest);
+				record.kept = (0, kept.max).into();
+				record.results = faces.union(&record.results);
+			}
+			return Ok(())
+		}
 		// Count the branches of each die still kept as though every reroll that
 		// it might need were rolled in advance, which makes every path equally
 		// likely: a limited reroll rolls each die up to the limit more times,
@@ -2893,6 +2957,46 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		Ok(())
 	}
 
+	fn visit_explode(&mut self, inst: &Explode) -> Result<(), ()>
+	{
+		// The bounds of explosion are sound but loose, until they are exact.
+		let criteria = Criteria::new(&inst.predicate, |op| self.value(op));
+		let limit = inst.limit.operand().map(|count| self.value(count));
+		let record = self.record(inst.dest);
+		let kept = record.kept;
+		let faces = record.kind.faces();
+		// A die still kept may be exploded only if some criterion matches some
+		// result that it may show, and the limit may be positive.
+		let may_match =
+			kept.max > 0 && record.results.meets(&criteria.possible);
+		let may_explode = may_match && limit.is_none_or(|limit| limit.max > 0);
+		if !may_explode
+		{
+			return Ok(())
+		}
+		// Each chain still kept grows only from its end, so a limited explode
+		// extends each up to the limit. Without limit, a chain saturates,
+		// rolling nothing, if every face matches; otherwise it may grow
+		// without bound.
+		let extensions = match limit
+		{
+			Some(limit) => dice(kept.max).saturating_mul(dice(limit.max)),
+			None => match faces.difference(&criteria.certain).is_empty()
+			{
+				true => 0,
+				false => u64::MAX
+			}
+		};
+		self.dice = self.dice.saturating_add(extensions);
+		// The paths through an explosion are unequally likely, so give up
+		// counting. An extension may show any face.
+		self.count = None;
+		let record = self.record_mut(inst.dest);
+		record.results = faces.union(&record.results);
+		record.exploded = true;
+		Ok(())
+	}
+
 	fn visit_sum_rolling_record(
 		&mut self,
 		inst: &SumRollingRecord
@@ -2909,9 +3013,14 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		}
 		// Each die still kept shows one of the results that the record admits,
 		// among them `0` for a die without faces or an empty range. No result
-		// is admitted only if a reroll crossed out every die.
+		// is admitted only if a reroll crossed out every die. The total of an
+		// exploded chain may be any value.
 		let sum = match record.results.hull()
 		{
+			_ if record.exploded && record.kept.max > 0 =>
+			{
+				EvaluationBounds::unconstrained()
+			},
 			Some(results) => record.kept * results,
 			None => 0.into()
 		};

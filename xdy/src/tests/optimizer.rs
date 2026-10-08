@@ -849,6 +849,203 @@ Function({x}@0) r#1 ⚅#1
 	}
 }
 
+/// Test that constant folding and strength reduction decline to fold or
+/// reduce a roll that an explode extends, even when its dice show only one
+/// face, since each chain may hold any number of dice, and that every set of
+/// passes agrees on the result, saturated or not; a later unlimited reroll
+/// that matches every face crosses out the dice of every chain but a saturated
+/// one. A roll without dice, or whose die shows only `0`, still folds to `0`,
+/// whatever its explodes.
+#[test]
+fn test_exploded_rolls_do_not_fold()
+{
+	for (roll, clauses, expected, folds) in [
+		(
+			"standard dice 3D1",
+			&["explode = 1 up to 2 times"][..],
+			9,
+			false
+		),
+		(
+			"standard dice 3D1",
+			&["explode = 1 unlimited times"],
+			i32::MAX,
+			false
+		),
+		(
+			"custom dice 2D[-2, -2]",
+			&["explode = -2 unlimited times"],
+			i32::MIN,
+			false
+		),
+		("range 2:2", &["explode = 2 up to 1 times"], 4, false),
+		(
+			"standard dice 4D1",
+			&["keep highest 2", "explode = 1 up to 1 times"],
+			4,
+			false
+		),
+		(
+			"standard dice 4D1",
+			&["explode = 1 up to 1 times", "keep highest 2"],
+			4,
+			false
+		),
+		(
+			"standard dice 3D1",
+			&["explode = 1 up to 1 times", "reroll = 1 unlimited times"],
+			0,
+			false
+		),
+		(
+			"standard dice 3D1",
+			&["explode = 1 unlimited times", "reroll = 1 unlimited times"],
+			i32::MAX,
+			false
+		),
+		(
+			"standard dice 0D6",
+			&["explode < 9 unlimited times"],
+			0,
+			true
+		),
+		(
+			"standard dice 3D0",
+			&["explode = 0 unlimited times"],
+			0,
+			true
+		),
+		("range 3:1", &["explode = 0 up to 3 times"], 0, true)
+	]
+	{
+		let clauses = clauses
+			.iter()
+			.map(|clause| format!("\t\t⚅0 <- {clause} from ⚅0\n"))
+			.collect::<String>();
+		let function = assemble_body(
+			1,
+			1,
+			&format!(
+				"\t\t⚅0 <- roll {roll}\n{clauses}\t\t@0 <- sum rolling record \
+				 ⚅0\n\t\treturn @0\n"
+			)
+		);
+		for passes in [
+			Passes::none(),
+			Pass::ConstantFolding.into(),
+			Pass::StrengthReduction.into(),
+			Passes::all()
+		]
+		{
+			let optimized = optimize(function.clone(), passes);
+			assert_eq!(optimized.validate(), Ok(()), "{}", optimized);
+			let result = Evaluator::new(optimized.clone())
+				.evaluate([], &mut StdRng::seed_from_u64(0))
+				.unwrap()
+				.result;
+			assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
+			let body = optimized.to_string();
+			let body = body.split_once("body:\n").unwrap().1;
+			match folds && passes.contains(Pass::ConstantFolding)
+			{
+				true => assert_eq!(
+					body,
+					format!("\t\treturn {expected}\n"),
+					"{:?}",
+					passes
+				),
+				false if !folds => assert!(
+					body.contains("explode"),
+					"{:?}\n{}",
+					passes,
+					optimized
+				),
+				false =>
+				{}
+			}
+		}
+	}
+}
+
+/// Test that strength reduction never combines two drops of a record across
+/// an explode of it, since the explode changes the chains that the later drop
+/// sees.
+#[test]
+fn test_drops_do_not_combine_across_explodes()
+{
+	let body = "\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- explode = 6 unlimited times from ⚅0
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+";
+	let optimized = optimize(assemble_body(1, 1, body), Passes::all());
+	assert_eq!(optimized.to_string().split_once("body:\n").unwrap().1, body);
+}
+
+/// Test that every pass renames the operands of an explode, as it does those
+/// of a reroll, and that dead code elimination removes an explode of a record
+/// that nothing sums, so that the optimized function is well formed and
+/// evaluates as the original does.
+#[test]
+fn test_optimizer_rewrites_explodes()
+{
+	let function = crate::Assembler::assemble(
+		"\
+Function({x}@0) r#7 ⚅#2
+\textern[]
+\tbody:
+\t\t@1 <- @0 + 1
+\t\t@2 <- @0 + 1
+\t\t@3 <- @2 * 1
+\t\t@4 <- 2 + 4
+\t\t⚅0 <- roll standard dice 5D6
+\t\t⚅0 <- explode in @1..=@2 up to @3 times from ⚅0
+\t\t⚅0 <- explode = @4 up to @4 times from ⚅0
+\t\t@5 <- sum rolling record ⚅0
+\t\t⚅1 <- roll standard dice 2D6
+\t\t⚅1 <- explode = @1 unlimited times from ⚅1
+\t\t@6 <- @5 + 0
+\t\treturn @6
+"
+	)
+	.unwrap();
+	let optimized = optimize(function.clone(), Passes::all());
+	assert_eq!(optimized.validate(), Ok(()), "{}", optimized);
+	assert_eq!(
+		optimized.to_string(),
+		"\
+Function({x}@0) r#1 ⚅#1
+\textern[]
+\tbody:
+\t\t@0 <- 1 + @0
+\t\t⚅0 <- roll standard dice 5D6
+\t\t⚅0 <- explode in @0..=@0 up to @0 times from ⚅0
+\t\t⚅0 <- explode = 6 up to 6 times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+	);
+	// The dead roll follows every live one, so removing it changes no draw.
+	for x in -1..=6
+	{
+		for seed in 0..20
+		{
+			let expected = Evaluator::new(function.clone())
+				.evaluate([x], &mut StdRng::seed_from_u64(seed))
+				.unwrap()
+				.result;
+			let actual = Evaluator::new(optimized.clone())
+				.evaluate([x], &mut StdRng::seed_from_u64(seed))
+				.unwrap()
+				.result;
+			assert_eq!(actual, expected, "x = {}, seed = {}", x, seed);
+		}
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                 Exactness.                                 //
 ////////////////////////////////////////////////////////////////////////////////

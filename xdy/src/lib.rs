@@ -105,6 +105,15 @@
 //!   [`Predicate`] and a [`Limit`], and its predicate resolves to the
 //!   [`Criterion`] that [`RollingRecord::reroll`] takes. A [`Min`] answers the
 //!   lesser of its operands, as [`Max`] answers the greater.
+//! * [`Instruction`] gains [`Explode`], and [`InstructionVisitor`] requires
+//!   [`visit_explode`](InstructionVisitor::visit_explode). An [`Explode`] holds
+//!   a [`Predicate`] and a [`Limit`], as a [`Reroll`] does, and
+//!   [`RollingRecord::explode`] applies it to a record, appending dice whose
+//!   [`origin`](Die::origin) is [`Origin::Extends`] or [`Origin::Saturates`].
+//!   [`AssemblyError`] gains
+//!   [`ExplodeSourceMismatch`](AssemblyError::ExplodeSourceMismatch), and
+//!   [`BuildError`] gains [`Unbounded`](BuildError::Unbounded), with which the
+//!   forward pass refuses every function that explodes dice, for now.
 //! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, and `Reroll`,
 //!   and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),
