@@ -77,11 +77,11 @@ fn test_debug_passes_flags_to_leaves()
 	);
 }
 
-/// Ensure that `{:?}` and `{:#?}` render each kind of drop, keep, and reroll
-/// clause exactly as the derived format would: the variant wraps the clause,
-/// whose derived [`Debug`] names its own type and its fields: the count, `drop`
-/// or `keep`, of a drop or keep, and the predicate and the limit of a reroll,
-/// in every form.
+/// Ensure that `{:?}` and `{:#?}` render each kind of drop, keep, reroll, and
+/// explode clause exactly as the derived format would: the variant wraps the
+/// clause, whose derived [`Debug`] names its own type and its fields: the
+/// count, `drop` or `keep`, of a drop or keep, and the predicate and the limit
+/// of a reroll or an explode, in every form.
 #[test]
 fn test_debug_clauses_match_derived()
 {
@@ -100,7 +100,18 @@ fn test_debug_clauses_match_derived()
 		"(function [] (reroll (standard-dice 4 6) (in []) (unlimited)))",
 		"(function [] (reroll (standard-dice 4 6) (in-range 1 3) (times 1)))",
 		"(function [{x}] (reroll (keep-highest (standard-dice 4 6) 3) \
-		 (in-range-inclusive -2 {x}) (unlimited)))"
+		 (in-range-inclusive -2 {x}) (unlimited)))",
+		"(function [] (explode (standard-dice 4 6) (eq 6)))",
+		"(function [] (explode (standard-dice 4 6) (ne -1) (times 2)))",
+		"(function [{x}] (explode (standard-dice 4 6) (lt {x}) (unlimited)))",
+		"(function [] (explode (standard-dice 4 6) (le (group (neg 1)))))",
+		"(function [] (explode (standard-dice 4 6) (gt 5) (times (add 1 1))))",
+		"(function [] (explode (standard-dice 4 6) (ge 6) (times 0)))",
+		"(function [] (explode (standard-dice 4 6) (in [1 2 -3])))",
+		"(function [] (explode (standard-dice 4 6) (in []) (unlimited)))",
+		"(function [] (explode (standard-dice 4 6) (in-range 5 7) (times 1)))",
+		"(function [{x}] (explode (reroll (keep-highest (standard-dice 4 6) 3) \
+		 (eq 1)) (in-range-inclusive -2 {x}) (unlimited)))"
 	]
 	{
 		let body = crate::s_expr::read_s_expr(s_expr).unwrap().body;
@@ -130,6 +141,10 @@ fn test_debug_clauses_match_derived()
 			DiceExpression::Reroll(clause) => (
 				format!("Dice(Reroll({:?}))", clause),
 				format!("Dice(\n    Reroll(\n{}", indent(clause))
+			),
+			DiceExpression::Explode(clause) => (
+				format!("Dice(Explode({:?}))", clause),
+				format!("Dice(\n    Explode(\n{}", indent(clause))
 			),
 			_ => unreachable!()
 		};
@@ -353,6 +368,66 @@ fn test_rerolls_are_distinct()
 		"(reroll (standard-dice 4 6) (eq 1) (unlimited))",
 		"(reroll (standard-dice 4 5) (eq 1))",
 		"(drop-lowest (standard-dice 4 6) 1)"
+	];
+	let sources = forms
+		.iter()
+		.map(|form| format!("(function [] {form})"))
+		.collect::<Vec<_>>();
+	let bodies = sources
+		.iter()
+		.map(|source| crate::s_expr::read_s_expr(source).unwrap().body)
+		.collect::<Vec<_>>();
+	for (i, left) in bodies.iter().enumerate()
+	{
+		for (j, right) in bodies.iter().enumerate()
+		{
+			assert_eq!(left == right, i == j, "{} vs {}", forms[i], forms[j]);
+			if i != j
+			{
+				assert!(
+					hash_of(left) != hash_of(right),
+					"{} and {} hash alike",
+					forms[i],
+					forms[j]
+				);
+			}
+		}
+	}
+}
+
+/// Ensure that explode clauses are distinct from one another whenever their
+/// predicates differ in form or in operands, or their limits differ, even when
+/// a limit of one time means the same as no limit, and from reroll and drop
+/// clauses of the same shape, in equality and in hashing.
+#[test]
+fn test_explodes_are_distinct()
+{
+	let forms = [
+		"(explode (standard-dice 4 6) (eq 6))",
+		"(explode (standard-dice 4 6) (eq 5))",
+		"(explode (standard-dice 4 6) (ne 6))",
+		"(explode (standard-dice 4 6) (lt 6))",
+		"(explode (standard-dice 4 6) (le 6))",
+		"(explode (standard-dice 4 6) (gt 6))",
+		"(explode (standard-dice 4 6) (ge 6))",
+		"(explode (standard-dice 4 6) (in [6]))",
+		"(explode (standard-dice 4 6) (in [5 6]))",
+		"(explode (standard-dice 4 6) (in [6 5]))",
+		"(explode (standard-dice 4 6) (in []))",
+		"(explode (standard-dice 4 6) (in-range 5 6))",
+		"(explode (standard-dice 4 6) (in-range 5 7))",
+		"(explode (standard-dice 4 6) (in-range-inclusive 5 6))",
+		"(explode (standard-dice 4 6) (eq 6) (times 1))",
+		"(explode (standard-dice 4 6) (eq 6) (times 2))",
+		"(explode (standard-dice 4 6) (eq 6) (unlimited))",
+		"(explode (standard-dice 4 5) (eq 6))",
+		"(explode (explode (standard-dice 4 6) (eq 6)) (eq 6))",
+		"(reroll (standard-dice 4 6) (eq 6))",
+		"(reroll (standard-dice 4 6) (eq 6) (times 2))",
+		"(reroll (standard-dice 4 6) (in-range 5 6) (unlimited))",
+		"(explode (standard-dice 4 6) (in-range 5 6) (unlimited))",
+		"(reroll (explode (standard-dice 4 6) (eq 6)) (eq 6))",
+		"(drop-lowest (standard-dice 4 6) 6)"
 	];
 	let sources = forms
 		.iter()
@@ -630,6 +705,103 @@ fn test_display_reroll_clauses()
 	}
 }
 
+/// Ensure that explode clauses render as their source, in every form of
+/// predicate and limit, as reroll clauses do: `≠`, `≤`, and `≥` for their
+/// comparators, `time` for a literal count of one only, `∞` for an unlimited
+/// limit, and a negative constant count grouped, though a negative threshold or
+/// endpoint is not; chained with drops, keeps, and rerolls in any order; and
+/// that the S-expressions of the trees, on one line or wrapped onto many, read
+/// back to the same trees.
+#[test]
+fn test_display_explode_clauses()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (explode (standard-dice 3 6) (eq 6)))",
+			"3D6 explode = 6"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (ne -1) (times 1)))",
+			"3D6 explode ≠ -1 1 time"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (lt 3) (times 2)))",
+			"3D6 explode < 3 2 times"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (le 2) (unlimited)))",
+			"3D6 explode ≤ 2 ∞ times"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (gt 5) (times 0)))",
+			"3D6 explode > 5 0 times"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (ge 6) (times -1)))",
+			"3D6 explode ≥ 6 (-1) times"
+		),
+		(
+			"(function [] (explode (custom-dice 3 [-1 0 1]) (in [-1 1])))",
+			"3D[-1, 0, 1] explode in [-1, 1]"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (in []) (unlimited)))",
+			"3D6 explode in [] ∞ times"
+		),
+		(
+			"(function [] (explode (custom-dice 3 [-3 -2 -1]) (in-range -3 -1)))",
+			"3D[-3, -2, -1] explode in -3..-1"
+		),
+		(
+			"(function [{x}] (explode (standard-dice 3 6) (in-range-inclusive \
+			 {x} 6) (times {x})))",
+			"{x}: 3D6 explode in {x}..=6 {x} times"
+		),
+		(
+			"(function [{n}] (explode (standard-dice 3 6) (in-range-inclusive \
+			 (group (sub {n} 1)) (group (add {n} 1))) (times (group (sub {n} \
+			 1)))))",
+			"{n}: 3D6 explode in ({n} - 1)..=({n} + 1) ({n} - 1) times"
+		),
+		(
+			"(function [] (keep-highest (explode (drop-lowest (standard-dice 5 \
+			 10)) (eq 10) (unlimited)) 3))",
+			"5D10 drop lowest explode = 10 ∞ times keep highest 3"
+		),
+		(
+			"(function [] (explode (keep-highest (standard-dice 5 10) 3) (eq \
+			 10)))",
+			"5D10 keep highest 3 explode = 10"
+		),
+		(
+			"(function [] (reroll (explode (standard-dice 1 6) (eq 6)) (eq 1)))",
+			"1D6 explode = 6 reroll = 1"
+		),
+		(
+			"(function [] (explode (explode (standard-dice 4 6) (eq 6)) (eq 5) \
+			 (times 1)))",
+			"4D6 explode = 6 explode = 5 1 time"
+		)
+	]
+	{
+		let function = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(function.to_string(), expected);
+		let options =
+			SExpressibleOptions::new(0, 4, usize::MAX).with_groups(true);
+		assert_eq!(function.to_s_expr(options), s_expr);
+		for soft_limit in [0, 20, 40]
+		{
+			let options =
+				SExpressibleOptions::new(0, 4, soft_limit).with_groups(true);
+			let wrapped = function.to_s_expr(options);
+			assert!(
+				crate::s_expr::read_s_expr(&wrapped).unwrap() == function,
+				"{wrapped}"
+			);
+		}
+	}
+}
+
 /// Ensure that keep clauses render as their source, chained with drops in
 /// either order, a negative constant count grouped as for drops, that the
 /// renderings parse back to the same trees, and that the S-expressions of the
@@ -890,6 +1062,30 @@ fn test_deep_reroll_clauses()
 	exercise_on_small_stack(Nesting::RerollClauses)
 }
 
+/// Ensure that a deep chain of explode thresholds survives every trait on a
+/// small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_explode_threshold()
+{
+	exercise_on_small_stack(Nesting::ExplodeThreshold)
+}
+
+/// Ensure that a deep chain of explode counts survives every trait on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_explode_count() { exercise_on_small_stack(Nesting::ExplodeCount) }
+
+/// Ensure that a deep stack of explode clauses, of every form, among rerolls
+/// and drops, survives every trait on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_explode_clauses()
+{
+	exercise_on_small_stack(Nesting::ExplodeClauses)
+}
+
 /// Ensure that a deep chain of the first arguments of extrema survives every
 /// trait on a small stack.
 #[test]
@@ -1017,7 +1213,8 @@ fn test_miri_standalone_reroll_clauses()
 {
 	for depth in 36..=40
 	{
-		let chain = reroll_clauses(standard_dice(constant(1)), depth);
+		let chain =
+			predicated_clauses(standard_dice(constant(1)), depth, false);
 		drop(chain.clone());
 		match &chain
 		{
@@ -1044,6 +1241,59 @@ fn test_miri_single_reroll_clause()
 		 {x}) (times 2)))",
 		"(function [] (reroll (standard-dice 1 6) (in [1 2]) (unlimited)))",
 		"(function [] (reroll (standard-dice 1 6) (in [])))"
+	]
+	{
+		let expression = crate::s_expr::read_s_expr(s_expr).unwrap().body;
+		drop(expression.clone());
+		drop(expression);
+	}
+}
+
+/// Ensure that every trait works on a chain of explode clauses of every form,
+/// among rerolls and drops, and on the nestings of explodes in rotation.
+#[test]
+fn test_miri_explode_clauses()
+{
+	exercise(|leaf| nest(Nesting::ExplodeClauses, 40, leaf));
+	exercise(|leaf| nest(Nesting::ExplodeThreshold, 20, leaf));
+	exercise(|leaf| nest(Nesting::ExplodeCount, 20, leaf));
+}
+
+/// Ensure that a standalone chain of explode clauses drops, both as a
+/// [`DiceExpression`] and as a bare clause, whichever kind of clause tops it.
+#[test]
+fn test_miri_standalone_explode_clauses()
+{
+	for depth in 36..=40
+	{
+		let chain = predicated_clauses(standard_dice(constant(1)), depth, true);
+		drop(chain.clone());
+		match &chain
+		{
+			DiceExpression::DropLowest(clause) => drop(clause.clone()),
+			DiceExpression::Reroll(clause) => drop(clause.clone()),
+			DiceExpression::Explode(clause) => drop(clause.clone()),
+			_ => unreachable!()
+		}
+		drop(chain);
+	}
+}
+
+/// Ensure that an explode clause directly atop a leaf dice expression drops,
+/// whatever its predicate and its limit, and whether its operands are leaves
+/// or not.
+#[test]
+fn test_miri_single_explode_clause()
+{
+	for s_expr in [
+		"(function [{x}] (explode (custom-dice {x} [1 2]) (eq (standard-dice 2 \
+		 6))))",
+		"(function [{x}] (explode (standard-dice {x} 6) (in-range (neg {x}) \
+		 (group 3)) (times (add 1 1))))",
+		"(function [{x}] (explode (standard-dice {x} 6) (in-range-inclusive 1 \
+		 {x}) (times 2)))",
+		"(function [] (explode (standard-dice 1 6) (in [1 2]) (unlimited)))",
+		"(function [] (explode (standard-dice 1 6) (in [])))"
 	]
 	{
 		let expression = crate::s_expr::read_s_expr(s_expr).unwrap().body;
@@ -1194,9 +1444,21 @@ pub(super) enum Nesting
 
 	/// `1D6 drop lowest reroll in (e)..=6 ∞ times`: a reroll clause atop a
 	/// drop clause. Nested alone, this produces a single chain of [reroll
-	/// clauses of every form](reroll_clauses), among drops, whose leaf count is
-	/// `e`.
+	/// clauses of every form](predicated_clauses), among drops, whose leaf
+	/// count is `e`.
 	RerollClauses,
+
+	/// `1D6 explode ≥ (e)`.
+	ExplodeThreshold,
+
+	/// `1D6 explode = 6 (e) times`.
+	ExplodeCount,
+
+	/// `1D6 reroll = 1 explode in (e)..=6 ∞ times`: an explode clause atop a
+	/// reroll clause. Nested alone, this produces a single chain of [explode
+	/// clauses of every form](predicated_clauses), among rerolls and drops,
+	/// whose leaf count is `e`.
+	ExplodeClauses,
 
 	/// `highest(e, 1)`.
 	ExtremumFirst,
@@ -1236,6 +1498,15 @@ impl Nesting
 		Nesting::RerollClauses,
 		Nesting::ExtremumFirst,
 		Nesting::ExtremumLast
+	];
+
+	/// The constructs that the parser does not read yet, which are therefore
+	/// absent from [`ROTATION`](Self::ROTATION), whose renderings other tests
+	/// parse. The tests that never parse a nesting cover them too.
+	pub(super) const UNPARSED: [Nesting; 3] = [
+		Nesting::ExplodeThreshold,
+		Nesting::ExplodeCount,
+		Nesting::ExplodeClauses
 	];
 
 	/// Answer whether nesting this way introduces [bindings](Binding). Every
@@ -1300,9 +1571,18 @@ pub(super) fn nest(
 		},
 		Nesting::RerollClauses =>
 		{
-			return Expression::Dice(reroll_clauses(
+			return Expression::Dice(predicated_clauses(
 				standard_dice(constant(leaf)),
-				depth
+				depth,
+				false
+			))
+		},
+		Nesting::ExplodeClauses =>
+		{
+			return Expression::Dice(predicated_clauses(
+				standard_dice(constant(leaf)),
+				depth,
+				true
 			))
 		},
 		_ =>
@@ -1377,7 +1657,8 @@ pub(super) fn nest_parsable(
 {
 	if let Nesting::DropClauses
 	| Nesting::MixedClauses
-	| Nesting::RerollClauses = nesting
+	| Nesting::RerollClauses
+	| Nesting::ExplodeClauses = nesting
 	{
 		return nest(nesting, depth, leaf)
 	}
@@ -1411,7 +1692,10 @@ pub(super) fn nest_parsable(
 			| Nesting::RerollThreshold
 			| Nesting::RerollRangeEnd
 			| Nesting::RerollCount
-			| Nesting::RerollClauses => !atomic,
+			| Nesting::RerollClauses
+			| Nesting::ExplodeThreshold
+			| Nesting::ExplodeCount
+			| Nesting::ExplodeClauses => !atomic,
 			Nesting::Negation => matches!(expression, Expression::Constant(_)),
 			Nesting::Multiplication | Nesting::Division | Nesting::Modulo =>
 			{
@@ -1646,6 +1930,41 @@ fn wrap(nesting: Nesting, inner: Expression<'static>) -> Expression<'static>
 				span
 			}))
 		},
+		Nesting::ExplodeThreshold =>
+		{
+			Expression::Dice(DiceExpression::Explode(Explode {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::Ge(inner),
+				limit: None,
+				span
+			}))
+		},
+		Nesting::ExplodeCount =>
+		{
+			Expression::Dice(DiceExpression::Explode(Explode {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::Eq(Box::new(constant(6))),
+				limit: Some(Limit::Times(inner)),
+				span
+			}))
+		},
+		Nesting::ExplodeClauses =>
+		{
+			Expression::Dice(DiceExpression::Explode(Explode {
+				dice: Box::new(DiceExpression::Reroll(Reroll {
+					dice: Box::new(standard_dice(constant(1))),
+					predicate: Predicate::Eq(Box::new(constant(1))),
+					limit: None,
+					span
+				})),
+				predicate: Predicate::InRangeInclusive {
+					start: inner,
+					end: Box::new(constant(6))
+				},
+				limit: Some(Limit::Unlimited),
+				span
+			}))
+		},
 		Nesting::ExtremumFirst =>
 		{
 			extremum(Direction::Highest, [*inner, constant(1)])
@@ -1746,20 +2065,23 @@ fn mixed_clauses(
 	dice
 }
 
-/// Stack `depth` clauses atop a dice expression: rerolls, rotating through
-/// every form of predicate and every kind of limit, and, at every fifth level,
-/// a drop. The operands of every other reroll are grouped, so that they are not
-/// leaves, and every other list is empty.
+/// Stack `depth` clauses atop a dice expression: rerolls, or explodes, rotating
+/// through every form of predicate and every kind of limit, and, at every fifth
+/// level, a drop. The operands of every other reroll or explode are grouped, so
+/// that they are not leaves, and every other list is empty. Among explodes,
+/// every fourth clause that is not a drop is a reroll instead.
 ///
 /// # Parameters
 /// - `dice`: The dice expression at the bottom of the stack.
 /// - `depth`: The number of clauses.
+/// - `explodes`: Whether to stack explodes, rather than rerolls alone.
 ///
 /// # Returns
 /// The stack of clauses.
-fn reroll_clauses(
+fn predicated_clauses(
 	dice: DiceExpression<'static>,
-	depth: usize
+	depth: usize,
+	explodes: bool
 ) -> DiceExpression<'static>
 {
 	let span = SourceSpan::SYNTHETIC;
@@ -1816,12 +2138,24 @@ fn reroll_clauses(
 			1 => Some(Limit::Times(operand(2))),
 			_ => Some(Limit::Unlimited)
 		};
-		dice = DiceExpression::Reroll(Reroll {
-			dice: inner,
-			predicate,
-			limit,
-			span
-		});
+		dice = if explodes && level % 4 != 3
+		{
+			DiceExpression::Explode(Explode {
+				dice: inner,
+				predicate,
+				limit,
+				span
+			})
+		}
+		else
+		{
+			DiceExpression::Reroll(Reroll {
+				dice: inner,
+				predicate,
+				limit,
+				span
+			})
+		};
 	}
 	dice
 }

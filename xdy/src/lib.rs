@@ -114,11 +114,14 @@
 //!   [`ExplodeSourceMismatch`](AssemblyError::ExplodeSourceMismatch), and
 //!   [`BuildError`] gains [`Unbounded`](BuildError::Unbounded), with which the
 //!   forward pass refuses every function that explodes dice, for now.
-//! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, and `Reroll`,
-//!   and [`ast::ASTVisitor`] requires
+//! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, `Reroll`, and
+//!   `Explode`, and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),
-//!   [`visit_keep_highest`](ast::ASTVisitor::visit_keep_highest), and
-//!   [`visit_reroll`](ast::ASTVisitor::visit_reroll).
+//!   [`visit_keep_highest`](ast::ASTVisitor::visit_keep_highest),
+//!   [`visit_reroll`](ast::ASTVisitor::visit_reroll), and
+//!   [`visit_explode`](ast::ASTVisitor::visit_explode). An [`ast::Explode`]
+//!   holds an [`ast::Predicate`] and an [`ast::Limit`], as an [`ast::Reroll`]
+//!   does.
 //! * [`ast::Expression`] gains [`Extremum`](ast::Expression::Extremum), whose
 //!   [`ast::Extremum`] holds a [`Direction`](ast::Direction), `Highest` or
 //!   `Lowest`, and its arguments in the order written. [`ast::ASTVisitor`]

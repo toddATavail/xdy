@@ -227,6 +227,186 @@ fn test_compile_reroll_clauses()
 	);
 }
 
+/// Ensure that the compiler emits an explode instruction for each explode
+/// clause, in order with the drops, keeps, and rerolls, with a limit of 1 when
+/// the clause gives none; that it computes the operands of the predicate and
+/// the limit after the dice that they explode, in the order written, and before
+/// the explode, each once; and that it discovers the external variables among
+/// them.
+#[test]
+fn test_compile_explode_clauses()
+{
+	for (s_expr, expected) in [
+		(
+			"(function [] (explode (standard-dice 3 6) (eq 6)))",
+			"\
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅0 <- explode = 6 up to 1 times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (explode (standard-dice 3 6) (ge (standard-dice 1 4)) \
+			 (unlimited)))",
+			"\
+\t\t⚅0 <- roll standard dice 3D6
+\t\t⚅1 <- roll standard dice 1D4
+\t\t@0 <- sum rolling record ⚅1
+\t\t⚅0 <- explode >= @0 unlimited times from ⚅0
+\t\t@1 <- sum rolling record ⚅0
+\t\treturn @1
+"
+		),
+		(
+			"(function [{n}] (explode (custom-dice 4 [-1 0 1]) (in-range \
+			 (neg 1) (group (add {n} 1))) (times {n})))",
+			"\
+\t\t⚅0 <- roll custom dice 4D[-1, 0, 1]
+\t\t@1 <- @0 + 1
+\t\t⚅0 <- explode in -1..@1 up to @0 times from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+"
+		),
+		(
+			"(function [] (explode (standard-dice 2 6) (in-range-inclusive {x} \
+			 {y}) (times 2)))",
+			"\
+\t\t⚅0 <- roll standard dice 2D6
+\t\t⚅0 <- explode in @0..=@1 up to 2 times from ⚅0
+\t\t@2 <- sum rolling record ⚅0
+\t\treturn @2
+"
+		),
+		(
+			"(function [] (keep-highest (explode (drop-lowest (standard-dice 5 \
+			 10)) (in [9 10])) 3))",
+			"\
+\t\t⚅0 <- roll standard dice 5D10
+\t\t⚅0 <- drop lowest 1 from ⚅0
+\t\t⚅0 <- explode in [9, 10] up to 1 times from ⚅0
+\t\t⚅0 <- keep highest 3 from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		),
+		(
+			"(function [] (explode (reroll (standard-dice 4 6) (eq 1)) (in []) \
+			 (unlimited)))",
+			"\
+\t\t⚅0 <- roll standard dice 4D6
+\t\t⚅0 <- reroll = 1 up to 1 times from ⚅0
+\t\t⚅0 <- explode in [] unlimited times from ⚅0
+\t\t@0 <- sum rolling record ⚅0
+\t\treturn @0
+"
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		let function = Compiler::compile(&ast).to_string();
+		assert_eq!(function.split_once("body:\n").unwrap().1, expected);
+	}
+	let ast = crate::s_expr::read_s_expr(
+		"(function [] (explode (standard-dice 2 6) (in-range-inclusive {x} {y}) \
+		 (times 2)))"
+	)
+	.unwrap();
+	let function = Compiler::compile(&ast);
+	assert_eq!(
+		function.to_string().lines().nth(1).map(str::trim),
+		Some("extern[{x}@0, {y}@1]")
+	);
+}
+
+/// Ensure that the functions compiled from explode clauses evaluate as their
+/// trees describe, and to the same results after optimization, which may
+/// rewrite the records of dice of one face: an explode extends each
+/// matching die once unless it says otherwise, and every extension may itself
+/// explode, up to the limit; later drops and keeps count each chain as one die,
+/// worth its total; a later reroll acts on each die of a chain; an operand
+/// rolled from dice is rolled once, after the dice that explode; and an
+/// unlimited explode that matches every face saturates each chain toward the
+/// sign of its mean face value, or to `0` if that mean is `0`.
+#[test]
+fn test_evaluate_explode_clauses()
+{
+	for (s_expr, result, records) in [
+		(
+			"(function [] (explode (custom-dice 2 [3]) (eq 3)))",
+			12,
+			&["2d[3]: [3, 3, 3, 3]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 2 [3]) (eq 3) (times 2)))",
+			18,
+			&["2d[3]: [3, 3, 3, 3, 3, 3]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 2 [3]) (ne 3) (unlimited)))",
+			6,
+			&["2d[3]: [3, 3]"][..]
+		),
+		(
+			"(function [] (keep-lowest (explode (custom-dice 3 [2]) (eq 2) \
+			 (times 1)) 2))",
+			8,
+			&["3d[2]: [~2, 2, 2, ~2, 2, 2]"][..]
+		),
+		(
+			"(function [] (reroll (explode (custom-dice 1 [6]) (eq 6)) (eq 6)))",
+			12,
+			&["1d[6]: [~6, ~6, 6, 6]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 1 [5]) (in-range-inclusive \
+			 (custom-dice 1 [4]) 6) (times 3)))",
+			20,
+			&["1d[5]: [5, 5, 5, 5]", "1d[4]: [4]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 2 [3]) (ge 1) (unlimited)))",
+			i32::MAX,
+			&["2d[3]: [3, 3, ∞, ∞]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 2 [0]) (eq 0) (unlimited)))",
+			0,
+			&["2d[0]: [0, 0, 0, 0]"][..]
+		),
+		(
+			"(function [] (explode (custom-dice 2 [-2]) (eq -2) (unlimited)))",
+			i32::MIN,
+			&["2d[-2]: [-2, -2, -∞, -∞]"][..]
+		)
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		Validator::validate(&ast).unwrap();
+		let function = Compiler::compile(&ast);
+		let evaluate = |function| {
+			Evaluator::new(function)
+				.evaluate([], &mut StdRng::seed_from_u64(0))
+				.unwrap()
+		};
+		let evaluation = evaluate(function.clone());
+		assert_eq!(evaluation.result, result, "{}", s_expr);
+		assert_eq!(
+			evaluation
+				.records
+				.iter()
+				.map(ToString::to_string)
+				.collect::<Vec<_>>(),
+			records,
+			"{}",
+			s_expr
+		);
+		let optimized = evaluate(optimize(function, Passes::all()));
+		assert_eq!(optimized.result, result, "{} optimized", s_expr);
+	}
+}
+
 /// Ensure that the compiler computes the arguments of an extremum in the order
 /// written, each once, and then chains `max` or `min` over their values from
 /// left to right; that it discovers the external variables among them in the
@@ -390,7 +570,10 @@ fn test_compile_extrema_of_fewer_than_two()
 fn test_compile_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION
+			.into_iter()
+			.chain(Nesting::UNPARSED)
+			.chain([Nesting::Mixed])
 		{
 			let function =
 				Compiler::compile(&nest_function(nesting, nesting.depth()));
@@ -418,7 +601,10 @@ const OPTIMIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 fn test_optimize_deep()
 {
 	on_small_stack_within(OPTIMIZATION_TIMEOUT, || {
-		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION
+			.into_iter()
+			.chain(Nesting::UNPARSED)
+			.chain([Nesting::Mixed])
 		{
 			let depth = nesting.depth() / OPTIMIZATION_DIVISOR;
 			let function = Compiler::compile(&nest_function(nesting, depth));

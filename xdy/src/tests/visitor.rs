@@ -154,6 +154,88 @@ fn test_visitor_order_rerolls()
 	);
 }
 
+/// Ensure that a walk enters and visits explode clauses as it does reroll
+/// clauses, in order with them and with drops and keeps, the outer clause
+/// first, then its dice, then the operands of its predicate in the order
+/// written, and then its count; that it hands
+/// [`visit_explode`](ASTVisitor::visit_explode) the outputs of those operands
+/// in the shape of the predicate and the limit; that it does not finish the
+/// dice beneath an explode clause with
+/// [`visit_expression`](ASTVisitor::visit_expression); and that it stops at an
+/// error from [`enter_explode`](ASTVisitor::enter_explode) or
+/// [`visit_explode`](ASTVisitor::visit_explode).
+#[test]
+fn test_visitor_order_explodes()
+{
+	let ast = crate::s_expr::read_s_expr(
+		"(function [{x}] (add (explode (keep-highest (reroll (explode \
+		 (standard-dice 5 6) (eq 6)) (in-range-inclusive (neg 2) {x}) (times \
+		 3)) 4) (in [5 6]) (unlimited)) (explode (custom-dice 2 [-1 1]) \
+		 (in-range {x} 7) (unlimited))))"
+	)
+	.unwrap();
+	let mut tracer = Tracer::default();
+	let output = ast.accept(&mut tracer).unwrap();
+	assert_eq!(
+		output,
+		"fn <<<5>D<6> explode = <6> reroll in <-<2>>..=<{x}> <3> times keep \
+		 highest <4> explode in [5, 6] ∞ times> + <<2>D[-1, 1] explode in \
+		 <{x}>..<7> ∞ times>>"
+	);
+	assert_eq!(
+		tracer.entered,
+		[
+			"function",
+			"add",
+			"explode",
+			"keep_highest",
+			"reroll",
+			"explode",
+			"standard_dice",
+			"constant",
+			"constant",
+			"constant",
+			"neg",
+			"constant",
+			"variable",
+			"constant",
+			"constant",
+			"explode",
+			"custom_dice",
+			"constant",
+			"variable",
+			"constant"
+		]
+	);
+	for (fail, entered) in [
+		("enter explode", &["function", "add", "explode"][..]),
+		(
+			"visit explode",
+			&[
+				"function",
+				"add",
+				"explode",
+				"keep_highest",
+				"reroll",
+				"explode",
+				"standard_dice",
+				"constant",
+				"constant",
+				"constant"
+			][..]
+		)
+	]
+	{
+		let mut tracer = Tracer {
+			fail: Some(fail),
+			..Tracer::default()
+		};
+		assert_eq!(ast.accept(&mut tracer), Err(fail));
+		assert_eq!(tracer.entered, entered, "{}", fail);
+		assert_eq!(tracer.calls.last(), Some(&fail));
+	}
+}
+
 /// Ensure that a walk enters an extremum before its arguments, enters and
 /// visits the arguments in the order written, hands
 /// [`visit_extremum`](ASTVisitor::visit_extremum) their outputs in that order,
@@ -286,7 +368,10 @@ fn test_visitor_stops_on_error()
 fn test_visitor_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION
+			.into_iter()
+			.chain(Nesting::UNPARSED)
+			.chain([Nesting::Mixed])
 		{
 			let depth = nesting.depth();
 			let expression = nest(nesting, depth, 1);
@@ -386,9 +471,11 @@ impl Tracer
 		})
 	}
 
-	/// Record a `visit_*` call and render a reroll clause.
+	/// Record a `visit_*` call and render a reroll or explode clause.
 	///
 	/// # Parameters
+	/// - `call`: The name of the call.
+	/// - `keyword`: The keyword of the clause.
 	/// - `dice`: The output of the dice.
 	/// - `predicate`: The predicate, holding the outputs of its operands.
 	/// - `limit`: The limit, holding the output of its count, if any.
@@ -398,14 +485,16 @@ impl Tracer
 	///
 	/// # Errors
 	/// The name of the call, if it is the one at which to fail.
-	fn reroll(
+	fn predicated(
 		&mut self,
+		call: &'static str,
+		keyword: &str,
 		dice: String,
 		predicate: Predicate<String>,
 		limit: Option<Limit<String>>
 	) -> Result<String, &'static str>
 	{
-		self.call("visit reroll")?;
+		self.call(call)?;
 		let predicate = match predicate
 		{
 			Predicate::Eq(t) => format!("= {}", t),
@@ -435,7 +524,7 @@ impl Tracer
 			Some(Limit::Times(count)) => format!(" {} times", count),
 			Some(Limit::Unlimited) => " ∞ times".to_string()
 		};
-		Ok(format!("{} reroll {}{}", dice, predicate, limit))
+		Ok(format!("{} {} {}{}", dice, keyword, predicate, limit))
 	}
 
 	/// Record a `visit_*` call and render an extremum.
@@ -599,6 +688,14 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 	) -> Result<(), Self::Error>
 	{
 		self.enter("reroll", "enter reroll")
+	}
+
+	fn enter_explode(
+		&mut self,
+		_node: &'a Explode<'src>
+	) -> Result<(), Self::Error>
+	{
+		self.enter("explode", "enter explode")
 	}
 
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), Self::Error>
@@ -773,7 +870,18 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Tracer
 		limit: Option<Limit<String>>
 	) -> Result<String, Self::Error>
 	{
-		self.reroll(dice, predicate, limit)
+		self.predicated("visit reroll", "reroll", dice, predicate, limit)
+	}
+
+	fn visit_explode(
+		&mut self,
+		_node: &'a Explode<'src>,
+		dice: String,
+		predicate: Predicate<String>,
+		limit: Option<Limit<String>>
+	) -> Result<String, Self::Error>
+	{
+		self.predicated("visit explode", "explode", dice, predicate, limit)
 	}
 
 	fn visit_add(
@@ -988,6 +1096,11 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 		self.enter()
 	}
 
+	fn enter_explode(&mut self, _node: &'a Explode<'src>) -> Result<(), ()>
+	{
+		self.enter()
+	}
+
 	fn enter_add(&mut self, _node: &'a Add<'src>) -> Result<(), ()>
 	{
 		self.enter()
@@ -1142,6 +1255,19 @@ impl<'a, 'src: 'a> ASTVisitor<'a, 'src> for Counter
 	fn visit_reroll(
 		&mut self,
 		_node: &'a Reroll<'src>,
+		dice: usize,
+		predicate: Predicate<usize>,
+		limit: Option<Limit<usize>>
+	) -> Result<usize, ()>
+	{
+		let operands = predicate.operands().sum::<usize>();
+		let count = limit.as_ref().and_then(Limit::operand).unwrap_or(&0);
+		self.visit(&[dice, operands, *count])
+	}
+
+	fn visit_explode(
+		&mut self,
+		_node: &'a Explode<'src>,
 		dice: usize,
 		predicate: Predicate<usize>,
 		limit: Option<Limit<usize>>

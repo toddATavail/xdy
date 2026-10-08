@@ -42,7 +42,7 @@ use super::{
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp,
+		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp, Explode,
 		Expression, Extremum, Function, Group, KeepHighest, KeepLowest, Limit,
 		Mod, Mul, Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub,
 		Variable
@@ -135,23 +135,20 @@ enum Form<'src>
 		dice: Option<DiceExpression<'src>>
 	},
 
-	/// `(reroll dice predicate limit?)`, whose predicate and limit are forms
-	/// without spans, since they are not AST nodes: `(eq t)`, `(ne t)`,
-	/// `(lt t)`, `(le t)`, `(gt t)`, `(ge t)`, `(in [values])`,
-	/// `(in-range start end)`, or `(in-range-inclusive start end)`; and
-	/// `(times n)` or `(unlimited)`. The engine reads the keywords and
-	/// delimiters of the predicate and the limit itself, and awaits only
-	/// their operands as children.
-	Reroll
+	/// `(reroll dice predicate limit?)` or `(explode dice predicate limit?)`,
+	/// whose predicate and limit are forms without spans, since they are not
+	/// AST nodes: `(eq t)`, `(ne t)`, `(lt t)`, `(le t)`, `(gt t)`, `(ge t)`,
+	/// `(in [values])`, `(in-range start end)`, or
+	/// `(in-range-inclusive start end)`; and `(times n)` or `(unlimited)`. The
+	/// engine reads the keywords and delimiters of the predicate and the limit
+	/// itself, and awaits only their operands as children.
+	Predicated
 	{
-		/// The input immediately after the keyword, before any whitespace, to
-		/// which an [`ExpectedDiceExpression`] is attributed.
-		///
-		/// [`ExpectedDiceExpression`]: SExprError::ExpectedDiceExpression
-		after_keyword: Span<'src>,
+		/// The kind of the clause.
+		kind: PredicatedKind,
 
-		/// The parts of the reroll read so far.
-		stage: RerollStage<'src>
+		/// The parts of the clause read so far.
+		stage: PredicatedStage<'src>
 	},
 
 	/// `(range start end)`.
@@ -325,15 +322,72 @@ impl ClauseKind
 	}
 }
 
-/// The parts of a `(reroll …)` form read so far. Each variant awaits the
-/// first of its missing parts.
+/// The kind of a reroll or explode form.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum PredicatedKind
+{
+	/// `reroll`.
+	Reroll,
+
+	/// `explode`.
+	Explode
+}
+
+impl PredicatedKind
+{
+	/// Build a clause of the receiver's kind.
+	///
+	/// # Parameters
+	/// - `dice`: The dice expression.
+	/// - `predicate`: The predicate.
+	/// - `limit`: The limit, if any.
+	/// - `span`: The span of the form.
+	///
+	/// # Returns
+	/// The clause.
+	fn apply<'src>(
+		self,
+		dice: DiceExpression<'src>,
+		predicate: Predicate<Box<Expression<'src>>>,
+		limit: Option<Limit<Box<Expression<'src>>>>,
+		span: SourceSpan
+	) -> Expression<'src>
+	{
+		let dice = Box::new(dice);
+		Expression::Dice(match self
+		{
+			PredicatedKind::Reroll => DiceExpression::Reroll(Reroll {
+				dice,
+				predicate,
+				limit,
+				span
+			}),
+			PredicatedKind::Explode => DiceExpression::Explode(Explode {
+				dice,
+				predicate,
+				limit,
+				span
+			})
+		})
+	}
+}
+
+/// The parts of a `(reroll …)` or `(explode …)` form read so far. Each
+/// variant awaits the first of its missing parts.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being read.
-enum RerollStage<'src>
+enum PredicatedStage<'src>
 {
 	/// Awaiting the dice expression.
-	Dice,
+	Dice
+	{
+		/// The input immediately after the keyword, before any whitespace, to
+		/// which an [`ExpectedDiceExpression`] is attributed.
+		///
+		/// [`ExpectedDiceExpression`]: SExprError::ExpectedDiceExpression
+		after_keyword: Span<'src>
+	},
 
 	/// Awaiting an operand of the predicate: the threshold of a comparison, or
 	/// the start or the end of a range.
@@ -655,9 +709,9 @@ fn open<'src>(
 		after_keyword,
 		dice: None
 	};
-	let reroll = Form::Reroll {
-		after_keyword,
-		stage: RerollStage::Dice
+	let predicated = move |kind| Form::Predicated {
+		kind,
+		stage: PredicatedStage::Dice { after_keyword }
 	};
 	let extremum = |direction| Form::Extremum {
 		direction,
@@ -679,7 +733,8 @@ fn open<'src>(
 		"drop-highest" => clause(ClauseKind::DropHighest),
 		"keep-lowest" => clause(ClauseKind::KeepLowest),
 		"keep-highest" => clause(ClauseKind::KeepHighest),
-		"reroll" => reroll,
+		"reroll" => predicated(PredicatedKind::Reroll),
+		"explode" => predicated(PredicatedKind::Explode),
 		"range" => Form::Range { start: None },
 		"highest" => extremum(Direction::Highest),
 		"lowest" => extremum(Direction::Lowest),
@@ -737,9 +792,10 @@ fn open<'src>(
 /// - [`SExprError::SiblingSpanOutOfOrder`] if the child's span overlaps or
 ///   precedes its previous sibling's span.
 /// - [`SExprError::ExpectedDiceExpression`] if the first child of a drop, keep,
-///   or reroll form is not a dice expression.
+///   reroll, or explode form is not a dice expression.
 /// - [`SExprError::UnknownPredicate`] or [`SExprError::UnknownLimit`] if the
-///   predicate or the limit of a reroll form opens with an unknown keyword.
+///   predicate or the limit of a reroll or explode form opens with an unknown
+///   keyword.
 /// - [`SExprError`] if a faces list, a values list, or a closing `)` is
 ///   malformed.
 fn deliver<'src>(
@@ -876,9 +932,9 @@ fn deliver<'src>(
 			dice: Some(dice),
 			..
 		} => close(input, kind.apply(dice, Some(child), span)),
-		Form::Reroll {
-			after_keyword,
-			stage: RerollStage::Dice
+		Form::Predicated {
+			kind: clause,
+			stage: PredicatedStage::Dice { after_keyword }
 		} =>
 		{
 			let Some(dice) = into_dice(child)
@@ -904,7 +960,7 @@ fn deliver<'src>(
 					let (input, _) = expect_char(')')(input)?;
 					open_limit(
 						input,
-						after_keyword,
+						clause,
 						dice,
 						Predicate::In(values),
 						span,
@@ -914,9 +970,9 @@ fn deliver<'src>(
 				},
 				(_, Some(kind)) => Ok(await_child(
 					stack,
-					Form::Reroll {
-						after_keyword,
-						stage: RerollStage::Predicate {
+					Form::Predicated {
+						kind: clause,
+						stage: PredicatedStage::Predicate {
 							dice,
 							kind,
 							start: None
@@ -935,19 +991,19 @@ fn deliver<'src>(
 				},
 			}
 		},
-		Form::Reroll {
-			after_keyword,
+		Form::Predicated {
+			kind: clause,
 			stage:
-				RerollStage::Predicate {
+				PredicatedStage::Predicate {
 					dice,
 					kind,
 					start: None
 				}
 		} if kind.is_range() => Ok(await_child(
 			stack,
-			Form::Reroll {
-				after_keyword,
-				stage: RerollStage::Predicate {
+			Form::Predicated {
+				kind: clause,
+				stage: PredicatedStage::Predicate {
 					dice,
 					kind,
 					start: Some(child)
@@ -957,9 +1013,9 @@ fn deliver<'src>(
 			child_span,
 			input
 		)),
-		Form::Reroll {
-			after_keyword,
-			stage: RerollStage::Predicate { dice, kind, start }
+		Form::Predicated {
+			kind: clause,
+			stage: PredicatedStage::Predicate { dice, kind, start }
 		} =>
 		{
 			let predicate = match start
@@ -968,25 +1024,17 @@ fn deliver<'src>(
 				None => kind.apply(child, None)
 			};
 			let (input, _) = expect_char(')')(input)?;
-			open_limit(
-				input,
-				after_keyword,
-				dice,
-				predicate,
-				span,
-				child_span,
-				stack
-			)
+			open_limit(input, clause, dice, predicate, span, child_span, stack)
 		},
-		Form::Reroll {
-			stage: RerollStage::Count { dice, predicate },
-			..
+		Form::Predicated {
+			kind,
+			stage: PredicatedStage::Count { dice, predicate }
 		} =>
 		{
 			let (input, _) = expect_char(')')(input)?;
 			close(
 				input,
-				reroll(
+				kind.apply(
 					dice,
 					predicate,
 					Some(Limit::Times(Box::new(child))),
@@ -1055,15 +1103,16 @@ fn deliver<'src>(
 	}
 }
 
-/// Read the limit of a reroll form, whose predicate has been read, and either
-/// close the form or await the count of its limit. The limit is absent if the
-/// form closes after its predicate, which represents the parser-originated
-/// `None` case (a single reroll), so the format faithfully distinguishes
-/// `(reroll d (eq 1))` from `(reroll d (eq 1) (times 1))`.
+/// Read the limit of a reroll or explode form, whose predicate has been read,
+/// and either close the form or await the count of its limit. The limit is
+/// absent if the form closes after its predicate, which represents the
+/// parser-originated `None` case (a single reroll or explosion), so the format
+/// faithfully distinguishes `(reroll d (eq 1))` from
+/// `(reroll d (eq 1) (times 1))`.
 ///
 /// # Parameters
 /// - `input`: The input text after the predicate.
-/// - `after_keyword`: The input immediately after the form's keyword.
+/// - `kind`: The kind of the clause.
 /// - `dice`: The dice expression.
 /// - `predicate`: The predicate.
 /// - `span`: The span of the form.
@@ -1078,7 +1127,7 @@ fn deliver<'src>(
 /// - [`SExprError`] if the limit or the closing `)` is malformed.
 fn open_limit<'src>(
 	input: Span<'src>,
-	after_keyword: Span<'src>,
+	kind: PredicatedKind,
 	dice: DiceExpression<'src>,
 	predicate: Predicate<Box<Expression<'src>>>,
 	span: SourceSpan,
@@ -1089,7 +1138,7 @@ fn open_limit<'src>(
 	let (probe, _) = skip_ws(input)?;
 	if probe.fragment().starts_with(')')
 	{
-		return close(input, reroll(dice, predicate, None, span))
+		return close(input, kind.apply(dice, predicate, None, span))
 	}
 	let (input, _) = expect_char('(')(input)?;
 	let (input, _) = skip_ws(input)?;
@@ -1100,13 +1149,16 @@ fn open_limit<'src>(
 		"unlimited" =>
 		{
 			let (input, _) = expect_char(')')(input)?;
-			close(input, reroll(dice, predicate, Some(Limit::Unlimited), span))
+			close(
+				input,
+				kind.apply(dice, predicate, Some(Limit::Unlimited), span)
+			)
 		},
 		"times" => Ok(await_child(
 			stack,
-			Form::Reroll {
-				after_keyword,
-				stage: RerollStage::Count { dice, predicate }
+			Form::Predicated {
+				kind,
+				stage: PredicatedStage::Count { dice, predicate }
 			},
 			span,
 			prev,
@@ -1117,31 +1169,6 @@ fn open_limit<'src>(
 			location: SExprLocation::of(kw_mark)
 		}))
 	}
-}
-
-/// Build a reroll expression.
-///
-/// # Parameters
-/// - `dice`: The dice expression.
-/// - `predicate`: The predicate.
-/// - `limit`: The limit, if any.
-/// - `span`: The span of the form.
-///
-/// # Returns
-/// The reroll expression.
-fn reroll<'src>(
-	dice: DiceExpression<'src>,
-	predicate: Predicate<Box<Expression<'src>>>,
-	limit: Option<Limit<Box<Expression<'src>>>>,
-	span: SourceSpan
-) -> Expression<'src>
-{
-	Expression::Dice(DiceExpression::Reroll(Reroll {
-		dice: Box::new(dice),
-		predicate,
-		limit,
-		span
-	}))
 }
 
 /// Push a frame that awaits a child, and read the child.

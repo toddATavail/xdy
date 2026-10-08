@@ -25,7 +25,7 @@ use std::{
 
 use super::{
 	Add, ArithmeticExpression, Binding, Constant, CustomDice, DiceExpression,
-	Div, DropHighest, DropLowest, Exp, Expression, Extremum, Group,
+	Div, DropHighest, DropLowest, Exp, Explode, Expression, Extremum, Group,
 	KeepHighest, KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll,
 	StandardDice, Sub, Variable,
 	traversal::{self, Node}
@@ -375,21 +375,32 @@ impl<'a, 'src> Cloner<'a, 'src>
 				}
 				self.tasks.push(Task::Dice(dice));
 			},
-			DiceExpression::Reroll(clause) =>
+			DiceExpression::Reroll(Reroll {
+				dice,
+				predicate,
+				limit,
+				..
+			})
+			| DiceExpression::Explode(Explode {
+				dice,
+				predicate,
+				limit,
+				..
+			}) =>
 			{
 				if let Some(count) =
-					clause.limit.as_ref().and_then(|limit| limit.operand())
+					limit.as_ref().and_then(|limit| limit.operand())
 				{
 					self.tasks.push(Task::Expression(count));
 				}
 				// A predicate has at most two operands.
-				let mut operands = clause.predicate.operands();
+				let mut operands = predicate.operands();
 				let (first, second) = (operands.next(), operands.next());
 				for operand in [second, first].into_iter().flatten()
 				{
 					self.tasks.push(Task::Expression(operand));
 				}
-				self.tasks.push(Task::Dice(&clause.dice));
+				self.tasks.push(Task::Dice(dice));
 			}
 		}
 	}
@@ -603,6 +614,19 @@ impl<'a, 'src> Cloner<'a, 'src>
 					limit,
 					span: self.span(clause.span)
 				})
+			},
+			DiceExpression::Explode(clause) =>
+			{
+				let limit = clause.limit.as_ref().map(|limit| {
+					limit.map(|_| Box::new(self.pop_expression()))
+				});
+				let predicate = self.pop_predicate(&clause.predicate);
+				DiceExpression::Explode(Explode {
+					dice: Box::new(self.pop_dice()),
+					predicate,
+					limit,
+					span: self.span(clause.span)
+				})
 			}
 		}
 	}
@@ -797,7 +821,7 @@ fn detach_children<'src>(
 
 /// Detach the children of a dice expression, leaving it shallow: dropping it
 /// no longer drops any expression with children, or any stack of drop, keep,
-/// and reroll clauses.
+/// reroll, and explode clauses.
 ///
 /// # Parameters
 /// - `dice`: The dice expression.
@@ -819,7 +843,8 @@ fn detach_dice_children<'src>(
 		| DiceExpression::DropHighest(_)
 		| DiceExpression::KeepLowest(_)
 		| DiceExpression::KeepHighest(_)
-		| DiceExpression::Reroll(_) =>
+		| DiceExpression::Reroll(_)
+		| DiceExpression::Explode(_) =>
 		{
 			let dice = detach_clause_operands(dice, orphans)
 				.expect("a clause has dice beneath it");
@@ -835,16 +860,18 @@ fn detach_dice_children<'src>(
 				| DiceExpression::DropHighest(_)
 				| DiceExpression::KeepLowest(_)
 				| DiceExpression::KeepHighest(_)
-				| DiceExpression::Reroll(_) => promote_leaf(dice, orphans)
+				| DiceExpression::Reroll(_)
+				| DiceExpression::Explode(_) => promote_leaf(dice, orphans)
 			}
 		}
 	}
 }
 
 /// Detach the operands of a clause — the count of a drop or keep, or the
-/// operands of the predicate and the limit of a reroll — leaving the clause
-/// with nothing to drop but the dice beneath it. A reroll keeps an empty list
-/// as its predicate, and no limit, so dropping either does nothing.
+/// operands of the predicate and the limit of a reroll or an explode — leaving
+/// the clause with nothing to drop but the dice beneath it. A reroll or an
+/// explode keeps an empty list as its predicate, and no limit, so dropping
+/// either does nothing.
 ///
 /// # Parameters
 /// - `clause`: The clause.
@@ -878,6 +905,12 @@ fn detach_clause_operands<'c, 'src>(
 			predicate,
 			limit,
 			..
+		})
+		| DiceExpression::Explode(Explode {
+			dice,
+			predicate,
+			limit,
+			..
 		}) =>
 		{
 			// An empty list allocates nothing, so it costs nothing to put in
@@ -899,11 +932,11 @@ fn detach_clause_operands<'c, 'src>(
 	Some(&mut **dice)
 }
 
-/// Replace a stack of drop, keep, and reroll clauses with the leaf dice
-/// expression at its bottom, dropping the clauses between without recursion
-/// and without allocation. The operands of the clauses — the counts of drops
-/// and keeps, and the operands of the predicates and limits of rerolls — and
-/// the children of the leaf join the orphans.
+/// Replace a stack of drop, keep, reroll, and explode clauses with the leaf
+/// dice expression at its bottom, dropping the clauses between without
+/// recursion and without allocation. The operands of the clauses — the counts
+/// of drops and keeps, and the operands of the predicates and limits of
+/// rerolls and explodes — and the children of the leaf join the orphans.
 ///
 /// ```mermaid
 /// flowchart LR
@@ -931,8 +964,8 @@ fn detach_clause_operands<'c, 'src>(
 ///
 /// 1. The safe phase walks down the stack, detaching the operands of every
 ///    clause and the children of the leaf, so that nothing left in the stack
-///    has a [`Drop`] that does any work. A reroll is left with an empty list,
-///    which owns no allocation, as its predicate, and no limit.
+///    has a [`Drop`] that does any work. A reroll or an explode is left with an
+///    empty list, which owns no allocation, as its predicate, and no limit.
 /// 2. The unsafe phase moves the top clause out of `slot` with [`ptr::read`],
 ///    leaving `slot` logically uninitialized. It then dismantles each clause in
 ///    turn: moving the clause out of its [`Box`] frees the box, and reading the
@@ -961,6 +994,7 @@ fn promote_leaf<'src>(
 			| DiceExpression::KeepLowest(_)
 			| DiceExpression::KeepHighest(_)
 			| DiceExpression::Reroll(_)
+			| DiceExpression::Explode(_)
 	)
 	{
 		cursor = detach_clause_operands(cursor, orphans)
@@ -1024,6 +1058,18 @@ fn promote_leaf<'src>(
 				// SAFETY: As above, since Phase 1 replaced `predicate` with an
 				// empty list, which owns no allocation, and emptied `limit`.
 				let Reroll {
+					dice,
+					predicate: _,
+					limit: _,
+					span: _
+				} = unsafe { ptr::read(payload) };
+				dice
+			},
+			DiceExpression::Explode(payload) =>
+			{
+				// SAFETY: As above, since Phase 1 replaced `predicate` with an
+				// empty list, which owns no allocation, and emptied `limit`.
+				let Explode {
 					dice,
 					predicate: _,
 					limit: _,

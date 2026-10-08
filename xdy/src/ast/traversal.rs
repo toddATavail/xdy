@@ -28,7 +28,7 @@ use std::{
 
 use super::{
 	Add, ArithmeticExpression, Constant, DiceExpression, Direction, Div, Exp,
-	Expression, Extremum, Limit, Mod, Mul, Predicate, Reroll, Sub, Variable
+	Expression, Extremum, Limit, Mod, Mul, Predicate, Sub, Variable
 };
 use crate::span::SourceSpan;
 
@@ -398,7 +398,26 @@ impl<'a, 'src> Events<'a, 'src>
 				&clause.keep,
 				clause.span
 			),
-			DiceExpression::Reroll(clause) => return self.expand_reroll(clause)
+			DiceExpression::Reroll(clause) =>
+			{
+				return self.expand_predicated(
+					"Reroll",
+					&clause.dice,
+					&clause.predicate,
+					&clause.limit,
+					clause.span
+				)
+			},
+			DiceExpression::Explode(clause) =>
+			{
+				return self.expand_predicated(
+					"Explode",
+					&clause.dice,
+					&clause.predicate,
+					&clause.limit,
+					clause.span
+				)
+			},
 		};
 		// Schedule the parts in reverse, since each goes atop its successor.
 		self.schedule(&[field("span"), self::span(span), close(), close()]);
@@ -422,15 +441,27 @@ impl<'a, 'src> Events<'a, 'src>
 
 impl<'a, 'src> Events<'a, 'src>
 {
-	/// Expand a [`DiceExpression::Reroll`].
+	/// Expand a [`DiceExpression::Reroll`] or a [`DiceExpression::Explode`],
+	/// whose variant and payload share a name.
 	///
 	/// # Parameters
-	/// - `reroll`: The reroll expression.
-	fn expand_reroll(&mut self, reroll: &'a Reroll<'src>)
+	/// - `kind`: The name of the variant and of its payload.
+	/// - `dice`: The dice expression to reroll or explode.
+	/// - `predicate`: The predicate.
+	/// - `limit`: The limit, if any.
+	/// - `span`: The span of the clause.
+	fn expand_predicated(
+		&mut self,
+		kind: &'static str,
+		dice: &'a DiceExpression<'src>,
+		predicate: &'a Predicate<Box<Expression<'src>>>,
+		limit: &'a Option<Limit<Box<Expression<'src>>>>,
+		span: SourceSpan
+	)
 	{
 		// Schedule the parts in reverse, since each goes atop its successor.
-		self.schedule(&[field("span"), span(reroll.span), close(), close()]);
-		match &reroll.limit
+		self.schedule(&[field("span"), self::span(span), close(), close()]);
+		match limit
 		{
 			None => self.schedule(&[unit("None")]),
 			Some(Limit::Times(count)) => self.schedule(&[
@@ -446,7 +477,7 @@ impl<'a, 'src> Events<'a, 'src>
 			},
 		}
 		self.schedule(&[field("limit")]);
-		match &reroll.predicate
+		match predicate
 		{
 			Predicate::Eq(threshold)
 			| Predicate::Ne(threshold)
@@ -455,7 +486,7 @@ impl<'a, 'src> Events<'a, 'src>
 			| Predicate::Gt(threshold)
 			| Predicate::Ge(threshold) =>
 			{
-				let name = match reroll.predicate
+				let name = match predicate
 				{
 					Predicate::Eq(_) => "Eq",
 					Predicate::Ne(_) => "Ne",
@@ -479,7 +510,7 @@ impl<'a, 'src> Events<'a, 'src>
 			Predicate::InRange { start, end }
 			| Predicate::InRangeInclusive { start, end } =>
 			{
-				let name = match reroll.predicate
+				let name = match predicate
 				{
 					Predicate::InRange { .. } => "InRange",
 					_ => "InRangeInclusive"
@@ -495,10 +526,10 @@ impl<'a, 'src> Events<'a, 'src>
 			}
 		}
 		self.schedule(&[
-			tuple("Reroll"),
-			structure("Reroll"),
+			tuple(kind),
+			structure(kind),
 			field("dice"),
-			dice_node(&reroll.dice),
+			dice_node(dice),
 			field("predicate")
 		]);
 	}

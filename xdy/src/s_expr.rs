@@ -24,7 +24,7 @@ use nom_locate::LocatedSpan;
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
+		DiceExpression, Div, DropHighest, DropLowest, Exp, Explode, Expression,
 		Function, Group, KeepHighest, KeepLowest, Mod, Mul, Neg, Parameter,
 		Range, Reroll, StandardDice, Sub, Variable
 	},
@@ -969,6 +969,24 @@ impl SExpressible for Reroll<'_>
 	}
 }
 
+impl SExpressible for Explode<'_>
+{
+	fn write_s_expr(
+		&self,
+		f: &mut dyn Write,
+		remaining_space: usize,
+		options: SExpressibleOptions
+	) -> fmt::Result
+	{
+		writer::write(self, f, remaining_space, options)
+	}
+
+	fn size_s_expr(&self, options: SExpressibleOptions) -> usize
+	{
+		writer::size(self, options)
+	}
+}
+
 impl SExpressible for DiceExpression<'_>
 {
 	fn write_s_expr(
@@ -1400,8 +1418,8 @@ pub enum SExprError
 	},
 
 	/// The first argument to `(drop-lowest …)`, `(drop-highest …)`,
-	/// `(keep-lowest …)`, `(keep-highest …)`, or `(reroll …)` was not a dice
-	/// expression.
+	/// `(keep-lowest …)`, `(keep-highest …)`, `(reroll …)`, or `(explode …)`
+	/// was not a dice expression.
 	ExpectedDiceExpression
 	{
 		/// The source position at which the non-dice form was read.
@@ -1436,9 +1454,9 @@ pub enum SExprError
 		location: SExprLocation
 	},
 
-	/// The predicate of a `(reroll …)` opened with a keyword other than `eq`,
-	/// `ne`, `lt`, `le`, `gt`, `ge`, `in`, `in-range`, or
-	/// `in-range-inclusive`.
+	/// The predicate of a `(reroll …)` or an `(explode …)` opened with a
+	/// keyword other than `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`,
+	/// `in-range`, or `in-range-inclusive`.
 	UnknownPredicate
 	{
 		/// The offending keyword.
@@ -1448,8 +1466,8 @@ pub enum SExprError
 		location: SExprLocation
 	},
 
-	/// The limit of a `(reroll …)` opened with a keyword other than `times` or
-	/// `unlimited`.
+	/// The limit of a `(reroll …)` or an `(explode …)` opened with a keyword
+	/// other than `times` or `unlimited`.
 	UnknownLimit
 	{
 		/// The offending keyword.
@@ -1586,7 +1604,7 @@ impl Display for SExprError
 			Self::ExpectedDiceExpression { .. } => write!(
 				f,
 				"expected dice expression as first argument to \
-				 drop-lowest/drop-highest/keep-lowest/keep-highest/reroll"
+				 drop-lowest/drop-highest/keep-lowest/keep-highest/reroll/explode"
 			),
 			Self::ExpectedTopLevelFunction { found, .. } =>
 			{
@@ -1602,11 +1620,11 @@ impl Display for SExprError
 			},
 			Self::UnknownPredicate { keyword, .. } =>
 			{
-				write!(f, "unknown reroll predicate '{}'", keyword)
+				write!(f, "unknown reroll or explode predicate '{}'", keyword)
 			},
 			Self::UnknownLimit { keyword, .. } =>
 			{
-				write!(f, "unknown reroll limit '{}'", keyword)
+				write!(f, "unknown reroll or explode limit '{}'", keyword)
 			},
 			Self::ExpectedExpression { .. } =>
 			{

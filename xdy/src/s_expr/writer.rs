@@ -28,7 +28,7 @@ use super::{
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Div, DropHighest, DropLowest, Exp, Expression,
+		DiceExpression, Div, DropHighest, DropLowest, Exp, Explode, Expression,
 		Extremum, Function, Group, KeepHighest, KeepLowest, Limit, Mod, Mul,
 		Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub, Variable
 	},
@@ -52,7 +52,7 @@ pub(super) enum Shape<'a>
 
 	/// `(keyword part…)`, preceded by the span prefix of `span`, unless the
 	/// span is [synthetic](SourceSpan::SYNTHETIC), as it is for the predicate
-	/// and the limit of a reroll, which are not AST nodes.
+	/// and the limit of a reroll or an explode, which are not AST nodes.
 	Form
 	{
 		/// The span of the node.
@@ -110,10 +110,10 @@ pub(super) enum Child<'a>
 	/// A dice expression.
 	Dice(&'a DiceExpression<'a>),
 
-	/// The predicate of a reroll.
+	/// The predicate of a reroll or an explode.
 	Predicate(&'a Predicate<Box<Expression<'a>>>),
 
-	/// The limit of a reroll.
+	/// The limit of a reroll or an explode.
 	Limit(&'a Limit<Box<Expression<'a>>>)
 }
 
@@ -1038,17 +1038,27 @@ impl Shaped for Reroll<'_>
 {
 	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
 	{
-		Shape::Form {
-			span: self.span,
-			keyword: "reroll",
-			parts: [
-				Some(Part::Child(Child::Dice(&self.dice))),
-				Some(Part::Child(Child::Predicate(&self.predicate))),
-				self.limit
-					.as_ref()
-					.map(|limit| Part::Child(Child::Limit(limit)))
-			]
-		}
+		predicated(
+			self.span,
+			"reroll",
+			&self.dice,
+			&self.predicate,
+			self.limit.as_ref()
+		)
+	}
+}
+
+impl Shaped for Explode<'_>
+{
+	fn shape<'a>(&'a self, _options: SExpressibleOptions) -> Shape<'a>
+	{
+		predicated(
+			self.span,
+			"explode",
+			&self.dice,
+			&self.predicate,
+			self.limit.as_ref()
+		)
 	}
 }
 
@@ -1066,7 +1076,8 @@ impl Shaped for DiceExpression<'_>
 			DiceExpression::DropHighest(clause) => clause.shape(options),
 			DiceExpression::KeepLowest(clause) => clause.shape(options),
 			DiceExpression::KeepHighest(clause) => clause.shape(options),
-			DiceExpression::Reroll(clause) => clause.shape(options)
+			DiceExpression::Reroll(clause) => clause.shape(options),
+			DiceExpression::Explode(clause) => clause.shape(options)
 		}
 	}
 }
@@ -1226,9 +1237,41 @@ fn clause<'a>(
 	}
 }
 
-/// Answer the shape of the predicate of a reroll: `(eq t)`, `(ne t)`, `(lt t)`,
-/// `(le t)`, `(gt t)`, or `(ge t)` for a comparison with a threshold,
-/// `(in [values])` for a list, and `(in-range start end)` or
+/// Answer the shape of a reroll or an explode clause: a form of the dice, the
+/// predicate, and the limit, or of the dice and the predicate alone if the
+/// clause has no limit.
+///
+/// # Parameters
+/// - `span`: The span of the clause.
+/// - `keyword`: The keyword.
+/// - `dice`: The dice expression to reroll or explode.
+/// - `predicate`: The predicate.
+/// - `limit`: The limit, if given.
+///
+/// # Returns
+/// The shape.
+fn predicated<'a>(
+	span: SourceSpan,
+	keyword: &'static str,
+	dice: &'a DiceExpression<'a>,
+	predicate: &'a Predicate<Box<Expression<'a>>>,
+	limit: Option<&'a Limit<Box<Expression<'a>>>>
+) -> Shape<'a>
+{
+	Shape::Form {
+		span,
+		keyword,
+		parts: [
+			Some(Part::Child(Child::Dice(dice))),
+			Some(Part::Child(Child::Predicate(predicate))),
+			limit.map(|limit| Part::Child(Child::Limit(limit)))
+		]
+	}
+}
+
+/// Answer the shape of the predicate of a reroll or an explode: `(eq t)`,
+/// `(ne t)`, `(lt t)`, `(le t)`, `(gt t)`, or `(ge t)` for a comparison with a
+/// threshold, `(in [values])` for a list, and `(in-range start end)` or
 /// `(in-range-inclusive start end)` for a range. A predicate is not an AST
 /// node, so it has no span.
 ///
@@ -1269,8 +1312,9 @@ fn predicate_shape<'a>(
 	}
 }
 
-/// Answer the shape of the limit of a reroll: `(times n)` for a finite limit,
-/// or `(unlimited)`. A limit is not an AST node, so it has no span.
+/// Answer the shape of the limit of a reroll or an explode: `(times n)` for a
+/// finite limit, or `(unlimited)`. A limit is not an AST node, so it has no
+/// span.
 ///
 /// # Parameters
 /// - `limit`: The limit.

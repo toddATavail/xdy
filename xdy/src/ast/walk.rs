@@ -10,8 +10,8 @@
 //! as gathering names, loop over a [`Walk`] directly.
 
 use super::{
-	ASTVisitor, Add, ArithmeticExpression, DiceExpression, Div, Exp,
-	Expression, Mod, Mul, Predicate, Sub
+	ASTVisitor, Add, ArithmeticExpression, DiceExpression, Div, Exp, Explode,
+	Expression, Mod, Mul, Predicate, Reroll, Sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -152,21 +152,32 @@ impl<'a, 'src> Walk<'a, 'src>
 			DiceExpression::DropHighest(clause) => (&clause.dice, &clause.drop),
 			DiceExpression::KeepLowest(clause) => (&clause.dice, &clause.keep),
 			DiceExpression::KeepHighest(clause) => (&clause.dice, &clause.keep),
-			DiceExpression::Reroll(clause) =>
+			DiceExpression::Reroll(Reroll {
+				dice,
+				predicate,
+				limit,
+				..
+			})
+			| DiceExpression::Explode(Explode {
+				dice,
+				predicate,
+				limit,
+				..
+			}) =>
 			{
 				if let Some(count) =
-					clause.limit.as_ref().and_then(|limit| limit.operand())
+					limit.as_ref().and_then(|limit| limit.operand())
 				{
 					self.expression(count);
 				}
 				// A predicate has at most two operands.
-				let mut operands = clause.predicate.operands();
+				let mut operands = predicate.operands();
 				let (first, second) = (operands.next(), operands.next());
 				for operand in [second, first].into_iter().flatten()
 				{
 					self.expression(operand);
 				}
-				self.stack.push(Event::Enter(Node::Dice(&clause.dice)));
+				self.stack.push(Event::Enter(Node::Dice(dice)));
 				return
 			}
 		};
@@ -328,7 +339,8 @@ fn enter_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 		{
 			visitor.enter_keep_highest(clause)
 		},
-		DiceExpression::Reroll(clause) => visitor.enter_reroll(clause)
+		DiceExpression::Reroll(clause) => visitor.enter_reroll(clause),
+		DiceExpression::Explode(clause) => visitor.enter_explode(clause)
 	}
 }
 
@@ -491,6 +503,16 @@ fn leave_dice<'a, 'src, V: ASTVisitor<'a, 'src>>(
 			let predicate = pop_predicate(&clause.predicate, outputs);
 			let dice = pop(outputs);
 			visitor.visit_reroll(clause, dice, predicate, limit)
+		},
+		DiceExpression::Explode(clause) =>
+		{
+			let limit = clause
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|_| pop(outputs)));
+			let predicate = pop_predicate(&clause.predicate, outputs);
+			let dice = pop(outputs);
+			visitor.visit_explode(clause, dice, predicate, limit)
 		}
 	}
 }

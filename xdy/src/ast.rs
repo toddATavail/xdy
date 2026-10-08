@@ -221,7 +221,7 @@ impl Display for Variable<'_>
 /// - A binding expression evaluates to the bound value, so it can appear
 ///   anywhere a [variable reference](Variable) is legal — as a primary, a dice
 ///   count, standard faces, the count of a drop or keep clause, or the
-///   threshold, an endpoint, or the count of a reroll clause.
+///   threshold, an endpoint, or the count of a reroll or explode clause.
 ///
 /// Collision, rebinding, and use-before-bind errors are reported by the
 /// [`Validator`](crate::Validator).
@@ -596,10 +596,47 @@ impl Display for Reroll<'_>
 	}
 }
 
-/// The predicate of a [reroll](Reroll): the test that a die must pass to be
-/// rerolled. It mirrors the [predicate](crate::Predicate) of the reroll
-/// instruction, but holds operands of any type, so that the same shape serves
-/// both the AST, whose operands are [expressions](Expression), and the
+/// An explode expression, which explodes each of the dice that the earlier
+/// clauses of its dice expression left kept, and that satisfy its predicate,
+/// up to its limit of times. An explode rolls the same die again, and appends
+/// the new die to the rolling record, extending the chain of the die that
+/// matched, which stays kept; the new die may itself explode, while the limit
+/// allows. Later drops and keeps count each chain as one die, worth its total.
+/// If every face of the die matches an unlimited explode, the chain saturates
+/// instead.
+///
+/// The operands of the predicate and the limit are each evaluated once, in the
+/// order written, after the dice and before any explosion.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Explode<'src>
+{
+	/// The dice expression.
+	pub dice: Box<DiceExpression<'src>>,
+
+	/// The predicate that a die must satisfy to be exploded.
+	pub predicate: Predicate<Box<Expression<'src>>>,
+
+	/// The number of times that each die may be exploded. Defaults to once.
+	pub limit: Option<Limit<Box<Expression<'src>>>>,
+
+	/// The span of the explode expression, from the dice expression through
+	/// the limit (or the predicate if no limit is given).
+	pub span: SourceSpan
+}
+
+impl Display for Explode<'_>
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+	{
+		display::render(self, f)
+	}
+}
+
+/// The predicate of a [reroll](Reroll) or an [explode](Explode): the test that
+/// a die must pass to be rerolled or exploded. It mirrors the
+/// [predicate](crate::Predicate) of the reroll and explode instructions, but
+/// holds operands of any type, so that the same shape serves both the AST,
+/// whose operands are [expressions](Expression), and the
 /// [visitor](ASTVisitor), whose operands are the outputs of those expressions.
 ///
 /// # Type parameters
@@ -750,21 +787,23 @@ impl<T> Predicate<T>
 	}
 }
 
-/// The limit of a [reroll](Reroll): the number of times that each die may be
-/// rerolled. It mirrors the [limit](crate::Limit) of the reroll instruction,
-/// but holds an operand of any type, as [`Predicate`] does.
+/// The limit of a [reroll](Reroll) or an [explode](Explode): the number of
+/// times that each die may be rerolled or exploded. It mirrors the
+/// [limit](crate::Limit) of the reroll and explode instructions, but holds an
+/// operand of any type, as [`Predicate`] does.
 ///
 /// # Type parameters
 /// - `T`: The type of the count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Limit<T>
 {
-	/// Reroll each die at most this many times, written `n time` or
+	/// Reroll or explode each die at most this many times, written `n time` or
 	/// `n times`, or not at all if the count is zero or less.
 	Times(T),
 
-	/// Reroll each die until it no longer matches, written `∞ times` or
-	/// `unlimited times`, or not at all if every face of the die matches.
+	/// Reroll or explode each die until it no longer matches, written
+	/// `∞ times` or `unlimited times`. If every face of the die matches, a
+	/// reroll rolls nothing, and an explode saturates.
 	Unlimited
 }
 
@@ -827,7 +866,10 @@ pub enum DiceExpression<'src>
 	KeepHighest(KeepHighest<'src>),
 
 	/// A reroll expression.
-	Reroll(Reroll<'src>)
+	Reroll(Reroll<'src>),
+
+	/// An explode expression.
+	Explode(Explode<'src>)
 }
 
 impl<'src> DiceExpression<'src>
@@ -1041,9 +1083,9 @@ impl Display for Neg<'_>
 /// 3. [`visit_expression`](Self::visit_expression), if the node fills a slot of
 ///    type [`Expression`], i.e., if it is not the [`DiceExpression`] beneath a
 ///    [drop-lowest](DropLowest), [drop-highest](DropHighest),
-///    [keep-lowest](KeepLowest), [keep-highest](KeepHighest), or
-///    [reroll](Reroll) expression. The hook receives the node's output and may
-///    replace it. By default, it returns the output unchanged.
+///    [keep-lowest](KeepLowest), [keep-highest](KeepHighest), [reroll](Reroll),
+///    or [explode](Explode) expression. The hook receives the node's output and
+///    may replace it. By default, it returns the output unchanged.
 ///
 /// The enum types ([`Expression`], [`DiceExpression`],
 /// [`ArithmeticExpression`]) are not visited directly; the driver visits the
@@ -1115,7 +1157,7 @@ impl Display for Neg<'_>
 ///     Parser,
 ///     ast::{
 ///         ASTVisitor, Add, Binding, Constant, CustomDice, Div, DropHighest,
-///         DropLowest, Exp, Extremum, Function, Group, KeepHighest,
+///         DropLowest, Exp, Explode, Extremum, Function, Group, KeepHighest,
 ///         KeepLowest, Limit, Mod, Mul, Neg, Predicate, Range, Reroll,
 ///         StandardDice, Sub, Variable
 ///     }
@@ -1163,6 +1205,18 @@ impl Display for Neg<'_>
 ///     fn visit_reroll(
 ///         &mut self,
 ///         _: &'a Reroll<'src>,
+///         dice: usize,
+///         predicate: Predicate<usize>,
+///         limit: Option<Limit<usize>>
+///     ) -> Result<usize, Infallible>
+///     {
+///         Ok(dice
+///             + predicate.operands().sum::<usize>()
+///             + limit.as_ref().and_then(Limit::operand).unwrap_or(&0))
+///     }
+///     fn visit_explode(
+///         &mut self,
+///         _: &'a Explode<'src>,
 ///         dice: usize,
 ///         predicate: Predicate<usize>,
 ///         limit: Option<Limit<usize>>
@@ -1324,6 +1378,16 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	fn enter_reroll(
 		&mut self,
 		_node: &'a Reroll<'src>
+	) -> Result<(), Self::Error>
+	{
+		Ok(())
+	}
+
+	/// Enter an [explode](Explode) expression, before its dice, the operands
+	/// of its predicate, and its limit.
+	fn enter_explode(
+		&mut self,
+		_node: &'a Explode<'src>
 	) -> Result<(), Self::Error>
 	{
 		Ok(())
@@ -1545,6 +1609,23 @@ pub trait ASTVisitor<'a, 'src: 'a>
 		limit: Option<Limit<Self::Output>>
 	) -> Result<Self::Output, Self::Error>;
 
+	/// Visit an [explode](Explode) expression, after its dice, the operands of
+	/// its predicate, and its limit.
+	///
+	/// # Parameters
+	/// - `node`: The explode expression.
+	/// - `dice`: The output of the dice expression.
+	/// - `predicate`: The predicate, holding the outputs of its operands.
+	/// - `limit`: The limit, holding the output of its count, if the expression
+	///   has one.
+	fn visit_explode(
+		&mut self,
+		node: &'a Explode<'src>,
+		dice: Self::Output,
+		predicate: Predicate<Self::Output>,
+		limit: Option<Limit<Self::Output>>
+	) -> Result<Self::Output, Self::Error>;
+
 	/// Visit an [addition](Add) expression, after its operands.
 	///
 	/// # Parameters
@@ -1638,9 +1719,10 @@ pub trait ASTVisitor<'a, 'src: 'a>
 	/// [`Expression`], after the `visit_*` method of the node inside it.
 	/// Every node but the [`DiceExpression`] beneath a
 	/// [drop-lowest](DropLowest), [drop-highest](DropHighest),
-	/// [keep-lowest](KeepLowest), [keep-highest](KeepHighest), or
-	/// [reroll](Reroll) expression fills such a slot, as does the root of a
-	/// walk that starts at an [`Expression`] or a [`Function`].
+	/// [keep-lowest](KeepLowest), [keep-highest](KeepHighest),
+	/// [reroll](Reroll), or [explode](Explode) expression fills such a slot,
+	/// as does the root of a walk that starts at an [`Expression`] or a
+	/// [`Function`].
 	///
 	/// # Parameters
 	/// - `node`: The expression.
@@ -1962,6 +2044,24 @@ impl Spanned for Reroll<'_>
 	}
 }
 
+impl Spanned for Explode<'_>
+{
+	fn span(&self) -> SourceSpan { self.span }
+
+	fn untethered(&self) -> Self
+	{
+		Explode {
+			dice: Box::new(self.dice.untethered()),
+			predicate: self.predicate.map(|t| Box::new(t.untethered())),
+			limit: self
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|n| Box::new(n.untethered()))),
+			span: SourceSpan::default()
+		}
+	}
+}
+
 impl Spanned for DiceExpression<'_>
 {
 	fn span(&self) -> SourceSpan
@@ -1974,7 +2074,8 @@ impl Spanned for DiceExpression<'_>
 			DiceExpression::DropHighest(d) => d.span(),
 			DiceExpression::KeepLowest(d) => d.span(),
 			DiceExpression::KeepHighest(d) => d.span(),
-			DiceExpression::Reroll(d) => d.span()
+			DiceExpression::Reroll(d) => d.span(),
+			DiceExpression::Explode(d) => d.span()
 		}
 	}
 

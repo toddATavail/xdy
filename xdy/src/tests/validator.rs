@@ -518,6 +518,49 @@ fn validator_checks_reroll_clauses()
 	}
 }
 
+/// The [`Validator`] walks the dice and the operands of explode clauses, in
+/// source order, as it does those of reroll clauses: a binding may serve as a
+/// threshold, an endpoint, or a count, and a later reference, even within the
+/// same clause, sees it, but a reference within an explode precedes a binding
+/// that follows it, even within the same clause.
+#[test]
+fn validator_checks_explode_clauses()
+{
+	for s_expr in [
+		"(function [] (add (explode (standard-dice 4 6) (eq (binding {a} 6))) \
+		 {a}))",
+		"(function [] (explode (standard-dice 4 6) (in-range-inclusive (binding \
+		 {a} 5) {a}) (times {a})))",
+		"(function [] (explode (standard-dice (binding {a} 4) 6) (ge {a}) \
+		 (unlimited)))",
+		"(function [] (explode (reroll (standard-dice 4 6) (eq (binding {a} \
+		 1))) (gt {a})))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert_eq!(Validator::validate(&ast), Ok(()), "{s_expr}");
+	}
+	for s_expr in [
+		"(function [] (add (explode (standard-dice 4 6) (lt {a})) (binding {a} \
+		 2)))",
+		"(function [] (explode (standard-dice 4 6) (in-range {a} (binding {a} \
+		 3))))",
+		"(function [] (explode (standard-dice 4 6) (eq {a}) (times (binding {a} \
+		 2))))"
+	]
+	{
+		let ast = crate::s_expr::read_s_expr(s_expr).unwrap();
+		assert!(
+			matches!(
+				Validator::validate(&ast),
+				Err(CompilationError::UseBeforeBind { name, .. }) if name == "a"
+			),
+			"{s_expr}: {:?}",
+			Validator::validate(&ast)
+		);
+	}
+}
+
 /// The [`Validator`] walks the arguments of an extremum in the order written: a
 /// binding may serve as an argument, and a later argument, or a reference after
 /// the extremum, sees it, but a reference in an argument precedes a binding in
@@ -1007,7 +1050,10 @@ fn use_before_bind_display_on_evaluation_error()
 fn test_validate_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION
+			.into_iter()
+			.chain(Nesting::UNPARSED)
+			.chain([Nesting::Mixed])
 		{
 			let result =
 				Validator::validate(&nest_function(nesting, nesting.depth()));
