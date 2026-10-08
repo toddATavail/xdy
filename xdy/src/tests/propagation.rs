@@ -2782,7 +2782,10 @@ fn test_exact_estimates()
 		"20D[-5, 0, 5]",
 		"5D[1, 1000000]",
 		"3D6 * 3D6",
-		"[1:100] * [1:100]"
+		"[1:100] * [1:100]",
+		// An explode that saturates every chain rolls nothing.
+		"4D6 explode ≥ 1 ∞ times",
+		"4D6 explode ≥ 1 ∞ times keep highest 2"
 	]
 	{
 		let (cost, usage) = estimated(source);
@@ -2817,9 +2820,10 @@ fn test_gapped_counts()
 
 /// Ensure that the estimate stays tight where it is not exact: within the
 /// specified ratio of the usage, in steps and in cells, on mixtures, splits,
-/// and every case of the distribution corpus but those that explode dice,
-/// which the estimate does not yet price. The budget decides which functions
-/// are reasonable, so a loose estimate would refuse reasonable functions.
+/// explodes, and every case of the distribution corpus but those whose explodes
+/// the estimate does not yet price, and so saturates. The budget decides which
+/// functions are reasonable, so a loose estimate would refuse reasonable
+/// functions.
 #[test]
 fn test_tight_estimates()
 {
@@ -2868,7 +2872,23 @@ fn test_tight_estimates()
 		("{x}@(1D300) + {x}D2", 1.1),
 		("{x}@(1D300) + {x}D4", 1.1),
 		("{x}@(1D600) + {x}D2", 1.1),
-		("{x}@(1D300) + {x}D[1, 3, 7]", 1.1)
+		("{x}@(1D300) + {x}D[1, 3, 7]", 1.1),
+		// An explode of alike dice reduces their chains to their totals, which
+		// are exact on the top face, but which the hull of the totals of a die
+		// spans, which may fill gaps between them.
+		("4D6 explode = 6 2 times", 1.1),
+		("10D6 explode = 6 3 times", 1.1),
+		("1D20 explode = 20", 1.2),
+		("2D10 explode = 10 5 times", 1.2),
+		("3D6 explode ≥ 5 3 times", 1.1),
+		("4D6 explode = 6 2 times keep highest 3", 1.2),
+		("4D6 reroll = 1 explode = 6 2 times", 1.1),
+		("3D[1, 3, 5] explode = 5 2 times", 3.0),
+		// Random counts, thresholds, and limits.
+		("(1D4)D6 explode = 6 2 times", 1.2),
+		("4D6 explode ≥ (1D6) 2 times", 1.1),
+		("4D6 explode = 6 (1D3) times", 1.7),
+		("{x}@(1D6) + {x}D6 explode = 6 2 times", 1.1)
 	]
 	{
 		let (cost, usage) = estimated(source);
@@ -2878,18 +2898,15 @@ fn test_tight_estimates()
 		read_distribution_test_cases(DISTRIBUTION_TEST_SOURCE)
 	{
 		let function = optimize(compile_valid(source), Passes::all());
-		if function
-			.instructions
-			.iter()
-			.any(|inst| matches!(inst, Instruction::Explode(_)))
-		{
-			// The estimate does not yet price explodes, so it saturates.
-			continue
-		}
 		let evaluator = evaluator(function, &externs);
 		let (_, usage) =
 			propagate_within(&evaluator, &args, Budget::UNLIMITED).unwrap();
 		let cost = estimate(&evaluator, args.iter().copied()).unwrap();
+		if cost.steps == u64::MAX
+		{
+			// The estimate does not yet price every explode, so it saturates.
+			continue
+		}
 		within(source, cost, usage, 2.0);
 	}
 }
@@ -3060,6 +3077,45 @@ fn test_classes()
 				rerolls: true,
 				..none
 			}
+		),
+		// An explode that may extend or saturate a chain explodes; one that
+		// cannot does not.
+		(
+			rerolled("roll standard dice 4D6", &["explode = 6 up to 1 times"]),
+			Class {
+				explodes: true,
+				..none
+			}
+		),
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&["explode >= 1 unlimited times"]
+			),
+			Class {
+				explodes: true,
+				..none
+			}
+		),
+		(
+			rerolled("roll standard dice 4D6", &["explode = 6 up to 0 times"]),
+			none
+		),
+		(
+			rerolled("roll standard dice 4D6", &["explode = 7 up to 2 times"]),
+			none
+		),
+		(
+			rerolled_by(
+				(1, 6),
+				"roll standard dice 4D6",
+				&["explode >= @0 up to 1 times"]
+			),
+			Class {
+				dynamic: true,
+				explodes: true,
+				..none
+			}
 		)
 	]
 	{
@@ -3184,12 +3240,19 @@ fn test_build_refusals()
 /// chain, even one whose random threshold may match every face, before it
 /// charges anything, so that the build answers
 /// [`Unbounded`](BuildError::Unbounded) whatever its budget, rather than
-/// [`BudgetExhausted`](BuildError::BudgetExhausted); that it accepts limited
-/// and saturating explodes; and that the estimate of a function that explodes
-/// dice still exceeds every budget but the unlimited one.
+/// [`BudgetExhausted`](BuildError::BudgetExhausted); that the estimate of
+/// such a function exceeds every budget but the unlimited one; and that the
+/// pass accepts limited and saturating explodes, whose estimates bound it.
 #[test]
 fn test_build_refuses_unbounded_explodes()
 {
+	let saturated = Cost {
+		steps: u64::MAX,
+		cells: u64::MAX,
+		worlds: u64::MAX,
+		bits: u64::MAX,
+		class: Class::default()
+	};
 	for (clause, unbounded) in [
 		("= 6 unlimited times", true),
 		("<= 5 unlimited times", true),
@@ -3208,18 +3271,18 @@ fn test_build_refuses_unbounded_explodes()
 			.unwrap()
 		);
 		let plan = evaluator.plan_distribution([]).unwrap();
-		assert_eq!(
-			plan.estimate(),
-			Cost {
-				steps: u64::MAX,
-				cells: u64::MAX,
-				worlds: u64::MAX,
-				bits: u64::MAX,
-				class: Class::default()
-			},
-			"{}",
-			clause
-		);
+		match unbounded
+		{
+			true => assert_eq!(plan.estimate(), saturated, "{clause}"),
+			false =>
+			{
+				let (distribution, usage) =
+					propagate_within(&evaluator, &[], Budget::UNLIMITED)
+						.unwrap();
+				check_estimate(&evaluator, &[], &distribution, usage)
+					.unwrap_or_else(|e| panic!("{clause}: {e}"));
+			}
+		}
 		for budget in [Budget::UNLIMITED, Budget { steps: 0, cells: 0 }]
 		{
 			let built = plan.build(budget, &Unobserved);
@@ -6197,8 +6260,9 @@ proptest! {
 	/// rerolls, and explodes, so that a split fixes the chains that a later
 	/// reroll or explode reads, refuses it only if it explodes without limit,
 	/// succeeds within a budget exactly when the budget covers its usage, and
-	/// reports its progress faithfully. The estimate of such a function
-	/// saturates, so it bounds the usage trivially.
+	/// reports its progress faithfully, and its estimate bounds its usage,
+	/// trivially if the estimate does not yet price its explodes, and so
+	/// saturates.
 	#[test]
 	fn test_explode_estimates_bound_usage(
 		program in explode_program(),

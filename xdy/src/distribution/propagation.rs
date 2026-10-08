@@ -2224,10 +2224,10 @@ pub enum BuildError
 	/// decides it by the [bounds](crate::Evaluator::bounds), conservatively,
 	/// so it also refuses an explode whose random threshold may match every
 	/// face or none. Limited explodes, and unlimited ones that match every
-	/// face, and so saturate, are built, though the
-	/// [estimate](DistributionPlan::estimate) of a function that explodes dice
-	/// does not yet price them, and so exceeds every budget but the
-	/// [unlimited](Budget::UNLIMITED) one.
+	/// face, and so saturate, are built. The
+	/// [estimate](DistributionPlan::estimate) of a function that the build
+	/// refuses so exceeds every budget but the [unlimited](Budget::UNLIMITED)
+	/// one, as does that of a function whose explodes it does not yet price.
 	Unbounded
 }
 

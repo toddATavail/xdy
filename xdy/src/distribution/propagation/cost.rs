@@ -60,13 +60,25 @@
 //!
 //! Every quantity saturates rather than overflows, so an estimate that exceeds
 //! [`u64::MAX`] reports [`u64::MAX`], which no budget but the
-//! [unlimited](super::meter::Budget::UNLIMITED) one admits. The estimate does
-//! not yet price [explosions](crate::Explode), so the estimate of a function
-//! that explodes dice saturates every quantity, and its class describes
-//! nothing. The pass still meters every explode, so a finite budget refuses
-//! one only when the pass would exceed it, and the pass
-//! [refuses](crate::BuildError::Unbounded) a function in which an explode
-//! without limit may grow a chain without bound before it begins.
+//! [unlimited](super::meter::Budget::UNLIMITED) one admits.
+//!
+//! An [explode](crate::Explode) of alike dice, none of which has been dropped,
+//! whose chains no later reroll or explode reads, reduces the chains to their
+//! totals at once, rewriting the law of the dice, as a reroll may. Its
+//! resolution runs a program over the extensions of a chain, stage by stage,
+//! whose states the estimate bounds in closed form, by the multisets or the
+//! sums of the faces that the explode matches, exactly when one face matches;
+//! the totals form custom dice that span the hull of the totals that the
+//! bounds admit, which may fill gaps between them, as those of `3D[1, 3, 5]
+//! explode = 5 2 times` leave. An explode without limit that matches every face
+//! saturates every chain still kept, leaving a pool of one multiset. The
+//! estimate does not yet price any other explode, so the estimate of a
+//! function that has one saturates every quantity, and its class describes
+//! nothing; nor does it price a function in which an explode without limit
+//! may grow a chain without bound, which the pass
+//! [refuses](crate::BuildError::Unbounded) before it begins. The pass still
+//! meters every explode, so a finite budget refuses one only when the pass
+//! would exceed it.
 
 use std::{
 	cmp::Reverse,
@@ -79,15 +91,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{
 	PropagationError,
-	plan::{Location, Plan, Step, rerolled}
+	plan::{Location, Plan, Step, rerolled},
+	unbounded
 };
 use crate::{
 	Add, AddressingMode, CanVisitInstructions as _, Div, DropHighest,
 	DropLowest, EvaluationBounds, Evaluator, Exp, Explode, Function,
-	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Max, Min, Mod,
-	Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
-	RollCustomDice, RollRange, RollStandardDice, RollingRecordKind, Sub,
-	SumRollingRecord,
+	Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min,
+	Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex, Reroll, Return,
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	RollingRecordKind, Sub, SumRollingRecord,
 	evaluator::{BoundsEvaluator, Criteria, LeastDice, ResultSet}
 };
 
@@ -151,7 +164,12 @@ pub struct Class
 	/// Whether some reroll may reroll a die, or cross it out, so that some
 	/// record may hold dice whose law the reroll rewrote, or the multisets of
 	/// the dice that it left, which the pass enumerates.
-	pub rerolls: bool
+	pub rerolls: bool,
+
+	/// Whether some explode may extend or saturate a chain, so that some
+	/// record may hold dice whose law the explode rewrote to the totals of
+	/// their chains, which the pass enumerates.
+	pub explodes: bool
 }
 
 /// Estimate the cost of the forward pass over the evaluator's function, for
@@ -208,13 +226,13 @@ fn observe(
 			given: args.len()
 		})
 	}
-	if function
-		.instructions
-		.iter()
-		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	let plan = Plan::new(&function.instructions);
+	if unbounded(evaluator, &args) || !priced(&function.instructions, &plan)
 	{
-		// The estimate does not yet price explodes, so price the function
-		// beyond every budget but the unlimited one.
+		// The pass refuses a function in which an explode may grow a chain
+		// without bound, whatever its budget, and the estimate does not yet
+		// price every explode, so price such a function beyond every budget
+		// but the unlimited one.
 		return Ok(Cost {
 			steps: u64::MAX,
 			cells: u64::MAX,
@@ -242,7 +260,6 @@ fn observe(
 		fork: None
 	};
 	let mut consumed = Consumed::new(lane.shadow.cells());
-	let plan = Plan::new(&function.instructions);
 	let mut depths = depths(&plan, function.instructions.len()).into_iter();
 	for (pc, inst) in function.instructions.iter().enumerate()
 	{
@@ -274,6 +291,62 @@ fn observe(
 	debug_assert!(lane.fork.is_none(), "every split merges by the end");
 	consumed.charge(lane.shadow.finish());
 	Ok(lane.shadow.cost(&consumed))
+}
+
+/// Answer whether the estimate prices every explode of the specified function:
+/// whether each explodes the alike dice of a roll, none of which a drop or
+/// keep has crossed out, nor a split fixed, since the roll filled its record,
+/// and no later reroll or explode reads its chains, so that they reduce to
+/// their totals at once.
+///
+/// # Parameters
+/// - `instructions`: The instructions of the function.
+/// - `plan`: The plan of the function.
+///
+/// # Returns
+/// `true` if the estimate prices every explode, `false` otherwise.
+fn priced(instructions: &[Instruction], plan: &Plan) -> bool
+{
+	instructions.iter().enumerate().all(|(pc, inst)| {
+		let Instruction::Explode(Explode { dest, .. }) = inst
+		else
+		{
+			return true
+		};
+		let record = Location::RollingRecord(*dest);
+		if rerolled(instructions, ProgramCounter(pc), record)
+		{
+			return false
+		}
+		let writes = AddressingMode::RollingRecord(*dest);
+		for earlier in (0..pc).rev()
+		{
+			if plan
+				.steps(ProgramCounter(earlier))
+				.contains(&Step::Split(record))
+			{
+				return false
+			}
+			let inst = &instructions[earlier];
+			if inst.destination() != Some(writes)
+			{
+				continue
+			}
+			match inst
+			{
+				Instruction::RollRange(_)
+				| Instruction::RollStandardDice(_)
+				| Instruction::RollCustomDice(_) => return true,
+				Instruction::DropLowest(_)
+				| Instruction::DropHighest(_)
+				| Instruction::KeepLowest(_)
+				| Instruction::KeepHighest(_) => return false,
+				_ =>
+				{}
+			}
+		}
+		true
+	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1760,150 +1833,41 @@ impl InstructionVisitor<()> for Pricing<'_>
 		Ok(())
 	}
 
-	fn visit_explode(&mut self, _inst: &Explode) -> Result<(), ()>
+	fn visit_explode(&mut self, inst: &Explode) -> Result<(), ()>
 	{
-		unreachable!("the estimate prices no function that explodes dice")
+		// The explode reduces its chains to their totals at once, which lie
+		// within the hull of the totals that the bounds admit.
+		let shape = match self.rolls.totals(inst.dest)
+		{
+			Some(hull) => Die::run(hull.min, hull.max),
+			None => Die::custom(Vec::new())
+		};
+		let (resolution, most, changed) = self.predicated(
+			inst.dest.0,
+			&inst.operands(),
+			&inst.predicate,
+			inst.limit,
+			|part, resolution, _| part.explode(resolution, &shape)
+		);
+		self.shadow.class.explodes |= changed;
+		// Only a limited explode pads the chains that it may extend; one that
+		// saturates them rolls nothing.
+		if resolution.limit.is_some()
+		{
+			self.shadow.log += most as f64 * resolution.padding_log();
+		}
+		Ok(())
 	}
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
 	{
-		// The pass reads each distinct operand once, and pairs the outcomes
-		// of all of them, each of which resolves the predicate, holding a copy
-		// of a list of literals.
-		let mut read = Vec::<AddressingMode>::new();
-		let (mut outcomes, mut random) = (1u128, false);
-		for op in inst.operands()
-		{
-			if matches!(op, AddressingMode::Register(_)) && read.contains(&op)
-			{
-				continue
-			}
-			read.push(op);
-			let operand = self.read(op);
-			outcomes = outcomes.saturating_mul(operand.support);
-			random |= operand.random;
-		}
-		self.tally.charge(outcomes, outcomes);
-		let listed = match &inst.predicate
-		{
-			Predicate::In(values) => values.len() as u128,
-			_ => 0
-		};
-		let resolved = outcomes.saturating_mul(1 + listed);
-		self.tally.charge(resolved, resolved);
-		self.shadow.class.dynamic |= random;
-		let before = self.before;
-		let bounds = |op: AddressingMode| match op
-		{
-			AddressingMode::Immediate(value) => value.0.into(),
-			AddressingMode::Register(reg) => before[reg.0],
-			AddressingMode::RollingRecord(_) => unreachable!()
-		};
-		let source = Source::new(self.rolls.roll(inst.dest));
-		let resolution =
-			Resolution::new(inst, bounds, outcomes, source.clone());
-		// Operands of few joint values resolve value by value, exactly.
-		let values = values(&read, before);
-		// Values that match the same faces of the die, with the same limit,
-		// resolve alike, so each resolution counts the values that reach it.
-		let mut resolutions = Vec::<(Resolution, u128)>::new();
-		for values in &values
-		{
-			let value = |op: AddressingMode| match op
-			{
-				AddressingMode::Register(reg) => values
-					.iter()
-					.find(|(other, _)| *other == reg)
-					.map(|(_, value)| (*value).into())
-					.expect("every register is valued"),
-				op => bounds(op)
-			};
-			let resolution = Resolution::new(inst, value, 1, source.clone());
-			match resolutions
-				.iter_mut()
-				.find(|(other, _)| other.alike(&resolution))
-			{
-				Some((_, count)) => *count += 1,
-				None => resolutions.push((resolution, 1))
-			}
-		}
-		let record = &mut self.shadow.records[inst.dest.0];
-		// The mixture charges a step and the cells of a setup for each setup
-		// and outcome, before each setup rerolls in turn.
-		self.tally.charge(
-			record.setups().saturating_mul(outcomes),
-			record.cells().saturating_mul(outcomes)
+		let (resolution, most, changed) = self.predicated(
+			inst.dest.0,
+			&inst.operands(),
+			&inst.predicate,
+			inst.limit,
+			|part, resolution, groups| part.reroll(resolution, groups)
 		);
-		let mut work = Tally::default();
-		let mut parts = Vec::<Part>::new();
-		let (mut most, mut changed) = (0u128, false);
-		for part in &record.parts
-		{
-			let (each, rerolls) = match resolutions.is_empty()
-			{
-				// Each outcome costs at most what the costliest resolution
-				// does.
-				true =>
-				{
-					let reroll = part.reroll(&resolution, &mut HashMap::new());
-					(reroll.each.times(outcomes), vec![reroll])
-				},
-				// Each outcome is one of the resolutions, of which a setup
-				// meets at most as many as there are outcomes.
-				false =>
-				{
-					let mut groups = HashMap::new();
-					let rerolls = resolutions
-						.iter()
-						.map(|(resolution, count)| {
-							(part.reroll(resolution, &mut groups), *count)
-						})
-						.collect::<Vec<_>>();
-					(
-						costliest(
-							rerolls
-								.iter()
-								.map(|(reroll, count)| (reroll.each, *count)),
-							outcomes
-						),
-						rerolls.into_iter().map(|(reroll, _)| reroll).collect()
-					)
-				}
-			};
-			work = work.beside(each.times(part.setups));
-			// Setups that the reroll leaves as they were, or crosses out, are
-			// the same for every outcome, but each redraw differs.
-			if rerolls.iter().any(|reroll| reroll.unchanged)
-			{
-				absorb(&mut parts, part.clone());
-			}
-			if rerolls.iter().any(|reroll| reroll.crossed)
-			{
-				absorb(
-					&mut parts,
-					Part {
-						lowest: part.results(),
-						..part.clone()
-					}
-				);
-			}
-			for reroll in rerolls
-			{
-				most = most.max(reroll.redrawn);
-				changed |= reroll.crossed || reroll.redrawn > 0;
-				for part in reroll.redraws
-				{
-					absorb(&mut parts, part);
-				}
-			}
-		}
-		self.tally.then(work);
-		record.parts = parts;
-		// The setups that the reroll leaves as they were, or crosses out, merge
-		// across the outcomes of the operands, and weigh their sum.
-		record.weighted |= outcomes > 1;
-		record.summed = false;
-		record.random |= random;
 		self.shadow.class.rerolls |= changed;
 		self.shadow.log += most as f64 * resolution.padding_log();
 		Ok(())
@@ -2152,6 +2116,178 @@ impl Pricing<'_>
 		record.summed = false;
 		count.bounds
 	}
+
+	/// Apply a reroll or an explode to the specified rolling record, as
+	/// [`Mixture::resolve`](super::mixture::Mixture) does: read each distinct
+	/// operand once, resolve the predicate by each joint outcome, and apply it
+	/// to every setup, part by part.
+	///
+	/// # Parameters
+	/// - `dest`: The index of the record.
+	/// - `operands`: The operands of the predicate and the limit.
+	/// - `predicate`: The predicate.
+	/// - `limit`: The limit.
+	/// - `apply`: The reroll or explode of the setups of one part by one
+	///   resolution, given the groups of the multisets of the part computed so
+	///   far.
+	///
+	/// # Returns
+	/// The resolution over the bounds of the operands, the most dice still kept
+	/// that the clause may pad, and whether it may change some setup.
+	fn predicated(
+		&mut self,
+		dest: usize,
+		operands: &[AddressingMode],
+		predicate: &Predicate,
+		limit: Limit,
+		apply: impl Fn(&Part, &Resolution, &mut Groups) -> Effects
+	) -> (Resolution, u128, bool)
+	{
+		// The pass reads each distinct operand once, and pairs the outcomes
+		// of all of them, each of which resolves the predicate, holding a copy
+		// of a list of literals.
+		let mut read = Vec::<AddressingMode>::new();
+		let (mut outcomes, mut random) = (1u128, false);
+		for &op in operands
+		{
+			if matches!(op, AddressingMode::Register(_)) && read.contains(&op)
+			{
+				continue
+			}
+			read.push(op);
+			let operand = self.read(op);
+			outcomes = outcomes.saturating_mul(operand.support);
+			random |= operand.random;
+		}
+		self.tally.charge(outcomes, outcomes);
+		let listed = match predicate
+		{
+			Predicate::In(values) => values.len() as u128,
+			_ => 0
+		};
+		let resolved = outcomes.saturating_mul(1 + listed);
+		self.tally.charge(resolved, resolved);
+		self.shadow.class.dynamic |= random;
+		let before = self.before;
+		let bounds = |op: AddressingMode| match op
+		{
+			AddressingMode::Immediate(value) => value.0.into(),
+			AddressingMode::Register(reg) => before[reg.0],
+			AddressingMode::RollingRecord(_) => unreachable!()
+		};
+		let source = Source::new(self.rolls.roll(RollingRecordIndex(dest)));
+		let resolution =
+			Resolution::new(predicate, limit, bounds, outcomes, source.clone());
+		// Operands of few joint values resolve value by value, exactly.
+		let values = values(&read, before);
+		// Values that match the same faces of the die, with the same limit,
+		// resolve alike, so each resolution counts the values that reach it.
+		let mut resolutions = Vec::<(Resolution, u128)>::new();
+		for values in &values
+		{
+			let value = |op: AddressingMode| match op
+			{
+				AddressingMode::Register(reg) => values
+					.iter()
+					.find(|(other, _)| *other == reg)
+					.map(|(_, value)| (*value).into())
+					.expect("every register is valued"),
+				op => bounds(op)
+			};
+			let resolution =
+				Resolution::new(predicate, limit, value, 1, source.clone());
+			match resolutions
+				.iter_mut()
+				.find(|(other, _)| other.alike(&resolution))
+			{
+				Some((_, count)) => *count += 1,
+				None => resolutions.push((resolution, 1))
+			}
+		}
+		let record = &mut self.shadow.records[dest];
+		// The mixture charges a step and the cells of a setup for each setup
+		// and outcome, before each setup applies the clause in turn.
+		self.tally.charge(
+			record.setups().saturating_mul(outcomes),
+			record.cells().saturating_mul(outcomes)
+		);
+		let mut work = Tally::default();
+		let mut parts = Vec::<Part>::new();
+		let (mut most, mut changed) = (0u128, false);
+		for part in &record.parts
+		{
+			let (each, effects) = match resolutions.is_empty()
+			{
+				// Each outcome costs at most what the costliest resolution
+				// does.
+				true =>
+				{
+					let effects = apply(part, &resolution, &mut HashMap::new());
+					(effects.each.times(outcomes), vec![effects])
+				},
+				// Each outcome is one of the resolutions, of which a setup
+				// meets at most as many as there are outcomes.
+				false =>
+				{
+					let mut groups = HashMap::new();
+					let effects = resolutions
+						.iter()
+						.map(|(resolution, count)| {
+							(apply(part, resolution, &mut groups), *count)
+						})
+						.collect::<Vec<_>>();
+					(
+						costliest(
+							effects
+								.iter()
+								.map(|(effects, count)| (effects.each, *count)),
+							outcomes
+						),
+						effects
+							.into_iter()
+							.map(|(effects, _)| effects)
+							.collect()
+					)
+				}
+			};
+			work = work.beside(each.times(part.setups));
+			// Setups that the clause leaves as they were, or crosses out, are
+			// the same for every outcome, but each redraw differs.
+			if effects.iter().any(|effects| effects.unchanged)
+			{
+				absorb(&mut parts, part.clone());
+			}
+			if effects.iter().any(|effects| effects.crossed)
+			{
+				absorb(
+					&mut parts,
+					Part {
+						lowest: part.results(),
+						..part.clone()
+					}
+				);
+			}
+			for effects in effects
+			{
+				most = most.max(effects.redrawn);
+				changed |= effects.crossed
+					|| effects.redrawn > 0
+					|| !effects.redraws.is_empty();
+				for part in effects.redraws
+				{
+					absorb(&mut parts, part);
+				}
+			}
+		}
+		self.tally.then(work);
+		record.parts = parts;
+		// The setups that the clause leaves as they were, or crosses out, merge
+		// across the outcomes of the operands, and weigh their sum.
+		record.weighted |= outcomes > 1;
+		record.summed = false;
+		record.random |= random;
+		(resolution, most, changed)
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2263,9 +2399,9 @@ impl Source
 	}
 }
 
-/// A reroll, resolved over the bounds of its operands against the die from
-/// which it draws, as [`redraw`](super::record::redraw) resolves it in each
-/// world.
+/// A reroll or an explode, resolved over the bounds of its operands against
+/// the die from which it draws, as [`redraw`](super::record::redraw) and
+/// [`burst`](super::chain::burst) resolve it in each world.
 #[derive(Debug, Clone)]
 struct Resolution
 {
@@ -2281,6 +2417,10 @@ struct Resolution
 	/// A bound on the joint outcomes of the operands, by which the reroll
 	/// splits each setup.
 	outcomes: u128,
+
+	/// Whether some die may have no face that every criterion matches, so that
+	/// the reroll or explode may match none of its faces.
+	miss: bool,
 
 	/// Whether the reroll may leave every die of some setup as it was,
 	/// though some is still kept: whether no face may match, the limit may be
@@ -2314,25 +2454,27 @@ struct Resolution
 
 impl Resolution
 {
-	/// Resolve the specified reroll.
+	/// Resolve the specified reroll or explode.
 	///
 	/// # Parameters
-	/// - `inst`: The reroll.
+	/// - `predicate`: The predicate of the reroll or explode.
+	/// - `times`: The limit of the reroll or explode.
 	/// - `bounds`: The function that answers the interval of an operand.
 	/// - `outcomes`: A bound on the joint outcomes of the operands.
-	/// - `source`: The die from which the reroll draws.
+	/// - `source`: The die from which the reroll or explode draws.
 	///
 	/// # Returns
 	/// The resolution.
 	fn new(
-		inst: &Reroll,
+		predicate: &Predicate,
+		times: Limit,
 		bounds: impl Fn(AddressingMode) -> EvaluationBounds,
 		outcomes: u128,
 		source: Source
 	) -> Self
 	{
-		let criteria = Criteria::new(&inst.predicate, &bounds);
-		let limit = inst.limit.operand().map(&bounds);
+		let criteria = Criteria::new(predicate, &bounds);
+		let limit = times.operand().map(&bounds);
 		let faces = &source.faces;
 		// Some die may have no face that every criterion matches.
 		let miss = !source.least.iter().all(|die| match die
@@ -2367,6 +2509,7 @@ impl Resolution
 			criteria,
 			limit,
 			outcomes,
+			miss,
 			idle,
 			cross,
 			redraw,
@@ -2507,24 +2650,28 @@ enum Arrangement
 	Scattered
 }
 
-/// The reroll of the setups of one part by one resolution.
+/// The effects of a reroll or an explode on the setups of one part by one
+/// resolution.
 #[derive(Debug)]
-struct Rerolled
+struct Effects
 {
-	/// The tally of the reroll of one setup by one outcome of the operands.
+	/// The tally of the reroll or explode of one setup by one outcome of the
+	/// operands.
 	each: Tally,
 
-	/// Whether the reroll may leave some setup as it was.
+	/// Whether the reroll or explode may leave some setup as it was.
 	unchanged: bool,
 
 	/// Whether the reroll may cross out every die still kept of some setup.
 	crossed: bool,
 
-	/// The parts that bound the setups that the reroll redraws.
+	/// The parts that bound the setups that the reroll redraws, or that the
+	/// explode extends or saturates.
 	redraws: Vec<Part>,
 
-	/// The most dice still kept that the reroll may redraw, which raise the
-	/// total of a setup by their paddings, or zero.
+	/// The most dice still kept that the reroll may redraw, or the most chains
+	/// still kept that a limited explode may extend, which raise the total of
+	/// a setup by their paddings, or zero.
 	redrawn: u128
 }
 
@@ -2542,13 +2689,13 @@ impl Part
 	///
 	/// # Returns
 	/// The reroll.
-	fn reroll(&self, resolution: &Resolution, groups: &mut Groups) -> Rerolled
+	fn reroll(&self, resolution: &Resolution, groups: &mut Groups) -> Effects
 	{
 		let kept = self.kept();
 		if kept.max <= 0
 		{
 			// No setup has a die still kept, so none has anything to reroll.
-			return Rerolled {
+			return Effects {
 				each: Tally::default(),
 				unchanged: true,
 				crossed: false,
@@ -2611,7 +2758,7 @@ impl Part
 			each.then(paths);
 			redrawn = kept.max as u128;
 		}
-		Rerolled {
+		Effects {
 			each,
 			unchanged: kept.min <= 0 || resolution.idle,
 			crossed: resolution.cross,
@@ -2829,6 +2976,335 @@ fn absorb(parts: &mut Vec<Part>, part: Part)
 			other.dice = other.dice.saturating_add(part.dice);
 		},
 		None => parts.push(part)
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 Explodes.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// What an explode may do to the setups of a part, by one resolution, as
+/// [`Burst`](super::chain::Burst) decides it in each world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Burst
+{
+	/// Whether the explode may leave some setup as it was, since it may match
+	/// no face, its limit may be zero or less, or, without limit, it may not
+	/// match every face of some die, and so match the end of no chain, since
+	/// the pass refuses a function in which it may.
+	idle: bool,
+
+	/// Whether the explode may saturate every chain still kept of some setup,
+	/// since it has no limit and may match every face of some die.
+	saturate: bool,
+
+	/// Whether the explode may extend the chains still kept of some setup,
+	/// since it has a limit that may be positive and may match some face.
+	extend: bool
+}
+
+impl Resolution
+{
+	/// Answer what an explode of this resolution may do to a setup.
+	///
+	/// # Returns
+	/// The effects that the explode may have.
+	fn burst(&self) -> Burst
+	{
+		let faces = &self.source.faces;
+		match self.limit
+		{
+			Some(limit) => Burst {
+				idle: self.miss || limit.min <= 0,
+				saturate: false,
+				extend: faces.meets(&self.criteria.possible) && limit.max > 0
+			},
+			None => Burst {
+				idle: !faces.is_subset(&self.criteria.certain),
+				saturate: self
+					.source
+					.least
+					.iter()
+					.any(|die| self.criteria.may_cover(die)),
+				extend: false
+			}
+		}
+	}
+
+	/// Resolve a limited explode of one setup that may extend its chains, as
+	/// [`burst`](super::chain::burst) does when the chains reduce to their
+	/// totals: list the faces of the die, and run the program over the
+	/// extensions, whose states are the folds of the extensions so far of the
+	/// chains that may still grow, stage by stage.
+	///
+	/// At stage `j`, each of the states rolls each of the `D` faces of the
+	/// die. The states are the folds of `j − 1` faces that the explode matches,
+	/// which number at most `m` times those of the stage before, for `m`
+	/// matching faces, and at most the multisets of `j − 1` of them, or, if
+	/// they are of one sign, so that their folds are their sums, at most the
+	/// [sums](Die::support) of `j − 1` of them. The tails that the stages close
+	/// number at most the moves that close them, and, if the faces are of one
+	/// sign, at most the sums of from one to `n` faces. The stages beyond
+	/// [`LISTED`] are priced at the most states of any.
+	///
+	/// # Returns
+	/// The tally of the resolution, which leaves the tails charged, and a
+	/// bound on the tails, which are the folds by which a matching chain may
+	/// grow.
+	fn extensions(&self) -> (Tally, u128)
+	{
+		let source = &self.source;
+		let d = source.distinct;
+		let n = self.limit.map_or(0, |limit| limit.max.max(0) as u128);
+		let mut tally = Tally::default();
+		// Listing the faces takes a step for each, and their weights a cell
+		// apiece; the padding is a power of the branches of the die, which
+		// takes a step for each extension that a chain may need.
+		tally.charge(d.saturating_add(n), d.saturating_mul(2));
+		let matching = source.faces.intersection(&self.criteria.possible);
+		let m = matching.len().clamp(1, d.max(1));
+		// The faces that end a chain before its limit is spent.
+		let ends = source.faces.difference(&self.criteria.certain).len().min(d);
+		let signed = |set: &ResultSet| {
+			set.hull()
+				.is_some_and(|hull| hull.min >= 0 || hull.max <= 0)
+		};
+		let die = Die::covering(&matching, source.listed);
+		let summed = signed(&matching);
+		// A bound on the folds of `k` matching faces.
+		let folds = |k: u128| match (k, summed)
+		{
+			(0, _) => 1,
+			(k, true) => die.support(k),
+			(k, false) => binomial(k + m - 1, m - 1)
+		};
+		let (mut moves, mut closed, mut states) = (0u128, 0u128, 1u128);
+		let listed = n.min(LISTED);
+		for j in 1..=listed
+		{
+			if j > 1
+			{
+				states = states.saturating_mul(m).min(folds(j - 1));
+			}
+			moves = moves.saturating_add(states.saturating_mul(d));
+			let closing = match j < n
+			{
+				true => ends,
+				false => d
+			};
+			closed = closed.saturating_add(states.saturating_mul(closing));
+		}
+		if n > listed
+		{
+			// The later stages hold at most the states of the last.
+			let rest = (n - listed).saturating_mul(folds(n - 1).min(
+				states.saturating_mul(m.saturating_pow((n - listed) as u32))
+			));
+			moves = moves.saturating_add(rest.saturating_mul(d));
+			closed = closed.saturating_add(rest.saturating_mul(d));
+		}
+		// Each stage takes a step, and each move a step and a cell.
+		tally.charge(moves.saturating_add(n), moves);
+		let tails = match (signed(&source.faces), source.faces.hull())
+		{
+			(true, Some(hull)) =>
+			{
+				let n = n as i128;
+				let least = (hull.min as i128).min(n * hull.min as i128);
+				let greatest = (hull.max as i128).max(n * hull.max as i128);
+				closed.min((greatest - least + 1) as u128)
+			},
+			_ => closed
+		};
+		// The tails stay charged; the states and the faces do not.
+		tally.keep(moves, tails);
+		tally.free(d.saturating_mul(2));
+		(tally, tails)
+	}
+}
+
+impl Part
+{
+	/// Explode the setups of the part by one resolution, as
+	/// [`Setup::explode`](super::mixture) does for each setup and each outcome
+	/// of the operands that resolves so, when no later reroll or explode reads
+	/// the chains, which reduce to their totals at once.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `shape`: The shape of a die whose faces are the totals of the chains
+	///   that the explode may grow.
+	///
+	/// # Returns
+	/// The effects of the explode.
+	fn explode(&self, resolution: &Resolution, shape: &Die) -> Effects
+	{
+		let kept = self.kept();
+		if kept.max <= 0
+		{
+			// No setup has a chain still kept, so none has anything to explode.
+			return Effects {
+				each: Tally::default(),
+				unchanged: true,
+				crossed: false,
+				redraws: Vec::new(),
+				redrawn: 0
+			}
+		}
+		let source = &resolution.source;
+		let burst = resolution.burst();
+		// Counting the branches of the die takes a step, and one for each face
+		// of a custom die.
+		let mut each = Tally::default();
+		each.charge(1 + source.cells, 0);
+		let setups = self.setups.saturating_mul(resolution.outcomes);
+		let mut paths = Tally::default();
+		let mut redraws = Vec::new();
+		let mut redrawn = 0;
+		if burst.saturate
+		{
+			// The total takes a step for each die, and the pool of one multiset
+			// of saturated chains takes three cells; the setup keeps a copy of
+			// the die.
+			let dice =
+				match &self.kind
+				{
+					Kind::Standard { count, .. }
+					| Kind::Custom { count, .. } => dice(count),
+					_ => 0
+				};
+			let cells = 3 + source.cells;
+			let mut path = Tally::default();
+			path.charge(1 + dice, cells);
+			paths = paths.max(path);
+			redraws.push(Part {
+				kind: Kind::Pool {
+					kept: (kept.min.max(1), kept.max).into(),
+					multisets: 1,
+					distinct: 1
+				},
+				setups,
+				cells: setups.saturating_mul(cells),
+				dice: 0,
+				lowest: 0.into(),
+				highest: 0.into()
+			});
+		}
+		if burst.extend
+		{
+			let (mut path, tails) = resolution.extensions();
+			let (tally, part) = self.totals(resolution, tails, shape, setups);
+			path.then(tally);
+			paths = paths.max(path);
+			redraws.push(part);
+			redrawn = kept.max as u128;
+		}
+		each.then(paths);
+		Effects {
+			each,
+			unchanged: kept.min <= 0 || burst.idle,
+			crossed: false,
+			redraws,
+			redrawn
+		}
+	}
+
+	/// Explode the alike dice of one setup of the part, none of which has been
+	/// dropped, into the law of the totals of their chains, as
+	/// [`Roll::explode`](super::record::Roll) does: list the law of a chain,
+	/// one die of each face, then the totals of each chain, those of a chain
+	/// whose end matches by each tail, and merge them into the faces of custom
+	/// dice.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `shape`: The shape of a die whose faces are the totals of the chains.
+	/// - `setups`: A bound on the exploded setups.
+	///
+	/// # Returns
+	/// The tally of the explode, and the part that bounds the exploded setups.
+	fn totals(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		shape: &Die,
+		setups: u128
+	) -> (Tally, Part)
+	{
+		let one = Operand {
+			bounds: 1.into(),
+			support: 1,
+			varied: false,
+			random: false,
+			dense: true
+		};
+		let source = &resolution.source;
+		let (count, chains, faces, laws) = match &self.kind
+		{
+			// A range is one die.
+			Kind::Range { .. } =>
+			{
+				(one, source.distinct, source.faces.clone(), self.setups)
+			},
+			Kind::Standard {
+				count, faces, dies, ..
+			} => (
+				*count,
+				faces.bounds.max.max(1) as u128,
+				source.faces.clone(),
+				*dies
+			),
+			Kind::Custom {
+				count, die, laws, ..
+			} => (*count, die.faces, die.set(), *laws),
+			_ => unreachable!("only a roll of alike dice explodes into totals")
+		};
+		// The chains of the law whose ends the explode may match.
+		let matching = faces
+			.intersection(&resolution.criteria.possible)
+			.len()
+			.min(chains);
+		let law = matching
+			.saturating_mul(tails)
+			.saturating_add(chains - matching);
+		let mut tally = Tally::default();
+		// The explode takes a step and a cell, and the law of a chain lists
+		// each face as a chain of one die, of two cells.
+		tally.charge(1, 1);
+		tally.charge(chains, chains.saturating_mul(2));
+		// Each chain whose end matches folds each tail into a total, and any
+		// other keeps its own.
+		tally.charge(
+			matching
+				.saturating_mul(tails.saturating_add(1))
+				.saturating_add(chains - matching),
+			law
+		);
+		// The totals are weighed and merged, leaving the faces of the dice,
+		// which the shape covers, and the law of a chain is freed.
+		tally.charge(law.saturating_add(chains), law);
+		let totals = law.min(shape.faces);
+		tally.keep(law.saturating_mul(2), totals);
+		tally.free(chains.saturating_mul(2));
+		// The setup keeps a copy of the die.
+		tally.charge(0, source.cells);
+		let part = Part {
+			kind: Kind::Custom {
+				count,
+				die: shape.clone(),
+				laws: laws.saturating_mul(resolution.outcomes).min(setups),
+				exact: false
+			},
+			setups,
+			cells: setups.saturating_mul(
+				1u128.saturating_add(totals).saturating_add(source.cells)
+			),
+			dice: setups.saturating_mul(dice(&count)),
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
 	}
 }
 

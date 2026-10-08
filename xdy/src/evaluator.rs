@@ -3289,6 +3289,24 @@ impl<'eval> BoundsEvaluator<'eval>
 		&self.record(op).kind
 	}
 
+	/// Answer the least interval that holds every total that a
+	/// [chain](crate::RollingRecord::chains) still kept by the specified
+	/// rolling record may show, which is exact.
+	///
+	/// # Parameters
+	/// - `op`: The rolling record.
+	///
+	/// # Returns
+	/// The interval, or `None` if no chain may be kept.
+	#[inline]
+	pub(crate) fn totals(
+		&self,
+		op: RollingRecordIndex
+	) -> Option<EvaluationBounds>
+	{
+		self.record(op).totals.hull()
+	}
+
 	/// Obtain the specified rolling record bounds.
 	///
 	/// # Parameters
