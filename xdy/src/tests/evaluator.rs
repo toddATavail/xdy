@@ -3212,12 +3212,12 @@ fn test_dice_budget_meters_explodes()
 /// matches every face saturates every chain, rolling nothing; an explode that
 /// cannot extend a die changes nothing; drops and keeps after an explode count
 /// whole chains; and a later reroll or explode of an exploded record that may
-/// match is sound but loose, though a later limited explode still rolls at
-/// most its limit for each chain still kept.
+/// match bounds each chain by the folds of its least and greatest results over
+/// its lengths, and counts nothing, but rolls at most its limit for each kept
+/// die, or for each chain still kept, and leaves saturated chains alone.
 #[test]
 fn test_explode_bounds()
 {
-	let unconstrained = EvaluationBounds::unconstrained();
 	for (clauses, value, count, dice) in [
 		// The chains total 1 to 5, 7 to 11, or 13 to 18.
 		(
@@ -3275,17 +3275,74 @@ fn test_explode_bounds()
 			Some(6u128.pow(4 + 4)),
 			4 + 4
 		),
+		// A later explode grows each chain still kept from its end, so a chain
+		// holds up to three dice.
 		(
 			&["explode = 6 up to 1 times", "explode = 6 up to 1 times"],
-			unconstrained,
+			(4, 72).into(),
 			None,
 			4 + 4 + 4
 		),
 		(
-			&["explode = 6 up to 1 times", "reroll = 1 up to 1 times"],
-			unconstrained,
+			&[
+				"explode = 6 up to 2 times",
+				"reroll = 6 up to 1 times",
+				"explode = 6 up to 1 times"
+			],
+			(4, 96).into(),
+			None,
+			4 + 4 * 2 + 4 * 3 + 4
+		),
+		(
+			&["explode = 6 up to 1 times", "explode = 6 unlimited times"],
+			(4, i32::MAX).into(),
 			None,
 			u64::MAX
+		),
+		// Every chain that grows saturates, but the bounds do not know that
+		// every chain grows.
+		(
+			&["explode = 6 up to 1 times", "explode >= 1 unlimited times"],
+			(4, i32::MAX).into(),
+			None,
+			4 + 4
+		),
+		// A later reroll rerolls each kept die of a chain, of which there are
+		// up to two.
+		(
+			&["explode = 6 up to 1 times", "reroll = 1 up to 1 times"],
+			(4, 48).into(),
+			None,
+			4 + 4 + 4 * 2
+		),
+		(
+			&["explode = 6 up to 1 times", "reroll = 1 unlimited times"],
+			(8, 48).into(),
+			None,
+			u64::MAX
+		),
+		// Every face matches, so the reroll crosses out every die.
+		(
+			&["explode = 6 up to 1 times", "reroll <= 6 unlimited times"],
+			0.into(),
+			None,
+			4 + 4
+		),
+		// Every chain saturates, so no die is left to reroll.
+		(
+			&["explode >= 1 unlimited times", "reroll = 1 up to 1 times"],
+			i32::MAX.into(),
+			Some(6u128.pow(4)),
+			4
+		),
+		(
+			&[
+				"explode >= 1 unlimited times",
+				"reroll <= 6 unlimited times"
+			],
+			i32::MAX.into(),
+			Some(6u128.pow(4)),
+			4
 		)
 	]
 	{
@@ -3301,6 +3358,38 @@ fn test_explode_bounds()
 		assert_eq!(bounds.value, value, "{}", clauses);
 		assert_eq!(bounds.count, count, "{}", clauses);
 		assert_eq!(bounds.dice, dice, "{}", clauses);
+	}
+	for (body, value, dice) in [
+		// A chain of up to three dice, each `-2` or `3`, totals at least three
+		// `-2`s and at most three `3`s.
+		(
+			"⚅0 <- roll custom dice 2D[-2, 3]
+			⚅0 <- explode = 3 up to 2 times from ⚅0
+			⚅0 <- reroll = -2 up to 1 times from ⚅0",
+			(-12, 18).into(),
+			2 + 2 * 2 + 2 * 3
+		),
+		// The explode saturates the chains if the threshold is `1`, but not if
+		// it is `2`; the reroll crosses out every die of the chains that do
+		// not saturate, but leaves those that do.
+		(
+			"⚅1 <- roll standard dice 1D2
+			@1 <- sum rolling record ⚅1
+			⚅0 <- roll standard dice 2D6
+			⚅0 <- explode >= @1 unlimited times from ⚅0
+			⚅0 <- reroll <= 6 unlimited times from ⚅0",
+			(0, i32::MAX).into(),
+			u64::MAX
+		)
+	]
+	{
+		let bounds = body_bounds(&format!(
+			"{}\n@0 <- sum rolling record ⚅0\nreturn @0",
+			body
+		));
+		assert_eq!(bounds.value, value, "{}", body);
+		assert_eq!(bounds.count, None, "{}", body);
+		assert_eq!(bounds.dice, dice, "{}", body);
 	}
 }
 
@@ -3937,7 +4026,9 @@ fn test_explode_bounds_count()
 /// sampled evaluation: each rolls standard dice, custom dice, or a range, and
 /// then drops, keeps, rerolls, and explodes them in any order, by predicates
 /// whose operands are constants or an argument, whose bounds contain the
-/// argument; and that no evaluation rolls more dice than the bounds allow.
+/// argument; that no evaluation rolls more dice than the bounds allow; and that
+/// the bounds of the value are finite unless some explode is unlimited, and
+/// those of the dice, unless some reroll or explode is.
 #[test]
 fn test_explode_bounds_sampled()
 {
@@ -3973,7 +4064,9 @@ fn test_explode_bounds_sampled()
 			true => t,
 			false => AddressingMode::from(Immediate(rng.random_range(-3..=7)))
 		};
-		let clauses = (0..rng.random_range(1..=3))
+		// Whether some explode, or some reroll, is unlimited.
+		let (mut unlimited_explode, mut unlimited_reroll) = (false, false);
+		let clauses = (0..rng.random_range(1..=5))
 			.map(|_| {
 				let predicate = match rng.random_range(0..9)
 				{
@@ -3997,7 +4090,8 @@ fn test_explode_bounds_sampled()
 						end: operand(&mut rng)
 					}
 				};
-				let limit = match rng.random_bool(0.3)
+				let unlimited = rng.random_bool(0.3);
+				let limit = match unlimited
 				{
 					true => "unlimited times".to_string(),
 					false => format!("up to {} times", rng.random_range(-1..=3))
@@ -4006,8 +4100,16 @@ fn test_explode_bounds_sampled()
 				{
 					0 => format!("drop lowest {}", rng.random_range(-1..=2)),
 					1 => format!("keep highest {}", rng.random_range(-1..=3)),
-					2 => format!("reroll {} {}", predicate, limit),
-					_ => format!("explode {} {}", predicate, limit)
+					2 =>
+					{
+						unlimited_reroll |= unlimited;
+						format!("reroll {} {}", predicate, limit)
+					},
+					_ =>
+					{
+						unlimited_explode |= unlimited;
+						format!("explode {} {}", predicate, limit)
+					}
 				}
 			})
 			.map(|clause| format!("\t\t⚅0 <- {} from ⚅0\n", clause))
@@ -4026,6 +4128,25 @@ fn test_explode_bounds_sampled()
 				[]
 			)
 			.unwrap();
+		// Every chain of finitely many small dice totals a small value, and
+		// limited rerolls and explodes roll finitely many dice.
+		if !unlimited_explode
+		{
+			assert!(
+				i32::MIN < bounds.value.min && bounds.value.max < i32::MAX,
+				"bounds {} not finite\n{}",
+				bounds.value,
+				evaluator.function
+			);
+			if !unlimited_reroll
+			{
+				assert!(
+					bounds.dice < u64::MAX,
+					"dice not finite\n{}",
+					evaluator.function
+				);
+			}
+		}
 		for _ in 0..50
 		{
 			let evaluation = evaluator.evaluate([arg], &mut rng).unwrap();
