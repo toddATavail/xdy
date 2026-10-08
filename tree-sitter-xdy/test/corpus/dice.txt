@@ -1374,3 +1374,980 @@ Run-on Keyword: 3D6 reroll = 1 2 timesx
 3D6 reroll = 1 2 timesx
 
 ---
+
+==========================
+Explode: 1D6 explode = 6
+==========================
+
+1D6 explode = 6
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))))
+
+===========================
+Explode: 1D6 explode != 1
+===========================
+
+1D6 explode != 1
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ne
+			(integer))))
+
+==========================
+Explode: 1D6 explode ≠ 1
+==========================
+
+1D6 explode ≠ 1
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ne
+			(integer))))
+
+==========================
+Explode: 1D6 explode < 2
+==========================
+
+1D6 explode < 2
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(lt
+			(integer))))
+
+===========================
+Explode: 1D6 explode <= 2
+===========================
+
+1D6 explode <= 2
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))))
+
+==========================
+Explode: 1D6 explode ≤ 2
+==========================
+
+1D6 explode ≤ 2
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(le
+			(integer))))
+
+==========================
+Explode: 1D6 explode > 5
+==========================
+
+1D6 explode > 5
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(gt
+			(integer))))
+
+===========================
+Explode: 1D6 explode >= 5
+===========================
+
+1D6 explode >= 5
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))))
+
+==========================
+Explode: 1D6 explode ≥ 5
+==========================
+
+1D6 explode ≥ 5
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))))
+
+=====================================
+Explode: 1D6 explode>=5 (no spaces)
+=====================================
+
+1D6 explode>=5
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))))
+
+=============================================================
+Explode: 3D[-2, -1, 0, 1] explode = -2 (negative threshold)
+=============================================================
+
+3D[-2, -1, 0, 1] explode = -2
+
+---
+
+(function
+	(explode
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)
+				(integer)))
+		(eq
+			(integer))))
+
+============================
+Explode: 2D8 explode > {x}
+============================
+
+2D8 explode > {x}
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(gt
+			(variable
+				(identifier)))))
+
+===================================
+Explode: 2D8 explode >= {x}@(1D4)
+===================================
+
+2D8 explode >= {x}@(1D4)
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(binding
+				(identifier)
+				(standard_dice
+					(constant)
+					(integer))))))
+
+=================================
+Explode: 2D8 explode >= (1 + 6)
+=================================
+
+2D8 explode >= (1 + 6)
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(group
+				(add
+					(constant)
+					(constant))))))
+
+=============================
+Explode: 1D20 explode in []
+=============================
+
+1D20 explode in []
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list)))
+
+===============================
+Explode: 1D20 explode in [20]
+===============================
+
+1D20 explode in [20]
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list
+			(integer))))
+
+==========================================
+Explode: 1D[-1, 0, 1] explode in [-1, 1]
+==========================================
+
+1D[-1, 0, 1] explode in [-1, 1]
+
+---
+
+(function
+	(explode
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)))
+		(in_list
+			(integer)
+			(integer))))
+
+=============================================
+Explode: 1D20 explode in[19,20] (no spaces)
+=============================================
+
+1D20 explode in[19,20]
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list
+			(integer)
+			(integer))))
+
+=================================
+Explode: 1D20 explode in 19..21
+=================================
+
+1D20 explode in 19..21
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range
+			(integer)
+			(integer))))
+
+==================================
+Explode: 1D20 explode in 19..=20
+==================================
+
+1D20 explode in 19..=20
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+=============================================
+Explode: 1D20 explode in19..=20 (no spaces)
+=============================================
+
+1D20 explode in19..=20
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+=============================================================
+Explode: 3D[-2, -1, 0, 1] explode in -2..0 (negative start)
+=============================================================
+
+3D[-2, -1, 0, 1] explode in -2..0
+
+---
+
+(function
+	(explode
+		(custom_dice
+			(constant)
+			(custom_faces
+				(integer)
+				(integer)
+				(integer)
+				(integer)))
+		(in_range
+			(integer)
+			(integer))))
+
+=======================================================
+Explode: 3D-6 explode in -6..=-5 (negative endpoints)
+=======================================================
+
+3D-6 explode in -6..=-5
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(integer))))
+
+=========================================
+Explode: 1D20 explode in {a}..({b} + 1)
+=========================================
+
+1D20 explode in {a}..({b} + 1)
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range
+			(variable
+				(identifier))
+			(group
+				(add
+					(variable
+						(identifier))
+					(constant))))))
+
+=========================================
+Explode: 1D20 explode in 19..={x}@(1D6)
+=========================================
+
+1D20 explode in 19..={x}@(1D6)
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_range_inclusive
+			(integer)
+			(binding
+				(identifier)
+				(standard_dice
+					(constant)
+					(integer))))))
+
+=================================
+Explode: 2D8 explode = 8 1 time
+=================================
+
+2D8 explode = 8 1 time
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(constant))))
+
+===================================
+Explode: 2D8 explode >= 7 3 times
+===================================
+
+2D8 explode >= 7 3 times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))
+		(times
+			(constant))))
+
+==================================
+Explode: 2D8 explode >= 7 3 time
+==================================
+
+2D8 explode >= 7 3 time
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(ge
+			(integer))
+		(times
+			(constant))))
+
+====================================
+Explode: 2D8 explode = 8 {n} times
+====================================
+
+2D8 explode = 8 {n} times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(variable
+				(identifier)))))
+
+========================================
+Explode: 2D8 explode = 8 (1 + 2) times
+========================================
+
+2D8 explode = 8 (1 + 2) times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(group
+				(add
+					(constant)
+					(constant))))))
+
+===============================================
+Explode: 2D8 explode = 8 (-1) times (grouped)
+===============================================
+
+2D8 explode = 8 (-1) times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(times
+			(group
+				(neg
+					(constant))))))
+
+==========================================
+Explode: 1D6 explode = 6 unlimited times
+==========================================
+
+1D6 explode = 6 unlimited times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+==================================
+Explode: 1D6 explode = 6 ∞ times
+==================================
+
+1D6 explode = 6 ∞ times
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+=================================
+Explode: 1D6 explode = 6 ∞ time
+=================================
+
+1D6 explode = 6 ∞ time
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(eq
+			(integer))
+		(unlimited)))
+
+===========================================
+Explode: 1D6 explode in [] unlimited time
+===========================================
+
+1D6 explode in [] unlimited time
+
+---
+
+(function
+	(explode
+		(standard_dice
+			(constant)
+			(integer))
+		(in_list)
+		(unlimited)))
+
+=================================================
+Explode: 4D6 explode = 6 ∞ times keep highest 3
+=================================================
+
+4D6 explode = 6 ∞ times keep highest 3
+
+---
+
+(function
+	(keep_highest
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer))
+			(unlimited))
+		(constant)))
+
+===========================================
+Explode: 5D10 keep highest 3 explode = 10
+===========================================
+
+5D10 keep highest 3 explode = 10
+
+---
+
+(function
+	(explode
+		(keep_highest
+			(standard_dice
+				(constant)
+				(integer))
+			(constant))
+		(eq
+			(integer))))
+
+======================================
+Explode: 4D6 drop lowest explode = 6
+======================================
+
+4D6 drop lowest explode = 6
+
+---
+
+(function
+	(explode
+		(drop_lowest
+			(standard_dice
+				(constant)
+				(integer)))
+		(eq
+			(integer))))
+
+======================================
+Explode: 4D6 explode = 6 drop lowest
+======================================
+
+4D6 explode = 6 drop lowest
+
+---
+
+(function
+	(drop_lowest
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))))
+
+=====================================
+Explode: 4D6 reroll = 1 explode = 6
+=====================================
+
+4D6 reroll = 1 explode = 6
+
+---
+
+(function
+	(explode
+		(reroll
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))
+		(eq
+			(integer))))
+
+=====================================
+Explode: 4D6 explode = 6 reroll = 1
+=====================================
+
+4D6 explode = 6 reroll = 1
+
+---
+
+(function
+	(reroll
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))
+		(eq
+			(integer))))
+
+============================================================
+Explode: 4D6 explode = 6 explode = 5 1 time explode in [4]
+============================================================
+
+4D6 explode = 6 explode = 5 1 time explode in [4]
+
+---
+
+(function
+	(explode
+		(explode
+			(explode
+				(standard_dice
+					(constant)
+					(integer))
+				(eq
+					(integer)))
+			(eq
+				(integer))
+			(times
+				(constant)))
+		(in_list
+			(integer))))
+
+======================================================
+Explode: 4D6 explode = 6 -1 (subtraction, not count)
+======================================================
+
+4D6 explode = 6 -1
+
+---
+
+(function
+	(sub
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))
+		(constant)))
+
+====================================================
+Explode: 4D6 explode = 6 2 times - 1 (subtraction)
+====================================================
+
+4D6 explode = 6 2 times - 1
+
+---
+
+(function
+	(sub
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer))
+			(times
+				(constant)))
+		(constant)))
+
+=====================================================
+Explode: -1D6 explode = 6 (negation of the explode)
+=====================================================
+
+-1D6 explode = 6
+
+---
+
+(function
+	(neg
+		(explode
+			(standard_dice
+				(constant)
+				(integer))
+			(eq
+				(integer)))))
+
+======================================
+Explode: (1D6 explode = 6)D6 (count)
+======================================
+
+(1D6 explode = 6)D6
+
+---
+
+(function
+	(standard_dice
+		(group
+			(explode
+				(standard_dice
+					(constant)
+					(integer))
+				(eq
+					(integer))))
+		(integer)))
+
+==================================
+Misplaced Explode: 3 explode = 6
+:error
+==================================
+
+3 explode = 6
+
+---
+
+===========================
+No Predicate: 3D6 explode
+:error
+===========================
+
+3D6 explode
+
+---
+
+=============================
+No Threshold: 3D6 explode =
+:error
+=============================
+
+3D6 explode =
+
+---
+
+========================================
+Threshold Not Faces: 3D6 explode = 1D6
+:error
+========================================
+
+3D6 explode = 1D6
+
+---
+
+=======================================
+No Range Operator: 3D6 explode in 5 6
+:error
+=======================================
+
+3D6 explode in 5 6
+
+---
+
+==================================
+No Range End: 3D6 explode in 5..
+:error
+==================================
+
+3D6 explode in 5..
+
+---
+
+=====================================
+No Range Start: 3D6 explode in ..=6
+:error
+=====================================
+
+3D6 explode in ..=6
+
+---
+
+=====================================
+Range of List: 3D6 explode in [5:6]
+:error
+=====================================
+
+3D6 explode in [5:6]
+
+---
+
+=========================================
+List of Variables: 3D6 explode in [{x}]
+:error
+=========================================
+
+3D6 explode in [{x}]
+
+---
+
+=============================
+No Times: 3D6 explode = 6 2
+:error
+=============================
+
+3D6 explode = 6 2
+
+---
+
+=================================
+No Count: 3D6 explode = 6 times
+:error
+=================================
+
+3D6 explode = 6 times
+
+---
+
+=====================================
+No Count: 3D6 explode in 5..7 times
+:error
+=====================================
+
+3D6 explode in 5..7 times
+
+---
+
+=====================================
+No Times: 3D6 explode = 6 unlimited
+:error
+=====================================
+
+3D6 explode = 6 unlimited
+
+---
+
+====================================
+Uppercase Keyword: 3D6 Explode = 6
+:error
+====================================
+
+3D6 Explode = 6
+
+---
+
+==================================
+Run-on Keyword: 3D6 exploded = 6
+:error
+==================================
+
+3D6 exploded = 6
+
+---
+
+====================================
+Run-on Keyword: 3D6 explodehighest
+:error
+====================================
+
+3D6 explodehighest
+
+---
+
+==========================================
+Run-on Keyword: 3D6 explode = 6 2 timesx
+:error
+==========================================
+
+3D6 explode = 6 2 timesx
+
+---

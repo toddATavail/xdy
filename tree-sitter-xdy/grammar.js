@@ -79,7 +79,7 @@ module.exports = grammar({
 
     // A call that answers the greatest of the values of its arguments, two or
     // more full expressions. As a dice count, faces, the count of a clause, or
-    // an operand of a reroll, a call must be grouped.
+    // an operand of a reroll or explode, a call must be grouped.
     highest: ($) =>
       seq(
         "highest",
@@ -91,7 +91,7 @@ module.exports = grammar({
 
     // A call that answers the least of the values of its arguments, two or more
     // full expressions. As a dice count, faces, the count of a clause, or an
-    // operand of a reroll, a call must be grouped.
+    // operand of a reroll or explode, a call must be grouped.
     lowest: ($) =>
       seq(
         "lowest",
@@ -111,6 +111,7 @@ module.exports = grammar({
         $.keep_lowest,
         $.keep_highest,
         $.reroll,
+        $.explode,
       ),
 
     // A standard dice expression, i.e., the faces of the dice are numbered
@@ -206,7 +207,23 @@ module.exports = grammar({
         ),
       ),
 
-    // The predicate of a reroll, which decides which results it rerolls.
+    // A dice expression that explodes each of the dice that the clauses before
+    // it left kept that matches its predicate, rolling another die to extend
+    // its chain, once, or as many times as its limit says. A die that extends
+    // a chain may itself match, extending the chain again.
+    explode: ($) =>
+      prec.left(
+        5,
+        seq(
+          field("dice", $._dice),
+          "explode",
+          field("predicate", $._predicate),
+          field("limit", optional($._limit)),
+        ),
+      ),
+
+    // The predicate of a reroll or explode, which decides which results it
+    // rerolls or explodes.
     _predicate: ($) =>
       choice(
         $.eq,
@@ -274,20 +291,21 @@ module.exports = grammar({
         field("end", $._standard_faces),
       ),
 
-    // The limit of a reroll, which bounds how many times it rerolls each die.
+    // The limit of a reroll or explode, which bounds how many times it rerolls
+    // or explodes each die.
     _limit: ($) => choice($.times, $.unlimited),
 
-    // A limit that rerolls each die at most N times. `time` and `times` read
-    // alike.
+    // A limit that rerolls or explodes each die at most N times. `time` and
+    // `times` read alike.
     times: ($) =>
       seq(field("count", $._drop_expression), choice("time", "times")),
 
-    // A limit that rerolls each die until it no longer matches. `∞` and
-    // `unlimited` read alike, as do `time` and `times`.
+    // A limit that rerolls or explodes each die until it no longer matches.
+    // `∞` and `unlimited` read alike, as do `time` and `times`.
     unlimited: ($) => seq(choice("unlimited", "∞"), choice("time", "times")),
 
     // An expression that represents the number of dice to drop or keep, or the
-    // number of times to reroll each die.
+    // number of times to reroll or explode each die.
     _drop_expression: ($) => choice($.constant, $.variable, $.binding, $.group),
 
     // An arithmetic expression.

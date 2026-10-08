@@ -242,6 +242,23 @@ Highest: 2D8 reroll <= (highest({x}, 2)) (grouped threshold)
 					(variable (identifier))
 					(constant))))))
 
+===============================================================
+Highest: 2D8 explode >= (highest({x}, 5)) (grouped threshold)
+===============================================================
+
+2D8 explode >= (highest({x}, 5))
+
+---
+
+(function
+	(explode
+		(standard_dice (constant) (integer))
+		(ge
+			(group
+				(highest
+					(variable (identifier))
+					(constant))))))
+
 =============================
 Highest: {x}: highest({x}, 0)
 =============================
@@ -361,5 +378,23 @@ Ungrouped Drop Count: 4D6 drop lowest lowest(1, 2)
 ==================================================
 
 4D6 drop lowest lowest(1, 2)
+
+---
+
+=====================================================
+Ungrouped Threshold: 2D8 explode >= highest({x}, 5)
+:error
+=====================================================
+
+2D8 explode >= highest({x}, 5)
+
+---
+
+=======================================================
+Ungrouped Limit: 2D8 explode = 8 lowest(1, {n}) times
+:error
+=======================================================
+
+2D8 explode = 8 lowest(1, {n}) times
 
 ---

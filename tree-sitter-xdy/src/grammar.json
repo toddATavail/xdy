@@ -366,6 +366,10 @@
         {
           "type": "SYMBOL",
           "name": "reroll"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "explode"
         }
       ]
     },
@@ -683,6 +687,51 @@
           {
             "type": "STRING",
             "value": "reroll"
+          },
+          {
+            "type": "FIELD",
+            "name": "predicate",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_predicate"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "limit",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_limit"
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "explode": {
+      "type": "PREC_LEFT",
+      "value": 5,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "dice",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_dice"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "explode"
           },
           {
             "type": "FIELD",

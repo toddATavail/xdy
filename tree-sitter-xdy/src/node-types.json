@@ -40,6 +40,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -127,6 +131,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -223,6 +231,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -386,6 +398,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -476,6 +492,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -552,6 +572,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
@@ -611,6 +635,10 @@
           },
           {
             "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -724,6 +752,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -814,6 +846,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -870,6 +906,106 @@
     }
   },
   {
+    "type": "explode",
+    "named": true,
+    "fields": {
+      "dice": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "custom_dice",
+            "named": true
+          },
+          {
+            "type": "drop_highest",
+            "named": true
+          },
+          {
+            "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "explode",
+            "named": true
+          },
+          {
+            "type": "keep_highest",
+            "named": true
+          },
+          {
+            "type": "keep_lowest",
+            "named": true
+          },
+          {
+            "type": "reroll",
+            "named": true
+          },
+          {
+            "type": "standard_dice",
+            "named": true
+          }
+        ]
+      },
+      "limit": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "times",
+            "named": true
+          },
+          {
+            "type": "unlimited",
+            "named": true
+          }
+        ]
+      },
+      "predicate": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "eq",
+            "named": true
+          },
+          {
+            "type": "ge",
+            "named": true
+          },
+          {
+            "type": "gt",
+            "named": true
+          },
+          {
+            "type": "in_list",
+            "named": true
+          },
+          {
+            "type": "in_range",
+            "named": true
+          },
+          {
+            "type": "in_range_inclusive",
+            "named": true
+          },
+          {
+            "type": "le",
+            "named": true
+          },
+          {
+            "type": "lt",
+            "named": true
+          },
+          {
+            "type": "ne",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "function",
     "named": true,
     "root": true,
@@ -908,6 +1044,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -1045,6 +1185,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -1166,6 +1310,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -1361,6 +1509,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "keep_highest",
             "named": true
           },
@@ -1420,6 +1572,10 @@
           },
           {
             "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -1530,6 +1686,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -1657,6 +1817,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -1744,6 +1908,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -1843,6 +2011,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -1930,6 +2102,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -2054,6 +2230,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -2185,6 +2365,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -2275,6 +2459,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -2348,6 +2536,10 @@
           },
           {
             "type": "drop_lowest",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -2517,6 +2709,10 @@
             "named": true
           },
           {
+            "type": "explode",
+            "named": true
+          },
+          {
             "type": "group",
             "named": true
           },
@@ -2604,6 +2800,10 @@
           },
           {
             "type": "exp",
+            "named": true
+          },
+          {
+            "type": "explode",
             "named": true
           },
           {
@@ -2793,6 +2993,10 @@
   },
   {
     "type": "drop",
+    "named": false
+  },
+  {
+    "type": "explode",
     "named": false
   },
   {
