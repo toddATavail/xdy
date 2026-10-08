@@ -151,12 +151,12 @@ fn inline_styles(svg: &str) -> String
 			 background-size:15px 15px;\
 			 background-image:\
 			 linear-gradient(to right,rgba(30,30,30,.05) 1px,transparent 1px),\
-			 linear-gradient(to bottom,rgba(30,30,30,.05) 1px,transparent 1px)\"",
+			 linear-gradient(to bottom,rgba(30,30,30,.05) 1px,transparent 1px)\""
 		)
 		// rect.railroad_canvas — invisible canvas rect.
 		.replace(
 			"class=\"railroad_canvas\"",
-			"class=\"railroad_canvas\" style=\"stroke-width:0;fill:none\"",
+			"class=\"railroad_canvas\" style=\"stroke-width:0;fill:none\""
 		);
 
 	// Step 3: apply styles that require context-aware replacement.
