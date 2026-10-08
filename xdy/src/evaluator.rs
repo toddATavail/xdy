@@ -1567,7 +1567,11 @@ pub(crate) struct BoundsEvaluator<'eval>
 	count: Option<u128>,
 
 	/// The special register holding the worst-case number of dice rolled.
-	dice: u64
+	dice: u64,
+
+	/// Whether some explode without limit, whose predicate does not match
+	/// every face, may extend a chain, which may then grow without bound.
+	unbounded: bool
 }
 
 /// The bounds of a function evaluation.
@@ -3019,7 +3023,8 @@ impl<'eval> BoundsEvaluator<'eval>
 			],
 			result: EvaluationBounds::default(),
 			count: Some(1),
-			dice: 0
+			dice: 0,
+			unbounded: false
 		}
 	}
 
@@ -3171,6 +3176,16 @@ impl<'eval> BoundsEvaluator<'eval>
 		*current =
 			(current.min.max(bounds.min), current.max.min(bounds.max)).into();
 	}
+
+	/// Answer whether some explode stepped so far has no limit, does not
+	/// certainly match every face, and may extend a chain, which may then grow
+	/// without bound, so that the function has no exact distribution of finite
+	/// weight.
+	///
+	/// # Returns
+	/// `true` if some such explode may extend a chain, `false` otherwise.
+	#[inline]
+	pub(crate) fn unbounded(&self) -> bool { self.unbounded }
 
 	/// Answer the bounds of the registers, as of the last
 	/// [step](Self::step).
@@ -3707,7 +3722,12 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			None => match saturates
 			{
 				true => 0,
-				false => u64::MAX
+				false =>
+				{
+					// A chain may grow without bound.
+					self.unbounded = true;
+					u64::MAX
+				}
 			}
 		};
 		self.dice = self.dice.saturating_add(extensions);

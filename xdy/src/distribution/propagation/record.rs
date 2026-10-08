@@ -20,13 +20,22 @@
 //! multisets, and the roll becomes a [pool](Roll::Pool) of the multisets that
 //! the reroll leaves, each with its weight. Either way, the record keeps the
 //! [die](Die) from which later rerolls draw.
+//!
+//! An explode extends the dice still kept into [chains](super::chain), which
+//! the record holds whole only while a later reroll or explode may read them,
+//! as [i.i.d. chains](Roll::Chains) before any drop, or [stacks](Roll::Stacks)
+//! of chains after one, and otherwise as the totals of its chains, which
+//! behave as the results of dice do.
 
 use std::{
 	collections::{BTreeMap, HashMap, hash_map::Entry},
 	iter
 };
 
-use super::meter::{Halt, Meter, charge_of};
+use super::{
+	chain::Chain,
+	meter::{Halt, Meter, charge_of}
+};
 use crate::{Criterion, Distribution, Weight};
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -80,7 +89,27 @@ pub(super) enum Roll
 	/// ascending order of multiset. Every multiset holds the same number of
 	/// results, which `Roll.Even`, in `lean/spec/XdySpec/Mixture.lean`, names,
 	/// and on which the laws of drops and keeps there rest.
-	Pool(Vec<(Vec<(i32, i32)>, Weight)>)
+	Pool(Vec<(Vec<(i32, i32)>, Weight)>),
+
+	/// The [chains](Chain) of `count` dice that an explode extended, before
+	/// any drop, which are independent and alike, as dice are, and which a
+	/// later reroll or explode reads.
+	Chains
+	{
+		/// The number of chains.
+		count: i32,
+
+		/// The distinct chains that each may be, in ascending order, each
+		/// weighed by the branches that reach it.
+		law: Vec<(Chain, Weight)>
+	},
+
+	/// The chains of a record that a drop, or a split, has made unlike, and
+	/// which a later reroll or explode reads: each multiset of them, in
+	/// ascending order, with the positive number of branches that reach it,
+	/// as a [pool](Self::Pool) holds the multisets of results. Every multiset
+	/// holds the same number of chains.
+	Stacks(Vec<(Vec<(Chain, i32)>, Weight)>)
 }
 
 /// The die from which a reroll draws the replacements of the dice of a roll,
@@ -221,6 +250,54 @@ impl Die
 			_ => vec![(0, Weight::ONE)]
 		}
 	}
+
+	/// Answer the value of a saturated die of the die, which stands for an
+	/// endless chain of it, as
+	/// [`RollingRecord::explode`](crate::RollingRecord::explode) answers it:
+	/// `i32::MAX` or `i32::MIN` by the sign of the mean face, or `0` if that
+	/// mean is `0`.
+	///
+	/// # Returns
+	/// The saturated value, which is `0` for a die without faces.
+	pub(super) fn saturated_value(&self) -> i32
+	{
+		// The sign of the sum of the branches' faces is the sign of their mean.
+		let (positive, negative) = match self
+		{
+			&Die::Range { start, end } if start <= end =>
+			{
+				let sum = start as i64 + end as i64;
+				(
+					Weight::from(sum.max(0) as u64),
+					Weight::from((-sum).max(0) as u64)
+				)
+			},
+			&Die::Standard(faces) if faces >= 1 => (Weight::ONE, Weight::ZERO),
+			Die::Custom(faces) => faces.iter().fold(
+				(Weight::ZERO, Weight::ZERO),
+				|(positive, negative), (face, weight)| match face.signum()
+				{
+					1 => (
+						positive + Weight::from(*face as u64) * weight,
+						negative
+					),
+					-1 => (
+						positive,
+						negative
+							+ Weight::from(face.unsigned_abs() as u64) * weight
+					),
+					_ => (positive, negative)
+				}
+			),
+			_ => (Weight::ZERO, Weight::ZERO)
+		};
+		match positive.checked_sub(&negative)
+		{
+			Some(excess) if excess.is_zero() => 0,
+			Some(_) => i32::MAX,
+			None => i32::MIN
+		}
+	}
 }
 
 /// Answer how many of the results from `least` to `greatest`, inclusive, the
@@ -304,13 +381,22 @@ impl Roll
 			{
 				results.iter().map(|(_, copies)| copies).sum()
 			},
-			Roll::Pool(pool) => pool[0].0.iter().map(|(_, copies)| copies).sum()
+			Roll::Pool(pool) =>
+			{
+				pool[0].0.iter().map(|(_, copies)| copies).sum()
+			},
+			Roll::Chains { count, .. } => (*count).max(0),
+			Roll::Stacks(pool) =>
+			{
+				pool[0].0.iter().map(|(_, copies)| copies).sum()
+			},
 		}
 	}
 
 	/// Answer the number of dice of the roll, which it charges as steps when
 	/// it fills its record, since its [total](Self::total) is the number of
-	/// faces raised to it. A range, fixed results, and a pool roll none.
+	/// faces raised to it, as is that of i.i.d. chains. A range, fixed
+	/// results, a pool, and stacks roll none.
 	///
 	/// # Returns
 	/// The number of dice.
@@ -318,18 +404,21 @@ impl Roll
 	{
 		match self
 		{
-			Roll::Standard { count, .. } | Roll::Custom { count, .. } =>
-			{
-				(*count).max(0) as u64
-			},
-			Roll::Range { .. } | Roll::Results(_) | Roll::Pool(_) => 0
+			Roll::Standard { count, .. }
+			| Roll::Custom { count, .. }
+			| Roll::Chains { count, .. } => (*count).max(0) as u64,
+			Roll::Range { .. }
+			| Roll::Results(_)
+			| Roll::Pool(_)
+			| Roll::Stacks(_) => 0
 		}
 	}
 
 	/// Answer the number of cells that the roll occupies: one, and one more
 	/// for each distinct face of a custom die, or for each distinct fixed
 	/// result, or for each multiset of a pool and each of its distinct
-	/// results.
+	/// results, or those of each chain that i.i.d. chains may be, or of each
+	/// multiset of stacks and each of its distinct chains.
 	///
 	/// # Returns
 	/// The number of cells.
@@ -341,8 +430,16 @@ impl Roll
 			Roll::Results(results) => results.len() as u64,
 			Roll::Pool(pool) => pool
 				.iter()
-				.map(|(results, _)| 1 + results.len() as u64)
+				.map(|(results, _)| multiset_cells(results))
 				.sum(),
+			Roll::Chains { law, .. } =>
+			{
+				law.iter().map(|(chain, _)| chain.cells()).sum()
+			},
+			Roll::Stacks(pool) =>
+			{
+				pool.iter().map(|(chains, _)| multiset_cells(chains)).sum()
+			},
 			Roll::Range { .. } | Roll::Standard { .. } => 0
 		}
 	}
@@ -352,22 +449,27 @@ impl Roll
 	///
 	/// # Returns
 	/// The number of distinct faces, which is zero for a range, fixed
-	/// results, or a pool.
+	/// results, a pool, chains, or stacks.
 	fn faces(&self) -> u64
 	{
 		match self
 		{
 			Roll::Standard { faces, .. } => (*faces).max(0) as u64,
 			Roll::Custom { faces, .. } => faces.len() as u64,
-			Roll::Range { .. } | Roll::Results(_) | Roll::Pool(_) => 0
+			Roll::Range { .. }
+			| Roll::Results(_)
+			| Roll::Pool(_)
+			| Roll::Chains { .. }
+			| Roll::Stacks(_) => 0
 		}
 	}
 
 	/// Answer the total weight of the roll, which is the number of paths
 	/// through it: the width of a range, or the number of faces of a die raised
-	/// to the number of dice, or the branches of the multisets of a pool. A
-	/// roll without branches, like an empty range, no dice, dice without
-	/// faces, or fixed results, weighs one.
+	/// to the number of dice, or the branches of the multisets of a pool, or
+	/// the branches of a chain raised to the number of chains, or the branches
+	/// of the multisets of stacks. A roll without branches, like an empty
+	/// range, no dice, dice without faces, or fixed results, weighs one.
 	///
 	/// # Returns
 	/// The total weight.
@@ -394,7 +496,13 @@ impl Roll
 					.sum::<Weight>()
 					.pow(*count as u32)
 			},
+			Roll::Chains { count, law } if *count > 0 && !law.is_empty() => law
+				.iter()
+				.map(|(_, weight)| weight)
+				.sum::<Weight>()
+				.pow(*count as u32),
 			Roll::Pool(pool) => pool.iter().map(|(_, weight)| weight).sum(),
+			Roll::Stacks(pool) => pool.iter().map(|(_, weight)| weight).sum(),
 			_ => Weight::ONE
 		}
 	}
@@ -420,6 +528,10 @@ impl Roll
 			Roll::Results(_) | Roll::Pool(_) =>
 			{
 				unreachable!("fixed results have no die")
+			},
+			Roll::Chains { .. } | Roll::Stacks(_) =>
+			{
+				unreachable!("chains have no die")
 			}
 		}
 	}
@@ -428,8 +540,8 @@ impl Roll
 	/// of the roll, if the roll shows it.
 	///
 	/// # Returns
-	/// The die, or `None` for fixed results or a pool, which no longer show
-	/// the die that rolled them.
+	/// The die, or `None` for fixed results, a pool, chains, or stacks, which
+	/// no longer show the die that rolled them.
 	pub(super) fn replacement(&self) -> Option<Die>
 	{
 		match self
@@ -437,7 +549,10 @@ impl Roll
 			&Roll::Range { start, end } => Some(Die::Range { start, end }),
 			&Roll::Standard { faces, .. } => Some(Die::Standard(faces)),
 			Roll::Custom { faces, .. } => Some(Die::Custom(faces.clone())),
-			Roll::Results(_) | Roll::Pool(_) => None
+			Roll::Results(_)
+			| Roll::Pool(_)
+			| Roll::Chains { .. }
+			| Roll::Stacks(_) => None
 		}
 	}
 
@@ -457,8 +572,9 @@ impl Roll
 	///   charged to.
 	///
 	/// # Returns
-	/// The outcomes, each a roll of [fixed results](Roll::Results), with their
-	/// weights. There are at most as many as the roll has branches.
+	/// The outcomes, each a roll of [fixed results](Roll::Results), or, for
+	/// chains or stacks, [stacks](Roll::Stacks) of one multiset of weight one,
+	/// with their weights. There are at most as many as the roll has branches.
 	///
 	/// # Errors
 	/// [`Halt`] if the enumeration would exceed the budget or is cancelled.
@@ -507,6 +623,10 @@ impl Roll
 					})
 					.collect())
 			},
+			Roll::Chains { .. } | Roll::Stacks(_) =>
+			{
+				return self.chain_outcomes(meter)
+			},
 			// No dice yield no results, however many faces they have.
 			_ if self.results() == 0 =>
 			{
@@ -527,85 +647,167 @@ impl Roll
 			meter.charge(1, 2)?;
 			return Ok(vec![(Roll::Results(vec![(0, n as i32)]), Weight::ONE)])
 		}
-		// Each partial outcome holds its results, the number of them, and its
-		// weight, and occupies one cell, and one more for each of its distinct
-		// results.
-		meter.charge(1, 1)?;
-		let mut held = 1;
-		let mut partial = vec![(Vec::<(i32, i32)>::new(), 0usize, Weight::ONE)];
-		for (index, (face, weight)) in die.iter().enumerate()
-		{
-			let greatest = index == die.len() - 1;
-			// A partial outcome of `j` results grows into `n - j + 1` others,
-			// or, by the greatest face, into one, whose binomial takes `j`
-			// steps. Each holds at most one more distinct result.
-			let (steps, grown) = partial.iter().fold(
-				(0u128, 0u128),
-				|(steps, grown), (_, j, _)| match greatest
-				{
-					true => (steps + *j as u128 + 1, grown + 1),
-					false =>
-					{
-						let m = (n - j + 1) as u128;
-						(steps + m, grown + m)
-					}
-				}
-			);
-			let cells = charge_of(grown * (index as u128 + 2));
-			meter.charge(charge_of(steps), cells)?;
-			let mut next = Vec::new();
-			for (results, j, w) in partial
-			{
-				if greatest
-				{
-					// The greatest face fills every position that remains, so
-					// `m = n - j`, and `C(n, m) = C(n, j)`.
-					let m = n - j;
-					let binomial = (1..=j).fold(Weight::ONE, |binomial, i| {
-						(binomial * Weight::from(n - j + i))
-							.exact_div(&Weight::from(i))
-					});
-					let power = weight.pow(m as u32);
-					let mut results = results;
-					if m > 0
-					{
-						results.push((*face, m as i32));
-					}
-					next.push((results, n, w * binomial * power));
-					continue
-				}
-				// `C(j + m, m)` and `weightᵐ`, maintained incrementally.
-				let mut binomial = Weight::ONE;
-				let mut power = Weight::ONE;
-				for m in 0..=n - j
-				{
-					let mut results = results.clone();
-					if m > 0
-					{
-						binomial = (binomial * Weight::from(j + m))
-							.exact_div(&Weight::from(m));
-						power *= weight;
-						results.push((*face, m as i32));
-					}
-					next.push((results, j + m, &w * &binomial * &power));
-				}
-			}
-			let occupied = next
-				.iter()
-				.map(|(results, _, _)| results.len() as u64 + 1)
-				.sum::<u64>();
-			meter.free(cells - occupied + held);
-			held = occupied;
-			partial = next;
-		}
+		let outcomes = multisets(&die, n, meter)?;
 		// The outcomes stay charged, and occupy the cells of their partial
 		// outcomes; the die does not.
 		meter.free(die.len() as u64);
-		Ok(partial
+		Ok(outcomes
 			.into_iter()
-			.map(|(results, _, weight)| (Roll::Results(results), weight))
+			.map(|(results, weight)| (Roll::Results(results), weight))
 			.collect())
 	}
+}
+
+/// A value that the multisets of a [roll](Roll) hold: a result, or a
+/// [chain](super::chain::Chain).
+pub(super) trait Element: Clone + Ord
+{
+	/// Answer the number of cells that the value occupies in a multiset, with
+	/// its number of copies.
+	///
+	/// # Returns
+	/// The number of cells, which is positive.
+	fn cells(&self) -> u64;
+}
+
+impl Element for i32
+{
+	fn cells(&self) -> u64 { 1 }
+}
+
+/// Multisets of values, each of the distinct values, in ascending order, with
+/// their positive numbers of copies, and its weight.
+pub(super) type Multisets<T> = Vec<(Vec<(T, i32)>, Weight)>;
+
+/// Answer every multiset of `n` independent draws of the given die, in
+/// ascending order, weighed by the number of branches of the draws that reach
+/// it, so that the weights sum to the branches of the die raised to `n`.
+///
+/// The multisets grow one distinct face at a time, in ascending order, as
+/// the [order statistics](order_statistics) do: placing `m` copies of the
+/// next face after `j` draws weighs `C(j + m, m) · wᵐ`, where `w` is the
+/// weight of the face, and over all faces the binomials telescope to the
+/// multinomial coefficient.
+///
+/// # Type parameters
+/// - `T`: The type of the faces.
+///
+/// # Parameters
+/// - `die`: The distinct faces of the die, in ascending order, each with its
+///   weight, which are not empty.
+/// - `n`: The number of draws.
+/// - `meter`: The meter, which the enumeration charges for each face before it
+///   grows the multisets by that face, and which the multisets stay charged to:
+///   one cell for each, and those of each of its distinct faces.
+///
+/// # Returns
+/// The multisets, each of the distinct faces drawn, in ascending order, with
+/// their positive numbers of copies, and its weight.
+///
+/// # Errors
+/// [`Halt`] if the enumeration would exceed the budget or is cancelled.
+pub(super) fn multisets<T: Element>(
+	die: &[(T, Weight)],
+	n: usize,
+	meter: &mut Meter
+) -> Result<Multisets<T>, Halt>
+{
+	// Each partial outcome holds its faces, the number of them, and its
+	// weight, and occupies one cell, and those of each of its distinct faces.
+	meter.charge(1, 1)?;
+	let mut held = 1;
+	let mut partial = vec![(Vec::<(T, i32)>::new(), 0usize, Weight::ONE)];
+	// The cells of the faces placed so far, through the current one.
+	let mut placed = 0u128;
+	for (index, (face, weight)) in die.iter().enumerate()
+	{
+		let greatest = index == die.len() - 1;
+		placed += face.cells() as u128;
+		// A partial outcome of `j` draws grows into `n - j + 1` others, or, by
+		// the greatest face, into one, whose binomial takes `j` steps. Each
+		// holds at most one more distinct face.
+		let (steps, grown) =
+			partial
+				.iter()
+				.fold(
+					(0u128, 0u128),
+					|(steps, grown), (_, j, _)| match greatest
+					{
+						true => (steps + *j as u128 + 1, grown + 1),
+						false =>
+						{
+							let m = (n - j + 1) as u128;
+							(steps + m, grown + m)
+						}
+					}
+				);
+		let cells = charge_of(grown * (1 + placed));
+		meter.charge(charge_of(steps), cells)?;
+		let mut next = Vec::new();
+		for (faces, j, w) in partial
+		{
+			if greatest
+			{
+				// The greatest face fills every position that remains, so
+				// `m = n - j`, and `C(n, m) = C(n, j)`.
+				let m = n - j;
+				let binomial = (1..=j).fold(Weight::ONE, |binomial, i| {
+					(binomial * Weight::from(n - j + i))
+						.exact_div(&Weight::from(i))
+				});
+				let power = weight.pow(m as u32);
+				let mut faces = faces;
+				if m > 0
+				{
+					faces.push((face.clone(), m as i32));
+				}
+				next.push((faces, n, w * binomial * power));
+				continue
+			}
+			// `C(j + m, m)` and `weightᵐ`, maintained incrementally.
+			let mut binomial = Weight::ONE;
+			let mut power = Weight::ONE;
+			for m in 0..=n - j
+			{
+				let mut faces = faces.clone();
+				if m > 0
+				{
+					binomial = (binomial * Weight::from(j + m))
+						.exact_div(&Weight::from(m));
+					power *= weight;
+					faces.push((face.clone(), m as i32));
+				}
+				next.push((faces, j + m, &w * &binomial * &power));
+			}
+		}
+		let occupied = next
+			.iter()
+			.map(|(faces, _, _)| multiset_cells(faces))
+			.sum::<u64>();
+		meter.free(cells - occupied + held);
+		held = occupied;
+		partial = next;
+	}
+	Ok(partial
+		.into_iter()
+		.map(|(faces, _, weight)| (faces, weight))
+		.collect())
+}
+
+/// Answer the number of cells that a multiset occupies: one, and those of
+/// each of its distinct values.
+///
+/// # Type parameters
+/// - `T`: The type of the values.
+///
+/// # Parameters
+/// - `multiset`: The distinct values, each with its number of copies.
+///
+/// # Returns
+/// The number of cells.
+pub(super) fn multiset_cells<T: Element>(multiset: &[(T, i32)]) -> u64
+{
+	1 + multiset.iter().map(|(value, _)| value.cells()).sum::<u64>()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -685,6 +887,16 @@ impl Roll
 	{
 		match self
 		{
+			Roll::Chains { .. } | Roll::Stacks(_) =>
+			{
+				// A chain's total behaves as the result of a die does, so the
+				// chains reduce to their totals, which are summed as dice or a
+				// pool are, and then dropped.
+				let totals = self.collapse(meter)?;
+				let sum = totals.sum(lowest, highest, powers, meter)?;
+				meter.free(totals.cells());
+				Ok(sum)
+			},
 			Roll::Results(results) =>
 			{
 				meter.charge(results.len() as u64, 1)?;
@@ -787,7 +999,8 @@ impl Roll
 /// # Notes
 /// `Record.sum_fixed`, in `lean/spec/XdySpec/Mixture.lean`, proves that this
 /// is the saturating fold of the kept results, one at a time.
-fn kept_sum(results: &[(i32, i32)], lowest: i32, highest: i32) -> i32
+pub(super) fn kept_sum(results: &[(i32, i32)], lowest: i32, highest: i32)
+-> i32
 {
 	let count = results
 		.iter()
@@ -922,14 +1135,14 @@ pub(super) enum Effect<'c>
 pub(super) struct Redraw<'c>
 {
 	/// The results that the reroll rerolls.
-	criterion: &'c Criterion,
+	pub(super) criterion: &'c Criterion,
 
 	/// The branches that the reroll adds to each die still kept, `G`.
-	padding: Weight,
+	pub(super) padding: Weight,
 
 	/// The final results of a die that the criterion matched, each weighed by
 	/// `g`, in ascending order, without zero weights.
-	law: Vec<(i32, Weight)>
+	pub(super) law: Vec<(i32, Weight)>
 }
 
 /// Resolve a reroll against the die from which it draws: decide whether it
@@ -1089,9 +1302,12 @@ impl Roll
 			Roll::Range { .. } => (1, self.replacement().unwrap().distinct()),
 			Roll::Standard { count, faces } => (*count, (*faces).max(1) as u64),
 			Roll::Custom { count, faces } => (*count, faces.len() as u64),
-			Roll::Results(_) | Roll::Pool(_) =>
+			Roll::Results(_)
+			| Roll::Pool(_)
+			| Roll::Chains { .. }
+			| Roll::Stacks(_) =>
 			{
-				unreachable!("fixed results are not alike")
+				unreachable!("fixed results and chains are not rewritten")
 			}
 		};
 		// The faces are listed, and each, with each final result of a matched
@@ -1280,22 +1496,28 @@ fn survivors(
 	(survivors, matched)
 }
 
-/// Answer the union of two multisets of fixed results.
+/// Answer the union of two multisets, as of fixed results or of chains.
+///
+/// # Type parameters
+/// - `T`: The type of the values.
 ///
 /// # Parameters
-/// - `xs`: The distinct results of one, in ascending order, each with its
+/// - `xs`: The distinct values of one, in ascending order, each with its
 ///   positive number of copies.
-/// - `ys`: The distinct results of the other, likewise.
+/// - `ys`: The distinct values of the other, likewise.
 ///
 /// # Returns
-/// The distinct results of the union, in ascending order, each with its
+/// The distinct values of the union, in ascending order, each with its
 /// positive number of copies.
-fn join(xs: &[(i32, i32)], ys: &[(i32, i32)]) -> Vec<(i32, i32)>
+pub(super) fn join<T: Clone + Ord>(
+	xs: &[(T, i32)],
+	ys: &[(T, i32)]
+) -> Vec<(T, i32)>
 {
-	let mut joined = BTreeMap::<i32, i32>::new();
-	for &(result, copies) in xs.iter().chain(ys)
+	let mut joined = BTreeMap::<T, i32>::new();
+	for (value, copies) in xs.iter().chain(ys)
 	{
-		*joined.entry(result).or_default() += copies;
+		*joined.entry(value.clone()).or_default() += copies;
 	}
 	joined.into_iter().collect()
 }

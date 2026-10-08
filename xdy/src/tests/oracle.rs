@@ -421,8 +421,8 @@ fn ask_oracle(
 	Ok(distribution)
 }
 
-/// Answer whether the specified function explodes dice, which neither the
-/// forward pass nor the oracle does yet.
+/// Answer whether the specified function explodes dice, which the oracle does
+/// not yet.
 ///
 /// # Parameters
 /// - `function`: The function.
@@ -492,8 +492,8 @@ fn report_case(
 /// must agree with it exactly, as probabilities. Write the corpus, with the
 /// oracle's distribution in place of each case that disagrees, to
 /// `target/oracle/test_distributions.txt`, and list the cases that disagree.
-/// Neither the forward pass nor the oracle explodes dice yet, so the test skips
-/// every case that does, and keeps it as it is.
+/// The oracle does not explode dice yet, so the test skips every case that
+/// does, and keeps it as it is.
 #[test]
 #[ignore = "oracle: run with just oracle"]
 fn test_oracle_distribution_corpus()
@@ -773,8 +773,11 @@ fn test_oracle_resummed_programs()
 /// common denominator, so they agree as probabilities rather than as weights.
 ///
 /// A source that does not compile, or whose distribution does not fit the
-/// budget, or that the oracle has not answered by [`ORACLE_DEADLINE`],
-/// abstains. The oracle refuses only malformed requests, so its refusal fails.
+/// budget, or that the pass refuses as [unbounded](BuildError::Unbounded), or
+/// that the oracle has not answered by [`ORACLE_DEADLINE`], abstains. The
+/// oracle does not explode dice yet, so a function that does is checked
+/// against its bounds alone. The oracle refuses only malformed requests, so
+/// its refusal fails.
 ///
 /// # Parameters
 /// - `oracle`: The path of the oracle executable.
@@ -829,9 +832,10 @@ fn check_oracle(
 			.build(ORACLE_BUDGET, &Unobserved)
 		{
 			Ok(distribution) => distribution,
-			Err(BuildError::BudgetExhausted { .. }) => continue,
-			// Neither the forward pass nor the oracle explodes dice yet.
-			Err(BuildError::Unbounded) => continue,
+			Err(BuildError::BudgetExhausted { .. } | BuildError::Unbounded) =>
+			{
+				continue
+			},
 			Err(e) =>
 			{
 				return Err(TestCaseError::fail(format!("build failed: {e}")))
@@ -857,6 +861,11 @@ fn check_oracle(
 				"total is not the count\nfunction:\n{}",
 				function
 			);
+		}
+		if explodes(&function)
+		{
+			// The oracle does not explode dice yet.
+			continue
 		}
 		let answer = match ask_oracle(
 			oracle,

@@ -113,7 +113,10 @@
 //!   [`AssemblyError`] gains
 //!   [`ExplodeSourceMismatch`](AssemblyError::ExplodeSourceMismatch), and
 //!   [`BuildError`] gains [`Unbounded`](BuildError::Unbounded), with which the
-//!   forward pass refuses every function that explodes dice, for now.
+//!   forward pass refuses a function in which an explode without limit, which
+//!   does not match every face, may grow a chain without bound. It builds the
+//!   exact distributions of limited explodes, and of unlimited ones that match
+//!   every face, and so saturate, though the estimate does not yet price them.
 //! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, `Reroll`, and
 //!   `Explode`, and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),

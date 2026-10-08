@@ -31,7 +31,7 @@ use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
 	Add, AddressingMode, Assembler, BuildError, Distribution, EvaluationError,
-	Evaluator, Function, Immediate, Instruction, Limit, Pass, Passes,
+	Evaluator, Explode, Function, Immediate, Instruction, Limit, Pass, Passes,
 	Predicate, ProgramCounter, Rational, RegisterIndex, Return,
 	RollingRecordIndex, SumRollingRecord, Weight,
 	compiler::{compile, compile_unoptimized},
@@ -2817,9 +2817,9 @@ fn test_gapped_counts()
 
 /// Ensure that the estimate stays tight where it is not exact: within the
 /// specified ratio of the usage, in steps and in cells, on mixtures, splits,
-/// and every case of the distribution corpus. The budget decides which
-/// functions are reasonable, so a loose estimate would refuse reasonable
-/// functions.
+/// and every case of the distribution corpus but those that explode dice,
+/// which the estimate does not yet price. The budget decides which functions
+/// are reasonable, so a loose estimate would refuse reasonable functions.
 #[test]
 fn test_tight_estimates()
 {
@@ -2878,6 +2878,14 @@ fn test_tight_estimates()
 		read_distribution_test_cases(DISTRIBUTION_TEST_SOURCE)
 	{
 		let function = optimize(compile_valid(source), Passes::all());
+		if function
+			.instructions
+			.iter()
+			.any(|inst| matches!(inst, Instruction::Explode(_)))
+		{
+			// The estimate does not yet price explodes, so it saturates.
+			continue
+		}
 		let evaluator = evaluator(function, &externs);
 		let (_, usage) =
 			propagate_within(&evaluator, &args, Budget::UNLIMITED).unwrap();
@@ -3171,21 +3179,31 @@ fn test_build_refusals()
 	);
 }
 
-/// Ensure that the forward pass refuses every function that explodes dice,
-/// limited or not, before it charges anything, so that the build answers
+/// Ensure that the forward pass refuses every function in which an explode
+/// without limit, whose predicate does not match every face, may extend a
+/// chain, even one whose random threshold may match every face, before it
+/// charges anything, so that the build answers
 /// [`Unbounded`](BuildError::Unbounded) whatever its budget, rather than
-/// [`BudgetExhausted`](BuildError::BudgetExhausted), and that the estimate
-/// of such a function exceeds every budget but the unlimited one.
+/// [`BudgetExhausted`](BuildError::BudgetExhausted); that it accepts limited
+/// and saturating explodes; and that the estimate of a function that explodes
+/// dice still exceeds every budget but the unlimited one.
 #[test]
-fn test_build_refuses_explodes()
+fn test_build_refuses_unbounded_explodes()
 {
-	for clause in ["= 6 up to 1 times", ">= 1 unlimited times"]
+	for (clause, unbounded) in [
+		("= 6 unlimited times", true),
+		("<= 5 unlimited times", true),
+		(">= @0 unlimited times", true),
+		("= 6 up to 1 times", false),
+		(">= 1 unlimited times", false),
+		("= 7 unlimited times", false)
+	]
 	{
 		let evaluator = Evaluator::new(
-			Assembler::assemble(&format!(
-				"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll \
-				 standard dice 2D6\n\t\t⚅0 <- explode {clause} from ⚅0\n\t\t@0 \
-				 <- sum rolling record ⚅0\n\t\treturn @0\n"
+			Assembler::assemble(&rerolled_by(
+				(1, 6),
+				"roll standard dice 2D6",
+				&[&format!("explode {clause}")]
 			))
 			.unwrap()
 		);
@@ -3204,24 +3222,34 @@ fn test_build_refuses_explodes()
 		);
 		for budget in [Budget::UNLIMITED, Budget { steps: 0, cells: 0 }]
 		{
-			assert_eq!(
-				plan.build(budget, &Unobserved),
-				Err(BuildError::Unbounded),
+			let built = plan.build(budget, &Unobserved);
+			match unbounded
+			{
+				true =>
+				{
+					assert_eq!(built, Err(BuildError::Unbounded), "{clause}")
+				},
+				false =>
+				{
+					assert_ne!(built, Err(BuildError::Unbounded), "{clause}")
+				}
+			}
+		}
+		match unbounded
+		{
+			true => assert_eq!(
+				propagate(&evaluator, []),
+				Err(PropagationError::Unbounded),
 				"{}",
 				clause
-			);
+			),
+			false => assert!(propagate(&evaluator, []).is_ok(), "{clause}")
 		}
-		assert_eq!(
-			propagate(&evaluator, []),
-			Err(PropagationError::Unbounded),
-			"{}",
-			clause
-		);
 	}
 	assert_eq!(
 		BuildError::Unbounded.to_string(),
-		"no exact distribution: the function explodes dice, so sample it \
-		 instead"
+		"no exact distribution: an explode without limit may grow a chain \
+		 without bound, so sample the function instead"
 	);
 }
 
@@ -3816,6 +3844,7 @@ pub(super) fn resum(function: Function, chosen: &[bool]) -> Function
 			Instruction::DropLowest(inst) => Some(inst.dest),
 			Instruction::DropHighest(inst) => Some(inst.dest),
 			Instruction::Reroll(inst) => Some(inst.dest),
+			Instruction::Explode(inst) => Some(inst.dest),
 			Instruction::Return(ret) =>
 			{
 				let mut answer = ret.src;
@@ -3879,8 +3908,9 @@ pub(super) fn resum(function: Function, chosen: &[bool]) -> Function
 ///
 /// # Errors
 /// [`TestCaseError`] if the pass refuses the source other than for
-/// [`BUDGET`], or answers unsoundly, or its answers disagree, or it fails
-/// [`check_exact_budget`], [`check_estimate`], or [`check_progress`].
+/// [`BUDGET`], or an explode without limit, or answers unsoundly, or its
+/// answers disagree, or it fails [`check_exact_budget`], [`check_estimate`],
+/// or [`check_progress`].
 fn check_propagation(
 	source: &str,
 	args: &[i32],
@@ -3914,6 +3944,11 @@ fn check_propagation(
 			{
 				Ok(answer) => answer,
 				Err(PropagationError::Exhausted(_)) => continue,
+				Err(PropagationError::Unbounded)
+					if explodes_without_limit(&evaluator.function) =>
+				{
+					continue
+				},
 				Err(e) =>
 				{
 					return Err(TestCaseError::fail(format!(
@@ -3951,6 +3986,27 @@ fn check_propagation(
 		);
 	}
 	Ok(())
+}
+
+/// Answer whether the specified function explodes dice without limit, which the
+/// pass may refuse as [unbounded](PropagationError::Unbounded).
+///
+/// # Parameters
+/// - `function`: The function.
+///
+/// # Returns
+/// `true` if some explode of the function has no limit, `false` otherwise.
+fn explodes_without_limit(function: &Function) -> bool
+{
+	function.instructions.iter().any(|inst| {
+		matches!(
+			inst,
+			Instruction::Explode(Explode {
+				limit: Limit::Unlimited,
+				..
+			})
+		)
+	})
 }
 
 /// Check that an answer of the pass is sound: that it lies within the
@@ -4066,8 +4122,8 @@ fn static_expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates dice whose counts, faces, drops, keeps,
-/// and rerolls are fixed, with custom faces that often reach the extremes of
-/// [`i32`], so that their sums saturate.
+/// rerolls, and explodes are fixed, with custom faces that often reach the
+/// extremes of [`i32`], so that their sums saturate.
 ///
 /// # Returns
 /// The strategy.
@@ -4119,7 +4175,8 @@ fn static_dice() -> impl Strategy<Value = String>
 		});
 	let clause = prop_oneof![
 		2 => clause,
-		1 => source_reroll(static_operand().boxed(), drop)
+		1 => source_reroll(static_operand().boxed(), drop.clone()),
+		1 => source_explode(static_operand().boxed(), drop)
 	];
 	(static_operand(), faces, prop::collection::vec(clause, 0..3)).prop_map(
 		|(count, faces, clauses)| {
@@ -4139,6 +4196,45 @@ fn static_dice() -> impl Strategy<Value = String>
 /// # Returns
 /// The strategy.
 pub(super) fn source_reroll(
+	operand: BoxedStrategy<String>,
+	count: BoxedStrategy<String>
+) -> impl Strategy<Value = String>
+{
+	source_predicated("reroll", operand, count)
+}
+
+/// Answer a strategy that generates explode clauses of every form of predicate
+/// and limit, whose thresholds and endpoints, which may be negative constants,
+/// and counts, which never begin with `-`, come from the specified strategies.
+///
+/// # Parameters
+/// - `operand`: The strategy for thresholds and endpoints.
+/// - `count`: The strategy for the counts of limits.
+///
+/// # Returns
+/// The strategy.
+pub(super) fn source_explode(
+	operand: BoxedStrategy<String>,
+	count: BoxedStrategy<String>
+) -> impl Strategy<Value = String>
+{
+	source_predicated("explode", operand, count)
+}
+
+/// Answer a strategy that generates reroll or explode clauses of every form of
+/// predicate and limit, whose thresholds and endpoints, which may be negative
+/// constants, and counts, which never begin with `-`, come from the specified
+/// strategies.
+///
+/// # Parameters
+/// - `verb`: The verb of the clauses, `reroll` or `explode`.
+/// - `operand`: The strategy for thresholds and endpoints.
+/// - `count`: The strategy for the counts of limits.
+///
+/// # Returns
+/// The strategy.
+fn source_predicated(
+	verb: &'static str,
 	operand: BoxedStrategy<String>,
 	count: BoxedStrategy<String>
 ) -> impl Strategy<Value = String>
@@ -4163,8 +4259,8 @@ pub(super) fn source_reroll(
 		select(&["∞ times", "unlimited times"][..])
 			.prop_map(|limit| format!(" {}", limit))
 	];
-	(predicate, option::of(limit)).prop_map(|(predicate, limit)| {
-		format!(" reroll {}{}", predicate, limit.unwrap_or_default())
+	(predicate, option::of(limit)).prop_map(move |(predicate, limit)| {
+		format!(" {} {}{}", verb, predicate, limit.unwrap_or_default())
 	})
 }
 
@@ -4194,9 +4290,9 @@ fn dynamic_program() -> impl Strategy<Value = String>
 
 /// Answer a strategy that generates dynamic expressions: [static
 /// expressions](static_expression), within dice whose counts, faces, drop and
-/// keep counts, and reroll thresholds, endpoints, and counts, ranges whose
-/// endpoints, and calls of `highest` and `lowest` whose arguments, may be
-/// random.
+/// keep counts, and reroll and explode thresholds, endpoints, and counts,
+/// ranges whose endpoints, and calls of `highest` and `lowest` whose
+/// arguments, may be random.
 ///
 /// # Returns
 /// The strategy.
@@ -4231,7 +4327,8 @@ fn dynamic_expression() -> impl Strategy<Value = String>
 			.boxed();
 		let clause = prop_oneof![
 			2 => clause,
-			1 => source_reroll(operand.clone().boxed(), count)
+			1 => source_reroll(operand.clone().boxed(), count.clone()),
+			1 => source_explode(operand.clone().boxed(), count)
 		];
 		prop_oneof![
 			3 => (operand.clone(), faces, prop::collection::vec(clause, 0..3))
@@ -4725,6 +4822,244 @@ fn test_rerolls_after_splits()
 	);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//                                 Explodes.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Test that explodes answer as expected, weight for weight, counting their
+/// branches as [`Bounds::count`](crate::Bounds::count) does: each chain still
+/// kept grows by the branches of its die raised to the limit, whether or not
+/// its end matches, and a chain that ends early is padded by the extensions
+/// that it never needed.
+#[test]
+fn test_explodes()
+{
+	for (roll, clauses, expected) in [
+		// A `6` exploded once adds any face along one path of 36; any other
+		// face stays along 6.
+		(
+			"roll standard dice 1D6",
+			&["explode = 6 up to 1 times"][..],
+			&[
+				(1, 6),
+				(2, 6),
+				(3, 6),
+				(4, 6),
+				(5, 6),
+				(7, 1),
+				(8, 1),
+				(9, 1),
+				(10, 1),
+				(11, 1),
+				(12, 1)
+			][..]
+		),
+		// Twice: a `6` that ends at its first extension is padded by the
+		// second, over 6³.
+		(
+			"roll standard dice 1D6",
+			&["explode = 6 up to 2 times"],
+			&[
+				(1, 36),
+				(2, 36),
+				(3, 36),
+				(4, 36),
+				(5, 36),
+				(7, 6),
+				(8, 6),
+				(9, 6),
+				(10, 6),
+				(11, 6),
+				(13, 1),
+				(14, 1),
+				(15, 1),
+				(16, 1),
+				(17, 1),
+				(18, 1)
+			]
+		),
+		// Two explodes once each grow a chain as one explode twice does.
+		(
+			"roll standard dice 1D2",
+			&["explode = 2 up to 1 times", "explode = 2 up to 1 times"],
+			&[(1, 4), (3, 2), (5, 1), (6, 1)]
+		),
+		(
+			"roll standard dice 1D2",
+			&["explode = 2 up to 2 times"],
+			&[(1, 4), (3, 2), (5, 1), (6, 1)]
+		),
+		// An explode that cannot happen changes nothing.
+		(
+			"roll standard dice 1D4",
+			&["explode = 5 up to 3 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		(
+			"roll standard dice 1D4",
+			&["explode = 1 up to 0 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		(
+			"roll standard dice 1D4",
+			&["explode = 1 up to -1 times"],
+			&[(1, 1), (2, 1), (3, 1), (4, 1)]
+		),
+		// A die of one face grows its chain without branching.
+		(
+			"roll standard dice 2D1",
+			&["explode = 1 up to 2 times"],
+			&[(6, 1)]
+		),
+		(
+			"roll standard dice 2D0",
+			&["explode = 0 up to 2 times"],
+			&[(0, 1)]
+		),
+		// A range is one die.
+		(
+			"roll range 1:3",
+			&["explode = 3 up to 1 times"],
+			&[(1, 3), (2, 3), (4, 1), (5, 1), (6, 1)]
+		),
+		// A custom die explodes from its faces, each as often as it is listed.
+		(
+			"roll custom dice 1D[1, 2, 2]",
+			&["explode in [2] up to 1 times"],
+			&[(1, 3), (3, 2), (4, 4)]
+		),
+		// A keep after an explode counts each chain as one die, worth its
+		// total: of two chains each worth 1, 3, or 4 along 2, 1, and 1 paths,
+		// keep the greater.
+		(
+			"roll standard dice 2D2",
+			&["explode = 2 up to 1 times", "keep highest 1"],
+			&[(1, 4), (3, 5), (4, 7)]
+		),
+		// An explode after a drop explodes only the chain still kept.
+		(
+			"roll standard dice 2D2",
+			&["drop lowest 1", "explode = 2 up to 1 times"],
+			&[(1, 2), (3, 3), (4, 3)]
+		),
+		// A reroll after an explode rerolls every kept die of a chain alone,
+		// and pads the chains of fewer dice: `[1]` rerolls to `1` or `2`,
+		// `[2, 1]` to `[2, 1]` or `[2, 2]`, and `[2, 2]` stays.
+		(
+			"roll standard dice 1D2",
+			&["explode = 2 up to 1 times", "reroll = 1 up to 1 times"],
+			&[(1, 4), (2, 4), (3, 2), (4, 6)]
+		),
+		// An unlimited explode whose predicate matches every face saturates
+		// every chain, by the sign of the die's mean face.
+		(
+			"roll standard dice 2D6",
+			&["explode >= 1 unlimited times"],
+			&[(i32::MAX, 36)]
+		),
+		(
+			"roll custom dice 2D[-1, -2]",
+			&["explode <= 0 unlimited times"],
+			&[(i32::MIN, 4)]
+		),
+		(
+			"roll custom dice 2D[-1, 1]",
+			&["explode in [-1, 1] unlimited times"],
+			&[(0, 4)]
+		),
+		(
+			"roll standard dice 3D0",
+			&["explode = 0 unlimited times"],
+			&[(0, 1)]
+		),
+		// A saturated chain keeps its value through later drops, rerolls, and
+		// explodes, which roll nothing for it, and so count no branches.
+		(
+			"roll standard dice 3D6",
+			&["explode >= 1 unlimited times", "drop lowest 1"],
+			&[(i32::MAX, 216)]
+		),
+		(
+			"roll standard dice 1D6",
+			&["explode >= 1 unlimited times", "reroll = 6 unlimited times"],
+			&[(i32::MAX, 6)]
+		),
+		(
+			"roll standard dice 1D6",
+			&[
+				"explode >= 1 unlimited times",
+				"reroll >= 1 unlimited times"
+			],
+			&[(i32::MAX, 6)]
+		),
+		(
+			"roll standard dice 1D6",
+			&["explode >= 1 unlimited times", "explode = 6 up to 1 times"],
+			&[(i32::MAX, 6)]
+		),
+		// An unlimited explode that cannot match any die still kept changes
+		// nothing, since every die rerolled to `6`.
+		(
+			"roll standard dice 1D6",
+			&[
+				"reroll <= 5 unlimited times",
+				"explode <= 5 unlimited times"
+			],
+			&[(6, 6)]
+		)
+	]
+	{
+		let assembly = rerolled(roll, clauses);
+		assert_eq!(
+			propagate_assembly(&assembly),
+			weights(expected),
+			"{assembly}"
+		);
+	}
+}
+
+/// Test that an explode that follows a split on its record, which fixes the
+/// record's results, draws from the die of the roll that the split fixed, and
+/// that a split of exploded chains that a later reroll reads keeps them whole.
+#[test]
+fn test_explodes_after_splits()
+{
+	// `1D2` shows `x`; a `2` explodes once to `2 + y`; the answer is the sum
+	// of both, over 2 · 2.
+	let function = Assembler::assemble(
+		"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D2
+		@0 <- sum rolling record ⚅0
+		⚅0 <- explode = 2 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 + @1
+		return @2"
+	)
+	.unwrap();
+	assert_agrees(function, &weights(&[(2, 2), (5, 1), (6, 1)]));
+	// The chains of the explode, `[1]`, `[2, 1]`, and `[2, 2]`, are summed,
+	// and then their `1`s rerolled once: `x + x'` for each.
+	let function = Assembler::assemble(
+		"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 1D2
+		⚅0 <- explode = 2 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 + @1
+		return @2"
+	)
+	.unwrap();
+	assert_agrees_in_probability(
+		function,
+		&weights(&[(2, 2), (3, 2), (6, 1), (7, 1), (8, 2)])
+	);
+}
+
 /// A chance, as a fraction that the reference reduces as it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Chance
@@ -4845,7 +5180,10 @@ enum RerollClause
 	KeepHighest(AddressingMode),
 
 	/// Reroll the results that satisfy the predicate, up to the limit.
-	Reroll(Predicate, Limit)
+	Reroll(Predicate, Limit),
+
+	/// Explode the chains whose ends satisfy the predicate, up to the limit.
+	Explode(Predicate, Limit)
 }
 
 /// A program that rolls a rolling record, applies clauses to it, and sums it,
@@ -4947,6 +5285,10 @@ impl RerollProgram
 				RerollClause::Reroll(predicate, limit) =>
 				{
 					format!("reroll {} {}", predicate.map(op), limit.map(op))
+				},
+				RerollClause::Explode(predicate, limit) =>
+				{
+					format!("explode {} {}", predicate.map(op), limit.map(op))
 				}
 			};
 			assembly.push_str(&format!("\t\t⚅0 <- {clause} from ⚅0\n"));
@@ -4960,8 +5302,13 @@ impl RerollProgram
 	}
 
 	/// Answer the law of the program's answer, by enumerating every value of
-	/// its registers, every roll of its dice, and every reroll that each die
-	/// still kept may make, independently of the forward pass.
+	/// its registers, every roll of its dice, every reroll that each die still
+	/// kept may make, and every extension that each chain still kept may
+	/// grow, independently of the forward pass.
+	///
+	/// # Panics
+	/// If an explode without limit, whose predicate does not match every face,
+	/// may extend a chain, whose law the reference cannot enumerate.
 	///
 	/// # Returns
 	/// The law, as a distribution, which agrees with the program's in
@@ -5054,8 +5401,9 @@ impl RerollProgram
 				}
 			}
 		};
-		// Each state is the sorted multiset of the dice still kept.
-		let mut states = Law::<Vec<i32>>::from([(vec![], Chance::one_in(1))]);
+		// Each state is the sorted multiset of the chains still kept.
+		let mut states =
+			Law::<Vec<ReferenceChain>>::from([(vec![], Chance::one_in(1))]);
 		for _ in 0..count.max(0)
 		{
 			let mut next = Law::new();
@@ -5064,7 +5412,7 @@ impl RerollProgram
 				for face in &faces
 				{
 					let mut kept = kept.clone();
-					kept.push(*face);
+					kept.push(ReferenceChain::die(*face));
 					kept.sort();
 					weigh(
 						&mut next,
@@ -5083,6 +5431,11 @@ impl RerollProgram
 				let len = kept.len();
 				let clamp = |count: AddressingMode| {
 					value(count).clamp(0, len as i32) as usize
+				};
+				let limit = |limit: &Limit| match limit
+				{
+					Limit::Times(count) => Some(value(*count)),
+					Limit::Unlimited => None
 				};
 				let outcomes = match clause
 				{
@@ -5108,18 +5461,28 @@ impl RerollProgram
 						kept[len - clamp(*count)..].to_vec(),
 						Chance::one_in(1)
 					)],
-					RerollClause::Reroll(predicate, limit) => reroll_reference(
-						&kept,
-						&faces,
-						|result| satisfies(predicate, result, value),
-						match limit
-						{
-							Limit::Times(count) => Some(value(*count)),
-							Limit::Unlimited => None
-						}
-					)
-					.into_iter()
-					.collect()
+					RerollClause::Reroll(predicate, reroll_limit) =>
+					{
+						reroll_reference(
+							&kept,
+							&faces,
+							|result| satisfies(predicate, result, value),
+							limit(reroll_limit)
+						)
+						.into_iter()
+						.collect()
+					},
+					RerollClause::Explode(predicate, explode_limit) =>
+					{
+						explode_reference(
+							&kept,
+							&faces,
+							|result| satisfies(predicate, result, value),
+							limit(explode_limit)
+						)
+						.into_iter()
+						.collect()
+					},
 				};
 				for (kept, outcome_chance) in outcomes
 				{
@@ -5131,13 +5494,112 @@ impl RerollProgram
 		let mut sums = Law::new();
 		for (kept, chance) in states
 		{
+			// The chains are sorted by their totals first.
 			let sum = kept
 				.iter()
-				.fold(0i32, |sum, result| sum.saturating_add(*result));
+				.fold(0i32, |sum, chain| sum.saturating_add(chain.total));
 			weigh(&mut sums, sum, chance);
 		}
 		sums
 	}
+}
+
+/// A chain still kept of the reference, ordered as drops and keeps order
+/// chains, by its fields in turn: by its total, then by its kept dice in
+/// ascending order, compared lexicographically, and then by the die at its
+/// end.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ReferenceChain
+{
+	/// The total: the saturating sum of the kept dice in ascending order, or
+	/// the value of the saturated die.
+	total: i32,
+
+	/// The kept dice, in ascending order, including a saturated die.
+	dice: Vec<i32>,
+
+	/// The die at the end, the last kept die that no die extends.
+	end: i32,
+
+	/// Whether a saturated die decides the chain.
+	saturated: bool
+}
+
+impl ReferenceChain
+{
+	/// Answer the chain of one die.
+	///
+	/// # Parameters
+	/// - `value`: The result of the die.
+	///
+	/// # Returns
+	/// The chain.
+	fn die(value: i32) -> Self
+	{
+		Self {
+			total: value,
+			dice: vec![value],
+			end: value,
+			saturated: false
+		}
+	}
+
+	/// Answer the chain of the specified kept dice, which ends at the
+	/// specified die, which they include.
+	///
+	/// # Parameters
+	/// - `dice`: The kept dice, in any order.
+	/// - `end`: The die at the end.
+	///
+	/// # Returns
+	/// The chain.
+	fn of(mut dice: Vec<i32>, end: i32) -> Self
+	{
+		dice.sort();
+		Self {
+			total: dice
+				.iter()
+				.fold(0i32, |total, die| total.saturating_add(*die)),
+			dice,
+			end,
+			saturated: false
+		}
+	}
+}
+
+/// Answer the law of the multisets of chains that each of the specified
+/// chains independently becomes, by the specified law of each.
+///
+/// # Parameters
+/// - `kept`: The chains still kept.
+/// - `becomes`: The law of what a chain becomes, or `None` if it vanishes.
+///
+/// # Returns
+/// The law of the multisets of the chains, sorted.
+fn chains_reference(
+	kept: &[ReferenceChain],
+	becomes: impl Fn(&ReferenceChain) -> Law<Option<ReferenceChain>>
+) -> Law<Vec<ReferenceChain>>
+{
+	let mut states =
+		Law::from([(Vec::<ReferenceChain>::new(), Chance::one_in(1))]);
+	for chain in kept
+	{
+		let law = becomes(chain);
+		let mut next = Law::new();
+		for (state, chance) in &states
+		{
+			for (chain, chain_chance) in &law
+			{
+				let mut state = state.clone();
+				state.extend(chain.clone());
+				state.sort();
+				weigh(&mut next, state, chance.times(chain_chance));
+			}
+		}
+		states = next;
+	}
+	states
 }
 
 /// Answer whether a result satisfies a predicate, given the values of its
@@ -5176,103 +5638,254 @@ fn satisfies(
 	}
 }
 
-/// Answer the law of the dice still kept after a reroll, by its definition:
-/// each die that matches rolls a replacement from the die, which rolls again
-/// while it matches and the limit allows, or, without limit, finally shows
-/// each face that does not match as likely as any other, unless every face
-/// matches, when every die is crossed out.
+/// Answer the law of the chains still kept after a reroll, by its definition:
+/// each kept die of a chain that no saturated die decides that matches rolls a
+/// replacement from the die, which rolls again while it matches and the limit
+/// allows, or, without limit, finally shows each face that does not match as
+/// likely as any other, unless every face matches, when every die is crossed
+/// out, and its chain with it. The replacement of a chain's end becomes its
+/// end.
 ///
 /// # Parameters
-/// - `kept`: The dice still kept, sorted.
+/// - `kept`: The chains still kept, sorted.
 /// - `faces`: The faces of the die, each as often as it is listed.
 /// - `matches`: Whether the reroll matches a result.
 /// - `limit`: The number of times that each die may be rerolled, or `None` for
 ///   no limit.
 ///
 /// # Returns
-/// The law of the dice still kept, sorted.
+/// The law of the chains still kept, sorted.
 fn reroll_reference(
-	kept: &[i32],
+	kept: &[ReferenceChain],
 	faces: &[i32],
 	matches: impl Fn(i32) -> bool,
 	limit: Option<i32>
-) -> Law<Vec<i32>>
+) -> Law<Vec<ReferenceChain>>
 {
-	let one = Chance::one_in(1);
+	let one = || Chance::one_in(1);
 	if limit.is_some_and(|limit| limit <= 0)
 	{
-		return Law::from([(kept.to_vec(), one)])
+		return Law::from([(kept.to_vec(), one())])
 	}
 	if limit.is_none() && faces.iter().all(|face| matches(*face))
 	{
-		let kept = kept.iter().copied().filter(|result| !matches(*result));
-		return Law::from([(kept.collect(), one)])
+		let kept = kept.iter().filter(|chain| chain.saturated).cloned();
+		return Law::from([(kept.collect(), one())])
 	}
-	// The law of a replacement that may be rerolled `n` more times.
-	fn replacement(
+	let die = |result: i32| match matches(result)
+	{
+		true => replacement(faces, &matches, limit.map(|limit| limit - 1)),
+		false => Law::from([(result, one())])
+	};
+	chains_reference(kept, |chain| {
+		if chain.saturated
+		{
+			return Law::from([(Some(chain.clone()), one())])
+		}
+		// The dice other than the end, and then the end.
+		let mut others = chain.dice.clone();
+		others.remove(others.iter().position(|die| *die == chain.end).unwrap());
+		let mut states = Law::from([(Vec::<i32>::new(), one())]);
+		for result in others
+		{
+			let law = die(result);
+			let mut next = Law::new();
+			for (state, chance) in &states
+			{
+				for (result, result_chance) in &law
+				{
+					let mut state = state.clone();
+					state.push(*result);
+					state.sort();
+					weigh(&mut next, state, chance.times(result_chance));
+				}
+			}
+			states = next;
+		}
+		let ends = die(chain.end);
+		let mut law = Law::new();
+		for (state, chance) in &states
+		{
+			for (end, end_chance) in &ends
+			{
+				let mut dice = state.clone();
+				dice.push(*end);
+				weigh(
+					&mut law,
+					Some(ReferenceChain::of(dice, *end)),
+					chance.times(end_chance)
+				);
+			}
+		}
+		law
+	})
+}
+
+/// Answer the law of the result of a replacement that may be rerolled `n`
+/// more times, or without limit, by the definition of a reroll.
+///
+/// # Parameters
+/// - `faces`: The faces of the die, each as often as it is listed.
+/// - `matches`: Whether the reroll matches a result.
+/// - `n`: The number of times that the replacement may be rerolled, or `None`
+///   for no limit, in which case some face does not match.
+///
+/// # Returns
+/// The law of the result.
+fn replacement(
+	faces: &[i32],
+	matches: &dyn Fn(i32) -> bool,
+	n: Option<i32>
+) -> Law<i32>
+{
+	let mut law = Law::new();
+	match n
+	{
+		None =>
+		{
+			let rest = faces
+				.iter()
+				.filter(|face| !matches(**face))
+				.collect::<Vec<_>>();
+			for face in &rest
+			{
+				weigh(&mut law, **face, Chance::one_in(rest.len()));
+			}
+		},
+		Some(n) =>
+		{
+			for face in faces
+			{
+				let chance = Chance::one_in(faces.len());
+				match matches(*face) && n > 0
+				{
+					true =>
+					{
+						for (result, again) in
+							replacement(faces, matches, Some(n - 1))
+						{
+							weigh(&mut law, result, chance.times(&again));
+						}
+					},
+					false => weigh(&mut law, *face, chance)
+				}
+			}
+		}
+	}
+	law
+}
+
+/// Answer the law of the chains still kept after an explode, by its
+/// definition: each chain that no saturated die decides, whose end matches,
+/// rolls an extension from the die, which becomes its end, and which rolls
+/// again while it matches and the limit allows. Without limit, if every face
+/// matches, then each such chain saturates instead, worth `i32::MAX` or
+/// `i32::MIN` by the sign of the mean face, or `0` if that mean is `0`.
+///
+/// # Parameters
+/// - `kept`: The chains still kept, sorted.
+/// - `faces`: The faces of the die, each as often as it is listed.
+/// - `matches`: Whether the explode matches a result.
+/// - `limit`: The number of times that each chain may be exploded, or `None`
+///   for no limit.
+///
+/// # Returns
+/// The law of the chains still kept, sorted.
+///
+/// # Panics
+/// If the explode has no limit, does not match every face, and matches the
+/// end of a chain, whose law the reference cannot enumerate.
+fn explode_reference(
+	kept: &[ReferenceChain],
+	faces: &[i32],
+	matches: impl Fn(i32) -> bool,
+	limit: Option<i32>
+) -> Law<Vec<ReferenceChain>>
+{
+	let one = || Chance::one_in(1);
+	if limit.is_some_and(|limit| limit <= 0)
+	{
+		return Law::from([(kept.to_vec(), one())])
+	}
+	let saturates = limit.is_none() && faces.iter().all(|face| matches(*face));
+	let saturated = match faces.iter().map(|face| *face as i64).sum::<i64>()
+	{
+		sum if sum > 0 => i32::MAX,
+		sum if sum < 0 => i32::MIN,
+		_ => 0
+	};
+	// The law of the extensions of a chain whose end matched, at most `n` of
+	// them: their multiset, sorted, and the last.
+	fn tails(
 		faces: &[i32],
 		matches: &dyn Fn(i32) -> bool,
-		n: Option<i32>
-	) -> Law<i32>
+		n: i32
+	) -> Law<(Vec<i32>, i32)>
 	{
 		let mut law = Law::new();
-		match n
+		let rest = match n > 1
 		{
-			None =>
+			true => tails(faces, matches, n - 1),
+			false => Law::new()
+		};
+		for face in faces
+		{
+			let chance = Chance::one_in(faces.len());
+			match matches(*face) && n > 1
 			{
-				let rest = faces
-					.iter()
-					.filter(|face| !matches(**face))
-					.collect::<Vec<_>>();
-				for face in &rest
+				true =>
 				{
-					weigh(&mut law, **face, Chance::one_in(rest.len()));
-				}
-			},
-			Some(n) =>
-			{
-				for face in faces
-				{
-					let chance = Chance::one_in(faces.len());
-					match matches(*face) && n > 0
+					for ((dice, end), again) in &rest
 					{
-						true =>
-						{
-							for (result, again) in
-								replacement(faces, matches, Some(n - 1))
-							{
-								weigh(&mut law, result, chance.times(&again));
-							}
-						},
-						false => weigh(&mut law, *face, chance)
+						let mut dice = dice.clone();
+						dice.push(*face);
+						dice.sort();
+						weigh(&mut law, (dice, *end), chance.times(again));
 					}
-				}
+				},
+				false => weigh(&mut law, (vec![*face], *face), chance)
 			}
 		}
 		law
 	}
-	let mut states = Law::from([(Vec::<i32>::new(), one)]);
-	for result in kept
+	let tails = match limit
 	{
-		let die = match matches(*result)
+		Some(limit) => tails(faces, &matches, limit),
+		None => Law::new()
+	};
+	chains_reference(kept, |chain| {
+		if chain.saturated || !matches(chain.end)
 		{
-			true => replacement(faces, &matches, limit.map(|limit| limit - 1)),
-			false => Law::from([(*result, Chance::one_in(1))])
-		};
-		let mut next = Law::new();
-		for (state, chance) in &states
-		{
-			for (result, result_chance) in &die
-			{
-				let mut state = state.clone();
-				state.push(*result);
-				state.sort();
-				weigh(&mut next, state, chance.times(result_chance));
-			}
+			return Law::from([(Some(chain.clone()), one())])
 		}
-		states = next;
-	}
-	states
+		match limit
+		{
+			_ if saturates =>
+			{
+				let mut dice = chain.dice.clone();
+				dice.push(saturated);
+				dice.sort();
+				Law::from([(
+					Some(ReferenceChain {
+						total: saturated,
+						dice,
+						end: saturated,
+						saturated: true
+					}),
+					one()
+				)])
+			},
+			Some(_) => tails
+				.iter()
+				.map(|((dice, end), chance)| {
+					let mut dice = dice.clone();
+					dice.extend(&chain.dice);
+					(Some(ReferenceChain::of(dice, *end)), chance.clone())
+				})
+				.collect(),
+			None => panic!("the reference cannot explode without limit")
+		}
+	})
 }
 
 /// Answer a strategy that generates an operand: an immediate in the specified
@@ -5314,6 +5927,47 @@ fn reroll_operand(
 /// The strategy.
 fn reroll_clause(registers: usize) -> BoxedStrategy<RerollClause>
 {
+	let limit = prop_oneof![
+		reroll_operand(registers, -1, 3).prop_map(Limit::Times),
+		Just(Limit::Unlimited)
+	];
+	predicated_clause(registers, limit.boxed(), RerollClause::Reroll)
+}
+
+/// Answer a strategy that generates an explode clause, of every predicate
+/// form, limited more often than not, since the pass refuses most explodes
+/// without limit.
+///
+/// # Parameters
+/// - `registers`: The number of registers.
+///
+/// # Returns
+/// The strategy.
+fn explode_clause(registers: usize) -> BoxedStrategy<RerollClause>
+{
+	let limit = prop_oneof![
+		3 => reroll_operand(registers, -1, 2).prop_map(Limit::Times),
+		1 => Just(Limit::Unlimited)
+	];
+	predicated_clause(registers, limit.boxed(), RerollClause::Explode)
+}
+
+/// Answer a strategy that generates a reroll or explode clause, of every
+/// predicate form, limited or not.
+///
+/// # Parameters
+/// - `registers`: The number of registers.
+/// - `limit`: The strategy that generates the limit.
+/// - `clause`: The clause of a predicate and a limit.
+///
+/// # Returns
+/// The strategy.
+fn predicated_clause(
+	registers: usize,
+	limit: BoxedStrategy<Limit>,
+	clause: fn(Predicate, Limit) -> RerollClause
+) -> BoxedStrategy<RerollClause>
+{
 	let op = move || reroll_operand(registers, -1, 5);
 	let predicate = prop_oneof![
 		op().prop_map(Predicate::Eq),
@@ -5328,12 +5982,8 @@ fn reroll_clause(registers: usize) -> BoxedStrategy<RerollClause>
 			Predicate::InRangeInclusive { start, end }
 		})
 	];
-	let limit = prop_oneof![
-		reroll_operand(registers, -1, 3).prop_map(Limit::Times),
-		Just(Limit::Unlimited)
-	];
 	(predicate, limit)
-		.prop_map(|(predicate, limit)| RerollClause::Reroll(predicate, limit))
+		.prop_map(move |(predicate, limit)| clause(predicate, limit))
 		.boxed()
 }
 
@@ -5389,6 +6039,85 @@ fn reroll_program() -> impl Strategy<Value = RerollProgram>
 				)
 		}
 	)
+}
+
+/// Answer a strategy that generates a [reroll program](RerollProgram) that
+/// explodes: up to two registers, of at most `3`, standard or custom dice,
+/// mostly of several faces, or a range, and an explode among up to two other
+/// clauses, drops, keeps, rerolls, or explodes.
+///
+/// # Returns
+/// The strategy.
+fn explode_program() -> impl Strategy<Value = RerollProgram>
+{
+	// The registers stay small, since each may be the limit of an explode.
+	prop::collection::vec((Just(1), 2..=3, -1..=0), 0..=2).prop_flat_map(
+		|registers| {
+			let n = registers.len();
+			// Mostly dice that roll, of more than one face, whose chains grow
+			// in more than one way.
+			let roll = prop_oneof![
+				3 => (reroll_operand(n, 1, 3), reroll_operand(n, 2, 4))
+					.prop_map(|(count, faces)| {
+						RerollRoll::Standard(count, faces)
+					}),
+				1 => (reroll_operand(n, 0, 3), reroll_operand(n, -1, 4))
+					.prop_map(|(count, faces)| {
+						RerollRoll::Standard(count, faces)
+					}),
+				2 => (
+					reroll_operand(n, 1, 3),
+					prop::collection::vec(-2..=3, 1..=3)
+				)
+					.prop_map(|(count, faces)| {
+						RerollRoll::Custom(count, faces)
+					}),
+				1 => (reroll_operand(n, -1, 3), reroll_operand(n, -1, 3))
+					.prop_map(|(start, end)| RerollRoll::Range(start, end))
+			];
+			let count = move || reroll_operand(n, -1, 3);
+			let clause = prop_oneof![
+				count().prop_map(RerollClause::DropLowest),
+				count().prop_map(RerollClause::DropHighest),
+				count().prop_map(RerollClause::KeepLowest),
+				count().prop_map(RerollClause::KeepHighest),
+				reroll_clause(n),
+				explode_clause(n)
+			];
+			(
+				Just(registers),
+				roll,
+				prop::collection::vec(clause, 0..=2),
+				explode_clause(n),
+				any::<prop::sample::Index>()
+			)
+				.prop_map(
+					|(registers, roll, mut clauses, explode, at)| {
+						clauses.insert(at.index(clauses.len() + 1), explode);
+						RerollProgram {
+							registers,
+							roll,
+							clauses
+						}
+					}
+				)
+		}
+	)
+}
+
+impl RerollProgram
+{
+	/// Answer whether the program has an explode without limit, which the pass
+	/// may refuse.
+	///
+	/// # Returns
+	/// `true` if some explode has no limit, `false` otherwise.
+	fn explodes_without_limit(&self) -> bool
+	{
+		self.clauses.iter().any(|clause| {
+			matches!(clause, RerollClause::Explode(_, Limit::Unlimited))
+		})
+	}
 }
 
 proptest! {
@@ -5448,6 +6177,102 @@ proptest! {
 			let propagated = propagate(&evaluator, []).unwrap();
 			prop_assert!(
 				agree(&propagated, &expected),
+				"{assembly}\npropagated:\n{propagated}\nexpected:\n{expected}"
+			);
+			if let Some(count) = evaluator.bounds_over([], []).unwrap().count
+				&& count < u128::MAX
+			{
+				prop_assert_eq!(
+					propagated.total(),
+					&Weight::from(count),
+					"{}",
+					assembly
+				);
+			}
+		}
+	}
+
+	/// The pass over a function that explodes, optimized or not, and whether
+	/// or not it sums its records before and after some of its rolls, drops,
+	/// rerolls, and explodes, so that a split fixes the chains that a later
+	/// reroll or explode reads, refuses it only if it explodes without limit,
+	/// succeeds within a budget exactly when the budget covers its usage, and
+	/// reports its progress faithfully. The estimate of such a function
+	/// saturates, so it bounds the usage trivially.
+	#[test]
+	fn test_explode_estimates_bound_usage(
+		program in explode_program(),
+		chosen in prop::collection::vec(any::<bool>(), 1..=4)
+	)
+	{
+		let assembly = program.assembly();
+		let function = Assembler::assemble(&assembly).unwrap();
+		for function in [function.clone(), optimize(function, Passes::all())]
+		{
+			for function in [function.clone(), resum(function, &chosen)]
+			{
+				let evaluator = Evaluator::new(function);
+				let (propagated, usage) =
+					match propagate_within(&evaluator, &[], Budget::UNLIMITED)
+					{
+						Err(PropagationError::Unbounded) =>
+						{
+							prop_assert!(
+								program.explodes_without_limit(),
+								"{}",
+								assembly
+							);
+							continue
+						},
+						result => result.unwrap()
+					};
+				check_exact_budget(&evaluator, &[], &propagated, usage)
+					.map_err(TestCaseError::fail)?;
+				check_estimate(&evaluator, &[], &propagated, usage)
+					.map_err(TestCaseError::fail)?;
+				check_progress(
+					&evaluator,
+					&[],
+					&propagated,
+					usage,
+					PROPERTY_CANCELLATIONS
+				)
+				.map_err(TestCaseError::fail)?;
+			}
+		}
+	}
+
+	/// Explodes answer the law of their definition, optimized or not, whether
+	/// before or after drops, keeps, rerolls, and other explodes, of every
+	/// predicate form, limited or not, with fixed or random operands, some of
+	/// them shared, and their totals are the counts of outcomes that their
+	/// bounds report. The pass refuses a function only if it explodes without
+	/// limit.
+	#[test]
+	fn test_explodes_agree_with_reference(program in explode_program())
+	{
+		let assembly = program.assembly();
+		let function = Assembler::assemble(&assembly).unwrap();
+		let expected = OnceLock::new();
+		for function in [function.clone(), optimize(function, Passes::all())]
+		{
+			let evaluator = Evaluator::new(function);
+			let propagated = match propagate(&evaluator, [])
+			{
+				Err(PropagationError::Unbounded) =>
+				{
+					prop_assert!(
+						program.explodes_without_limit(),
+						"{}",
+						assembly
+					);
+					continue
+				},
+				result => result.unwrap()
+			};
+			let expected = expected.get_or_init(|| program.reference());
+			prop_assert!(
+				agree(&propagated, expected),
 				"{assembly}\npropagated:\n{propagated}\nexpected:\n{expected}"
 			);
 			if let Some(count) = evaluator.bounds_over([], []).unwrap().count

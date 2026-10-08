@@ -48,8 +48,8 @@ use proptest::{
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
-	Budget, BuildError, Distribution, EvaluationError, Evaluator,
-	Function as IrFunction, Instruction, Optimizer as _, Parser, Passes,
+	Budget, BuildError, Distribution, EvaluationError, Evaluator, Explode,
+	Function as IrFunction, Instruction, Limit, Optimizer as _, Parser, Passes,
 	StandardOptimizer, Unobserved,
 	ast::Function,
 	compiler::{CompilationError, compile, compile_unoptimized},
@@ -209,8 +209,8 @@ fn test_optimized_rerolls()
 /// face, or none; a limit of every form; and the clauses around it, of every
 /// kind, before it or after it, among them rerolls and other explodes, over
 /// values of the parameter that make every operand that is not constant match
-/// differently. The forward pass does not explode dice yet, so the
-/// distributions are not compared until it does.
+/// differently, and that their distributions agree, unless the forward pass
+/// refuses an explode without limit.
 #[test]
 fn test_optimized_explodes()
 {
@@ -587,14 +587,17 @@ fn check_evaluation(
 				"refused within the estimate"
 			);
 		},
-		// The forward pass does not explode dice yet.
+		// The forward pass refuses only explodes without limit that may grow
+		// a chain without bound.
 		Err(BuildError::Unbounded) => prop_assert!(
-			evaluator
-				.function
-				.instructions
-				.iter()
-				.any(|inst| matches!(inst, Instruction::Explode(_))),
-			"refused a function that explodes no dice"
+			evaluator.function.instructions.iter().any(|inst| matches!(
+				inst,
+				Instruction::Explode(Explode {
+					limit: Limit::Unlimited,
+					..
+				})
+			)),
+			"refused a function that explodes no dice without limit"
 		),
 		Err(e) => prop_assert!(false, "distribution failed: {}", e)
 	}

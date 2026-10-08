@@ -1,10 +1,11 @@
 //! # Mixtures
 //!
 //! When the count, faces, or range endpoints of a roll, the counts of its
-//! drops, or the operands of its rerolls come from random registers, the
-//! rolling record holds not one [setup](Setup) but a weighted mixture of them,
-//! each a roll with fixed operands and fixed drop counts. By the law of total
-//! probability, the sum of the record is the mixture of the sums of its setups.
+//! drops, or the operands of its rerolls or explodes come from random
+//! registers, the rolling record holds not one [setup](Setup) but a weighted
+//! mixture of them, each a roll with fixed operands and fixed drop counts. By
+//! the law of total probability, the sum of the record is the mixture of the
+//! sums of its setups.
 //!
 //! A setup of weight `w` answers sums of total `T`, and the setups' totals
 //! differ, as the totals `zᵏ` of `k` dice of `z` faces do, so the mixture
@@ -22,7 +23,9 @@
 //! that it fills, and a mixture the mixture of its setups' laws, and proves
 //! that rolling, dropping, keeping and summing a mixture act on that law as the
 //! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` proves that
-//! rerolling does, as every later instruction views the record. When those
+//! rerolling does, as every later instruction views the record. The
+//! specification does not yet model explosion, so nothing proves that
+//! exploding does, nor that rerolling [chains](super::chain) does. When those
 //! operands are rolls with fixed operands, every path through them is equally
 //! likely, and the mixture weighs each outcome by the number of paths that
 //! reach it. When some path to a setup is likelier than another, the least
@@ -35,6 +38,7 @@ use std::{
 };
 
 use super::{
+	chain::{Burst, burst},
 	meter::{Halt, Meter, charge_of},
 	record::{Die, Effect, Powers, Roll, redraw}
 };
@@ -116,12 +120,15 @@ impl Setup
 	/// Reroll the dice still kept of the setup.
 	///
 	/// A reroll that does nothing leaves the setup as it was, and one that
-	/// crosses out every die still kept drops them all. Otherwise, if no
+	/// crosses out every die still kept drops them all, unless a saturated die
+	/// decides every chain still kept, which it leaves alone. Otherwise, if no
 	/// result has been dropped and the roll is a range or dice, then its dice
 	/// are alike, and the reroll [rewrites](Roll::rewrite) the law of each;
-	/// if not, it [pools](Roll::pool) the multisets of the dice still kept.
-	/// Either way, the setup keeps its die, and the total of its roll grows by
-	/// the [padding](super::record::Redraw) of each die still kept.
+	/// if not, it [pools](Roll::pool) the multisets of the dice still kept. A
+	/// roll of [chains](super::chain) [rerolls](Roll::reroll_chains) the kept
+	/// dice of each. Either way, the setup keeps its die, and the total of its
+	/// roll grows by the [padding](super::record::Redraw) of each die still
+	/// kept.
 	///
 	/// # Parameters
 	/// - `criterion`: The results that the reroll rerolls.
@@ -151,7 +158,8 @@ impl Setup
 	/// die still kept, where the specification's record keeps only its kept
 	/// results. The proof asks that every result be a face of the die, as
 	/// `Setup.faithful_roll` and `Setup.reroll_invariants` prove of every roll
-	/// and every reroll.
+	/// and every reroll. The specification does not yet model explosion, so
+	/// the proof does not cover chains.
 	fn reroll(
 		&self,
 		criterion: &Criterion,
@@ -171,6 +179,8 @@ impl Setup
 		match redraw(&die, criterion, limit, meter)?
 		{
 			Effect::Nothing => Ok(self.clone()),
+			// The reroll leaves alone every chain that a saturated die decides.
+			Effect::CrossOut if roll.is_saturated() => Ok(self.clone()),
 			Effect::CrossOut => Ok(Setup {
 				lowest: results,
 				..self.clone()
@@ -187,6 +197,13 @@ impl Setup
 						0,
 						0
 					) => roll.rewrite(&redraw, meter)?,
+					(Roll::Chains { .. } | Roll::Stacks(_), ..) => roll
+						.reroll_chains(
+							self.lowest,
+							self.highest,
+							&redraw,
+							meter
+						)?,
 					_ => roll.pool(self.lowest, self.highest, &redraw, meter)?
 				};
 				Ok(Setup {
@@ -196,6 +213,122 @@ impl Setup
 					highest: 0
 				})
 			}
+		}
+	}
+
+	/// Explode the chains still kept of the setup, counting each die still
+	/// kept as a chain of one die if no explode has extended it yet.
+	///
+	/// An explode that does nothing, or that has no limit but cannot match
+	/// the end of any chain of the roll, leaves the setup as it was, as does
+	/// any explode of chains that saturated dice decide, which have no end
+	/// from which to grow, so that it counts no branches of them, as
+	/// [`Bounds::count`](crate::Bounds::count) does. One that saturates every
+	/// chain still kept answers one multiset of saturated chains, weighing the
+	/// total of the roll. Otherwise, the roll
+	/// [explodes](Roll::explode) the chains still kept, transforming the law of
+	/// each if no chain has been dropped and the chains are alike, and their
+	/// multisets if not. Either way, the setup keeps its die, and the total of
+	/// its roll grows by the padding of each chain still kept.
+	///
+	/// # Parameters
+	/// - `criterion`: The results that the explode explodes.
+	/// - `limit`: The number of times that each chain may be exploded, or
+	///   `None` for no limit.
+	/// - `whole`: Whether to keep the chains whole, since a later reroll or
+	///   explode reads them, or reduce them to their totals.
+	/// - `meter`: The meter, to which the exploded setup stays charged beyond
+	///   the cells of the setup.
+	///
+	/// # Returns
+	/// The exploded setup.
+	///
+	/// # Errors
+	/// [`Halt`] if the explode would exceed the budget or is cancelled.
+	///
+	/// # Panics
+	/// If the setup holds fixed results without their die, which the
+	/// [plan](super::plan::rerolled) prevents; or if the explode has no limit,
+	/// does not match every face, and matches the end of a chain still kept,
+	/// which the pass refuses before it begins.
+	///
+	/// # Notes
+	/// The Lean specification does not yet model explosion, so this has no
+	/// proof.
+	fn explode(
+		&self,
+		criterion: &Criterion,
+		limit: Option<i32>,
+		whole: bool,
+		meter: &mut Meter
+	) -> Result<Setup, Halt>
+	{
+		let results = self.results();
+		let kept = results - self.lowest - self.highest;
+		let Some(roll) = self
+			.roll
+			.as_ref()
+			.filter(|roll| kept > 0 && !roll.is_saturated())
+		else
+		{
+			// Without chains still kept, or with only chains that saturated
+			// dice decide, which have no end from which to grow, there is
+			// nothing to explode, and no branch to count.
+			return Ok(self.clone())
+		};
+		let die = self
+			.die()
+			.expect("an explode reads fixed results with a die");
+		let roll = match burst(&die, criterion, limit, whole, meter)?
+		{
+			Burst::Nothing => return Ok(self.clone()),
+			Burst::Unbounded(criterion) if !roll.shows(criterion) =>
+			{
+				return Ok(self.clone())
+			},
+			Burst::Saturate(value) =>
+			{
+				roll.saturate(value, kept, whole, meter)?
+			},
+			burst =>
+			{
+				roll.explode(self.lowest, self.highest, &burst, whole, meter)?
+			},
+		};
+		meter.charge(0, die.cells())?;
+		Ok(Setup {
+			roll: Some(roll),
+			die: Some(die),
+			lowest: 0,
+			highest: 0
+		})
+	}
+
+	/// Reduce the [chains](super::chain) of the setup's roll to their totals,
+	/// if it has any, as when no later reroll or explode reads them.
+	///
+	/// # Parameters
+	/// - `meter`: The meter, to which the reduced setup stays charged beyond
+	///   the cells of the setup.
+	///
+	/// # Returns
+	/// The reduced setup.
+	///
+	/// # Errors
+	/// [`Halt`] if reducing would exceed the budget or is cancelled.
+	fn collapse(self, meter: &mut Meter) -> Result<Setup, Halt>
+	{
+		match &self.roll
+		{
+			Some(roll @ (Roll::Chains { .. } | Roll::Stacks(_))) =>
+			{
+				let roll = roll.collapse(meter)?;
+				Ok(Setup {
+					roll: Some(roll),
+					..self
+				})
+			},
+			_ => Ok(self)
 		}
 	}
 }
@@ -448,6 +581,9 @@ impl Mixture
 	///   rerolls, with the number of times that each die may be rerolled, or
 	///   `None` for no limit, and the weight of the outcome of the operands
 	///   that chose them.
+	/// - `whole`: Whether a later reroll or explode reads the record before a
+	///   roll refills it, so that its [chains](super::chain) stay whole, rather
+	///   than reduce to their totals.
 	/// - `meter`: The meter, which the reroll charges a step and the cells of a
 	///   setup for each new setup, before each [setup's reroll](Setup::reroll)
 	///   charges its own work.
@@ -463,10 +599,96 @@ impl Mixture
 	pub(super) fn reroll(
 		&mut self,
 		rerolls: &[(Criterion, Option<i32>, Weight)],
+		whole: bool,
 		meter: &mut Meter
 	) -> Result<(), Halt>
 	{
-		let outcomes = rerolls.len() as u128;
+		self.resolve(
+			rerolls,
+			|setup, criterion, limit, meter| {
+				let setup = setup.reroll(criterion, limit, meter)?;
+				match whole
+				{
+					true => Ok(setup),
+					false => setup.collapse(meter)
+				}
+			},
+			meter
+		)
+	}
+
+	/// Explode the chains still kept of every setup, by each of the given
+	/// resolutions of the explode's operands, splitting each setup by each
+	/// resolution and merging the setups that coincide, as when the explode
+	/// does nothing.
+	///
+	/// # Parameters
+	/// - `explodes`: The resolutions of the explode: each set of results that
+	///   it explodes, with the number of times that each chain may be exploded,
+	///   or `None` for no limit, and the weight of the outcome of the operands
+	///   that chose them.
+	/// - `whole`: Whether a later reroll or explode reads the record before a
+	///   roll refills it, so that its [chains](super::chain) stay whole, rather
+	///   than reduce to their totals.
+	/// - `meter`: The meter, which the explode charges a step and the cells of
+	///   a setup for each new setup, before each [setup's
+	///   explode](Setup::explode) charges its own work.
+	///
+	/// # Errors
+	/// [`Halt`] if the explode would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// The Lean specification does not yet model explosion, so this has no
+	/// proof.
+	pub(super) fn explode(
+		&mut self,
+		explodes: &[(Criterion, Option<i32>, Weight)],
+		whole: bool,
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
+		self.resolve(
+			explodes,
+			|setup, criterion, limit, meter| {
+				let setup = setup.explode(criterion, limit, whole, meter)?;
+				match whole
+				{
+					true => Ok(setup),
+					false => setup.collapse(meter)
+				}
+			},
+			meter
+		)
+	}
+
+	/// Apply a reroll or an explode to every setup, by each of the given
+	/// resolutions of its operands, splitting each setup by each resolution
+	/// and merging the setups that coincide.
+	///
+	/// # Parameters
+	/// - `resolutions`: The resolutions: each criterion, with its limit, or
+	///   `None` for no limit, and the weight of the outcome of the operands
+	///   that chose them.
+	/// - `apply`: The reroll or explode, which acts on a setup by one
+	///   resolution, and charges its own work.
+	/// - `meter`: The meter, which the clause charges a step and the cells of a
+	///   setup for each new setup.
+	///
+	/// # Errors
+	/// [`Halt`] if the clause would exceed the budget or is cancelled.
+	fn resolve(
+		&mut self,
+		resolutions: &[(Criterion, Option<i32>, Weight)],
+		apply: impl Fn(
+			&Setup,
+			&Criterion,
+			Option<i32>,
+			&mut Meter
+		) -> Result<Setup, Halt>,
+		meter: &mut Meter
+	) -> Result<(), Halt>
+	{
+		let outcomes = resolutions.len() as u128;
 		let (steps, cells) =
 			self.0.keys().fold((0u128, 0u128), |(steps, cells), setup| {
 				(steps + outcomes, cells + outcomes * setup.cells() as u128)
@@ -475,10 +697,11 @@ impl Mixture
 		let mut setups = BTreeMap::<Setup, Weight>::new();
 		for (setup, weight) in mem::take(&mut self.0)
 		{
-			for (criterion, limit, reroll_weight) in rerolls
+			for (criterion, limit, resolution_weight) in resolutions
 			{
-				let setup = setup.reroll(criterion, *limit, meter)?;
-				*setups.entry(setup).or_default() += &weight * reroll_weight;
+				let setup = apply(&setup, criterion, *limit, meter)?;
+				*setups.entry(setup).or_default() +=
+					&weight * resolution_weight;
 			}
 		}
 		self.0 = setups;

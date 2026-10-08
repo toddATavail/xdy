@@ -60,11 +60,13 @@
 //!
 //! Every quantity saturates rather than overflows, so an estimate that exceeds
 //! [`u64::MAX`] reports [`u64::MAX`], which no budget but the
-//! [unlimited](super::meter::Budget::UNLIMITED) one admits. The pass does not
-//! yet propagate [explosions](crate::Explode), and
-//! [refuses](crate::BuildError::Unbounded) every function that explodes dice,
-//! so the estimate of such a function saturates every quantity, and its class
-//! describes nothing.
+//! [unlimited](super::meter::Budget::UNLIMITED) one admits. The estimate does
+//! not yet price [explosions](crate::Explode), so the estimate of a function
+//! that explodes dice saturates every quantity, and its class describes
+//! nothing. The pass still meters every explode, so a finite budget refuses
+//! one only when the pass would exceed it, and the pass
+//! [refuses](crate::BuildError::Unbounded) a function in which an explode
+//! without limit may grow a chain without bound before it begins.
 
 use std::{
 	cmp::Reverse,
@@ -211,7 +213,7 @@ fn observe(
 		.iter()
 		.any(|inst| matches!(inst, Instruction::Explode(_)))
 	{
-		// The pass refuses every function that explodes dice, so price it
+		// The estimate does not yet price explodes, so price the function
 		// beyond every budget but the unlimited one.
 		return Ok(Cost {
 			steps: u64::MAX,

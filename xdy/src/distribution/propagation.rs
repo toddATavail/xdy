@@ -24,6 +24,20 @@
 //! endpoints, or limit are random splits each setup of its record by their
 //! joint outcomes, as a drop does by its count.
 //!
+//! An explode extends each die still kept into a [chain], which every
+//! later drop, keep, and sum counts as one die, worth its total. A chain's
+//! total behaves as a die's result does, so an explode that no later reroll or
+//! explode reads reduces its chains to their totals at once, and the record
+//! holds dice, or a pool, of totals; otherwise, the record holds the chains
+//! whole, and a later reroll rerolls each of their kept dice alone. An
+//! explode limited to `n` times counts the branches of each chain still kept
+//! as though it rolled every extension that it might need in advance, as a
+//! limited reroll does, and one without limit that matches every face
+//! saturates every chain, rolling nothing. Any other explode without limit may
+//! roll without bound, so the pass refuses every function in which one may
+//! extend a chain, before it begins. The Lean specification does not yet model
+//! explosion, so the proofs cited below do not cover it.
+//!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of
 //! an instruction are independent unless some random value reaches both, which
@@ -65,6 +79,7 @@
 //! of the paths' denominators divides, and often equals; see [`Mixture`] and
 //! [`merge`].
 
+mod chain;
 pub(crate) mod cost;
 pub(crate) mod meter;
 mod mixture;
@@ -88,12 +103,12 @@ use record::{Roll, clamp, convolve, distinct_faces};
 
 use crate::{
 	Add, AddressingMode, CanAllocate as _, CanVisitInstructions as _,
-	Distribution, Div, DropHighest, DropLowest, EvaluationError, Evaluator,
-	Exp, Explode, Instruction, InstructionVisitor, KeepHighest, KeepLowest,
-	Limit, Max, Min, Mod, Mul, Neg, Predicate, ProgramCounter, RegisterIndex,
-	Reroll, Return, RollCustomDice, RollRange, RollStandardDice,
-	RollingRecordIndex, Sub, SumRollingRecord, Weight, add, div, exp, max, min,
-	r#mod, mul, neg, sub
+	Criterion, Distribution, Div, DropHighest, DropLowest, EvaluationBounds,
+	EvaluationError, Evaluator, Exp, Explode, Instruction, InstructionVisitor,
+	KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul, Neg, Predicate,
+	ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice, RollRange,
+	RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord, Weight, add,
+	div, evaluator::BoundsEvaluator, exp, max, min, r#mod, mul, neg, sub
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -259,8 +274,9 @@ impl DistributionPlan<'_>
 	///   exceed the budget.
 	/// - [`Cancelled`](BuildError::Cancelled) if the progress cancels the
 	///   build.
-	/// - [`Unbounded`](BuildError::Unbounded) if the function explodes dice,
-	///   before the build charges anything.
+	/// - [`Unbounded`](BuildError::Unbounded) if an explode without limit,
+	///   whose predicate does not match every face, may extend a chain, before
+	///   the build charges anything.
 	///
 	/// In every case, there is no partial distribution.
 	///
@@ -509,8 +525,9 @@ pub(crate) fn propagate(
 ///   the budget, which the pass refuses before the operation expands anything.
 /// - [`Cancelled`](PropagationError::Cancelled) if the progress cancels the
 ///   pass.
-/// - [`Unbounded`](PropagationError::Unbounded) if the function explodes dice,
-///   before the pass charges anything.
+/// - [`Unbounded`](PropagationError::Unbounded) if an explode without limit,
+///   whose predicate does not match every face, may extend a chain, before the
+///   pass charges anything.
 ///
 /// # Panics
 /// In debug builds, if the function is not [valid](crate::Function::validate),
@@ -541,12 +558,8 @@ pub(crate) fn propagate_worlds(
 			given: args.len()
 		})
 	}
-	if function
-		.instructions
-		.iter()
-		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	if unbounded(evaluator, &args)
 	{
-		// The pass does not yet propagate explosions.
 		return Err(PropagationError::Unbounded)
 	}
 	let mut world = World {
@@ -571,12 +584,25 @@ pub(crate) fn propagate_worlds(
 	for inst in &function.instructions
 	{
 		let touched = touched(inst);
+		// A reroll or explode keeps the chains of its record whole only if a
+		// later one reads them.
+		let whole = match inst
+		{
+			Instruction::Reroll(Reroll { dest, .. })
+			| Instruction::Explode(Explode { dest, .. }) => rerolled(
+				&function.instructions,
+				pc,
+				Location::RollingRecord(*dest)
+			),
+			_ => false
+		};
 		for world in &mut worlds
 		{
 			let before = world.cells_at(&touched);
 			inst.visit(&mut Execution {
 				world,
-				meter: &mut meter
+				meter: &mut meter,
+				whole
 			})?;
 			meter.settle(before, world.cells_at(&touched));
 		}
@@ -611,6 +637,50 @@ pub(crate) fn propagate_worlds(
 	debug_assert!(worlds.is_empty(), "every split merges by the end");
 	let distribution = world.finish(&mut meter)?;
 	Ok((distribution, meter.usage()))
+}
+
+/// Answer whether the evaluator's function, for the given arguments and the
+/// evaluator's external variables, has an explode without limit, whose
+/// predicate does not match every face of its die, that may extend a chain,
+/// which may then grow without bound, so that the function has no exact
+/// distribution of finite weight. The [bounds](BoundsEvaluator) decide it,
+/// conservatively: an explode whose random threshold may match every face,
+/// or may match none, is unbounded too.
+///
+/// # Parameters
+/// - `evaluator`: The evaluator, suitably [bound](Evaluator::bind).
+/// - `args`: The arguments to the function, as many as its formal parameters.
+///
+/// # Returns
+/// `true` if some such explode may extend a chain, `false` otherwise.
+fn unbounded(evaluator: &Evaluator, args: &[i32]) -> bool
+{
+	let function = &evaluator.function;
+	if !function
+		.instructions
+		.iter()
+		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	{
+		return false
+	}
+	// The pass fixes every binding, and an unbound external variable holds
+	// zero, so every binding is a degenerate interval.
+	let mut bounds = BoundsEvaluator::new(function);
+	bounds
+		.seed(
+			args.iter().map(|arg| Some((*arg).into())),
+			evaluator
+				.environment
+				.iter()
+				.map(|(index, value)| (*index, (*value).into())),
+			EvaluationBounds::default()
+		)
+		.expect("the arity agrees");
+	for inst in &function.instructions
+	{
+		bounds.step(inst);
+	}
+	bounds.unbounded()
 }
 
 /// Answer the locations that the specified instruction reads or writes, each
@@ -1701,7 +1771,13 @@ struct Execution<'a, 'b>
 	world: &'a mut World,
 
 	/// The meter.
-	meter: &'a mut Meter<'b>
+	meter: &'a mut Meter<'b>,
+
+	/// Whether a later reroll or explode reads the rolling record that a
+	/// reroll or explode writes, before a roll refills it, so that the
+	/// [chains](chain) of the record stay whole, rather than reduce to their
+	/// totals.
+	whole: bool
 }
 
 impl Execution<'_, '_>
@@ -1743,7 +1819,7 @@ impl Execution<'_, '_>
 		) -> Result<Distribution, Halt>
 	) -> Result<(), Halt>
 	{
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let result = match op1
 		{
 			AddressingMode::Register(_) if op1 == op2 =>
@@ -1759,6 +1835,56 @@ impl Execution<'_, '_>
 		};
 		world.write(dest, result, meter)
 	}
+
+	/// Resolve the predicate and limit of a reroll or an explode by each joint
+	/// outcome of their operands.
+	///
+	/// # Parameters
+	/// - `operands`: The operands of the predicate and the limit.
+	/// - `predicate`: The predicate.
+	/// - `limit`: The limit.
+	///
+	/// # Returns
+	/// The resolutions: each set of results that the predicate matches, with
+	/// the limit, or `None` for no limit, and the weight of the joint outcome
+	/// of the operands that chose them.
+	///
+	/// # Errors
+	/// [`Halt`] if resolving would exceed the budget or is cancelled.
+	fn resolve(
+		&mut self,
+		operands: &[AddressingMode],
+		predicate: &Predicate,
+		limit: Limit
+	) -> Result<Vec<(Criterion, Option<i32>, Weight)>, Halt>
+	{
+		let Self { world, meter, .. } = self;
+		let joint = world.read_joint(operands, meter)?;
+		// Each joint outcome of the operands resolves the predicate, which
+		// holds a copy of a list of literals.
+		let listed = match predicate
+		{
+			Predicate::In(values) => values.len() as u128,
+			_ => 0
+		};
+		let resolved = charge_of(joint.len() as u128 * (1 + listed));
+		meter.charge(resolved, resolved)?;
+		Ok(joint
+			.into_iter()
+			.map(|(values, w)| {
+				let value = |op: AddressingMode| {
+					values[operands.iter().position(|&o| o == op).unwrap()]
+				};
+				let criterion = predicate.resolve(value);
+				let limit = match limit
+				{
+					Limit::Times(count) => Some(value(count)),
+					Limit::Unlimited => None
+				};
+				(criterion, limit, w)
+			})
+			.collect())
+	}
 }
 
 impl InstructionVisitor<Halt> for Execution<'_, '_>
@@ -1768,7 +1894,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// `law_rollRange_operands`, in `lean/spec/XdySpec/World.lean`, proves
 		// that the record has the law of the range at each pair of endpoints,
 		// mixed over their joint law.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let ends = world.read_pair(inst.start, inst.end, meter)?;
 		// Each pair of endpoints makes one setup, of one cell.
 		let setups = ends.len() as u64;
@@ -1789,7 +1915,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// `law_rollStandardDice`, in `lean/spec/XdySpec/World.lean`, proves
 		// that the record has the law of the dice at each pair of count and
 		// faces, mixed over their joint law.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let dice = world.read_pair(inst.count, inst.faces, meter)?;
 		// Each pair of count and faces makes one setup, of one cell, and
 		// charges its dice.
@@ -1813,7 +1939,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_rollCustomDice`, in `lean/spec/XdySpec/World.lean`, proves that
 		// the record has the law of the dice at each count, mixed over its law.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let counts = world.read(inst.count, meter)?;
 		let faces = inst.faces.len() as u128;
 		// The distinct faces take a step for each face. Each count makes one
@@ -1840,7 +1966,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_dropLowest`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// record has the law of the drop over independent records and counts.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];
 		record.mixture.drop_lowest(&counts, meter)?;
@@ -1853,7 +1979,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_dropHighest`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// record has the law of the drop over independent records and counts.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];
 		record.mixture.drop_highest(&counts, meter)?;
@@ -1866,7 +1992,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_keepLowest`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// record has the law of the keep over independent records and counts.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];
 		record.mixture.keep_lowest(&counts, meter)?;
@@ -1879,7 +2005,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_keepHighest`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// record has the law of the keep over independent records and counts.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let counts = world.read(inst.count, meter)?;
 		let record = &mut world.records[inst.dest.0];
 		record.mixture.keep_highest(&counts, meter)?;
@@ -1896,43 +2022,37 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// `mixtureLaw_reroll`, in `lean/spec/XdySpec/Reroll.lean`, that
 		// rerolling every setup by each resolution of the operands describes
 		// it, as every later instruction views the record.
-		let Self { world, meter } = self;
-		let ops = inst.operands();
-		let joint = world.read_joint(&ops, meter)?;
-		// Each joint outcome of the operands resolves the predicate, which
-		// holds a copy of a list of literals.
-		let listed = match &inst.predicate
-		{
-			Predicate::In(values) => values.len() as u128,
-			_ => 0
-		};
-		let resolved = charge_of(joint.len() as u128 * (1 + listed));
-		meter.charge(resolved, resolved)?;
-		let rerolls = joint
-			.into_iter()
-			.map(|(values, w)| {
-				let value = |op: AddressingMode| {
-					values[ops.iter().position(|&o| o == op).unwrap()]
-				};
-				let criterion = inst.predicate.resolve(value);
-				let limit = match inst.limit
-				{
-					Limit::Times(count) => Some(value(count)),
-					Limit::Unlimited => None
-				};
-				(criterion, limit, w)
-			})
-			.collect::<Vec<_>>();
+		let rerolls =
+			self.resolve(&inst.operands(), &inst.predicate, inst.limit)?;
+		let Self {
+			world,
+			meter,
+			whole
+		} = self;
 		let record = &mut world.records[inst.dest.0];
-		record.mixture.reroll(&rerolls, meter)?;
+		record.mixture.reroll(&rerolls, *whole, meter)?;
 		// The reroll writes a new value, which no sum has read yet.
 		record.summed = false;
 		Ok(())
 	}
 
-	fn visit_explode(&mut self, _inst: &Explode) -> Result<(), Halt>
+	fn visit_explode(&mut self, inst: &Explode) -> Result<(), Halt>
 	{
-		unreachable!("the pass refuses every function that explodes dice")
+		// The Lean specification does not yet model explosion, so this has no
+		// proof; the explode mirrors the reroll, resolving every setup of its
+		// record by each joint outcome of its operands.
+		let explodes =
+			self.resolve(&inst.operands(), &inst.predicate, inst.limit)?;
+		let Self {
+			world,
+			meter,
+			whole
+		} = self;
+		let record = &mut world.records[inst.dest.0];
+		record.mixture.explode(&explodes, *whole, meter)?;
+		// The explode writes a new value, which no sum has read yet.
+		record.summed = false;
+		Ok(())
 	}
 
 	fn visit_sum_rolling_record(
@@ -1942,7 +2062,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_sumRollingRecord`, in `lean/spec/XdySpec/World.lean`, proves
 		// that the register has the law of the record's sum.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		// A record summed before is fixed, since the plan splits on every
 		// random record read twice, so summing it again adds no weight.
 		let record = &mut world.records[inst.src.0];
@@ -2013,7 +2133,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_neg`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// register has the operand's law, negated.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		let xs = world.read(inst.op, meter)?;
 		let result = map(xs, neg, meter)?;
 		world.write(inst.dest, result, meter)
@@ -2024,7 +2144,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// `run_eq_forward`, in `lean/spec/XdySpec/Invariant.lean`, proves that
 		// the function answers the law of the returned register, mixed over
 		// the worlds.
-		let Self { world, meter } = self;
+		let Self { world, meter, .. } = self;
 		world.result = Some(world.read(inst.src, meter)?);
 		Ok(())
 	}
@@ -2056,8 +2176,9 @@ pub(crate) enum PropagationError
 	/// it charged last expanded anything.
 	Cancelled,
 
-	/// The function explodes dice, which the pass does not yet propagate, so
-	/// it refused the function before it charged anything.
+	/// An explode without limit, whose predicate does not match every face,
+	/// may extend a chain, which may then grow without bound, so the pass
+	/// refused the function before it charged anything.
 	Unbounded
 }
 
@@ -2094,12 +2215,18 @@ pub enum BuildError
 	/// The [progress](Progress) cancelled the build.
 	Cancelled,
 
-	/// The function [explodes](crate::Explode) dice, whose chains may hold
-	/// any number of dice, so the build refused it before it charged anything.
+	/// An [explode](crate::Explode) without limit, whose predicate does not
+	/// match every face of its die, may extend a chain, which may then hold
+	/// any number of dice, so that the function has no exact distribution of
+	/// finite weight, and the build refused it before it charged anything.
 	/// This reports no defect, and no greater budget would help;
-	/// [sample](crate::Evaluator::sample) the function instead. For now, the
-	/// build refuses every function that explodes dice, and its
-	/// [estimate](DistributionPlan::estimate) exceeds every budget but the
+	/// [sample](crate::Evaluator::sample) the function instead. The build
+	/// decides it by the [bounds](crate::Evaluator::bounds), conservatively,
+	/// so it also refuses an explode whose random threshold may match every
+	/// face or none. Limited explodes, and unlimited ones that match every
+	/// face, and so saturate, are built, though the
+	/// [estimate](DistributionPlan::estimate) of a function that explodes dice
+	/// does not yet price them, and so exceeds every budget but the
 	/// [unlimited](Budget::UNLIMITED) one.
 	Unbounded
 }
@@ -2126,8 +2253,8 @@ impl Display for BuildError
 			BuildError::Cancelled => write!(f, "distribution build cancelled"),
 			BuildError::Unbounded => write!(
 				f,
-				"no exact distribution: the function explodes dice, so sample \
-				 it instead"
+				"no exact distribution: an explode without limit may grow a \
+				 chain without bound, so sample the function instead"
 			)
 		}
 	}
