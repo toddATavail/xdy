@@ -368,10 +368,7 @@ fn test_visitor_stops_on_error()
 fn test_visitor_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION
-			.into_iter()
-			.chain(Nesting::UNPARSED)
-			.chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
 			let depth = nesting.depth();
 			let expression = nest(nesting, depth, 1);

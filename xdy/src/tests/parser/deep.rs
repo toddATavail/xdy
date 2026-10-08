@@ -143,6 +143,22 @@ fn test_parse_deep_reroll_count() { parse_deep(Nesting::RerollCount) }
 #[ignore = "stress: run with just stress"]
 fn test_parse_deep_reroll_clauses() { parse_deep(Nesting::RerollClauses) }
 
+/// Ensure that a deep chain of explode thresholds parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_explode_threshold() { parse_deep(Nesting::ExplodeThreshold) }
+
+/// Ensure that a deep chain of explode counts parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_explode_count() { parse_deep(Nesting::ExplodeCount) }
+
+/// Ensure that a deep stack of explode clauses of every form, among rerolls
+/// and drops, parses on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_parse_deep_explode_clauses() { parse_deep(Nesting::ExplodeClauses) }
+
 /// Ensure that a deep chain of the first arguments of extrema parses on a small
 /// stack.
 #[test]

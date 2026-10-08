@@ -55,7 +55,7 @@ use nom::{
 use crate::{
 	ast::{
 		Add, ArithmeticExpression, Binding, Constant, CustomDice,
-		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp,
+		DiceExpression, Direction, Div, DropHighest, DropLowest, Exp, Explode,
 		Expression, Extremum, Function, Group, KeepHighest, KeepLowest, Limit,
 		Mod, Mul, Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub,
 		Variable
@@ -67,15 +67,13 @@ use super::{
 	ARGUMENT_CONTEXT, BINDING_CONTEXT, BINDING_EXPRESSION_CONTEXT,
 	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CLOSING_PAREN_CONTEXT,
 	CONSTANT_CONTEXT, CUSTOM_FACES_CONTEXT, DICE_CONTEXT, DICE_COUNT_CONTEXT,
-	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPRESSION_CONTEXT,
-	FUNCTION_BODY_CONTEXT, FUNCTION_CONTEXT, GROUP_CONTEXT, IDENTIFIER_CONTEXT,
-	KEEP_DIRECTION_CONTEXT, KEEP_EXPRESSION_CONTEXT, NEXT_PARAMETER_CONTEXT,
-	NomErrorKind, PARAMETER_CONTEXT, ParseError, RANGE_CONTEXT,
-	RANGE_END_CONTEXT, RANGE_START_CONTEXT, REROLL_COUNT_CONTEXT,
-	REROLL_PREDICATE_CONTEXT, REROLL_RANGE_END_CONTEXT,
-	REROLL_RANGE_OPERATOR_CONTEXT, REROLL_RANGE_START_CONTEXT,
-	REROLL_THRESHOLD_CONTEXT, REROLL_TIMES_CONTEXT, RIGHT_OPERAND_CONTEXT,
-	RerollParts, STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT, begins_call,
+	DROP_DIRECTION_CONTEXT, DROP_EXPRESSION_CONTEXT, EXPLODE_CONTEXTS,
+	EXPRESSION_CONTEXT, FUNCTION_BODY_CONTEXT, FUNCTION_CONTEXT, GROUP_CONTEXT,
+	IDENTIFIER_CONTEXT, KEEP_DIRECTION_CONTEXT, KEEP_EXPRESSION_CONTEXT,
+	NEXT_PARAMETER_CONTEXT, NomErrorKind, PARAMETER_CONTEXT, ParseError,
+	PredicatedContexts, RANGE_CONTEXT, RANGE_END_CONTEXT, RANGE_START_CONTEXT,
+	REROLL_CONTEXTS, RIGHT_OPERAND_CONTEXT, RerollParts,
+	STANDARD_FACES_CONTEXT, Span, VARIABLE_CONTEXT, begins_call,
 	begins_misplaced_clause, begins_operand, begins_verb, braced_name,
 	canonical_name, constant, custom_faces, d_operator, identifier, integer,
 	is_token_space, keyword, name_space0, negative_constant, parameter,
@@ -139,14 +137,14 @@ pub(crate) enum Goal
 	/// [`dice_count`](super::dice_count) or
 	/// [`drop_expression`](super::drop_expression), which are identical, and
 	/// whose constant is unsigned, producing [`Value::Expression`]. The counts
-	/// of keep clauses and of the limits of reroll clauses are drop
-	/// expressions too.
+	/// of keep clauses and of the limits of reroll and explode clauses are
+	/// drop expressions too.
 	Atom,
 
 	/// [`standard_faces`](super::standard_faces), which is [`Goal::Atom`] but
 	/// with a signed [integer] in place of the constant, producing
 	/// [`Value::Expression`]. The thresholds and endpoints of the predicates
-	/// of reroll clauses are standard faces too.
+	/// of reroll and explode clauses are standard faces too.
 	Faces,
 
 	/// [`drop_lowest`](super::drop_lowest), producing [`Value::Drop`].
@@ -161,8 +159,11 @@ pub(crate) enum Goal
 	/// [`keep_highest`](super::keep_highest), producing [`Value::Drop`].
 	KeepHighest,
 
-	/// [`reroll`](super::reroll), producing [`Value::Reroll`].
+	/// [`reroll`](super::reroll), producing [`Value::Predicated`].
 	Reroll,
+
+	/// [`explode`](super::explode), producing [`Value::Predicated`].
+	Explode,
 
 	/// [`extremum`](super::extremum), producing [`Value::Expression`]: the
 	/// call, unless a [repair](Repair::Unwrap) replaced a call of one argument
@@ -207,8 +208,8 @@ pub(super) enum Value<'src>
 	/// The optional drop expression of a drop or keep clause, i.e., its count.
 	Drop(Option<Box<Expression<'src>>>),
 
-	/// The predicate and the optional limit of a reroll clause.
-	Reroll
+	/// The predicate and the optional limit of a reroll or explode clause.
+	Predicated
 	{
 		/// The predicate.
 		predicate: Predicate<Box<Expression<'src>>>,
@@ -396,19 +397,23 @@ impl<'src> Value<'src>
 		}
 	}
 
-	/// Answer the predicate and the optional limit of a reroll clause.
+	/// Answer the predicate and the optional limit of a reroll or explode
+	/// clause.
 	///
 	/// # Returns
 	/// The predicate and the limit.
 	///
 	/// # Panics
-	/// If the receiver is not a [reroll clause](Value::Reroll).
-	pub(super) fn into_reroll(self) -> RerollParts<'src>
+	/// If the receiver is not a [reroll or explode clause](Value::Predicated).
+	pub(super) fn into_predicated(self) -> RerollParts<'src>
 	{
 		match self
 		{
-			Value::Reroll { predicate, limit } => (predicate, limit),
-			value => unreachable!("expected a reroll clause: {:?}", value)
+			Value::Predicated { predicate, limit } => (predicate, limit),
+			value =>
+			{
+				unreachable!("expected a reroll or explode clause: {:?}", value)
+			}
 		}
 	}
 }
@@ -610,7 +615,107 @@ impl ClauseKind
 	}
 }
 
-/// The comparator of the predicate of a reroll clause.
+/// The kind of a reroll or explode clause, which share their predicates and
+/// their limits, and differ only in their verbs and what they build.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PredicatedKind
+{
+	/// `reroll`.
+	Reroll,
+
+	/// `explode`.
+	Explode
+}
+
+impl PredicatedKind
+{
+	/// Answer the verb of a clause of this kind.
+	///
+	/// # Returns
+	/// `reroll` or `explode`.
+	pub(crate) const fn keyword(self) -> &'static str
+	{
+		match self
+		{
+			PredicatedKind::Reroll => "reroll",
+			PredicatedKind::Explode => "explode"
+		}
+	}
+
+	/// Answer the context classifiers of the parts of a clause of this kind.
+	///
+	/// # Returns
+	/// The classifiers.
+	pub(crate) const fn contexts(self) -> &'static PredicatedContexts
+	{
+		match self
+		{
+			PredicatedKind::Reroll => &REROLL_CONTEXTS,
+			PredicatedKind::Explode => &EXPLODE_CONTEXTS
+		}
+	}
+
+	/// Answer the threshold of the predicate, `=`, that a [repair](Repair::Fix)
+	/// supplies wherever a clause of this kind lacks its predicate: for a
+	/// reroll, [`PLACEHOLDER_THRESHOLD`], since a reroll most often rerolls
+	/// ones; for an explode, the highest face of its dice, since an explode
+	/// most often explodes the highest face, or [`PLACEHOLDER_FACES`], the
+	/// faces of the commonest dice, if the faces are not constant.
+	///
+	/// # Parameters
+	/// - `highest`: The [highest face](highest_face) of the dice, if known.
+	///
+	/// # Returns
+	/// The threshold.
+	pub(crate) const fn placeholder_threshold(self, highest: Option<i32>)
+	-> i32
+	{
+		match (self, highest)
+		{
+			(PredicatedKind::Reroll, _) => PLACEHOLDER_THRESHOLD,
+			(PredicatedKind::Explode, Some(highest)) => highest,
+			(PredicatedKind::Explode, None) => PLACEHOLDER_FACES
+		}
+	}
+
+	/// Build a clause of this kind.
+	///
+	/// # Parameters
+	/// - `dice`: The dice expression that the clause modifies.
+	/// - `predicate`: The predicate.
+	/// - `limit`: The limit, if any.
+	/// - `span`: The span of the clause.
+	///
+	/// # Returns
+	/// The clause.
+	fn build<'src>(
+		self,
+		dice: DiceExpression<'src>,
+		predicate: Predicate<Box<Expression<'src>>>,
+		limit: Option<Limit<Box<Expression<'src>>>>,
+		span: SourceSpan
+	) -> DiceExpression<'src>
+	{
+		let dice = Box::new(dice);
+		match self
+		{
+			PredicatedKind::Reroll => DiceExpression::Reroll(Reroll {
+				dice,
+				predicate,
+				limit,
+				span
+			}),
+			PredicatedKind::Explode => DiceExpression::Explode(Explode {
+				dice,
+				predicate,
+				limit,
+				span
+			})
+		}
+	}
+}
+
+/// The comparator of the predicate of a reroll or explode clause.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Comparison
 {
@@ -885,11 +990,15 @@ enum Frame<'src>
 		input: Span<'src>
 	},
 
-	/// A reroll clause of [`Goal::Dice`], [`Goal::PrimaryDice`], or
-	/// [`Goal::Reroll`], awaiting the threshold of a comparison, or the start
-	/// of a range. It carries the [clause](Payload::Reroll).
-	RerollFirst
+	/// A reroll or explode clause of [`Goal::Dice`], [`Goal::PrimaryDice`],
+	/// [`Goal::Reroll`], or [`Goal::Explode`], awaiting the threshold of a
+	/// comparison, or the start of a range. It carries the
+	/// [clause](Payload::Predicated).
+	PredicateFirst
 	{
+		/// The kind of the clause.
+		kind: PredicatedKind,
+
 		/// The comparator, or `None` if the predicate is a range.
 		comparison: Option<Comparison>,
 
@@ -897,10 +1006,13 @@ enum Frame<'src>
 		input: Span<'src>
 	},
 
-	/// A reroll clause, awaiting the end of a range. It carries the
-	/// [clause](Payload::Reroll), which holds the start of the range.
-	RerollEnd
+	/// A reroll or explode clause, awaiting the end of a range. It carries the
+	/// [clause](Payload::Predicated), which holds the start of the range.
+	PredicateEnd
 	{
+		/// The kind of the clause.
+		kind: PredicatedKind,
+
 		/// Whether the range is inclusive, `..=`, rather than half-open, `..`.
 		inclusive: bool,
 
@@ -908,11 +1020,17 @@ enum Frame<'src>
 		input: Span<'src>
 	},
 
-	/// A reroll clause, awaiting the optional count of its limit. It holds the
-	/// input of the count, and carries the [clause](Payload::Reroll), which
-	/// holds the predicate and the input after it, where the clause ends if it
-	/// has no limit.
-	RerollCount(Span<'src>)
+	/// A reroll or explode clause, awaiting the optional count of its limit.
+	/// It carries the [clause](Payload::Predicated), which holds the predicate
+	/// and the input after it, where the clause ends if it has no limit.
+	LimitCount
+	{
+		/// The kind of the clause.
+		kind: PredicatedKind,
+
+		/// The input of the count.
+		input: Span<'src>
+	}
 }
 
 // A frame is at most as large as a span and an offset, and a tag.
@@ -938,9 +1056,9 @@ impl Frame<'_>
 			| Frame::DiceDrop { .. }
 			| Frame::StandardFaces(_)
 			| Frame::DropExpression { .. }
-			| Frame::RerollFirst { .. }
-			| Frame::RerollEnd { .. }
-			| Frame::RerollCount(_)
+			| Frame::PredicateFirst { .. }
+			| Frame::PredicateEnd { .. }
+			| Frame::LimitCount { .. }
 			| Frame::CallArgument { .. } => true,
 			Frame::UnaryExponent { merged, .. } => *merged,
 			Frame::BinaryFirst(_)
@@ -1008,12 +1126,15 @@ enum Payload<'src>
 	Head(BindingHead<'src>),
 
 	/// The dice expression that the clause of [`Frame::DiceDrop`] modifies,
-	/// and the input after the direction, where the clause ends if it has no
-	/// drop expression.
+	/// the highest face of its dice, and the input after the direction, where
+	/// the clause ends if it has no drop expression.
 	Drop
 	{
 		/// The dice expression.
 		dice: DiceExpression<'src>,
+
+		/// The [highest face](highest_face) of the dice, if known.
+		highest: Option<i32>,
 
 		/// The input after the direction.
 		rest: Span<'src>
@@ -1023,10 +1144,10 @@ enum Payload<'src>
 	/// clause ends if it has no drop expression.
 	Rest(Span<'src>),
 
-	/// The parts of the reroll clause of [`Frame::RerollFirst`],
-	/// [`Frame::RerollEnd`], or [`Frame::RerollCount`] read so far. They are
+	/// The parts of the reroll or explode clause of [`Frame::PredicateFirst`],
+	/// [`Frame::PredicateEnd`], or [`Frame::LimitCount`] read so far. They are
 	/// boxed, lest they enlarge every payload.
-	Reroll(Box<RerollClause<'src>>),
+	Predicated(Box<PredicatedClause<'src>>),
 
 	/// The call of [`Frame::CallArgument`] so far. It is boxed, lest it
 	/// enlarge every payload.
@@ -1058,22 +1179,23 @@ struct Call<'src>
 	first: SourceSpan
 }
 
-/// The parts of a reroll clause read so far, which the frames of the clause
-/// [carry](Payload::Reroll) in turn.
+/// The parts of a reroll or explode clause read so far, which the frames of
+/// the clause [carry](Payload::Predicated) in turn.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
-struct RerollClause<'src>
+struct PredicatedClause<'src>
 {
-	/// The dice expression that the clause modifies, or `None` if the clause
-	/// is parsed alone, as [`Goal::Reroll`].
-	dice: Option<DiceExpression<'src>>,
+	/// The dice expression that the clause modifies, and the [highest
+	/// face](highest_face) of its dice, if known; or `None` if the clause is
+	/// parsed alone, as [`Goal::Reroll`] or [`Goal::Explode`].
+	dice: Option<(DiceExpression<'src>, Option<i32>)>,
 
-	/// The start of a range, once read, which [`Frame::RerollEnd`] holds.
+	/// The start of a range, once read, which [`Frame::PredicateEnd`] holds.
 	start: Option<Expression<'src>>,
 
 	/// The predicate, and the input after it, where the clause ends if it has
-	/// no limit, once read, which [`Frame::RerollCount`] holds.
+	/// no limit, once read, which [`Frame::LimitCount`] holds.
 	predicate: Option<(Predicate<Box<Expression<'src>>>, Span<'src>)>
 }
 
@@ -1143,19 +1265,23 @@ impl<'src> Payload<'src>
 		}
 	}
 
-	/// Answer the dice expression and the input after the direction of a drop
-	/// clause.
+	/// Answer the dice expression, the highest face of its dice, and the input
+	/// after the direction of a drop clause.
 	///
 	/// # Returns
-	/// The dice expression and the input.
+	/// The dice expression, the highest face, and the input.
 	///
 	/// # Panics
 	/// If the payload is not [`Payload::Drop`].
-	fn into_drop(self) -> (DiceExpression<'src>, Span<'src>)
+	fn into_drop(self) -> (DiceExpression<'src>, Option<i32>, Span<'src>)
 	{
 		match self
 		{
-			Payload::Drop { dice, rest } => (dice, rest),
+			Payload::Drop {
+				dice,
+				highest,
+				rest
+			} => (dice, highest, rest),
 			_ => unreachable!("the payload is not a drop clause")
 		}
 	}
@@ -1176,19 +1302,19 @@ impl<'src> Payload<'src>
 		}
 	}
 
-	/// Answer the parts of a reroll clause read so far.
+	/// Answer the parts of a reroll or explode clause read so far.
 	///
 	/// # Returns
 	/// The parts.
 	///
 	/// # Panics
-	/// If the payload is not [`Payload::Reroll`].
-	fn into_reroll(self) -> Box<RerollClause<'src>>
+	/// If the payload is not [`Payload::Predicated`].
+	fn into_predicated(self) -> Box<PredicatedClause<'src>>
 	{
 		match self
 		{
-			Payload::Reroll(clause) => clause,
-			_ => unreachable!("the payload is not a reroll clause")
+			Payload::Predicated(clause) => clause,
+			_ => unreachable!("the payload is not a reroll or explode clause")
 		}
 	}
 
@@ -1639,7 +1765,14 @@ fn start<'src, R: Recovery<'src>>(
 		Goal::DropHighest => start_drop(input, ClauseKind::DropHighest, stack),
 		Goal::KeepLowest => start_drop(input, ClauseKind::KeepLowest, stack),
 		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack),
-		Goal::Reroll => start_reroll(input, stack, rec),
+		Goal::Reroll =>
+		{
+			start_predicated(PredicatedKind::Reroll, input, stack, rec)
+		},
+		Goal::Explode =>
+		{
+			start_predicated(PredicatedKind::Explode, input, stack, rec)
+		},
 		Goal::Extremum => start_extremum(input, stack, rec)
 	}
 }
@@ -1754,8 +1887,16 @@ fn resume<'src, R: Recovery<'src>>(
 		},
 		Frame::DiceDrop { kind, input } =>
 		{
-			let (dice, rest) = stack.pop_payload().into_drop();
-			resume_dice_drop(dice, kind, rest, input, outcome, stack, rec)
+			let (dice, highest, rest) = stack.pop_payload().into_drop();
+			resume_dice_drop(
+				(dice, highest),
+				kind,
+				rest,
+				input,
+				outcome,
+				stack,
+				rec
+			)
 		},
 		Frame::StandardCount(input) =>
 		{
@@ -1772,20 +1913,32 @@ fn resume<'src, R: Recovery<'src>>(
 			let rest = stack.pop_payload().into_rest();
 			resume_drop_expression(kind, rest, input, outcome)
 		},
-		Frame::RerollFirst { comparison, input } =>
+		Frame::PredicateFirst {
+			kind,
+			comparison,
+			input
+		} =>
 		{
-			let clause = stack.pop_payload().into_reroll();
-			resume_reroll_first(clause, comparison, input, outcome, stack, rec)
+			let clause = stack.pop_payload().into_predicated();
+			resume_predicate_first(
+				kind, clause, comparison, input, outcome, stack, rec
+			)
 		},
-		Frame::RerollEnd { inclusive, input } =>
+		Frame::PredicateEnd {
+			kind,
+			inclusive,
+			input
+		} =>
 		{
-			let clause = stack.pop_payload().into_reroll();
-			resume_reroll_end(clause, inclusive, input, outcome, stack, rec)
+			let clause = stack.pop_payload().into_predicated();
+			resume_predicate_end(
+				kind, clause, inclusive, input, outcome, stack, rec
+			)
 		},
-		Frame::RerollCount(input) =>
+		Frame::LimitCount { kind, input } =>
 		{
-			let clause = stack.pop_payload().into_reroll();
-			resume_reroll_count(*clause, input, outcome, stack, rec)
+			let clause = stack.pop_payload().into_predicated();
+			resume_limit_count(kind, *clause, input, outcome, stack, rec)
 		}
 	}
 }
@@ -3390,6 +3543,7 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 				});
 				return dice_continue(
 					standard_dice(count, faces),
+					Some(PLACEHOLDER_FACES),
 					rest,
 					stack,
 					rec
@@ -3430,7 +3584,8 @@ fn resume_dice_faces<'src, R: Recovery<'src>>(
 			Ok((rest, faces)) =>
 			{
 				let dice = standard_dice(count, faces.into_expression());
-				return dice_continue(dice, rest, stack, rec);
+				let highest = highest_face(&dice);
+				return dice_continue(dice, highest, rest, stack, rec);
 			},
 			Err(nom::Err::Error(e)) => e,
 			Err(e) => return fail(e)
@@ -3454,7 +3609,8 @@ fn resume_dice_faces<'src, R: Recovery<'src>>(
 				faces,
 				span: SourceSpan { start, end }
 			});
-			dice_continue(dice, rest, stack, rec)
+			let highest = highest_face(&dice);
+			dice_continue(dice, highest, rest, stack, rec)
 		},
 		Err(nom::Err::Error(e)) =>
 		{
@@ -3510,11 +3666,41 @@ fn standard_dice<'src>(
 	})
 }
 
+/// Answer the highest face of standard or custom dice, if their faces are
+/// constant: the faces of standard dice, which show `0` if they have none, or
+/// the greatest of custom faces. The clauses of a dice expression leave the
+/// faces of its dice alone, so the parser answers this once, as it reads the
+/// dice, rather than seeking the dice beneath the clauses.
+///
+/// # Parameters
+/// - `dice`: The dice expression.
+///
+/// # Returns
+/// The highest face, or `None` if the faces are not constant, or `dice` is
+/// not standard or custom dice.
+fn highest_face(dice: &DiceExpression<'_>) -> Option<i32>
+{
+	match dice
+	{
+		DiceExpression::Standard(StandardDice { faces, .. }) => match **faces
+		{
+			Expression::Constant(Constant { value, .. }) => Some(value.max(0)),
+			_ => None
+		},
+		DiceExpression::Custom(CustomDice { faces, .. }) =>
+		{
+			faces.iter().copied().max()
+		},
+		_ => None
+	}
+}
+
 /// Continue [`Goal::Dice`] or [`Goal::PrimaryDice`] after the dice expression
-/// so far, as `fold_many0(alt((reroll_clause, drop_clause, keep_clause)))`. If
-/// a reroll clause follows, parse its predicate; see [`reroll_predicate`]. If a
-/// drop or keep clause follows, parse its direction and call its drop
-/// expression. Otherwise, finish with the dice expression so far.
+/// so far, as `fold_many0(alt((reroll_clause, explode_clause, drop_clause,
+/// keep_clause)))`. If a reroll or explode clause follows, parse its
+/// predicate; see [`read_predicate`]. If a drop or keep clause follows, parse
+/// its direction and call its drop expression. Otherwise, finish with the dice
+/// expression so far.
 ///
 /// A drop clause is `multispace0`, then `tag("drop")`, then
 /// `cut(preceded(multispace0, context(DROP_DIRECTION_CONTEXT,
@@ -3522,10 +3708,13 @@ fn standard_dice<'src>(
 /// context(DROP_EXPRESSION_CONTEXT, drop_expression)))`. A keep clause is the
 /// same, but with `tag("keep")`, [`KEEP_DIRECTION_CONTEXT`], and
 /// [`KEEP_EXPRESSION_CONTEXT`]. A reroll clause is `multispace0`, then the
-/// [keyword] `reroll`, and then its predicate and its limit.
+/// [keyword] `reroll`, and then its predicate and its limit. An explode clause
+/// is the same, but with the [keyword] `explode`.
 ///
 /// # Parameters
 /// - `dice`: The dice expression so far.
+/// - `highest`: The [highest face](highest_face) of its dice, if known, which
+///   an explode clause that lacks its predicate supplies as its threshold.
 /// - `rest`: The input after the dice expression so far.
 /// - `stack`: The stack of suspended productions.
 /// - `rec`: The recovery state.
@@ -3534,21 +3723,34 @@ fn standard_dice<'src>(
 /// The next step.
 fn dice_continue<'src, R: Recovery<'src>>(
 	dice: DiceExpression<'src>,
+	highest: Option<i32>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let reroll: IResult<Span, Span, ParseError> =
-		preceded(multispace0, keyword("reroll")).parse_complete(rest);
-	if let Ok((after_keyword, _)) = reroll
+	let verb: IResult<Span, PredicatedKind, ParseError> = preceded(
+		multispace0,
+		alt((
+			map(keyword("reroll"), |_| PredicatedKind::Reroll),
+			map(keyword("explode"), |_| PredicatedKind::Explode)
+		))
+	)
+	.parse_complete(rest);
+	if let Ok((after_keyword, kind)) = verb
 	{
-		let clause = RerollClause {
-			dice: Some(dice),
+		let clause = PredicatedClause {
+			dice: Some((dice, highest)),
 			start: None,
 			predicate: None
 		};
-		return reroll_predicate(Box::new(clause), after_keyword, stack, rec);
+		return read_predicate(
+			kind,
+			Box::new(clause),
+			after_keyword,
+			stack,
+			rec
+		);
 	}
 	let keyword: IResult<Span, bool, ParseError> = preceded(
 		multispace0,
@@ -3597,6 +3799,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	{
 		return finish_drop_clause(
 			dice,
+			highest,
 			kind,
 			after_direction,
 			None,
@@ -3609,6 +3812,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 		Frame::DiceDrop { kind, input },
 		Payload::Drop {
 			dice,
+			highest,
 			rest: after_direction
 		},
 		Goal::Atom,
@@ -3620,7 +3824,8 @@ fn dice_continue<'src, R: Recovery<'src>>(
 /// optional drop expression of a drop or keep clause.
 ///
 /// # Parameters
-/// - `dice`: The dice expression that the clause modifies.
+/// - `dice`: The dice expression that the clause modifies, and the [highest
+///   face](highest_face) of its dice, if known.
 /// - `kind`: The kind of the clause.
 /// - `rest`: The input after the direction.
 /// - `input`: The input of the drop expression.
@@ -3631,7 +3836,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 /// # Returns
 /// The next step.
 fn resume_dice_drop<'src, R: Recovery<'src>>(
-	dice: DiceExpression<'src>,
+	(dice, highest): (DiceExpression<'src>, Option<i32>),
 	kind: ClauseKind,
 	rest: Span<'src>,
 	input: Span<'src>,
@@ -3644,7 +3849,7 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 	{
 		Ok((rest, drop)) =>
 		{
-			finish_drop_clause(dice, kind, rest, drop, stack, rec)
+			finish_drop_clause(dice, highest, kind, rest, drop, stack, rec)
 		},
 		Err(e) => fail(e)
 	}
@@ -3655,6 +3860,7 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 ///
 /// # Parameters
 /// - `dice`: The dice expression that the clause modifies.
+/// - `highest`: The [highest face](highest_face) of the dice, if known.
 /// - `kind`: The kind of the clause.
 /// - `rest`: The input after the clause.
 /// - `drop`: The drop expression of the clause, if any.
@@ -3665,6 +3871,7 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 /// The next step.
 fn finish_drop_clause<'src, R: Recovery<'src>>(
 	dice: DiceExpression<'src>,
+	highest: Option<i32>,
 	kind: ClauseKind,
 	rest: Span<'src>,
 	drop: Option<Box<Expression<'src>>>,
@@ -3676,38 +3883,41 @@ fn finish_drop_clause<'src, R: Recovery<'src>>(
 		start: dice.span().start,
 		end: rest.location_offset()
 	};
-	dice_continue(kind.build(dice, drop, span), rest, stack, rec)
+	dice_continue(kind.build(dice, drop, span), highest, rest, stack, rec)
 }
 
-/// Continue a reroll clause after its `reroll`, by parsing its predicate.
+/// Continue a reroll or explode clause after its verb, `reroll` or `explode`,
+/// by parsing its predicate.
 ///
 /// The predicate is `preceded(multispace0, alt((comparison, list, range)))`:
 ///
 /// - A comparison is a comparator, `=`, `!=` or `≠`, `<`, `<=` or `≤`, `>`, or
-///   `>=` or `≥`, then `cut(preceded(multispace0,
-///   context(REROLL_THRESHOLD_CONTEXT, standard_faces)))`.
+///   `>=` or `≥`, then `cut(preceded(multispace0, context(threshold,
+///   standard_faces)))`.
 /// - A list is the [keyword] `in`, then `[`, then `separated_list0(comma,
 ///   integer)`, then [a closing bracket](close). Its values are literals, and
 ///   it may be empty.
 /// - A range is the [keyword] `in`, then `cut(preceded(multispace0,
-///   context(REROLL_RANGE_START_CONTEXT, standard_faces)))`, then
-///   `cut(preceded(multispace0, context(REROLL_RANGE_OPERATOR_CONTEXT,
-///   alt((tag("..="), tag(".."))))))`, then `cut(preceded(multispace0,
-///   context(REROLL_RANGE_END_CONTEXT, standard_faces)))`.
+///   context(range_start, standard_faces)))`, then `cut(preceded(multispace0,
+///   context(range_operator, alt((tag("..="), tag(".."))))))`, then
+///   `cut(preceded(multispace0, context(range_end, standard_faces)))`.
 ///
-/// The predicate itself is cut, under [`REROLL_PREDICATE_CONTEXT`], since
-/// nothing else may follow `reroll`. The limit follows; see [`reroll_limit`].
+/// The predicate itself is cut, under the `predicate` context, since nothing
+/// else may follow the verb. The limit follows; see [`read_limit`]. The
+/// [contexts](PredicatedKind::contexts) are those of the kind of the clause.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `clause`: The parts of the clause read so far.
-/// - `after_keyword`: The input after the `reroll`.
+/// - `after_keyword`: The input after the verb.
 /// - `stack`: The stack of suspended productions.
 /// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn reroll_predicate<'src, R: Recovery<'src>>(
-	clause: Box<RerollClause<'src>>,
+fn read_predicate<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	clause: Box<PredicatedClause<'src>>,
 	after_keyword: Span<'src>,
 	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
@@ -3730,11 +3940,12 @@ fn reroll_predicate<'src, R: Recovery<'src>>(
 		let input = skip_whitespace(after);
 		return call_with(
 			stack,
-			Frame::RerollFirst {
+			Frame::PredicateFirst {
+				kind,
 				comparison: Some(comparison),
 				input
 			},
-			Payload::Reroll(clause),
+			Payload::Predicated(clause),
 			Goal::Faces,
 			input
 		);
@@ -3746,9 +3957,10 @@ fn reroll_predicate<'src, R: Recovery<'src>>(
 		let input = skip_whitespace(after);
 		if input.fragment().starts_with('[')
 		{
-			return match reroll_values(input, stack, rec)
+			return match read_values(input, stack, rec)
 			{
-				Ok((rest, values)) => reroll_limit(
+				Ok((rest, values)) => read_limit(
+					kind,
 					clause,
 					Predicate::In(values),
 					rest,
@@ -3760,43 +3972,47 @@ fn reroll_predicate<'src, R: Recovery<'src>>(
 		}
 		return call_with(
 			stack,
-			Frame::RerollFirst {
+			Frame::PredicateFirst {
+				kind,
 				comparison: None,
 				input
 			},
-			Payload::Reroll(clause),
+			Payload::Predicated(clause),
 			Goal::Faces,
 			input
 		);
 	}
-	// Nothing else may follow `reroll`. The repair supplies the commonest
-	// predicate, `= 1`.
+	// Nothing else may follow the verb. The repair supplies the commonest
+	// predicate of the verb: `= 1` for a reroll, and the highest face for an
+	// explode.
 	let at = skip_whitespace(after_keyword);
 	let e = nom::Err::Failure(ParseError::add_context(
 		at,
-		REROLL_PREDICATE_CONTEXT,
+		kind.contexts().predicate,
 		ParseError::from_error_kind(at, ErrorKind::Tag)
 	));
-	match rec.repair(Site::Predicate, e, stack)
+	let highest = clause.dice.as_ref().and_then(|(_, highest)| *highest);
+	let threshold = kind.placeholder_threshold(highest);
+	match rec.repair(Site::Predicate { kind, threshold }, e, stack)
 	{
 		Ok(at) =>
 		{
 			let position = at.location_offset();
 			let threshold = Expression::Constant(Constant {
-				value: PLACEHOLDER_THRESHOLD,
+				value: threshold,
 				span: SourceSpan {
 					start: position,
 					end: position
 				}
 			});
 			let predicate = Comparison::Eq.predicate(threshold);
-			reroll_limit(clause, predicate, at, stack, rec)
+			read_limit(kind, clause, predicate, at, stack, rec)
 		},
 		Err(e) => fail(e)
 	}
 }
 
-/// Parse the list of a reroll clause, `[`, then `separated_list0(
+/// Parse the list of a reroll or explode clause, `[`, then `separated_list0(
 /// preceded(multispace0, char(',')), preceded(multispace0,
 /// context(CONSTANT_CONTEXT, integer)))`, then [a closing bracket](close),
 /// whose absence a repair may supply.
@@ -3811,7 +4027,7 @@ fn reroll_predicate<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the list could not be parsed, or repaired.
-fn reroll_values<'src, R: Recovery<'src>>(
+fn read_values<'src, R: Recovery<'src>>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
@@ -3842,11 +4058,12 @@ fn reroll_values<'src, R: Recovery<'src>>(
 	Ok((rest, values))
 }
 
-/// Resume a reroll clause with the outcome of the threshold of a comparison,
-/// or of the start of a range, after which the range continues with its
-/// operator and its end.
+/// Resume a reroll or explode clause with the outcome of the threshold of a
+/// comparison, or of the start of a range, after which the range continues
+/// with its operator and its end.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `clause`: The parts of the clause read so far.
 /// - `comparison`: The comparator, or `None` if the predicate is a range.
 /// - `input`: The input of the threshold or the start.
@@ -3856,8 +4073,9 @@ fn reroll_values<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_reroll_first<'src, R: Recovery<'src>>(
-	mut clause: Box<RerollClause<'src>>,
+fn resume_predicate_first<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	mut clause: Box<PredicatedClause<'src>>,
 	comparison: Option<Comparison>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
@@ -3865,7 +4083,7 @@ fn resume_reroll_first<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let label = first_context(comparison);
+	let label = first_context(kind, comparison);
 	let (rest, first) = match outcome
 	{
 		Ok((rest, first)) => (rest, first.into_expression()),
@@ -3874,12 +4092,12 @@ fn resume_reroll_first<'src, R: Recovery<'src>>(
 	if let Some(comparison) = comparison
 	{
 		let predicate = comparison.predicate(first);
-		return reroll_limit(clause, predicate, rest, stack, rec);
+		return read_limit(kind, clause, predicate, rest, stack, rec);
 	}
 	let operator: IResult<Span, bool, ParseError> = cut(preceded(
 		multispace0,
 		context(
-			REROLL_RANGE_OPERATOR_CONTEXT,
+			kind.contexts().range_operator,
 			alt((map(tag("..="), |_| true), map(tag(".."), |_| false)))
 		)
 	))
@@ -3889,7 +4107,7 @@ fn resume_reroll_first<'src, R: Recovery<'src>>(
 	let (after, inclusive) = match operator
 	{
 		Ok(parsed) => parsed,
-		Err(e) => match rec.repair(Site::RangeOperator, e, stack)
+		Err(e) => match rec.repair(Site::RangeOperator { kind }, e, stack)
 		{
 			Ok(at) => (at, true),
 			Err(e) => return fail(e)
@@ -3899,8 +4117,12 @@ fn resume_reroll_first<'src, R: Recovery<'src>>(
 	let input = skip_whitespace(after);
 	call_with(
 		stack,
-		Frame::RerollEnd { inclusive, input },
-		Payload::Reroll(clause),
+		Frame::PredicateEnd {
+			kind,
+			inclusive,
+			input
+		},
+		Payload::Predicated(clause),
 		Goal::Faces,
 		input
 	)
@@ -3909,23 +4131,30 @@ fn resume_reroll_first<'src, R: Recovery<'src>>(
 /// Answer the context classifier of the first operand of a predicate.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `comparison`: The comparator, or `None` if the predicate is a range.
 ///
 /// # Returns
-/// [`REROLL_THRESHOLD_CONTEXT`] for the threshold of a comparison, or
-/// [`REROLL_RANGE_START_CONTEXT`] for the start of a range.
-const fn first_context(comparison: Option<Comparison>) -> &'static str
+/// The [classifier](PredicatedContexts::threshold) of the threshold of a
+/// comparison, or that of the [start](PredicatedContexts::range_start) of a
+/// range, for clauses of the kind.
+const fn first_context(
+	kind: PredicatedKind,
+	comparison: Option<Comparison>
+) -> &'static str
 {
+	let contexts = kind.contexts();
 	match comparison
 	{
-		Some(_) => REROLL_THRESHOLD_CONTEXT,
-		None => REROLL_RANGE_START_CONTEXT
+		Some(_) => contexts.threshold,
+		None => contexts.range_start
 	}
 }
 
-/// Resume a reroll clause with the outcome of the end of a range.
+/// Resume a reroll or explode clause with the outcome of the end of a range.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `clause`: The parts of the clause read so far, among them the start of the
 ///   range.
 /// - `inclusive`: Whether the range is inclusive.
@@ -3936,8 +4165,9 @@ const fn first_context(comparison: Option<Comparison>) -> &'static str
 ///
 /// # Returns
 /// The next step.
-fn resume_reroll_end<'src, R: Recovery<'src>>(
-	mut clause: Box<RerollClause<'src>>,
+fn resume_predicate_end<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	mut clause: Box<PredicatedClause<'src>>,
 	inclusive: bool,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
@@ -3952,7 +4182,7 @@ fn resume_reroll_end<'src, R: Recovery<'src>>(
 		{
 			return fail(cut_error(with_context(
 				input,
-				REROLL_RANGE_END_CONTEXT,
+				kind.contexts().range_end,
 				e
 			)));
 		}
@@ -3966,18 +4196,20 @@ fn resume_reroll_end<'src, R: Recovery<'src>>(
 	{
 		Predicate::InRange { start, end }
 	};
-	reroll_limit(clause, predicate, rest, stack, rec)
+	read_limit(kind, clause, predicate, rest, stack, rec)
 }
 
-/// Continue a reroll clause after its predicate, by parsing its optional
-/// limit: `opt(alt((unlimited, count)))`, where `unlimited` is
+/// Continue a reroll or explode clause after its predicate, by parsing its
+/// optional limit: `opt(alt((unlimited, count)))`, where `unlimited` is
 /// `preceded(multispace0, alt((keyword("unlimited"), tag("∞"))))`, then
-/// [times], and `count` is `preceded(multispace0, context(REROLL_COUNT_CONTEXT,
-/// drop_expression))`, then [times]. A count never begins with `-`, so after a
-/// predicate, a `-` is subtraction, as after a drop clause; see
-/// [`begins_with_minus`].
+/// [times], and `count` is `preceded(multispace0, context(count,
+/// drop_expression))`, then [times], under the
+/// [context](PredicatedContexts::count) of the kind of the clause. A count
+/// never begins with `-`, so after a predicate, a `-` is subtraction, as after
+/// a drop clause; see [`begins_with_minus`].
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `clause`: The parts of the clause read so far.
 /// - `predicate`: The predicate.
 /// - `rest`: The input after the predicate, where the clause ends if it has no
@@ -3987,8 +4219,9 @@ fn resume_reroll_end<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn reroll_limit<'src, R: Recovery<'src>>(
-	mut clause: Box<RerollClause<'src>>,
+fn read_limit<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	mut clause: Box<PredicatedClause<'src>>,
 	predicate: Predicate<Box<Expression<'src>>>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
@@ -4000,9 +4233,10 @@ fn reroll_limit<'src, R: Recovery<'src>>(
 			.parse_complete(rest);
 	if let Ok((after, _)) = unlimited
 	{
-		return match times(after, false, stack, rec)
+		return match times(kind, after, false, stack, rec)
 		{
-			Ok(after) => finish_reroll(
+			Ok(after) => finish_predicated(
+				kind,
 				clause.dice,
 				predicate,
 				Some(Limit::Unlimited),
@@ -4016,21 +4250,31 @@ fn reroll_limit<'src, R: Recovery<'src>>(
 	let input = skip_whitespace(rest);
 	if begins_with_minus(input)
 	{
-		return finish_reroll(clause.dice, predicate, None, rest, stack, rec);
+		return finish_predicated(
+			kind,
+			clause.dice,
+			predicate,
+			None,
+			rest,
+			stack,
+			rec
+		);
 	}
 	clause.predicate = Some((predicate, rest));
 	call_with(
 		stack,
-		Frame::RerollCount(input),
-		Payload::Reroll(clause),
+		Frame::LimitCount { kind, input },
+		Payload::Predicated(clause),
 		Goal::Atom,
 		input
 	)
 }
 
-/// Resume a reroll clause with the outcome of the optional count of its limit.
+/// Resume a reroll or explode clause with the outcome of the optional count of
+/// its limit.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `clause`: The parts of the clause read so far, among them the predicate.
 /// - `input`: The input of the count.
 /// - `outcome`: The outcome of the count.
@@ -4039,19 +4283,20 @@ fn reroll_limit<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_reroll_count<'src, R: Recovery<'src>>(
-	clause: RerollClause<'src>,
+fn resume_limit_count<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	clause: PredicatedClause<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let RerollClause {
+	let PredicatedClause {
 		dice, predicate, ..
 	} = clause;
 	let (predicate, rest) = predicate.expect("a limit follows a predicate");
-	match with_context_on_error(input, REROLL_COUNT_CONTEXT, outcome)
+	match with_context_on_error(input, kind.contexts().count, outcome)
 	{
 		Ok((after, count)) =>
 		{
@@ -4060,9 +4305,10 @@ fn resume_reroll_count<'src, R: Recovery<'src>>(
 				count,
 				Expression::Constant(Constant { value: 1, .. })
 			);
-			match times(after, singular, stack, rec)
+			match times(kind, after, singular, stack, rec)
 			{
-				Ok(after) => finish_reroll(
+				Ok(after) => finish_predicated(
+					kind,
 					dice,
 					predicate,
 					Some(Limit::Times(Box::new(count))),
@@ -4076,18 +4322,20 @@ fn resume_reroll_count<'src, R: Recovery<'src>>(
 		// `opt` rewinds after a recoverable error, and discards it.
 		Err(nom::Err::Error(_)) =>
 		{
-			finish_reroll(dice, predicate, None, rest, stack, rec)
+			finish_predicated(kind, dice, predicate, None, rest, stack, rec)
 		},
 		Err(e) => fail(e)
 	}
 }
 
 /// Parse the `time` or `times` that follows the count of a limit, or `∞` or
-/// `unlimited`, as `cut(preceded(multispace0, context(REROLL_TIMES_CONTEXT,
-/// alt((keyword("times"), keyword("time"))))))`, whose absence a repair may
-/// supply.
+/// `unlimited`, as `cut(preceded(multispace0, context(times,
+/// alt((keyword("times"), keyword("time"))))))`, under the
+/// [context](PredicatedContexts::times) of the kind of the clause, whose
+/// absence a repair may supply.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `input`: The input after the count, `∞`, or `unlimited`.
 /// - `singular`: Whether the count is the constant `1`, after which a repair
 ///   supplies `time` rather than `times`.
@@ -4100,6 +4348,7 @@ fn resume_reroll_count<'src, R: Recovery<'src>>(
 /// # Errors
 /// * [`Failure`](nom::Err::Failure) if it is missing, and not repaired.
 fn times<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
 	input: Span<'src>,
 	singular: bool,
 	stack: &Stack<'src>,
@@ -4109,7 +4358,7 @@ fn times<'src, R: Recovery<'src>>(
 	let parsed: IResult<Span, Span, ParseError> = cut(preceded(
 		multispace0,
 		context(
-			REROLL_TIMES_CONTEXT,
+			kind.contexts().times,
 			alt((keyword("times"), keyword("time")))
 		)
 	))
@@ -4117,17 +4366,19 @@ fn times<'src, R: Recovery<'src>>(
 	match parsed
 	{
 		Ok((after, _)) => Ok(after),
-		Err(e) => rec.repair(Site::Times { singular }, e, stack)
+		Err(e) => rec.repair(Site::Times { kind, singular }, e, stack)
 	}
 }
 
-/// Finish a reroll clause: as a clause of [`Goal::Dice`] or
+/// Finish a reroll or explode clause: as a clause of [`Goal::Dice`] or
 /// [`Goal::PrimaryDice`], whose dice expression it modifies, after which look
-/// for another clause; or as [`Goal::Reroll`].
+/// for another clause; or as [`Goal::Reroll`] or [`Goal::Explode`].
 ///
 /// # Parameters
-/// - `dice`: The dice expression that the clause modifies, or `None` if the
-///   clause is parsed alone, as [`Goal::Reroll`].
+/// - `kind`: The kind of the clause.
+/// - `dice`: The dice expression that the clause modifies, and the [highest
+///   face](highest_face) of its dice, if known; or `None` if the clause is
+///   parsed alone, as [`Goal::Reroll`] or [`Goal::Explode`].
 /// - `predicate`: The predicate.
 /// - `limit`: The limit, if any.
 /// - `rest`: The input after the clause.
@@ -4136,8 +4387,9 @@ fn times<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn finish_reroll<'src, R: Recovery<'src>>(
-	dice: Option<DiceExpression<'src>>,
+fn finish_predicated<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
+	dice: Option<(DiceExpression<'src>, Option<i32>)>,
 	predicate: Predicate<Box<Expression<'src>>>,
 	limit: Option<Limit<Box<Expression<'src>>>>,
 	rest: Span<'src>,
@@ -4145,52 +4397,50 @@ fn finish_reroll<'src, R: Recovery<'src>>(
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let Some(dice) = dice
+	let Some((dice, highest)) = dice
 	else
 	{
-		return succeed(rest, Value::Reroll { predicate, limit });
+		return succeed(rest, Value::Predicated { predicate, limit });
 	};
 	let span = SourceSpan {
 		start: dice.span().start,
 		end: rest.location_offset()
 	};
-	let reroll = DiceExpression::Reroll(Reroll {
-		dice: Box::new(dice),
-		predicate,
-		limit,
-		span
-	});
-	dice_continue(reroll, rest, stack, rec)
+	let dice = kind.build(dice, predicate, limit, span);
+	dice_continue(dice, highest, rest, stack, rec)
 }
 
-/// Start [`Goal::Reroll`]: the [keyword] `reroll`, then the predicate and the
-/// limit of a reroll clause, as [`reroll_predicate`] describes.
+/// Start [`Goal::Reroll`] or [`Goal::Explode`]: the [keyword] of the verb,
+/// `reroll` or `explode`, then the predicate and the limit of the clause, as
+/// [`read_predicate`] describes.
 ///
 /// # Parameters
+/// - `kind`: The kind of the clause.
 /// - `input`: The input of the production.
 /// - `stack`: The stack of suspended productions.
 /// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn start_reroll<'src, R: Recovery<'src>>(
+fn start_predicated<'src, R: Recovery<'src>>(
+	kind: PredicatedKind,
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R>
 ) -> Step<'src>
 {
-	let reroll: IResult<Span, Span, ParseError> =
-		keyword("reroll").parse_complete(input);
-	match reroll
+	let verb: IResult<Span, Span, ParseError> =
+		keyword(kind.keyword()).parse_complete(input);
+	match verb
 	{
 		Ok((after_keyword, _)) =>
 		{
-			let clause = RerollClause {
+			let clause = PredicatedClause {
 				dice: None,
 				start: None,
 				predicate: None
 			};
-			reroll_predicate(Box::new(clause), after_keyword, stack, rec)
+			read_predicate(kind, Box::new(clause), after_keyword, stack, rec)
 		},
 		Err(e) => fail(e)
 	}
@@ -4805,7 +5055,8 @@ pub(crate) const PLACEHOLDER_FACE: i32 = 0;
 
 /// The threshold of the predicate, `=`, that a [repair](Repair::Fix) supplies
 /// wherever a reroll clause lacks its predicate, since a reroll most often
-/// rerolls ones.
+/// rerolls ones. An explode clause instead gets the highest face of its dice;
+/// see [`PredicatedKind::placeholder_threshold`].
 pub(crate) const PLACEHOLDER_THRESHOLD: i32 = 1;
 
 /// The name that a [repair](Repair::Fix) supplies wherever a variable or a
@@ -4879,7 +5130,7 @@ pub(crate) enum Repair
 	/// | [`Site::FaceValue`]   | a face, [`PLACEHOLDER_FACE`]              |
 	/// | [`Site::Direction`]   | `lowest` after `drop`, `highest` after `keep` |
 	/// | [`Site::DiceOperator`] | a dice operator and standard faces, [`PLACEHOLDER_FACES`] |
-	/// | [`Site::Predicate`]   | `=` and a threshold, [`PLACEHOLDER_THRESHOLD`] |
+	/// | [`Site::Predicate`]   | `=` and its threshold                     |
 	/// | [`Site::RangeOperator`] | `..=`                                   |
 	/// | [`Site::Times`]       | `time` after the count `1`, and `times` otherwise |
 	/// | [`Site::Comma`]       | `,`, before another argument              |
@@ -5033,11 +5284,12 @@ pub(crate) enum Site
 		/// the end of a range.
 		range: Option<usize>,
 
-		/// Whether the failure lies in an operand of the predicate of a
-		/// reroll clause, a threshold or an endpoint, whose literal is signed,
-		/// as that of [standard faces](Goal::Faces) is, so that a `-` just
-		/// before the failure is its sign.
-		operand: bool,
+		/// The kind of the clause, if the failure lies in an operand of the
+		/// predicate of a reroll or explode clause, a threshold or an
+		/// endpoint, whose literal is signed, as that of [standard
+		/// faces](Goal::Faces) is, so that a `-` just before the failure is
+		/// its sign.
+		operand: Option<PredicatedKind>,
 
 		/// The byte offset of the `(` of the call, if the failure lies in an
 		/// argument of a call of `highest` or `lowest`, as the innermost
@@ -5100,8 +5352,9 @@ pub(crate) enum Site
 		keep: bool
 	},
 
-	/// A keep or reroll clause follows a dice count without a dice operator
-	/// and faces between them, e.g., `3 keep lowest` or `3 reroll = 1`, so the
+	/// A keep, reroll, or explode clause follows a dice count without a dice
+	/// operator and faces between them, e.g., `3 keep lowest` or `3 reroll =
+	/// 1`, so the
 	/// clause follows no dice expression. Only a
 	/// [recovering](Recovery::ENABLED) parse looks for this failure, since the
 	/// ordinary parse ends the expression at the dice count, and fails later,
@@ -5109,22 +5362,39 @@ pub(crate) enum Site
 	/// `)`. A misplaced drop clause needs no such site, since the `d` of `drop`
 	/// reads as a dice operator, whose faces then fail at [`Site::Faces`]. The
 	/// [position](FailureSite::position) of the failure is that of the verb,
-	/// `keep` or `reroll`. Since the ordinary parse does not fail here,
+	/// `keep`, `reroll`, or `explode`. Since the ordinary parse does not fail
+	/// here,
 	/// [declining](Repair::Stop) the repair does not end recovery.
 	DiceOperator,
 
-	/// The predicate of a reroll clause is missing after its `reroll`: neither
-	/// a comparator nor `in` follows it.
-	Predicate,
+	/// The predicate of a reroll or explode clause is missing after its verb:
+	/// neither a comparator nor `in` follows it.
+	Predicate
+	{
+		/// The kind of the clause.
+		kind: PredicatedKind,
+
+		/// The threshold of the predicate, `=`, that a [fix](Repair::Fix)
+		/// supplies, as [`placeholder_threshold`](
+		/// PredicatedKind::placeholder_threshold) answers it.
+		threshold: i32
+	},
 
 	/// The range operator, `..` or `..=`, is missing after the start of the
-	/// range of a reroll clause.
-	RangeOperator,
+	/// range of a reroll or explode clause.
+	RangeOperator
+	{
+		/// The kind of the clause.
+		kind: PredicatedKind
+	},
 
 	/// The `time` or `times` is missing after the count of the limit of a
-	/// reroll clause, or after its `∞` or `unlimited`.
+	/// reroll or explode clause, or after its `∞` or `unlimited`.
 	Times
 	{
+		/// The kind of the clause.
+		kind: PredicatedKind,
+
 		/// Whether the count is the constant `1`, after which a repair
 		/// supplies `time` rather than `times`.
 		singular: bool
@@ -5189,17 +5459,18 @@ pub(crate) enum Operand
 	/// The count of a keep clause.
 	KeepCount,
 
-	/// The threshold of the comparison of a reroll clause.
-	Threshold,
+	/// The threshold of the comparison of a reroll or explode clause, of the
+	/// kind.
+	Threshold(PredicatedKind),
 
-	/// The start of the range of a reroll clause.
-	RangeStart,
+	/// The start of the range of a reroll or explode clause, of the kind.
+	RangeStart(PredicatedKind),
 
-	/// The end of the range of a reroll clause.
-	RangeEnd,
+	/// The end of the range of a reroll or explode clause, of the kind.
+	RangeEnd(PredicatedKind),
 
-	/// The count of the limit of a reroll clause.
-	Limit
+	/// The count of the limit of a reroll or explode clause, of the kind.
+	Limit(PredicatedKind)
 }
 
 impl Operand
@@ -5227,13 +5498,17 @@ impl Operand
 			{
 				Operand::DropCount
 			},
-			Some(Frame::RerollFirst {
+			Some(Frame::PredicateFirst {
+				kind,
 				comparison: Some(_),
 				..
-			}) => Operand::Threshold,
-			Some(Frame::RerollFirst { .. }) => Operand::RangeStart,
-			Some(Frame::RerollEnd { .. }) => Operand::RangeEnd,
-			Some(Frame::RerollCount(_)) => Operand::Limit,
+			}) => Operand::Threshold(*kind),
+			Some(Frame::PredicateFirst { kind, .. }) =>
+			{
+				Operand::RangeStart(*kind)
+			},
+			Some(Frame::PredicateEnd { kind, .. }) => Operand::RangeEnd(*kind),
+			Some(Frame::LimitCount { kind, .. }) => Operand::Limit(*kind),
 			_ => Operand::DiceCount
 		}
 	}
@@ -5345,11 +5620,11 @@ impl Role
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
 			| Frame::DropExpression { .. }
-			| Frame::RerollCount(_) => Role::Catch,
+			| Frame::LimitCount { .. } => Role::Catch,
 			Frame::BinaryRight { .. }
 			| Frame::ExponentPower(_)
-			| Frame::RerollFirst { .. }
-			| Frame::RerollEnd { .. }
+			| Frame::PredicateFirst { .. }
+			| Frame::PredicateEnd { .. }
 			| Frame::CallArgument { .. }
 			| Frame::GroupExpression { .. }
 			| Frame::BindingExpression { .. }
@@ -5649,10 +5924,12 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 			Frame::RangeEnd { start, .. } => Some(*start),
 			_ => None
 		};
-		let operand = matches!(
-			stack[anchor],
-			Frame::RerollFirst { .. } | Frame::RerollEnd { .. }
-		);
+		let operand = match &stack[anchor]
+		{
+			Frame::PredicateFirst { kind, .. }
+			| Frame::PredicateEnd { kind, .. } => Some(*kind),
+			_ => None
+		};
 		let call = match &stack[anchor]
 		{
 			Frame::CallArgument { opener, .. } => Some(*opener),
@@ -6335,17 +6612,22 @@ fn unwind<'src>(
 		{
 			with_context(*input, kind.count_context(), e)
 		},
-		Frame::RerollFirst { comparison, input } =>
+		Frame::PredicateFirst {
+			kind,
+			comparison,
+			input
+		} => cut_error(with_context(
+			*input,
+			first_context(*kind, *comparison),
+			e
+		)),
+		Frame::PredicateEnd { kind, input, .. } =>
 		{
-			cut_error(with_context(*input, first_context(*comparison), e))
+			cut_error(with_context(*input, kind.contexts().range_end, e))
 		},
-		Frame::RerollEnd { input, .. } =>
+		Frame::LimitCount { kind, input } =>
 		{
-			cut_error(with_context(*input, REROLL_RANGE_END_CONTEXT, e))
-		},
-		Frame::RerollCount(input) =>
-		{
-			with_context(*input, REROLL_COUNT_CONTEXT, e)
+			with_context(*input, kind.contexts().count, e)
 		},
 		Frame::CallArgument { input, .. } =>
 		{

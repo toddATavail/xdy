@@ -24,7 +24,8 @@
 //! variable       ::= name
 //! binding        ::= name '@' '(' expression ')'
 //! range          ::= '[' expression ':' expression ']'
-//! dice           ::= base_dice (drop_clause | keep_clause | reroll_clause)*
+//! dice           ::= base_dice (drop_clause | keep_clause | reroll_clause
+//!                    | explode_clause)*
 //! base_dice      ::= dice_count D_OPERATOR (standard_faces | custom_faces)
 //! dice_count     ::= CONSTANT | variable | binding | group
 //! standard_faces ::= INTEGER | variable | binding | group
@@ -32,6 +33,7 @@
 //! drop_clause    ::= 'drop' ('lowest' | 'highest') drop_expression?
 //! keep_clause    ::= 'keep' ('lowest' | 'highest') drop_expression?
 //! reroll_clause  ::= 'reroll' predicate limit?
+//! explode_clause ::= 'explode' predicate limit?
 //! predicate      ::= comparator standard_faces
 //!                  | 'in' '[' (INTEGER (',' INTEGER)*)? ']'
 //!                  | 'in' standard_faces ('..' | '..=') standard_faces
@@ -56,14 +58,15 @@
 //! accepts just what its rule does, so [`constant`], [`primary`],
 //! [`dice_count`], and [`dice`] reject `-3`, while [`integer`] and
 //! [`standard_faces`] accept it, as do the thresholds and endpoints of the
-//! predicates of rerolls, since custom dice may have negative faces, e.g.,
-//! `3D[-2, -1, 0, 1] reroll in -2..0`. In particular, a drop expression, which
-//! is the count of a drop or keep clause, or of the limit of a reroll clause,
-//! never begins with `-`, so after a clause, a `-` is subtraction: `4D6 drop
-//! lowest -1` is `(4D6 drop lowest) - 1`, and `4D6 reroll = 1 -1` is `(4D6
-//! reroll = 1) - 1`. A count of zero or less drops nothing, keeps nothing, or
-//! rerolls nothing, so no one means to write a negative count, but one may be
-//! grouped, as in `4D6 drop lowest (-1)`.
+//! predicates of rerolls and explodes, since custom dice may have negative
+//! faces, e.g., `3D[-2, -1, 0, 1] reroll in -2..0`. In particular, a drop
+//! expression, which is the count of a drop or keep clause, or of the limit of
+//! a reroll or explode clause, never begins with `-`, so after a clause, a `-`
+//! is subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) - 1`, and `4D6
+//! reroll = 1 -1` is `(4D6 reroll = 1) - 1`. A count of zero or less drops
+//! nothing, keeps nothing, rerolls nothing, or explodes nothing, so no one
+//! means to write a negative count, but one may be grouped, as in `4D6 drop
+//! lowest (-1)`.
 //!
 //! The clauses of a dice expression apply in the order written. A keep counts
 //! from the dice that the clauses before it left kept, so `4D6 drop lowest
@@ -79,6 +82,16 @@
 //! `start..=end` inclusive; either is empty if its end precedes its start. The
 //! comparators `!=`, `<=`, and `>=` may also be written `≠`, `≤`, and `≥`.
 //!
+//! An explode clause takes the same predicates and limits, but rolls each die
+//! that matches again, and adds the new die to it, as one die of a chain: `3D6
+//! explode = 6` adds another die to each six, and `3D6 explode = 6 ∞ times`
+//! keeps adding while the new die is a six. Later drops and keeps count each
+//! chain as one die, worth its total, so `4D6 explode = 6 keep highest 3`
+//! keeps the three highest chains, while later rerolls and explodes consider
+//! each die of a chain. If an unlimited explode matches every face of its die,
+//! the chain never ends, and saturates instead, as
+//! [`Explode`](crate::ast::Explode) describes.
+//!
 //! A call of `highest` or `lowest` answers the greatest or the least of the
 //! values of its arguments, two or more full expressions, each evaluated in
 //! turn, left to right, e.g., `highest(1D20, 1D20)` or `lowest({POW} * 5,
@@ -87,8 +100,8 @@
 //! die. A call is a primary expression, which may stand wherever an expression
 //! may begin, but nowhere that only a constant, a variable, a binding, or a
 //! group may: as a dice count, faces, the count of a clause, or an operand of a
-//! reroll, it must be grouped, as a range must, e.g., `4D6 drop lowest
-//! (lowest({x}, 2))`. So a drop or keep clause still reads `lowest` or
+//! reroll or explode, it must be grouped, as a range must, e.g., `4D6 drop
+//! lowest (lowest({x}, 2))`. So a drop or keep clause still reads `lowest` or
 //! `highest` as its direction, whatever follows it: `4D6 drop lowest (2)` and
 //! `4D6 drop lowest(2)` both drop the lowest 2 dice. The keyword is
 //! recognized only where a `(` follows it, after any whitespace, so a name that
@@ -98,10 +111,11 @@
 //! returns, but by no other whitespace; the [doctor](crate::diagnostics)
 //! replaces stray whitespace between tokens, such as U+00A0 NO-BREAK SPACE,
 //! with a space. The keywords `drop`, `keep`, `lowest`, `highest`, `reroll`,
-//! `in`, `time`, `times`, and `unlimited` are lowercase, but the dice operator
-//! may be `d` or `D`. The keywords of a reroll clause are contextual: each must
-//! not run into a word after it, so `rerolled` is not `reroll` and `ed`, but
-//! it may abut a digit or a symbol, as in `reroll=1` or `in1..3`.
+//! `explode`, `in`, `time`, `times`, and `unlimited` are lowercase, but the
+//! dice operator may be `d` or `D`. The keywords of a reroll or explode clause
+//! are contextual: each must not run into a word after it, so `rerolled` is
+//! not `reroll` and `ed`, nor `exploded` `explode` and `d`, but it may abut a
+//! digit or a symbol, as in `reroll=1`, `explode>=5`, or `in1..3`.
 //!
 //! Every name is braced, whether it names a parameter, a variable, or a
 //! binding, so no name can run into the text around it. A lone braced name
@@ -141,8 +155,8 @@ mod errors;
 
 pub use combinators::*;
 pub(crate) use engine::{
-	FailureSite, LoneArgument, Operand, PLACEHOLDER_OPERAND,
-	PLACEHOLDER_THRESHOLD, Recovery, Repair, Site
+	FailureSite, LoneArgument, Operand, PLACEHOLDER_OPERAND, PredicatedKind,
+	Recovery, Repair, Site
 };
 #[cfg(test)]
 pub(crate) use engine::{

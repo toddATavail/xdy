@@ -386,16 +386,31 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		RIGHT_OPERAND_CONTEXT => EXPRESSION_EXPECTATIONS,
 		DROP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
 		KEEP_DIRECTION_CONTEXT => &["`lowest`", "`highest`"],
-		REROLL_PREDICATE_CONTEXT => &[
+		REROLL_PREDICATE_CONTEXT | EXPLODE_PREDICATE_CONTEXT => &[
 			"`=`", "`!=`", "`≠`", "`<`", "`<=`", "`≤`", "`>`", "`>=`", "`≥`",
 			"`in`"
 		],
-		REROLL_THRESHOLD_CONTEXT => &["`{`", "`(`", "integer"],
-		REROLL_RANGE_START_CONTEXT => &["`[`", "`{`", "`(`", "integer"],
-		REROLL_RANGE_OPERATOR_CONTEXT => &["`..`", "`..=`"],
-		REROLL_RANGE_END_CONTEXT => &["`{`", "`(`", "integer"],
-		REROLL_COUNT_CONTEXT => &["`{`", "`(`", "integer"],
-		REROLL_TIMES_CONTEXT => &["`time`", "`times`"],
+		REROLL_THRESHOLD_CONTEXT | EXPLODE_THRESHOLD_CONTEXT =>
+		{
+			&["`{`", "`(`", "integer"]
+		},
+		REROLL_RANGE_START_CONTEXT | EXPLODE_RANGE_START_CONTEXT =>
+		{
+			&["`[`", "`{`", "`(`", "integer"]
+		},
+		REROLL_RANGE_OPERATOR_CONTEXT | EXPLODE_RANGE_OPERATOR_CONTEXT =>
+		{
+			&["`..`", "`..=`"]
+		},
+		REROLL_RANGE_END_CONTEXT | EXPLODE_RANGE_END_CONTEXT =>
+		{
+			&["`{`", "`(`", "integer"]
+		},
+		REROLL_COUNT_CONTEXT | EXPLODE_COUNT_CONTEXT =>
+		{
+			&["`{`", "`(`", "integer"]
+		},
+		REROLL_TIMES_CONTEXT | EXPLODE_TIMES_CONTEXT => &["`time`", "`times`"],
 		ARGUMENT_CONTEXT => EXPRESSION_EXPECTATIONS,
 		unexpected =>
 		{
@@ -517,6 +532,82 @@ pub(crate) const REROLL_COUNT_CONTEXT: &str = "reroll count";
 /// Context classifier for a missing `time` or `times` after the count of a
 /// reroll, or after `∞` or `unlimited`.
 pub(crate) const REROLL_TIMES_CONTEXT: &str = "reroll times";
+
+/// Context classifier for a missing explode predicate: a comparator, or `in`.
+pub(crate) const EXPLODE_PREDICATE_CONTEXT: &str = "explode predicate";
+
+/// Context classifier for the threshold of a comparison of an explode.
+pub(crate) const EXPLODE_THRESHOLD_CONTEXT: &str = "explode threshold";
+
+/// Context classifier for what follows the `in` of an explode: a list, or the
+/// start of a range.
+pub(crate) const EXPLODE_RANGE_START_CONTEXT: &str = "explode range start";
+
+/// Context classifier for a missing range operator (`..` or `..=`) of an
+/// explode.
+pub(crate) const EXPLODE_RANGE_OPERATOR_CONTEXT: &str =
+	"explode range operator";
+
+/// Context classifier for the end of a range of an explode.
+pub(crate) const EXPLODE_RANGE_END_CONTEXT: &str = "explode range end";
+
+/// Context classifier for the count of the limit of an explode, a drop
+/// expression.
+pub(crate) const EXPLODE_COUNT_CONTEXT: &str = "explode count";
+
+/// Context classifier for a missing `time` or `times` after the count of an
+/// explode, or after `∞` or `unlimited`.
+pub(crate) const EXPLODE_TIMES_CONTEXT: &str = "explode times";
+
+/// The context classifiers of the parts of a reroll or explode clause, which
+/// differ only in their verbs.
+#[derive(Debug)]
+pub(crate) struct PredicatedContexts
+{
+	/// The classifier for a missing predicate: a comparator, or `in`.
+	pub(crate) predicate: &'static str,
+
+	/// The classifier for the threshold of a comparison.
+	pub(crate) threshold: &'static str,
+
+	/// The classifier for what follows the `in`: a list, or the start of a
+	/// range.
+	pub(crate) range_start: &'static str,
+
+	/// The classifier for a missing range operator, `..` or `..=`.
+	pub(crate) range_operator: &'static str,
+
+	/// The classifier for the end of a range.
+	pub(crate) range_end: &'static str,
+
+	/// The classifier for the count of the limit.
+	pub(crate) count: &'static str,
+
+	/// The classifier for a missing `time` or `times`.
+	pub(crate) times: &'static str
+}
+
+/// The context classifiers of the parts of a reroll clause.
+pub(crate) const REROLL_CONTEXTS: PredicatedContexts = PredicatedContexts {
+	predicate: REROLL_PREDICATE_CONTEXT,
+	threshold: REROLL_THRESHOLD_CONTEXT,
+	range_start: REROLL_RANGE_START_CONTEXT,
+	range_operator: REROLL_RANGE_OPERATOR_CONTEXT,
+	range_end: REROLL_RANGE_END_CONTEXT,
+	count: REROLL_COUNT_CONTEXT,
+	times: REROLL_TIMES_CONTEXT
+};
+
+/// The context classifiers of the parts of an explode clause.
+pub(crate) const EXPLODE_CONTEXTS: PredicatedContexts = PredicatedContexts {
+	predicate: EXPLODE_PREDICATE_CONTEXT,
+	threshold: EXPLODE_THRESHOLD_CONTEXT,
+	range_start: EXPLODE_RANGE_START_CONTEXT,
+	range_operator: EXPLODE_RANGE_OPERATOR_CONTEXT,
+	range_end: EXPLODE_RANGE_END_CONTEXT,
+	count: EXPLODE_COUNT_CONTEXT,
+	times: EXPLODE_TIMES_CONTEXT
+};
 
 /// Context classifier for an argument of a call of `highest` or `lowest`.
 pub(crate) const ARGUMENT_CONTEXT: &str = "argument";

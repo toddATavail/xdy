@@ -69,11 +69,9 @@ use crate::{
 	ast::{Direction, Event, Expression, Function, Node, Walk},
 	parser::{
 		FailureSite, LoneArgument, NomErrorKind, Operand, PLACEHOLDER_OPERAND,
-		PLACEHOLDER_THRESHOLD, REROLL_RANGE_END_CONTEXT,
-		REROLL_RANGE_START_CONTEXT, REROLL_THRESHOLD_CONTEXT, Recovery, Repair,
-		Site, Span, begins_misplaced_clause, begins_operand, begins_verb,
-		canonical_name, is_bare_word_continue, is_bare_word_start,
-		is_token_space, token, unclosed_name_ends
+		PredicatedKind, Recovery, Repair, Site, Span, begins_misplaced_clause,
+		begins_operand, begins_verb, canonical_name, is_bare_word_continue,
+		is_bare_word_start, is_token_space, token, unclosed_name_ends
 	},
 	span::SourceSpan
 };
@@ -221,6 +219,52 @@ pub enum DiagnosticKind
 	/// `4D6 reroll = 1 2`, `4D6 reroll = 1 ∞`
 	MissingRerollTimes,
 
+	/// An explode clause follows something other than a dice expression.
+	///
+	/// # Examples
+	/// `3 explode = 6`, `1 + explode = 6`
+	MisplacedExplodeClause,
+
+	/// An `explode` keyword is not followed by a predicate: a comparator or
+	/// `in`.
+	///
+	/// # Examples
+	/// `4D6 explode`, `4D6 explode 6`
+	MissingExplodePredicate,
+
+	/// The comparator of an explode clause is not followed by a threshold.
+	///
+	/// # Examples
+	/// `4D6 explode =`, `4D6 explode ≥ + 1`
+	MissingExplodeThreshold,
+
+	/// The `in` of an explode clause is not followed by a list or a range.
+	///
+	/// # Examples
+	/// `4D6 explode in`, `4D6 explode in ..6`
+	MissingExplodeRangeStart,
+
+	/// The start of the range of an explode clause is not followed by `..` or
+	/// `..=`.
+	///
+	/// # Examples
+	/// `4D6 explode in 5 6`, `4D6 explode in 5`
+	MissingExplodeRangeOperator,
+
+	/// The range operator of an explode clause is not followed by the end of
+	/// the range.
+	///
+	/// # Examples
+	/// `4D6 explode in 5..`, `4D6 explode in 5..= + 1`
+	MissingExplodeRangeEnd,
+
+	/// The count of the limit of an explode clause, or its `∞` or
+	/// `unlimited`, is not followed by `time` or `times`.
+	///
+	/// # Examples
+	/// `4D6 explode = 6 2`, `4D6 explode = 6 ∞`
+	MissingExplodeTimes,
+
 	/// A call names a function that the language spells otherwise: `max` for
 	/// `highest`, or `min` for `lowest`.
 	///
@@ -255,9 +299,9 @@ pub enum DiagnosticKind
 	TrailingComma,
 
 	/// A call of `highest` or `lowest` stands ungrouped as a dice count, the
-	/// faces of dice, the count of a drop, keep, or reroll clause, or an
-	/// operand of the predicate of a reroll clause, where only a constant, a
-	/// variable, a binding, or a group may.
+	/// faces of dice, the count of a drop, keep, reroll, or explode clause, or
+	/// an operand of the predicate of a reroll or explode clause, where only a
+	/// constant, a variable, a binding, or a group may.
 	///
 	/// # Examples
 	/// `3Dhighest({x}, 4)`, `4D6 drop lowest lowest({x}, 2)`,
@@ -421,6 +465,31 @@ impl Display for DiagnosticKind
 				write!(f, "missing reroll range end")
 			},
 			Self::MissingRerollTimes => write!(f, "missing `times`"),
+			Self::MisplacedExplodeClause =>
+			{
+				write!(f, "misplaced explode clause")
+			},
+			Self::MissingExplodePredicate =>
+			{
+				write!(f, "missing explode predicate")
+			},
+			Self::MissingExplodeThreshold =>
+			{
+				write!(f, "missing explode threshold")
+			},
+			Self::MissingExplodeRangeStart =>
+			{
+				write!(f, "missing explode range start")
+			},
+			Self::MissingExplodeRangeOperator =>
+			{
+				write!(f, "missing explode range operator")
+			},
+			Self::MissingExplodeRangeEnd =>
+			{
+				write!(f, "missing explode range end")
+			},
+			Self::MissingExplodeTimes => write!(f, "missing `times`"),
 			Self::UnknownFunction { name } =>
 			{
 				write!(f, "unknown function `{}`", name)
@@ -664,15 +733,106 @@ const DICE_KINDS: &[&str] = &["dice expression"];
 /// Valid kinds for the direction of a drop or keep clause.
 const DIRECTION_KINDS: &[&str] = &["lowest", "highest"];
 
-/// Valid kinds for the predicate of a reroll clause.
+/// Valid kinds for the predicate of a reroll or explode clause.
 const PREDICATE_KINDS: &[&str] = &["comparison", "list", "range"];
 
-/// Valid expression kinds for the threshold of a reroll clause, and the
-/// endpoints of its range.
+/// Valid expression kinds for the threshold of a reroll or explode clause, and
+/// the endpoints of its range.
 const THRESHOLD_KINDS: &[&str] = &["integer", "{variable}", "(expression)"];
 
-/// Valid kinds for the operator of the range of a reroll clause.
+/// Valid kinds for the operator of the range of a reroll or explode clause.
 const RANGE_OPERATOR_KINDS: &[&str] = &["..", "..="];
+
+/// A part of a reroll or explode clause that may be missing, each of which has
+/// a [kind](DiagnosticKind) of diagnostic for either clause.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ClausePart
+{
+	/// The predicate, after the verb.
+	Predicate,
+
+	/// The threshold of a comparison, after its comparator.
+	Threshold,
+
+	/// What follows `in`: a list, or the start of a range.
+	RangeStart,
+
+	/// The operator of a range, after its start.
+	RangeOperator,
+
+	/// The end of a range, after its operator.
+	RangeEnd,
+
+	/// The `time` or `times` of a limit, after its count, `∞`, or
+	/// `unlimited`.
+	Times
+}
+
+impl ClausePart
+{
+	/// Answer the kind of the diagnostic for this part, missing from a clause
+	/// of the specified kind.
+	///
+	/// # Parameters
+	/// - `kind`: The kind of the clause.
+	///
+	/// # Returns
+	/// The kind of the diagnostic.
+	const fn missing(self, kind: PredicatedKind) -> DiagnosticKind
+	{
+		match (kind, self)
+		{
+			(PredicatedKind::Reroll, Self::Predicate) =>
+			{
+				DiagnosticKind::MissingRerollPredicate
+			},
+			(PredicatedKind::Reroll, Self::Threshold) =>
+			{
+				DiagnosticKind::MissingRerollThreshold
+			},
+			(PredicatedKind::Reroll, Self::RangeStart) =>
+			{
+				DiagnosticKind::MissingRerollRangeStart
+			},
+			(PredicatedKind::Reroll, Self::RangeOperator) =>
+			{
+				DiagnosticKind::MissingRerollRangeOperator
+			},
+			(PredicatedKind::Reroll, Self::RangeEnd) =>
+			{
+				DiagnosticKind::MissingRerollRangeEnd
+			},
+			(PredicatedKind::Reroll, Self::Times) =>
+			{
+				DiagnosticKind::MissingRerollTimes
+			},
+			(PredicatedKind::Explode, Self::Predicate) =>
+			{
+				DiagnosticKind::MissingExplodePredicate
+			},
+			(PredicatedKind::Explode, Self::Threshold) =>
+			{
+				DiagnosticKind::MissingExplodeThreshold
+			},
+			(PredicatedKind::Explode, Self::RangeStart) =>
+			{
+				DiagnosticKind::MissingExplodeRangeStart
+			},
+			(PredicatedKind::Explode, Self::RangeOperator) =>
+			{
+				DiagnosticKind::MissingExplodeRangeOperator
+			},
+			(PredicatedKind::Explode, Self::RangeEnd) =>
+			{
+				DiagnosticKind::MissingExplodeRangeEnd
+			},
+			(PredicatedKind::Explode, Self::Times) =>
+			{
+				DiagnosticKind::MissingExplodeTimes
+			},
+		}
+	}
+}
 
 /// The names that other languages give the functions of the language, and the
 /// direction of the call that the language spells them as.
@@ -750,7 +910,8 @@ struct Doctor<'src>
 	/// as its dice operator, and fail at its faces.
 	reread: Option<usize>,
 
-	/// The byte offset of a misplaced `keep` or `reroll`, before which a fix
+	/// The byte offset of a misplaced `keep`, `reroll`, or `explode`, before
+	/// which a fix
 	/// supplied a dice expression where an expression was expected, if the
 	/// parser has yet to read the operand that the fix supplied as a dice
 	/// count, and fail at the missing dice operator.
@@ -1223,7 +1384,7 @@ impl<'src> Doctor<'src>
 
 		// Pattern: a call of `max` or `min`, where an expression may begin,
 		// which the language spells `highest` or `lowest`.
-		if let Site::Goal { operand: false, .. } = site.site
+		if let Site::Goal { operand: None, .. } = site.site
 			&& expects_expression
 			&& let Some(&(name, direction)) =
 				MISNAMED_CALLS.iter().find(|(name, _)| {
@@ -1258,9 +1419,10 @@ impl<'src> Doctor<'src>
 					c == 'd' && begins_verb(&source[d_pos..], "drop")
 				})
 				.map(|(_, d_pos)| d_pos),
-			// An operand of a reroll is no dice expression, so a supplied
+			// An operand of a reroll or explode is no dice expression, so a
+			// supplied
 			// operand would read as the operand itself, not as a dice count.
-			Site::Goal { operand: false, .. }
+			Site::Goal { operand: None, .. }
 				if expects_expression
 					&& begins_verb(&source[pos..], "drop") =>
 			{
@@ -1286,8 +1448,9 @@ impl<'src> Doctor<'src>
 			);
 		}
 
-		// Pattern: a keep or reroll clause that follows no dice expression,
-		// e.g., `3 keep lowest`, after a dice count, or `1 + reroll = 1`,
+		// Pattern: a keep, reroll, or explode clause that follows no dice
+		// expression, e.g., `3 keep lowest`, after a dice count, or `1 +
+		// reroll = 1`,
 		// where an expression was expected, rather than a bare name. After a
 		// dice count, the parse supplies the dice operator and faces. Where an
 		// expression was expected, the parse supplies an operand, which it
@@ -1297,7 +1460,7 @@ impl<'src> Doctor<'src>
 		let misplaced = match (site.site, verb)
 		{
 			(Site::DiceOperator, Some(verb)) => Some((verb, true)),
-			(Site::Goal { operand: false, .. }, Some(verb))
+			(Site::Goal { operand: None, .. }, Some(verb))
 				if expects_expression =>
 			{
 				Some((verb, false))
@@ -1322,12 +1485,12 @@ impl<'src> Doctor<'src>
 		// begin instead.
 		let reads_variable = match site.site
 		{
-			// The faces of dice, or an operand of a reroll, may begin with a
-			// `-`, as its sign.
-			Site::Faces | Site::Goal { operand: true, .. } =>
-			{
-				self.preceding(pos).is_none_or(|(c, _)| c != '-')
-			},
+			// The faces of dice, or an operand of a reroll or explode, may
+			// begin with a `-`, as its sign.
+			Site::Faces
+			| Site::Goal {
+				operand: Some(_), ..
+			} => self.preceding(pos).is_none_or(|(c, _)| c != '-'),
 			Site::Goal { .. } => true,
 			_ => false
 		};
@@ -1352,11 +1515,12 @@ impl<'src> Doctor<'src>
 			}
 		}
 
-		// Pattern: a reroll clause that lacks part of its predicate, which the
-		// context of the operand that failed tells: its threshold, or the start
-		// or the end of its range; or that lacks the whole predicate, its range
-		// operator, or the `time` or `times` of its limit.
-		if let Some(diagnostic) = self.incomplete_reroll(site, at_eof)
+		// Pattern: a reroll or explode clause that lacks part of its
+		// predicate, which the context of the operand that failed tells: its
+		// threshold, or the start or the end of its range; or that lacks the
+		// whole predicate, its range operator, or the `time` or `times` of its
+		// limit.
+		if let Some(diagnostic) = self.incomplete_predicated(site, at_eof)
 		{
 			return Analysis::Diagnosed(diagnostic, Repair::Fix);
 		}
@@ -1636,7 +1800,8 @@ impl<'src> Doctor<'src>
 				let (last, last_pos) = self.preceding(pos)?;
 				// The `,` follows the argument, unless a fix supplied the end
 				// of the argument after its last token in the source, e.g.,
-				// the predicate of a reroll clause, which the `,` follows too.
+				// the predicate of a reroll or explode clause, which the `,`
+				// follows too.
 				let after = last_pos + last.len_utf8();
 				let after = match self.fixes.last()
 				{
@@ -1652,13 +1817,15 @@ impl<'src> Doctor<'src>
 		}
 	}
 
-	/// Diagnose a reroll clause that lacks its predicate, an operand of its
-	/// predicate, its range operator, or the `time` or `times` of its limit.
-	/// The [goal](Site::Goal) of an operand of a reroll says so. The context
-	/// of the operand tells which operand it is, the threshold of a
-	/// comparison, or the start or the end of a range, if the failure lies at
-	/// its start; otherwise, the failure lies after the operand's sign, and the
-	/// token before the sign tells: a comparator, `in`, or a range operator.
+	/// Diagnose a reroll or explode clause that lacks its predicate, an
+	/// operand of its predicate, its range operator, or the `time` or `times`
+	/// of its limit. The site says which kind of clause it is, and the
+	/// [goal](Site::Goal) of an operand of a reroll or explode says so too.
+	/// The context of the operand tells which operand it is, the threshold of
+	/// a comparison, or the start or the end of a range, if the failure lies
+	/// at its start; otherwise, the failure lies after the operand's sign, and
+	/// the token before the sign tells: a comparator, `in`, or a range
+	/// operator.
 	///
 	/// # Parameters
 	/// - `site`: The failure.
@@ -1667,7 +1834,7 @@ impl<'src> Doctor<'src>
 	/// # Returns
 	/// The diagnostic, if the failure is one of these, whose fix the
 	/// [repair](Repair::Fix) of the failure supplies.
-	fn incomplete_reroll(
+	fn incomplete_predicated(
 		&mut self,
 		site: &FailureSite<'src>,
 		at_eof: bool
@@ -1675,32 +1842,32 @@ impl<'src> Doctor<'src>
 	{
 		let source = self.source;
 		let pos = site.position();
-		if !matches!(
-			site.site,
-			Site::Predicate
-				| Site::RangeOperator
-				| Site::Times { .. }
-				| Site::Goal { operand: true, .. }
-		)
+		let kind = match site.site
 		{
-			return None;
-		}
+			Site::Predicate { kind, .. }
+			| Site::RangeOperator { kind }
+			| Site::Times { kind, .. }
+			| Site::Goal {
+				operand: Some(kind),
+				..
+			} => kind,
+			_ => return None
+		};
 		let (last, last_pos) = self.preceding(pos)?;
 		let before_end = last_pos + last.len_utf8();
 		let diagnostic = match site.site
 		{
-			Site::Predicate =>
+			Site::Predicate { threshold, .. } =>
 			{
-				make_missing_reroll_predicate(source, before_end, pos)
+				make_missing_predicate(source, kind, threshold, before_end, pos)
 			},
-			Site::RangeOperator =>
+			Site::RangeOperator { .. } =>
 			{
-				make_missing_range_operator(source, pos, at_eof)
+				make_missing_range_operator(source, kind, pos, at_eof)
 			},
-			Site::Times { singular } =>
-			{
-				make_missing_times(source, before_end, pos, at_eof, singular)
-			},
+			Site::Times { singular, .. } => make_missing_times(
+				source, kind, before_end, pos, at_eof, singular
+			),
 			_ =>
 			{
 				// The token before the operand, past its sign, if any.
@@ -1723,58 +1890,56 @@ impl<'src> Doctor<'src>
 						.iter()
 						.any(|(_, kind)| *kind == NomErrorKind::Context(label))
 				};
-				let threshold = DiagnosticKind::MissingRerollThreshold;
+				let threshold = ClausePart::Threshold;
 				let tokens = [
-					("..=", DiagnosticKind::MissingRerollRangeEnd),
-					("..", DiagnosticKind::MissingRerollRangeEnd),
-					("<=", threshold.clone()),
-					(">=", threshold.clone()),
-					("!=", threshold.clone()),
-					("≤", threshold.clone()),
-					("≥", threshold.clone()),
-					("≠", threshold.clone()),
-					("<", threshold.clone()),
-					(">", threshold.clone()),
-					("=", threshold.clone()),
-					("in", DiagnosticKind::MissingRerollRangeStart)
+					("..=", ClausePart::RangeEnd),
+					("..", ClausePart::RangeEnd),
+					("<=", threshold),
+					(">=", threshold),
+					("!=", threshold),
+					("≤", threshold),
+					("≥", threshold),
+					("≠", threshold),
+					("<", threshold),
+					(">", threshold),
+					("=", threshold),
+					("in", ClausePart::RangeStart)
 				];
 				let token = tokens
-					.iter()
-					.find(|(token, _)| before.ends_with(token))
-					.map(|(token, kind)| (*token, kind.clone()));
-				let kind = if within(REROLL_THRESHOLD_CONTEXT)
+					.into_iter()
+					.find(|(token, _)| before.ends_with(token));
+				let contexts = kind.contexts();
+				let part = if within(contexts.threshold)
 				{
 					threshold
 				}
-				else if within(REROLL_RANGE_START_CONTEXT)
+				else if within(contexts.range_start)
 				{
-					DiagnosticKind::MissingRerollRangeStart
+					ClausePart::RangeStart
 				}
-				else if within(REROLL_RANGE_END_CONTEXT)
+				else if within(contexts.range_end)
 				{
-					DiagnosticKind::MissingRerollRangeEnd
+					ClausePart::RangeEnd
 				}
 				else
 				{
 					// Only a fix supplies the token before an operand: the
 					// operator before the end of a range.
-					token.as_ref().map_or(
-						DiagnosticKind::MissingRerollRangeEnd,
-						|(_, kind)| kind.clone()
-					)
+					token.map_or(ClausePart::RangeEnd, |(_, part)| part)
 				};
 				// Name the token before the operand only if it belongs to the
 				// operand, and so is not one that a fix supplied.
 				let token =
-					token.filter(|(_, of)| *of == kind).map(|(token, _)| {
+					token.filter(|(_, of)| *of == part).map(|(token, _)| {
 						SourceSpan {
 							start: before.len() - token.len(),
 							end: before.len()
 						}
 					});
-				make_missing_reroll_operand(
+				make_missing_operand(
 					source,
 					kind,
+					part,
 					token,
 					token_span(source, pos, at_eof),
 					pos,
@@ -1832,9 +1997,12 @@ impl<'src> Doctor<'src>
 		// Check if a variable contains `d`/`D` — if so, offer both a split
 		// fix (e.g., `{x}D6`) and a whole-variable fix (e.g., `{xD6}`). The
 		// split fix leaves the whitespace before the `d` outside the braces,
-		// e.g., `{abc} d6`.
+		// e.g., `{abc} d6`. A word that begins with `explode`, e.g.,
+		// `explodehighest`, begins with the keyword, whose `d` is no dice
+		// operator, so it is never split.
 		let split_pos = name.char_indices().find(|&(i, c)| {
 			what == "variable"
+				&& !name.starts_with("explode")
 				&& (c == 'd' || c == 'D')
 				&& i > 0
 				&& name[..i].starts_with(is_bare_word_start)
@@ -2059,7 +2227,8 @@ impl<'src> Recovery<'src> for Doctor<'src>
 			return Repair::Reread;
 		}
 		// Likewise, the dice operator after the operand that a fix supplied
-		// before a misplaced `keep` or `reroll` fails at once, at the verb.
+		// before a misplaced `keep`, `reroll`, or `explode` fails at once, at
+		// the verb.
 		if let Some(verb_pos) = self.misplaced_clause.take()
 			&& site.site == Site::DiceOperator
 			&& site.position() == verb_pos
@@ -2922,7 +3091,7 @@ fn make_missing_dice_faces(source: &str, d_pos: usize) -> Diagnostic
 	}
 }
 
-/// Create a diagnostic for a drop, keep, or reroll clause that follows
+/// Create a diagnostic for a drop, keep, reroll, or explode clause that follows
 /// something other than a dice expression. After an operand, which the parser
 /// read as the count of a dice expression, the fix inserts placeholder faces
 /// after the operand, e.g., `3D6 drop lowest` for `3 drop lowest`, whose `d`
@@ -2934,13 +3103,13 @@ fn make_missing_dice_faces(source: &str, d_pos: usize) -> Diagnostic
 /// # Parameters
 /// - `source`: The source.
 /// - `verb_pos`: The byte offset of the verb.
-/// - `verb`: The verb, `drop`, `keep`, or `reroll`.
+/// - `verb`: The verb, `drop`, `keep`, `reroll`, or `explode`.
 /// - `after_operand`: Whether an operand precedes the verb.
 ///
 /// # Returns
-/// A diagnostic with a `MisplacedDropClause`, `MisplacedKeepClause`, or
-/// `MisplacedRerollClause` kind and a suggestion with a placeholder for the
-/// faces or the dice expression.
+/// A diagnostic with a `MisplacedDropClause`, `MisplacedKeepClause`,
+/// `MisplacedRerollClause`, or `MisplacedExplodeClause` kind and a suggestion
+/// with a placeholder for the faces or the dice expression.
 fn make_misplaced_clause(
 	source: &str,
 	verb_pos: usize,
@@ -2952,7 +3121,8 @@ fn make_misplaced_clause(
 	{
 		"drop" => DiagnosticKind::MisplacedDropClause,
 		"keep" => DiagnosticKind::MisplacedKeepClause,
-		_ => DiagnosticKind::MisplacedRerollClause
+		"reroll" => DiagnosticKind::MisplacedRerollClause,
+		_ => DiagnosticKind::MisplacedExplodeClause
 	};
 	let edit = if after_operand
 	{
@@ -3178,34 +3348,41 @@ fn token_span(source: &str, pos: usize, at_eof: bool) -> SourceSpan
 	SourceSpan { start, end }
 }
 
-/// Create a diagnostic for a `reroll` that no predicate follows. The fix
-/// inserts the commonest predicate, `= 1`, as a placeholder.
+/// Create a diagnostic for a `reroll` or `explode` that no predicate follows.
+/// The fix inserts the commonest predicate of the verb as a placeholder: `= 1`
+/// for a reroll, and `=` and the highest face of the dice for an explode.
 ///
 /// # Parameters
 /// - `source`: The source.
-/// - `verb_end`: The byte offset of the end of the `reroll`.
+/// - `kind`: The kind of the clause.
+/// - `threshold`: The threshold of the predicate, as the [repair](Repair::Fix)
+///   supplies it.
+/// - `verb_end`: The byte offset of the end of the verb.
 /// - `pos`: The byte offset where the predicate was expected.
 ///
 /// # Returns
-/// A diagnostic with a `MissingRerollPredicate` kind and a suggestion with a
-/// placeholder for the predicate.
-fn make_missing_reroll_predicate(
+/// A diagnostic with a `MissingRerollPredicate` or `MissingExplodePredicate`
+/// kind and a suggestion with a placeholder for the predicate.
+fn make_missing_predicate(
 	source: &str,
+	kind: PredicatedKind,
+	threshold: i32,
 	verb_end: usize,
 	pos: usize
 ) -> Diagnostic
 {
-	let predicate = format!("= {}", PLACEHOLDER_THRESHOLD);
+	let verb = kind.keyword();
+	let predicate = format!("= {threshold}");
 	Diagnostic {
-		kind: DiagnosticKind::MissingRerollPredicate,
+		kind: ClausePart::Predicate.missing(kind),
 		span: SourceSpan {
-			start: verb_end.saturating_sub("reroll".len()),
+			start: verb_end.saturating_sub(verb.len()),
 			end: verb_end
 		},
-		message: "expected a comparator or `in` after `reroll`".into(),
+		message: format!("expected a comparator or `in` after `{verb}`"),
 		related: vec![],
 		suggestions: vec![Suggestion {
-			description: "insert reroll predicate".into(),
+			description: format!("insert {verb} predicate"),
 			edits: vec![padded_insertion(
 				source,
 				pos,
@@ -3216,15 +3393,16 @@ fn make_missing_reroll_predicate(
 	}
 }
 
-/// Create a diagnostic for an operand of the predicate of a reroll clause that
-/// is missing after the token that precedes it: the threshold after a
-/// comparator, the start of a range after `in`, or the end of a range after
-/// its operator. The fix inserts the placeholder operand, `0`.
+/// Create a diagnostic for an operand of the predicate of a reroll or explode
+/// clause that is missing after the token that precedes it: the threshold
+/// after a comparator, the start of a range after `in`, or the end of a range
+/// after its operator. The fix inserts the placeholder operand, `0`.
 ///
 /// # Parameters
 /// - `source`: The source.
-/// - `kind`: The kind of the diagnostic: `MissingRerollThreshold`,
-///   `MissingRerollRangeStart`, or `MissingRerollRangeEnd`.
+/// - `kind`: The kind of the clause.
+/// - `part`: The missing operand: [`ClausePart::Threshold`],
+///   [`ClausePart::RangeStart`], or [`ClausePart::RangeEnd`].
 /// - `before`: The span of the token before the operand, or `None` if a fix
 ///   supplied it, as it may the range operator.
 /// - `at`: The span of the token where the operand was expected, which the
@@ -3234,11 +3412,12 @@ fn make_missing_reroll_predicate(
 ///   fix must not separate the placeholder, lest it read as a subtraction.
 ///
 /// # Returns
-/// A diagnostic of the specified kind and a suggestion with a placeholder for
-/// the operand.
-fn make_missing_reroll_operand(
+/// A diagnostic of the [kind](ClausePart::missing) of the part, and a
+/// suggestion with a placeholder for the operand.
+fn make_missing_operand(
 	source: &str,
-	kind: DiagnosticKind,
+	kind: PredicatedKind,
+	part: ClausePart,
 	before: Option<SourceSpan>,
 	at: SourceSpan,
 	pos: usize,
@@ -3248,14 +3427,14 @@ fn make_missing_reroll_operand(
 	let after = before.map_or(String::new(), |before| {
 		format!(" after `{}`", &source[before.start..before.end])
 	});
-	let (message, description, what) = match kind
+	let (message, description, what) = match part
 	{
-		DiagnosticKind::MissingRerollThreshold => (
+		ClausePart::Threshold => (
 			format!("expected a threshold{after}"),
 			"insert threshold",
 			"threshold"
 		),
-		DiagnosticKind::MissingRerollRangeStart => (
+		ClausePart::RangeStart => (
 			format!("expected a list or a range{after}"),
 			"insert range start",
 			"range start"
@@ -3279,7 +3458,7 @@ fn make_missing_reroll_operand(
 		}
 	}
 	Diagnostic {
-		kind,
+		kind: part.missing(kind),
 		span: before.unwrap_or(at),
 		message,
 		related: vec![],
@@ -3290,27 +3469,30 @@ fn make_missing_reroll_operand(
 	}
 }
 
-/// Create a diagnostic for a range of a reroll clause whose start no range
-/// operator follows. The fix inserts the inclusive operator, `..=`, as a
-/// placeholder, since the author of two endpoints most likely means to
+/// Create a diagnostic for a range of a reroll or explode clause whose start
+/// no range operator follows. The fix inserts the inclusive operator, `..=`,
+/// as a placeholder, since the author of two endpoints most likely means to
 /// include both.
 ///
 /// # Parameters
 /// - `source`: The source.
+/// - `kind`: The kind of the clause.
 /// - `pos`: The byte offset where the operator was expected.
 /// - `at_eof`: Whether the position is at the end of the source.
 ///
 /// # Returns
-/// A diagnostic with a `MissingRerollRangeOperator` kind and a suggestion with
-/// a placeholder for the operator.
+/// A diagnostic with a `MissingRerollRangeOperator` or
+/// `MissingExplodeRangeOperator` kind and a suggestion with a placeholder for
+/// the operator.
 fn make_missing_range_operator(
 	source: &str,
+	kind: PredicatedKind,
 	pos: usize,
 	at_eof: bool
 ) -> Diagnostic
 {
 	Diagnostic {
-		kind: DiagnosticKind::MissingRerollRangeOperator,
+		kind: ClausePart::RangeOperator.missing(kind),
 		span: token_span(source, pos, at_eof),
 		message: "expected `..` or `..=` after the start of the range".into(),
 		related: vec![],
@@ -3326,12 +3508,13 @@ fn make_missing_range_operator(
 	}
 }
 
-/// Create a diagnostic for a limit of a reroll clause that no `time` or
-/// `times` follows. The fix inserts `time` after the count `1`, and `times`
-/// otherwise, as [`Display`] writes them.
+/// Create a diagnostic for a limit of a reroll or explode clause that no
+/// `time` or `times` follows. The fix inserts `time` after the count `1`, and
+/// `times` otherwise, as [`Display`] writes them.
 ///
 /// # Parameters
 /// - `source`: The source.
+/// - `kind`: The kind of the clause.
 /// - `before_end`: The byte offset of the end of the count, `∞`, or
 ///   `unlimited`.
 /// - `pos`: The byte offset where the `time` or `times` was expected.
@@ -3339,9 +3522,11 @@ fn make_missing_range_operator(
 /// - `singular`: Whether the count is the constant `1`.
 ///
 /// # Returns
-/// A diagnostic with a `MissingRerollTimes` kind and a suggestion.
+/// A diagnostic with a `MissingRerollTimes` or `MissingExplodeTimes` kind and
+/// a suggestion.
 fn make_missing_times(
 	source: &str,
+	kind: PredicatedKind,
 	before_end: usize,
 	pos: usize,
 	at_eof: bool,
@@ -3357,7 +3542,7 @@ fn make_missing_times(
 			Cow::Owned(format!("`{keyword}`"))
 		});
 	Diagnostic {
-		kind: DiagnosticKind::MissingRerollTimes,
+		kind: ClausePart::Times.missing(kind),
 		span: token_span(source, pos, at_eof),
 		message: format!("expected `{word}` after {after}"),
 		related: vec![],
@@ -3572,16 +3757,34 @@ fn make_ungrouped_call(source: &str, pos: usize, operand: Operand)
 	let name = &name[..name
 		.find(|c: char| c == '(' || is_token_space(c))
 		.unwrap_or(name.len())];
+	// The article and the verb of a reroll or explode clause.
+	let clause = |kind: PredicatedKind| match kind
+	{
+		PredicatedKind::Reroll => "a reroll",
+		PredicatedKind::Explode => "an explode"
+	};
 	let what = match operand
 	{
-		Operand::DiceCount => "a dice count",
-		Operand::Faces => "the faces of dice",
-		Operand::DropCount => "the count of a drop clause",
-		Operand::KeepCount => "the count of a keep clause",
-		Operand::Threshold => "a reroll threshold",
-		Operand::RangeStart => "the start of a reroll range",
-		Operand::RangeEnd => "the end of a reroll range",
-		Operand::Limit => "the count of a reroll limit"
+		Operand::DiceCount => Cow::Borrowed("a dice count"),
+		Operand::Faces => Cow::Borrowed("the faces of dice"),
+		Operand::DropCount => Cow::Borrowed("the count of a drop clause"),
+		Operand::KeepCount => Cow::Borrowed("the count of a keep clause"),
+		Operand::Threshold(kind) =>
+		{
+			format!("{} threshold", clause(kind)).into()
+		},
+		Operand::RangeStart(kind) =>
+		{
+			format!("the start of {} range", clause(kind)).into()
+		},
+		Operand::RangeEnd(kind) =>
+		{
+			format!("the end of {} range", clause(kind)).into()
+		},
+		Operand::Limit(kind) =>
+		{
+			format!("the count of {} limit", clause(kind)).into()
+		},
 	};
 	Diagnostic {
 		kind: DiagnosticKind::UngroupedCall,

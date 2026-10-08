@@ -22,8 +22,8 @@ use crate::{
 	parser::{
 		FailureSite, LoneArgument, Operand, PLACEHOLDER_FACE,
 		PLACEHOLDER_FACES, PLACEHOLDER_NAME, PLACEHOLDER_OPERAND,
-		PLACEHOLDER_THRESHOLD, Recovery, Repair, Site, bare_word,
-		is_token_space, steps, unclosed_name_ends
+		PredicatedKind, Recovery, Repair, Site, bare_word, is_token_space,
+		steps, unclosed_name_ends
 	}
 };
 
@@ -114,9 +114,12 @@ impl<'src> Recovery<'src> for Canonical<'src>
 		let signed = self.source[..at].trim_end().ends_with('-');
 		let variable = match site.site
 		{
-			// The faces of dice, or an operand of a reroll, may begin with a
-			// `-`, as its sign.
-			Site::Faces | Site::Goal { operand: true, .. } => !signed,
+			// The faces of dice, or an operand of a reroll or explode, may
+			// begin with a `-`, as its sign.
+			Site::Faces
+			| Site::Goal {
+				operand: Some(_), ..
+			} => !signed,
 			Site::Goal { .. } | Site::ParameterName => true,
 			_ => false
 		};
@@ -137,10 +140,9 @@ impl<'src> Recovery<'src> for Canonical<'src>
 		match site.site
 		{
 			// The operand of a reroll is the constant that begins at its sign.
-			Site::Goal { operand: true, .. } if signed =>
-			{
-				self.insert(at, PLACEHOLDER_OPERAND.to_string())
-			},
+			Site::Goal {
+				operand: Some(_), ..
+			} if signed => self.insert(at, PLACEHOLDER_OPERAND.to_string()),
 			Site::Goal { .. } =>
 			{
 				self.insert(at, format!(" {}", PLACEHOLDER_OPERAND))
@@ -199,11 +201,11 @@ impl<'src> Recovery<'src> for Canonical<'src>
 			},
 			// Separate the supplied tokens from those after them, lest they run
 			// together, as `= 12` would for `= 1` before `2 times`.
-			Site::Predicate =>
+			Site::Predicate { threshold, .. } =>
 			{
-				self.insert(at, format!("= {} ", PLACEHOLDER_THRESHOLD))
+				self.insert(at, format!("= {} ", threshold))
 			},
-			Site::RangeOperator => self.insert(at, "..="),
+			Site::RangeOperator { .. } => self.insert(at, "..="),
 			// Supply the `,`, before another argument; a second after a lone
 			// argument, before its `)`.
 			Site::Comma { .. } => self.insert(at, ","),
@@ -211,7 +213,7 @@ impl<'src> Recovery<'src> for Canonical<'src>
 			Site::TrailingComma => self.edits.push((at, 1, String::new())),
 			// Supply the `(` before the call, whose `)` a closer supplies.
 			Site::UngroupedCall { .. } => self.insert(at, "("),
-			Site::Times { singular } =>
+			Site::Times { singular, .. } =>
 			{
 				self.insert(at, if singular { " time " } else { " times " })
 			},
@@ -325,6 +327,41 @@ fn test_canonical_repairs()
 		("highest(1, rerollhighest)", "highest(1, {rerollhighest})"),
 		("-3 reroll in [1]", "-3D6 reroll in [1]"),
 		("(2 reroll ≥ 2", "(2D6 reroll ≥ 2)"),
+		("3d6 explode", "3d6 explode= 6 "),
+		("3d6 explode 2 times", "3d6 explode = 6 2 times"),
+		("3d6 explode + 1", "3d6 explode = 6 + 1"),
+		(
+			"4d10 keep highest 3 explode",
+			"4d10 keep highest 3 explode= 10 "
+		),
+		(
+			"3d[1, 4] drop lowest explode",
+			"3d[1, 4] drop lowest explode= 4 "
+		),
+		("3d{x} explode", "3d{x} explode= 6 "),
+		("3d6 explode =", "3d6 explode = 0"),
+		("3d6 explode ≤ + 1", "3d6 explode ≤  0+ 1"),
+		("3d6 explode < -", "3d6 explode < -0"),
+		("3d6 explode < x", "3d6 explode < {x}"),
+		("3d6 explode in", "3d6 explode in 0..= 0"),
+		("3d6 explode in ..3", "3d6 explode in  0..3"),
+		("3d6 explode in 1 3", "3d6 explode in 1 ..=3"),
+		("3d6 explode in 1..", "3d6 explode in 1.. 0"),
+		("3d6 explode in -..2", "3d6 explode in -0..2"),
+		("3d6 explode in [1, 2", "3d6 explode in [1, 2]"),
+		("3d6 explode = 1 2", "3d6 explode = 1 2 times "),
+		("3d6 explode = 1 1", "3d6 explode = 1 1 time "),
+		("3d6 explode = 1 ∞", "3d6 explode = 1 ∞ times "),
+		(
+			"3d6 explode = 1 unlimited + 1",
+			"3d6 explode = 1 unlimited  times + 1"
+		),
+		("3 explode = 1", "3D6 explode = 1"),
+		("3 explode!=1", "3D6 explode!=1"),
+		("1 + explodehighest", "1 + {explodehighest}"),
+		("highest(1, explodehighest)", "highest(1, {explodehighest})"),
+		("-3 explode in [1]", "-3D6 explode in [1]"),
+		("(2 explode ≥ 2", "(2D6 explode ≥ 2)"),
 		("3d-", "3d-6"),
 		("3d-^2", "3d-6^2"),
 		("3dx", "3d{x}"),
@@ -365,6 +402,22 @@ fn test_canonical_repairs()
 		(
 			"3d6 reroll = 1 highest(1, 2) times",
 			"3d6 reroll = 1 (highest(1, 2)) times"
+		),
+		(
+			"3d6 explode ≤ highest(1, 2)",
+			"3d6 explode ≤ (highest(1, 2))"
+		),
+		(
+			"3d6 explode in lowest(1, 2)..3",
+			"3d6 explode in (lowest(1, 2))..3"
+		),
+		(
+			"3d6 explode in 1..lowest(2, 3)",
+			"3d6 explode in 1..(lowest(2, 3))"
+		),
+		(
+			"3d6 explode = 1 highest(1, 2) times",
+			"3d6 explode = 1 (highest(1, 2)) times"
 		),
 		(
 			"3dhighest(1, 2dlowest(3, 4))",
@@ -488,31 +541,41 @@ fn test_declining_dice_operator_continues()
 	assert_eq!(sites.len(), 1);
 }
 
-/// Ensure that a reroll clause after a dice count offers a repair at
-/// [`Site::DiceOperator`] as a keep clause does, and that declining it does
+/// Ensure that a reroll or explode clause after a dice count offers a repair
+/// at [`Site::DiceOperator`] as a keep clause does, and that declining it does
 /// not end recovery.
 #[test]
-fn test_declining_dice_operator_continues_reroll()
+fn test_declining_dice_operator_continues_predicated()
 {
-	let (recovered, sites) = recover("3 reroll = 1", |site| match site.site
+	for (source, grouped, expected) in [
+		("3 reroll = 1", "(3 reroll = 1) + 1", "(3D6 reroll = 1) + 1"),
+		(
+			"3 explode = 6",
+			"(3 explode = 6) + 1",
+			"(3D6 explode = 6) + 1"
+		)
+	]
 	{
-		Site::DiceOperator => Repair::Stop,
-		_ => Repair::Fix
-	});
-	assert_eq!(recovered.as_deref(), Some("3"));
-	assert_eq!(
-		sites.iter().map(|site| site.site).collect::<Vec<_>>(),
-		[Site::DiceOperator, Site::TrailingInput]
-	);
-	assert_eq!(sites[0].position(), 2);
-	let (recovered, sites) =
-		recover("(3 reroll = 1) + 1", |site| match site.site
+		let (recovered, sites) = recover(source, |site| match site.site
+		{
+			Site::DiceOperator => Repair::Stop,
+			_ => Repair::Fix
+		});
+		assert_eq!(recovered.as_deref(), Some("3"), "{source:?}");
+		assert_eq!(
+			sites.iter().map(|site| site.site).collect::<Vec<_>>(),
+			[Site::DiceOperator, Site::TrailingInput],
+			"{source:?}"
+		);
+		assert_eq!(sites[0].position(), 2, "{source:?}");
+		let (recovered, sites) = recover(grouped, |site| match site.site
 		{
 			Site::DiceOperator => Repair::Fix,
 			_ => Repair::Stop
 		});
-	assert_eq!(recovered.as_deref(), Some("(3D6 reroll = 1) + 1"));
-	assert_eq!(sites.len(), 1);
+		assert_eq!(recovered.as_deref(), Some(expected), "{grouped:?}");
+		assert_eq!(sites.len(), 1, "{grouped:?}");
+	}
 }
 
 /// Ensure that declining a [`Site::UngroupedCall`] or a
@@ -573,10 +636,38 @@ fn test_ungrouped_call_operands()
 		("3dhighest(1, 2)", Operand::Faces),
 		("3d6 drop lowest lowest(1, 2)", Operand::DropCount),
 		("3d6 keep lowest lowest(1, 2)", Operand::KeepCount),
-		("3d6 reroll < lowest(1, 2)", Operand::Threshold),
-		("3d6 reroll in lowest(1, 2)..3", Operand::RangeStart),
-		("3d6 reroll in 1..=lowest(1, 2)", Operand::RangeEnd),
-		("3d6 reroll = 1 lowest(1, 2) times", Operand::Limit)
+		(
+			"3d6 reroll < lowest(1, 2)",
+			Operand::Threshold(PredicatedKind::Reroll)
+		),
+		(
+			"3d6 reroll in lowest(1, 2)..3",
+			Operand::RangeStart(PredicatedKind::Reroll)
+		),
+		(
+			"3d6 reroll in 1..=lowest(1, 2)",
+			Operand::RangeEnd(PredicatedKind::Reroll)
+		),
+		(
+			"3d6 reroll = 1 lowest(1, 2) times",
+			Operand::Limit(PredicatedKind::Reroll)
+		),
+		(
+			"3d6 explode > lowest(1, 2)",
+			Operand::Threshold(PredicatedKind::Explode)
+		),
+		(
+			"3d6 explode in lowest(1, 2)..7",
+			Operand::RangeStart(PredicatedKind::Explode)
+		),
+		(
+			"3d6 explode in 5..=lowest(1, 2)",
+			Operand::RangeEnd(PredicatedKind::Explode)
+		),
+		(
+			"3d6 explode = 6 lowest(1, 2) times",
+			Operand::Limit(PredicatedKind::Explode)
+		)
 	]
 	{
 		let (_, sites) = recover(source, |_| Repair::Fix);
@@ -733,19 +824,29 @@ fn test_goal_call()
 }
 
 /// Ensure that a goal that fails at an operand of the predicate of a reroll
-/// clause says so, and that every other goal does not.
+/// or explode clause says so, and which kind of clause it is, and that every
+/// other goal does not.
 #[test]
-fn test_goal_of_reroll_operand()
+fn test_goal_of_predicated_operand()
 {
+	let reroll = Some(PredicatedKind::Reroll);
+	let explode = Some(PredicatedKind::Explode);
 	for (source, operand) in [
-		("3d6 reroll =", true),
-		("3d6 reroll ≤ -", true),
-		("3d6 reroll in", true),
-		("3d6 reroll in 1..", true),
-		("3d6 reroll = (", false),
-		("3d6 reroll = 1 (", false),
-		("3d6 drop lowest (", false),
-		("1 +", false)
+		("3d6 reroll =", reroll),
+		("3d6 reroll ≤ -", reroll),
+		("3d6 reroll in", reroll),
+		("3d6 reroll in 1..", reroll),
+		("3d6 explode =", explode),
+		("3d6 explode ≥ -", explode),
+		("3d6 explode in", explode),
+		("3d6 explode in 5..", explode),
+		("3d6 explode = 6 reroll in", reroll),
+		("3d6 reroll = 1 explode in", explode),
+		("3d6 reroll = (", None),
+		("3d6 reroll = 1 (", None),
+		("3d6 explode = 6 (", None),
+		("3d6 drop lowest (", None),
+		("1 +", None)
 	]
 	{
 		let (_, sites) = recover(source, |_| Repair::Fix);
@@ -1012,6 +1113,26 @@ pub(super) const FAMILIES: &[Family] = &[
 	Family {
 		name: "misplaced rerolls",
 		source: |n| format!("1{}", " + 3 reroll = 1".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing explode predicates",
+		source: |n| format!("3d6{}", " explode".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing explode thresholds",
+		source: |n| format!("1{}", " + 3d6 explode ≥".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "missing explode times",
+		source: |n| format!("3d6{}", " explode = 6 2".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
+		name: "misplaced explodes",
+		source: |n| format!("1{}", " + 3 explode = 6".repeat(n)),
 		repairs: |n| n
 	},
 	Family {

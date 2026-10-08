@@ -866,6 +866,10 @@ fn test_extremum_positions()
 			"1D6 reroll in (lowest(1, 2))..(highest(3, 4))"
 		),
 		(
+			"1D6 explode ≥ (highest(5, {x})) (lowest(2, 3)) times",
+			"1D6 explode ≥ (highest(5, {x})) (lowest(2, 3)) times"
+		),
+		(
 			"[highest(1, 2):lowest(3, 4)]",
 			"[highest(1, 2):lowest(3, 4)]"
 		),
@@ -897,7 +901,8 @@ fn test_extremum_positions()
 	for (input, residue) in [
 		("highest(1, 2)D6", "D6"),
 		("4D6 drop lowest lowest(1, 2)", " lowest(1, 2)"),
-		("4D6 reroll = 1 highest(1, 2) times", " highest(1, 2) times")
+		("4D6 reroll = 1 highest(1, 2) times", " highest(1, 2) times"),
+		("4D6 explode = 6 lowest(1, 2) times", " lowest(1, 2) times")
 	]
 	{
 		let (rest, _) = expression(Span::new(input)).unwrap();

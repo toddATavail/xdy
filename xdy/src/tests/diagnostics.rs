@@ -53,6 +53,16 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 		},
 		DiagnosticKind::MissingRerollRangeEnd => "MissingRerollRangeEnd",
 		DiagnosticKind::MissingRerollTimes => "MissingRerollTimes",
+		DiagnosticKind::MisplacedExplodeClause => "MisplacedExplodeClause",
+		DiagnosticKind::MissingExplodePredicate => "MissingExplodePredicate",
+		DiagnosticKind::MissingExplodeThreshold => "MissingExplodeThreshold",
+		DiagnosticKind::MissingExplodeRangeStart => "MissingExplodeRangeStart",
+		DiagnosticKind::MissingExplodeRangeOperator =>
+		{
+			"MissingExplodeRangeOperator"
+		},
+		DiagnosticKind::MissingExplodeRangeEnd => "MissingExplodeRangeEnd",
+		DiagnosticKind::MissingExplodeTimes => "MissingExplodeTimes",
 		DiagnosticKind::UnknownFunction { .. } => "UnknownFunction",
 		DiagnosticKind::LoneArgument => "LoneArgument",
 		DiagnosticKind::MissingComma => "MissingComma",
@@ -537,6 +547,15 @@ fn test_valid_programs_produce_no_diagnostics()
 		"4D6 reroll in []",
 		"4D[-2, -1, 0, 1] reroll in -1..={x} {n} times",
 		"4D6 drop lowest reroll != 1 keep highest 3",
+		"3D6 explode = 6",
+		"3d6 explode=6 - 1",
+		"4D6 explode ≥ 5 ∞ times",
+		"4D6 explode >= {x} unlimited time",
+		"4D6 explode in [5, 6] 2 times",
+		"4D6 explode in []",
+		"4D[-2, -1, 0, 1] explode in -1..={x} {n} times",
+		"4D6 drop lowest explode != 1 keep highest 3",
+		"4D6 explode = 6 reroll = 1 explode = 5 1 time",
 		"1D6 + 1D8 + 1D10",
 	];
 	for source in &valid
@@ -753,6 +772,11 @@ fn test_diagnose_stray_whitespace()
 			"4d6 reroll\u{a0}≤ 2\u{2003}∞ times",
 			"4d6 reroll ≤ 2 ∞ times",
 			vec![(10, 12), (17, 20)]
+		),
+		(
+			"4d6 explode\u{a0}≥ 5\u{2003}∞ times",
+			"4d6 explode ≥ 5 ∞ times",
+			vec![(11, 13), (18, 21)]
 		),
 		("{x},\u{b}{y}: {x}", "{x}, {y}: {x}", vec![(4, 5)]),
 		("{x}@\u{a0}(1)", "{x}@ (1)", vec![(4, 6)])
@@ -1118,6 +1142,31 @@ fn test_diagnose_deep_reroll_count() { diagnose_deep(Nesting::RerollCount) }
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_diagnose_deep_reroll_clauses() { diagnose_deep(Nesting::RerollClauses) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of explode thresholds on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_explode_threshold()
+{
+	diagnose_deep(Nesting::ExplodeThreshold)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of explode counts on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_explode_count() { diagnose_deep(Nesting::ExplodeCount) }
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep stack of explode clauses of every form, among rerolls and drops, on a
+/// small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_explode_clauses()
+{
+	diagnose_deep(Nesting::ExplodeClauses)
+}
 
 /// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
 /// deep chain of the first arguments of extrema on a small stack.

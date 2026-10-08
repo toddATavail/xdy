@@ -570,10 +570,7 @@ fn test_compile_extrema_of_fewer_than_two()
 fn test_compile_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION
-			.into_iter()
-			.chain(Nesting::UNPARSED)
-			.chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
 			let function =
 				Compiler::compile(&nest_function(nesting, nesting.depth()));
@@ -601,10 +598,7 @@ const OPTIMIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 fn test_optimize_deep()
 {
 	on_small_stack_within(OPTIMIZATION_TIMEOUT, || {
-		for nesting in Nesting::ROTATION
-			.into_iter()
-			.chain(Nesting::UNPARSED)
-			.chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
 			let depth = nesting.depth() / OPTIMIZATION_DIVISOR;
 			let function = Compiler::compile(&nest_function(nesting, depth));

@@ -287,6 +287,14 @@ fn test_equality_distinguishes()
 		("4D6 reroll in [1]", "4D6 reroll in [1, 2]"),
 		("4D6 reroll in 1..2", "4D6 reroll in 1..=2"),
 		("4D6 reroll = 1 drop lowest", "4D6 drop lowest reroll = 1"),
+		("4D6 explode = 6", "4D6 explode ≠ 6"),
+		("4D6 explode = 6", "4D6 explode = 6 1 time"),
+		("4D6 explode = 6 2 times", "4D6 explode = 6 ∞ times"),
+		("4D6 explode in [6]", "4D6 explode in [5, 6]"),
+		("4D6 explode in 5..6", "4D6 explode in 5..=6"),
+		("4D6 explode = 6 drop lowest", "4D6 drop lowest explode = 6"),
+		("4D6 explode = 6", "4D6 reroll = 6"),
+		("4D6 explode = 6 reroll = 1", "4D6 reroll = 1 explode = 6"),
 		("{x}: {x}", "{y}: {y}"),
 		("-(1)", "-(2)")
 	];
@@ -709,9 +717,9 @@ fn test_display_reroll_clauses()
 /// predicate and limit, as reroll clauses do: `≠`, `≤`, and `≥` for their
 /// comparators, `time` for a literal count of one only, `∞` for an unlimited
 /// limit, and a negative constant count grouped, though a negative threshold or
-/// endpoint is not; chained with drops, keeps, and rerolls in any order; and
-/// that the S-expressions of the trees, on one line or wrapped onto many, read
-/// back to the same trees.
+/// endpoint is not; chained with drops, keeps, and rerolls in any order; that
+/// the renderings parse back to the same trees; and that the S-expressions of
+/// the trees, on one line or wrapped onto many, read back to the same trees.
 #[test]
 fn test_display_explode_clauses()
 {
@@ -789,6 +797,13 @@ fn test_display_explode_clauses()
 		let options =
 			SExpressibleOptions::new(0, 4, usize::MAX).with_groups(true);
 		assert_eq!(function.to_s_expr(options), s_expr);
+		// The rendering parses back to the same tree, whose negative constant
+		// count is grouped, so compare without groups.
+		let reparsed = Parser::parse(expected).unwrap();
+		assert_eq!(
+			reparsed.to_s_expr(SExpressibleOptions::default()),
+			function.to_s_expr(SExpressibleOptions::default())
+		);
 		for soft_limit in [0, 20, 40]
 		{
 			let options =
@@ -1473,7 +1488,7 @@ pub(super) enum Nesting
 impl Nesting
 {
 	/// The constructs through which [`Mixed`](Self::Mixed) rotates.
-	pub(super) const ROTATION: [Nesting; 24] = [
+	pub(super) const ROTATION: [Nesting; 27] = [
 		Nesting::Group,
 		Nesting::Binding,
 		Nesting::RangeStart,
@@ -1496,17 +1511,11 @@ impl Nesting
 		Nesting::RerollRangeEnd,
 		Nesting::RerollCount,
 		Nesting::RerollClauses,
-		Nesting::ExtremumFirst,
-		Nesting::ExtremumLast
-	];
-
-	/// The constructs that the parser does not read yet, which are therefore
-	/// absent from [`ROTATION`](Self::ROTATION), whose renderings other tests
-	/// parse. The tests that never parse a nesting cover them too.
-	pub(super) const UNPARSED: [Nesting; 3] = [
 		Nesting::ExplodeThreshold,
 		Nesting::ExplodeCount,
-		Nesting::ExplodeClauses
+		Nesting::ExplodeClauses,
+		Nesting::ExtremumFirst,
+		Nesting::ExtremumLast
 	];
 
 	/// Answer whether nesting this way introduces [bindings](Binding). Every

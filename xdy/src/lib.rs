@@ -130,7 +130,8 @@
 //!   [`enter_extremum`](ast::ASTVisitor::enter_extremum), which does nothing by
 //!   default.
 //! * [`diagnostics::DiagnosticKind`] gains the kinds that diagnose malformed
-//!   keep and reroll clauses, and malformed calls of `highest` and `lowest`.
+//!   keep, reroll, and explode clauses, and malformed calls of `highest` and
+//!   `lowest`.
 //! * [`Class`] gains [`rerolls`](Class::rerolls), which says whether some
 //!   reroll may reroll or cross out a die.
 //!

@@ -49,8 +49,8 @@ use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
 	Budget, BuildError, Distribution, EvaluationError, Evaluator,
-	Function as IrFunction, Optimizer as _, Parser, Passes, StandardOptimizer,
-	Unobserved,
+	Function as IrFunction, Instruction, Optimizer as _, Parser, Passes,
+	StandardOptimizer, Unobserved,
 	ast::Function,
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
@@ -188,6 +188,71 @@ fn test_optimized_rerolls()
 						clauses
 							.replace("{dice}", dice)
 							.replace("{reroll}", &reroll)
+					);
+					for x in -1..=4
+					{
+						check_optimization(&source, &[x], &[])
+							.map_err(|e| {
+								format!("{}, x = {}: {}", source, x, e)
+							})
+							.unwrap();
+					}
+				}
+			}
+		}
+	}
+}
+
+/// Ensure that optimization never widens the bounds of an explode, for every
+/// combination of a die, ordinary or with one face, constant or not; a
+/// predicate of every form, constant or not, that matches some faces, every
+/// face, or none; a limit of every form; and the clauses around it, of every
+/// kind, before it or after it, among them rerolls and other explodes, over
+/// values of the parameter that make every operand that is not constant match
+/// differently. The forward pass does not explode dice yet, so the
+/// distributions are not compared until it does.
+#[test]
+fn test_optimized_explodes()
+{
+	let dice = [
+		"3D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}", "[2:2]"
+	];
+	let predicates = [
+		"= 1",
+		"≠ 1",
+		"≤ 3",
+		"≥ 1",
+		"< 9",
+		"in []",
+		"in [2, 4]",
+		"in 2..2",
+		"in 1..=3",
+		"= {x}",
+		"in {x}..=4"
+	];
+	let limits = ["", " 0 times", " 2 times", " ∞ times", " {x} times"];
+	let clauses = [
+		"{dice} explode {explode}",
+		"{dice} drop lowest explode {explode}",
+		"{dice} explode {explode} keep highest",
+		"{dice} explode {explode} explode {explode}",
+		"{dice} reroll = 1 explode {explode}",
+		"{dice} explode {explode} reroll ≥ 2 ∞ times"
+	];
+	for dice in dice
+	{
+		for predicate in predicates
+		{
+			for limit in limits
+			{
+				let explode = format!("{}{}", predicate, limit);
+				for clauses in clauses
+				{
+					let source = format!(
+						"{{x}}: {}",
+						clauses
+							.replace("{dice}", dice)
+							.replace("{explode}", &explode)
 					);
 					for x in -1..=4
 					{
@@ -522,6 +587,15 @@ fn check_evaluation(
 				"refused within the estimate"
 			);
 		},
+		// The forward pass does not explode dice yet.
+		Err(BuildError::Unbounded) => prop_assert!(
+			evaluator
+				.function
+				.instructions
+				.iter()
+				.any(|inst| matches!(inst, Instruction::Explode(_))),
+			"refused a function that explodes no dice"
+		),
 		Err(e) => prop_assert!(false, "distribution failed: {}", e)
 	}
 	Ok(())
@@ -751,9 +825,9 @@ pub(super) fn extremum(
 }
 
 /// Answer a strategy that generates dice expressions, whose operands come
-/// from the specified strategy, with drop, keep, and reroll clauses in any
-/// order. Any drop or keep clause may lack a drop expression, and any reroll
-/// clause its limit.
+/// from the specified strategy, with drop, keep, reroll, and explode clauses in
+/// any order. Any drop or keep clause may lack a drop expression, and any
+/// reroll or explode clause its limit.
 ///
 /// # Parameters
 /// - `inner`: The strategy for nested expressions.
@@ -793,7 +867,11 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 			Some(drop) => format!(" {} {} {}", verb, direction, drop),
 			None => format!(" {} {}", verb, direction)
 		});
-	let clause = prop_oneof![2 => clause, 1 => reroll(inner.clone(), drop)];
+	let clause = prop_oneof![
+		2 => clause,
+		1 => predicated("reroll", inner.clone(), drop.clone()),
+		1 => predicated("explode", inner.clone(), drop)
+	];
 	(
 		atom(inner),
 		select(&["d", "D"][..]),
@@ -805,18 +883,20 @@ fn dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 		})
 }
 
-/// Answer a strategy that generates reroll clauses, whose thresholds and
-/// endpoints, which may be negative constants, come from the specified
-/// strategy, of every form of predicate and limit.
+/// Answer a strategy that generates reroll or explode clauses, whose
+/// thresholds and endpoints, which may be negative constants, come from the
+/// specified strategy, of every form of predicate and limit.
 ///
 /// # Parameters
+/// - `verb`: The verb of the clauses, `reroll` or `explode`.
 /// - `inner`: The strategy for nested expressions.
 /// - `count`: The strategy for the counts of limits, which never begin with
 ///   `-`.
 ///
 /// # Returns
 /// The strategy.
-fn reroll(
+fn predicated(
+	verb: &'static str,
 	inner: BoxedStrategy<String>,
 	count: impl Strategy<Value = String> + 'static
 ) -> impl Strategy<Value = String>
@@ -847,8 +927,8 @@ fn reroll(
 		)
 			.prop_map(|(keyword, word)| format!(" {} {}", keyword, word))
 	];
-	(predicate, option::of(limit)).prop_map(|(predicate, limit)| {
-		format!(" reroll {}{}", predicate, limit.unwrap_or_default())
+	(predicate, option::of(limit)).prop_map(move |(predicate, limit)| {
+		format!(" {} {}{}", verb, predicate, limit.unwrap_or_default())
 	})
 }
 

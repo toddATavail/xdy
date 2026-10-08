@@ -3,7 +3,8 @@
 //! Herein are the test cases for the [`dice`] combinator and its
 //! sub-combinators: [`standard_dice`], [`custom_dice`], [`dice_count`],
 //! [`standard_faces`], [`custom_faces`], [`drop_lowest`], [`drop_highest`],
-//! [`keep_lowest`], [`keep_highest`], [`reroll`], and [`drop_expression`].
+//! [`keep_lowest`], [`keep_highest`], [`reroll`], [`explode`], and
+//! [`drop_expression`].
 
 use crate::{
 	ast::*,
@@ -1405,6 +1406,248 @@ fn test_reroll()
 			input
 		);
 	}
+}
+
+/// Ensure that [`dice`] reads explode clauses: every comparator, in ASCII and
+/// in Unicode, with literal, negative, named, bound, and computed thresholds;
+/// lists, empty or not, of negative literals too; half-open and inclusive
+/// ranges, with endpoints of every kind; limits of `time` or `times`, and of
+/// `∞` or `unlimited`; with and without whitespace between their tokens; and
+/// chained with drops, keeps, rerolls, and other explodes in any order.
+#[test]
+fn test_dice_explode_clauses()
+{
+	for (input, rendering, s_expr) in [
+		(
+			"3d6 explode = 6",
+			"3D6 explode = 6",
+			"(explode (standard-dice 3 6) (eq 6))"
+		),
+		(
+			"3d6 explode=6",
+			"3D6 explode = 6",
+			"(explode (standard-dice 3 6) (eq 6))"
+		),
+		(
+			"3d6 explode != 1 2 times",
+			"3D6 explode ≠ 1 2 times",
+			"(explode (standard-dice 3 6) (ne 1) (times 2))"
+		),
+		(
+			"3d6 explode ≠ -1 1 time",
+			"3D6 explode ≠ -1 1 time",
+			"(explode (standard-dice 3 6) (ne -1) (times 1))"
+		),
+		(
+			"3d6 explode < 2 1 times",
+			"3D6 explode < 2 1 time",
+			"(explode (standard-dice 3 6) (lt 2) (times 1))"
+		),
+		(
+			"3d6 explode <= 1 ∞ times",
+			"3D6 explode ≤ 1 ∞ times",
+			"(explode (standard-dice 3 6) (le 1) (unlimited))"
+		),
+		(
+			"3d6 explode ≤ {x} unlimited time",
+			"3D6 explode ≤ {x} ∞ times",
+			"(explode (standard-dice 3 6) (le {x}) (unlimited))"
+		),
+		(
+			"3d6 explode > 5 {n} times",
+			"3D6 explode > 5 {n} times",
+			"(explode (standard-dice 3 6) (gt 5) (times {n}))"
+		),
+		(
+			"3d6 explode >= (3+2) 2 time",
+			"3D6 explode ≥ (3 + 2) 2 times",
+			"(explode (standard-dice 3 6) (ge (group (add 3 2))) (times 2))"
+		),
+		(
+			"3d6 explode ≥ {a}@(6)",
+			"3D6 explode ≥ {a}@(6)",
+			"(explode (standard-dice 3 6) (ge (binding {a} 6)))"
+		),
+		(
+			"3d[-1,0,1] explode in [-1, 1]",
+			"3D[-1, 0, 1] explode in [-1, 1]",
+			"(explode (custom-dice 3 [-1 0 1]) (in [-1 1]))"
+		),
+		(
+			"3d6 explode in []",
+			"3D6 explode in []",
+			"(explode (standard-dice 3 6) (in []))"
+		),
+		(
+			"3d6 explode in[5,6] unlimited times",
+			"3D6 explode in [5, 6] ∞ times",
+			"(explode (standard-dice 3 6) (in [5 6]) (unlimited))"
+		),
+		(
+			"3d[-3,-2,-1] explode in -3..-1",
+			"3D[-3, -2, -1] explode in -3..-1",
+			"(explode (custom-dice 3 [-3 -2 -1]) (in-range -3 -1))"
+		),
+		(
+			"3d6 explode in 5..=6 2 times",
+			"3D6 explode in 5..=6 2 times",
+			"(explode (standard-dice 3 6) (in-range-inclusive 5 6) (times 2))"
+		),
+		(
+			"3d6 explode in5..={x}",
+			"3D6 explode in 5..={x}",
+			"(explode (standard-dice 3 6) (in-range-inclusive 5 {x}))"
+		),
+		(
+			"3d6 explode in ({x}-1)..=({x}+1) ({x}) times",
+			"3D6 explode in ({x} - 1)..=({x} + 1) ({x}) times",
+			"(explode (standard-dice 3 6) (in-range-inclusive (group (sub {x} \
+			 1)) (group (add {x} 1))) (times (group {x})))"
+		),
+		(
+			"4d6 drop lowest explode = 6 keep highest 2",
+			"4D6 drop lowest explode = 6 keep highest 2",
+			"(keep-highest (explode (drop-lowest (standard-dice 4 6)) (eq 6)) \
+			 2)"
+		),
+		(
+			"4d6 explode = 6 reroll = 1 explode = 5 1 time drop highest",
+			"4D6 explode = 6 reroll = 1 explode = 5 1 time drop highest",
+			"(drop-highest (explode (reroll (explode (standard-dice 4 6) (eq \
+			 6)) (eq 1)) (eq 5) (times 1)))"
+		),
+		(
+			"4d6 reroll = 1 explode = 6 ∞ times",
+			"4D6 reroll = 1 explode = 6 ∞ times",
+			"(explode (reroll (standard-dice 4 6) (eq 1)) (eq 6) (unlimited))"
+		),
+		(
+			"3d6\nexplode\t=\n6\n2\ntimes",
+			"3D6 explode = 6 2 times",
+			"(explode (standard-dice 3 6) (eq 6) (times 2))"
+		)
+	]
+	{
+		let (residue, result) = dice(Span::new(input))
+			.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		assert_eq!(result.to_string(), rendering, "{input:?}");
+		let source = format!("(function [{{a}}] {s_expr})");
+		let expected = crate::s_expr::read_s_expr(&source).unwrap();
+		let Expression::Dice(expected) = &expected.body
+		else
+		{
+			unreachable!()
+		};
+		assert!(
+			result.untethered() == expected.untethered(),
+			"AST mismatch for {input:?}"
+		);
+	}
+	for input in [
+		"explode = 6",
+		"3d6 explode",
+		"3d6 explode 6",
+		"3d6 explode == 6",
+		"3d6 explode = -{x}",
+		"3d6 explode = 6 2",
+		"3d6 explode = 6 2 timesx",
+		"3d6 explode = 6 ∞",
+		"3d6 explode in",
+		"3d6 explode in 5 6",
+		"3d6 explode in 5..",
+		"3d6 explode in [{x}]",
+		"3d6 explode in [5, 6",
+		"3 explode = 6"
+	]
+	{
+		let result = dice(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+	// A count never begins with `-`, so a `-` after a predicate is
+	// subtraction, and a word that begins with `explode` is no explode.
+	for (input, rendering, residue) in [
+		("3d6 explode = 6 -1", "3D6 explode = 6", " -1"),
+		("3d6 explode = 6 + 1", "3D6 explode = 6", " + 1"),
+		("3d6 exploded", "3D6", " exploded"),
+		("3d6 explodehighest", "3D6", " explodehighest")
+	]
+	{
+		let (rest, result) = dice(Span::new(input)).unwrap();
+		assert_eq!(result.to_string(), rendering, "{input:?}");
+		assert_eq!(*rest.fragment(), residue, "{input:?}");
+	}
+}
+
+/// Ensure that [`explode`] reads an explode clause alone, and rejects anything
+/// else.
+#[test]
+fn test_explode()
+{
+	for (input, predicate, limit) in [
+		("explode = 6", "(eq 6)", ""),
+		("explode≥-2 3 times", "(ge -2)", " (times 3)"),
+		("explode in [] ∞ time", "(in [])", " (unlimited)"),
+		("explode in {x}..7", "(in-range {x} 7)", ""),
+		(
+			"explode  in  5 ..= 6  {n}  time",
+			"(in-range-inclusive 5 6)",
+			" (times {n})"
+		)
+	]
+	{
+		let (residue, (actual_predicate, actual_limit)) =
+			explode(Span::new(input))
+				.unwrap_or_else(|e| panic!("{input:?} failed: {e}"));
+		assert!(residue.fragment().is_empty(), "residue for {input:?}");
+		let source = format!(
+			"(function [] (explode (standard-dice 1 6) {predicate}{limit}))"
+		);
+		let expected = crate::s_expr::read_s_expr(&source).unwrap();
+		let Expression::Dice(DiceExpression::Explode(expected)) =
+			&expected.body
+		else
+		{
+			unreachable!()
+		};
+		assert_eq!(
+			actual_predicate.map(|operand| operand.untethered()),
+			expected.predicate.map(|operand| operand.untethered()),
+			"{input:?}"
+		);
+		assert_eq!(
+			actual_limit.map(|limit| limit.map(|count| count.untethered())),
+			expected
+				.limit
+				.as_ref()
+				.map(|limit| limit.map(|count| count.untethered())),
+			"{input:?}"
+		);
+	}
+	for input in [
+		"",
+		" explode = 6",
+		"exploded = 6",
+		"explode",
+		"explode in",
+		"reroll = 1",
+		"drop lowest",
+		"3d6 explode = 6"
+	]
+	{
+		let result = explode(Span::new(input));
+		assert!(
+			result.is_err() || !result.unwrap().0.fragment().is_empty(),
+			"Failed to reject invalid input: {}",
+			input
+		);
+	}
+	// Neither reads the other's clause.
+	assert!(reroll(Span::new("explode = 6")).is_err());
 }
 
 /// Ensure that [`drop_expression`] behaves as expected.

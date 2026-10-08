@@ -135,10 +135,11 @@ fn test_bare_word_trailing_whitespace()
 	assert_eq!(*residue.fragment(), ")");
 }
 
-/// Ensure that [`begins_misplaced_clause`] recognizes the verb of a keep or
-/// reroll clause as the clause would: `keep` before a direction that may run
-/// into it, and `reroll` only as a keyword, which never runs into a word, so
-/// that `rerollhighest`, which no reroll clause begins, is a bare word.
+/// Ensure that [`begins_misplaced_clause`] recognizes the verb of a keep,
+/// reroll, or explode clause as the clause would: `keep` before a direction
+/// that may run into it, and `reroll` and `explode` only as keywords, which
+/// never run into a word, so that `rerollhighest` and `explodehighest`, which
+/// no reroll or explode clause begins, are bare words.
 #[test]
 fn test_begins_misplaced_clause()
 {
@@ -155,6 +156,14 @@ fn test_begins_misplaced_clause()
 		("rerollhighest", None),
 		("rerolllowest = 1", None),
 		("rerolled", None),
+		("explode = 6", Some("explode")),
+		("explode>=5", Some("explode")),
+		("explode≥5", Some("explode")),
+		("explode5..7", Some("explode")),
+		("explode", Some("explode")),
+		("explodehighest", None),
+		("explodelowest = 1", None),
+		("exploded", None),
 		("keeper", None),
 		("drop lowest", None),
 		("{x}", None),

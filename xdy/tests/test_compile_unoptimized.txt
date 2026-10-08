@@ -998,6 +998,121 @@ Function() r#2 ⚅#1
 		@1 <- @0 - 1
 		return @1
 
+3D6 explode = 1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode = 1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 explode != 1 2 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode != 1 up to 2 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 explode <= 2 ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode <= 2 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[-1, 0, 1] explode in [-1, 1]
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 3D[-1, 0, 1]
+		⚅0 <- explode in [-1, 1] up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[-3, -2, -1, 0] explode in -3..-1
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll custom dice 3D[-3, -2, -1, 0]
+		⚅0 <- explode in -3..-1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+{x}: 3D6 explode in 1..={x} ∞ times
+=
+Function({x}@0) r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode in 1..=@0 unlimited times from ⚅0
+		@1 <- sum rolling record ⚅0
+		return @1
+
+3D6 explode ≤ {a}@(2) + {a}
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode <= 2 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 + 2
+		return @1
+
+4D6 drop lowest explode = 1 keep highest 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 4D6
+		⚅0 <- drop lowest 1 from ⚅0
+		⚅0 <- explode = 1 up to 1 times from ⚅0
+		⚅0 <- keep highest 2 from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+2D6 reroll = 1 explode = 2
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 2D6
+		⚅0 <- reroll = 1 up to 1 times from ⚅0
+		⚅0 <- explode = 2 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D1 explode = 1 ∞ times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D1
+		⚅0 <- explode = 1 unlimited times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 explode = 1 - 1
+=
+Function() r#2 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode = 1 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		@1 <- @0 - 1
+		return @1
+
 highest(1, 2)
 =
 Function() r#1 ⚅#0

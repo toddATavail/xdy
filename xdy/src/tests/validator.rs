@@ -432,13 +432,14 @@ fn validator_visitor_accepts_every_node_type()
 {
 	// Build an AST that exercises every node type the visitor can encounter:
 	// Group, Constant, Variable, Binding, Range, StandardDice, CustomDice,
-	// DropLowest, DropHighest, KeepLowest, KeepHighest, Reroll, Extremum, Add,
-	// Sub, Mul, Div, Mod, Exp, and Neg. The enclosing function is semantically
-	// clean, so the walk returns `Ok(())`.
+	// DropLowest, DropHighest, KeepLowest, KeepHighest, Reroll, Explode,
+	// Extremum, Add, Sub, Mul, Div, Mod, Exp, and Neg. The enclosing function
+	// is semantically clean, so the walk returns `Ok(())`.
 	let ast = Parser::parse(
 		"{x}: [1:{x}] + (1D6 - 1D[1,2,3]) * 2D6 drop lowest / \
 		 3D8 drop highest + -1 ^ 2 % {y}@(1) + 4D6 keep lowest 3 keep highest \
-		 reroll in {x}..={y} {y} times + highest({x}, lowest({y}, 2))"
+		 reroll in {x}..={y} {y} times explode ≥ {y} {x} times + highest({x}, \
+		 lowest({y}, 2))"
 	)
 	.unwrap();
 	let mut validator = Validator::new();
@@ -1050,10 +1051,7 @@ fn use_before_bind_display_on_evaluation_error()
 fn test_validate_deep()
 {
 	on_small_stack(|| {
-		for nesting in Nesting::ROTATION
-			.into_iter()
-			.chain(Nesting::UNPARSED)
-			.chain([Nesting::Mixed])
+		for nesting in Nesting::ROTATION.into_iter().chain([Nesting::Mixed])
 		{
 			let result =
 				Validator::validate(&nest_function(nesting, nesting.depth()));

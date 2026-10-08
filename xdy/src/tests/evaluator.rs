@@ -74,7 +74,8 @@ fn test_evaluation()
 			let result =
 				evaluator.evaluate(args.iter().copied(), &mut rng).unwrap();
 			// Ensure that the evaluator rolls no more dice than the worst case,
-			// and reports exactly the dice that it rolled.
+			// and reports exactly the dice that it rolled. A saturated die
+			// rolls nothing, so it is not counted.
 			assert!(
 				result.dice <= bounds.dice,
 				"case {}: {}: too many dice: {} > {}",
@@ -88,7 +89,15 @@ fn test_evaluation()
 				result
 					.records
 					.iter()
-					.map(|record| record.dice.len() as u64)
+					.map(|record| {
+						record
+							.dice
+							.iter()
+							.filter(|die| {
+								!matches!(die.origin, Origin::Saturates(_))
+							})
+							.count() as u64
+					})
 					.sum::<u64>(),
 				"case {}: {}: misreported dice",
 				index + 1,
@@ -112,7 +121,9 @@ fn test_evaluation()
 			);
 			// Ensure that none of the die rolls are outside the expected
 			// bounds. A reroll appends each replacement to the dice that the
-			// roll rolled, so count only the latter.
+			// roll rolled, and an explode each extension, so count only the
+			// latter. A saturated die shows no face of its die, so check only
+			// the others.
 			for record in result.records
 			{
 				match record.kind
@@ -170,7 +181,13 @@ fn test_evaluation()
 							index + 1,
 							key
 						);
-						for result in record.dice.iter().map(|die| die.value)
+						for result in record
+							.dice
+							.iter()
+							.filter(|die| {
+								!matches!(die.origin, Origin::Saturates(_))
+							})
+							.map(|die| die.value)
 						{
 							match faces <= 0
 							{
@@ -206,7 +223,13 @@ fn test_evaluation()
 							index + 1,
 							key
 						);
-						for result in record.dice.iter().map(|die| die.value)
+						for result in record
+							.dice
+							.iter()
+							.filter(|die| {
+								!matches!(die.origin, Origin::Saturates(_))
+							})
+							.map(|die| die.value)
 						{
 							assert!(
 								faces.contains(&result),

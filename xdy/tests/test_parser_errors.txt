@@ -1654,6 +1654,403 @@ rendered: missing reroll range end (28..28): expected the end of the range
 suggestion: 4D6 reroll in {keep highest 2}..= 0
 placeholder: 34..35 "range end" [integer, {variable}, (expression)]
 
+4D6 explode
+=
+kind: MissingExplodePredicate
+span: 4..11
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (4..11): expected a comparator or `in` after `explode`
+suggestion: 4D6 explode = 6
+placeholder: 12..15 "predicate" [comparison, list, range]
+
+4D6 explode 2 times
+=
+kind: MissingExplodePredicate
+span: 4..11
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (4..11): expected a comparator or `in` after `explode`
+suggestion: 4D6 explode = 6 2 times
+placeholder: 12..15 "predicate" [comparison, list, range]
+
+4D6 explode + 1
+=
+kind: MissingExplodePredicate
+span: 4..11
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (4..11): expected a comparator or `in` after `explode`
+suggestion: 4D6 explode = 6 + 1
+placeholder: 12..15 "predicate" [comparison, list, range]
+
+4D10 explode
+=
+kind: MissingExplodePredicate
+span: 5..12
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (5..12): expected a comparator or `in` after `explode`
+suggestion: 4D10 explode = 10
+placeholder: 13..17 "predicate" [comparison, list, range]
+
+3D[-1, 0, 2] explode
+=
+kind: MissingExplodePredicate
+span: 13..20
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (13..20): expected a comparator or `in` after `explode`
+suggestion: 3D[-1, 0, 2] explode = 2
+placeholder: 21..24 "predicate" [comparison, list, range]
+
+5D10 keep highest 3 reroll = 1 explode
+=
+kind: MissingExplodePredicate
+span: 31..38
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (31..38): expected a comparator or `in` after `explode`
+suggestion: 5D10 keep highest 3 reroll = 1 explode = 10
+placeholder: 39..43 "predicate" [comparison, list, range]
+
+{x}: 3D{x} explode
+=
+kind: MissingExplodePredicate
+span: 11..18
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (11..18): expected a comparator or `in` after `explode`
+suggestion: {x}: 3D{x} explode = 6
+placeholder: 19..22 "predicate" [comparison, list, range]
+
+1D20 explode explode
+=
+kind: MissingExplodePredicate
+span: 5..12
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (5..12): expected a comparator or `in` after `explode`
+suggestion: 1D20 explode = 20 explode
+placeholder: 13..17 "predicate" [comparison, list, range]
+---
+kind: MissingExplodePredicate
+span: 13..20
+message: expected a comparator or `in` after `explode`
+rendered: missing explode predicate (13..20): expected a comparator or `in` after `explode`
+suggestion: 1D20 explode = 20 explode = 20
+placeholder: 26..30 "predicate" [comparison, list, range]
+
+4D6 explode =
+=
+kind: MissingExplodeThreshold
+span: 12..13
+message: expected a threshold after `=`
+rendered: missing explode threshold (12..13): expected a threshold after `=`
+suggestion: 4D6 explode = 0
+placeholder: 14..15 "threshold" [integer, {variable}, (expression)]
+
+4D6 explode ≤ + 1
+=
+kind: MissingExplodeThreshold
+span: 12..15
+message: expected a threshold after `≤`
+rendered: missing explode threshold (12..15): expected a threshold after `≤`
+suggestion: 4D6 explode ≤ 0 + 1
+placeholder: 16..17 "threshold" [integer, {variable}, (expression)]
+
+4D6 explode >= -
+=
+kind: MissingExplodeThreshold
+span: 12..14
+message: expected a threshold after `>=`
+rendered: missing explode threshold (12..14): expected a threshold after `>=`
+suggestion: 4D6 explode >= -0
+placeholder: 16..17 "threshold" [integer, {variable}, (expression)]
+
+4D6 explode ≠ -(1)
+=
+kind: MissingExplodeThreshold
+span: 12..15
+message: expected a threshold after `≠`
+rendered: missing explode threshold (12..15): expected a threshold after `≠`
+suggestion: 4D6 explode ≠ -0 (1)
+placeholder: 17..18 "threshold" [integer, {variable}, (expression)]
+---
+kind: MissingExplodeTimes
+span: 20..20
+message: expected `times` after the count
+rendered: missing `times` (20..20): expected `times` after the count
+suggestion: 4D6 explode ≠ -0 (1) times
+
+4D6 explode in
+=
+kind: MissingExplodeRangeStart
+span: 12..14
+message: expected a list or a range after `in`
+rendered: missing explode range start (12..14): expected a list or a range after `in`
+suggestion: 4D6 explode in 0
+placeholder: 15..16 "range start" [integer, {variable}, (expression)]
+---
+kind: MissingExplodeRangeOperator
+span: 14..14
+message: expected `..` or `..=` after the start of the range
+rendered: missing explode range operator (14..14): expected `..` or `..=` after the start of the range
+suggestion: 4D6 explode in 0..=
+placeholder: 16..19 "range operator" [.., ..=]
+---
+kind: MissingExplodeRangeEnd
+span: 14..14
+message: expected the end of the range
+rendered: missing explode range end (14..14): expected the end of the range
+suggestion: 4D6 explode in 0..= 0
+placeholder: 20..21 "range end" [integer, {variable}, (expression)]
+
+4D6 explode in ..3
+=
+kind: MissingExplodeRangeStart
+span: 12..14
+message: expected a list or a range after `in`
+rendered: missing explode range start (12..14): expected a list or a range after `in`
+suggestion: 4D6 explode in 0 ..3
+placeholder: 15..16 "range start" [integer, {variable}, (expression)]
+
+4D6 explode in 1 3
+=
+kind: MissingExplodeRangeOperator
+span: 17..18
+message: expected `..` or `..=` after the start of the range
+rendered: missing explode range operator (17..18): expected `..` or `..=` after the start of the range
+suggestion: 4D6 explode in 1 ..= 3
+placeholder: 17..20 "range operator" [.., ..=]
+
+4D6 explode in 1
+=
+kind: MissingExplodeRangeOperator
+span: 16..16
+message: expected `..` or `..=` after the start of the range
+rendered: missing explode range operator (16..16): expected `..` or `..=` after the start of the range
+suggestion: 4D6 explode in 1..=
+placeholder: 16..19 "range operator" [.., ..=]
+---
+kind: MissingExplodeRangeEnd
+span: 16..16
+message: expected the end of the range
+rendered: missing explode range end (16..16): expected the end of the range
+suggestion: 4D6 explode in 1..= 0
+placeholder: 20..21 "range end" [integer, {variable}, (expression)]
+
+4D6 explode in 1..
+=
+kind: MissingExplodeRangeEnd
+span: 16..18
+message: expected the end of the range after `..`
+rendered: missing explode range end (16..18): expected the end of the range after `..`
+suggestion: 4D6 explode in 1.. 0
+placeholder: 19..20 "range end" [integer, {variable}, (expression)]
+
+4D6 explode in 1..= + 1
+=
+kind: MissingExplodeRangeEnd
+span: 16..19
+message: expected the end of the range after `..=`
+rendered: missing explode range end (16..19): expected the end of the range after `..=`
+suggestion: 4D6 explode in 1..= 0 + 1
+placeholder: 20..21 "range end" [integer, {variable}, (expression)]
+
+4D6 explode in [1, 2
+=
+kind: UnclosedDelimiter
+span: 15..16
+message: expected `]` to close `[`
+rendered: unclosed `[` (15..16): expected `]` to close `[`
+suggestion: 4D6 explode in [1, 2]
+
+4D6 explode = 1 2
+=
+kind: MissingExplodeTimes
+span: 17..17
+message: expected `times` after the count
+rendered: missing `times` (17..17): expected `times` after the count
+suggestion: 4D6 explode = 1 2 times
+
+4D6 explode = 1 1
+=
+kind: MissingExplodeTimes
+span: 17..17
+message: expected `time` after the count
+rendered: missing `times` (17..17): expected `time` after the count
+suggestion: 4D6 explode = 1 1 time
+
+4D6 explode = 1 2 + 3
+=
+kind: MissingExplodeTimes
+span: 18..19
+message: expected `times` after the count
+rendered: missing `times` (18..19): expected `times` after the count
+suggestion: 4D6 explode = 1 2 times + 3
+
+4D6 explode = 1 ∞
+=
+kind: MissingExplodeTimes
+span: 19..19
+message: expected `times` after `∞`
+rendered: missing `times` (19..19): expected `times` after `∞`
+suggestion: 4D6 explode = 1 ∞ times
+
+4D6 explode = 1 unlimited
+=
+kind: MissingExplodeTimes
+span: 25..25
+message: expected `times` after `unlimited`
+rendered: missing `times` (25..25): expected `times` after `unlimited`
+suggestion: 4D6 explode = 1 unlimited times
+
+4D6 explode = 1 {n} drop lowest
+=
+kind: MissingExplodeTimes
+span: 20..24
+message: expected `times` after the count
+rendered: missing `times` (20..24): expected `times` after the count
+suggestion: 4D6 explode = 1 {n} times drop lowest
+
+3 explode = 1
+=
+kind: MisplacedExplodeClause
+span: 2..9
+message: `explode` must follow a dice expression
+rendered: misplaced explode clause (2..9): `explode` must follow a dice expression
+suggestion: 3D6 explode = 1
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+3explode ≤ 2 ∞ times
+=
+kind: MisplacedExplodeClause
+span: 1..8
+message: `explode` must follow a dice expression
+rendered: misplaced explode clause (1..8): `explode` must follow a dice expression
+suggestion: 3D6 explode ≤ 2 ∞ times
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+-3 explode in [1]
+=
+kind: MisplacedExplodeClause
+span: 3..10
+message: `explode` must follow a dice expression
+rendered: misplaced explode clause (3..10): `explode` must follow a dice expression
+suggestion: -3D6 explode in [1]
+placeholder: 3..4 "face count" [integer, {variable}, (expression)]
+
+1 + explode = 1
+=
+kind: MisplacedExplodeClause
+span: 4..11
+message: `explode` must follow a dice expression
+rendered: misplaced explode clause (4..11): `explode` must follow a dice expression
+suggestion: 1 + 1D6 explode = 1
+placeholder: 4..7 "dice expression" [dice expression]
+
+3 explode!=1
+=
+kind: MisplacedExplodeClause
+span: 2..9
+message: `explode` must follow a dice expression
+rendered: misplaced explode clause (2..9): `explode` must follow a dice expression
+suggestion: 3D6 explode!=1
+placeholder: 2..3 "face count" [integer, {variable}, (expression)]
+
+3 explodehighest
+=
+kind: TrailingInput
+span: 2..16
+message: unexpected `explodehighest` after expression
+rendered: trailing input (2..16): unexpected `explodehighest` after expression
+suggestion: 3
+
+1 + explodehighest
+=
+kind: BareIdentifier
+span: 4..18
+message: bare identifier `explodehighest` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (4..18): bare identifier `explodehighest` is not valid here; variables must be wrapped in `{}`
+suggestion: 1 + {explodehighest}
+
+highest(1, explodehighest
+=
+kind: BareIdentifier
+span: 11..25
+message: bare identifier `explodehighest` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (11..25): bare identifier `explodehighest` is not valid here; variables must be wrapped in `{}`
+suggestion: highest(1, {explodehighest}
+---
+kind: UnclosedDelimiter
+span: 7..8
+message: expected `)` to close `(`
+rendered: unclosed `(` (7..8): expected `)` to close `(`
+suggestion: highest(1, {explodehighest})
+
+4D6 explode = x
+=
+kind: BareIdentifier
+span: 14..15
+message: bare identifier `x` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (14..15): bare identifier `x` is not valid here; variables must be wrapped in `{}`
+suggestion: 4D6 explode = {x}
+
+4D6 explode in [{x}]
+=
+kind: UnexpectedToken
+span: 16..20
+message: unexpected `{x}]`
+rendered: unexpected token (16..20): unexpected `{x}]`
+
+4D6 explode = drop lowest
+=
+kind: BareIdentifier
+span: 14..25
+message: bare identifier `drop lowest` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (14..25): bare identifier `drop lowest` is not valid here; variables must be wrapped in `{}`
+suggestion: 4D6 explode = {drop lowest}
+
+4D6 explode in keep highest 2
+=
+kind: BareIdentifier
+span: 15..29
+message: bare identifier `keep highest 2` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (15..29): bare identifier `keep highest 2` is not valid here; variables must be wrapped in `{}`
+suggestion: 4D6 explode in {keep highest 2}
+---
+kind: MissingExplodeRangeOperator
+span: 29..29
+message: expected `..` or `..=` after the start of the range
+rendered: missing explode range operator (29..29): expected `..` or `..=` after the start of the range
+suggestion: 4D6 explode in {keep highest 2}..=
+placeholder: 31..34 "range operator" [.., ..=]
+---
+kind: MissingExplodeRangeEnd
+span: 29..29
+message: expected the end of the range
+rendered: missing explode range end (29..29): expected the end of the range
+suggestion: 4D6 explode in {keep highest 2}..= 0
+placeholder: 35..36 "range end" [integer, {variable}, (expression)]
+
+4D6 explode = 6 reroll
+=
+kind: MissingRerollPredicate
+span: 16..22
+message: expected a comparator or `in` after `reroll`
+rendered: missing reroll predicate (16..22): expected a comparator or `in` after `reroll`
+suggestion: 4D6 explode = 6 reroll = 1
+placeholder: 23..26 "predicate" [comparison, list, range]
+
+4D6 reroll = 1 explode in 5
+=
+kind: MissingExplodeRangeOperator
+span: 27..27
+message: expected `..` or `..=` after the start of the range
+rendered: missing explode range operator (27..27): expected `..` or `..=` after the start of the range
+suggestion: 4D6 reroll = 1 explode in 5..=
+placeholder: 27..30 "range operator" [.., ..=]
+---
+kind: MissingExplodeRangeEnd
+span: 27..27
+message: expected the end of the range
+rendered: missing explode range end (27..27): expected the end of the range
+suggestion: 4D6 reroll = 1 explode in 5..= 0
+placeholder: 31..32 "range end" [integer, {variable}, (expression)]
+
 max(1D20, 1D20)
 =
 kind: UnknownFunction
@@ -2007,6 +2404,38 @@ span: 15..22
 message: a call of `highest` must be grouped as the count of a reroll limit
 rendered: ungrouped call (15..22): a call of `highest` must be grouped as the count of a reroll limit
 suggestion: 1D6 reroll = 1 (highest(1, 2)) times
+
+1D6 explode ≤ highest(1, 2)
+=
+kind: UngroupedCall
+span: 16..23
+message: a call of `highest` must be grouped as an explode threshold
+rendered: ungrouped call (16..23): a call of `highest` must be grouped as an explode threshold
+suggestion: 1D6 explode ≤ (highest(1, 2))
+
+1D6 explode in lowest(1, 2)..3
+=
+kind: UngroupedCall
+span: 15..21
+message: a call of `lowest` must be grouped as the start of an explode range
+rendered: ungrouped call (15..21): a call of `lowest` must be grouped as the start of an explode range
+suggestion: 1D6 explode in (lowest(1, 2))..3
+
+1D6 explode in 1..=lowest(3, 4)
+=
+kind: UngroupedCall
+span: 19..25
+message: a call of `lowest` must be grouped as the end of an explode range
+rendered: ungrouped call (19..25): a call of `lowest` must be grouped as the end of an explode range
+suggestion: 1D6 explode in 1..=(lowest(3, 4))
+
+1D6 explode = 1 highest(1, 2) times
+=
+kind: UngroupedCall
+span: 16..23
+message: a call of `highest` must be grouped as the count of an explode limit
+rendered: ungrouped call (16..23): a call of `highest` must be grouped as the count of an explode limit
+suggestion: 1D6 explode = 1 (highest(1, 2)) times
 
 highest(1, 2)D6
 =

@@ -758,7 +758,46 @@ pub fn reroll(
 	input: Span<'_>
 ) -> IResult<Span<'_>, RerollParts<'_>, ParseError<'_>>
 {
-	run(Goal::Reroll, input).map(|(rest, value)| (rest, value.into_reroll()))
+	run(Goal::Reroll, input)
+		.map(|(rest, value)| (rest, value.into_predicated()))
+}
+
+/// The predicate and the optional limit of an explode clause, as [`explode`]
+/// parses them, which are those of a reroll clause.
+pub type ExplodeParts<'src> = RerollParts<'src>;
+
+/// Parse an explode clause, without leading whitespace: `explode`, then a
+/// predicate, then an optional limit, as for a [reroll clause](reroll). A
+/// clause without a limit explodes each die at most once.
+///
+/// # Parameters
+/// - `input`: The input text to parse.
+///
+/// # Returns
+/// The parsed predicate, and the limit, or `None` if the clause has none.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the input could not be parsed.
+///
+/// # Examples
+/// ```rust
+/// use xdy::{
+///     ast::{Limit, Predicate},
+///     parser::{Span, explode}
+/// };
+///
+/// let (rest, (predicate, limit)) =
+///     explode(Span::new("explode ≥ 5 ∞ times")).unwrap();
+/// assert!(rest.fragment().is_empty());
+/// assert!(matches!(predicate, Predicate::Ge(_)));
+/// assert_eq!(limit, Some(Limit::Unlimited));
+/// ```
+pub fn explode(
+	input: Span<'_>
+) -> IResult<Span<'_>, ExplodeParts<'_>, ParseError<'_>>
+{
+	run(Goal::Explode, input)
+		.map(|(rest, value)| (rest, value.into_predicated()))
 }
 
 /// Parse a drop expression, without leading whitespace: the count of a drop
@@ -1143,19 +1182,21 @@ pub(crate) fn keyword<'src>(
 	}
 }
 
-/// Answer the verb of a clause that cannot follow a dice count, `keep` or
-/// `reroll`, if text begins with it as the clause would. Unlike the `d` of
-/// `drop`, neither reads as a dice operator. A keep clause takes a direction,
-/// which may run into its verb, so `keep` is recognized as [`begins_verb`]
-/// recognizes it, e.g., in `keephighest`; a reroll clause takes none, so
-/// `reroll` is recognized as a [keyword](begins_keyword), e.g., in `reroll!=1`
-/// but not in `rerollhighest`.
+/// Answer the verb of a clause that cannot follow a dice count, `keep`,
+/// `reroll`, or `explode`, if text begins with it as the clause would. Unlike
+/// the `d` of `drop`, none reads as a dice operator. A keep clause takes a
+/// direction, which may run into its verb, so `keep` is recognized as
+/// [`begins_verb`] recognizes it, e.g., in `keephighest`; a reroll or explode
+/// clause takes none, so `reroll` and `explode` are recognized as
+/// [keywords](begins_keyword), e.g., in `reroll!=1` or `explode=6`, but not
+/// in `rerollhighest` or `explodehighest`.
 ///
 /// # Parameters
 /// - `text`: The text.
 ///
 /// # Returns
-/// `keep` or `reroll`, if `text` begins with that verb, or [`None`] otherwise.
+/// `keep`, `reroll`, or `explode`, if `text` begins with that verb, or
+/// [`None`] otherwise.
 pub(crate) fn begins_misplaced_clause(text: &str) -> Option<&'static str>
 {
 	if begins_verb(text, "keep")
@@ -1165,6 +1206,10 @@ pub(crate) fn begins_misplaced_clause(text: &str) -> Option<&'static str>
 	else if begins_keyword(text, "reroll")
 	{
 		Some("reroll")
+	}
+	else if begins_keyword(text, "explode")
+	{
+		Some("explode")
 	}
 	else
 	{

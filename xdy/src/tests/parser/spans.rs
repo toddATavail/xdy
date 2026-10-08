@@ -405,6 +405,67 @@ fn test_reroll_clause_spans()
 	assert_eq!(*rest.fragment(), " -1");
 }
 
+/// An [`Explode`] extends its span as a [`Reroll`] does: from the start of the
+/// inner dice through its limit, or through its predicate if it has none,
+/// while the inner dice retains its pre-clause span; its threshold, endpoints,
+/// and count span themselves, and the comparators and `∞` that precede them
+/// span several bytes.
+#[test]
+fn test_explode_clause_spans()
+{
+	// `DiceExpression` implements `Drop`, so clone the clause out of it.
+	let explode = |input| match &dice(Span::new(input)).unwrap().1
+	{
+		DiceExpression::Explode(explode) => explode.clone(),
+		other => panic!("expected Explode, got {:?}", other)
+	};
+	let clause = explode("3D6 explode = 6");
+	assert_eq!(clause.span, span(0, 15));
+	assert_eq!(clause.dice.span(), span(0, 3));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(14, 15)]
+	);
+	assert!(clause.limit.is_none());
+	let clause = explode("3D6 explode ≥ -2 3 times");
+	assert_eq!(clause.span, span(0, 26));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(16, 18)]
+	);
+	let Some(Limit::Times(count)) = &clause.limit
+	else
+	{
+		panic!("expected a count, got {:?}", clause.limit)
+	};
+	assert_eq!(count.span(), span(19, 20));
+	let clause = explode("3D6 explode in 5..={x} ∞ times");
+	assert_eq!(clause.span, span(0, 32));
+	assert_eq!(
+		clause
+			.predicate
+			.operands()
+			.map(|t| t.span())
+			.collect::<Vec<_>>(),
+		[span(15, 16), span(19, 22)]
+	);
+	assert_eq!(clause.limit, Some(Limit::Unlimited));
+	let clause = explode("3D6 explode in [5, 6]");
+	assert_eq!(clause.span, span(0, 21));
+	// The clause ends before a `-`, which is subtraction.
+	let (rest, result) = dice(Span::new("3D6 explode = 6 -1")).unwrap();
+	assert_eq!(result.span(), span(0, 15));
+	assert_eq!(*rest.fragment(), " -1");
+}
+
 /// A call's span runs from its keyword through its `)`, and each argument
 /// keeps its own span, whatever the whitespace around it.
 #[test]
@@ -454,6 +515,36 @@ fn test_stacked_reroll_clauses_span()
 	};
 	assert_eq!(middle.span, span(0, 29));
 	assert_eq!(middle.dice.span(), span(0, 14));
+}
+
+/// An explode clause, chained with keep and reroll clauses, produces nested
+/// wrappers, each with a span extending through its own clause.
+#[test]
+fn test_stacked_explode_clauses_span()
+{
+	let (_, result) = dice(Span::new(
+		"4D6 explode = 6 keep highest 2 reroll < 2 1 time"
+	))
+	.unwrap();
+	let DiceExpression::Reroll(outer) = &result
+	else
+	{
+		panic!("expected Reroll, got {:?}", result)
+	};
+	assert_eq!(outer.span, span(0, 48));
+	let DiceExpression::KeepHighest(middle) = outer.dice.as_ref()
+	else
+	{
+		panic!("expected KeepHighest, got {:?}", outer.dice)
+	};
+	assert_eq!(middle.span, span(0, 30));
+	let DiceExpression::Explode(inner) = middle.dice.as_ref()
+	else
+	{
+		panic!("expected Explode, got {:?}", middle.dice)
+	};
+	assert_eq!(inner.span, span(0, 15));
+	assert_eq!(inner.dice.span(), span(0, 3));
 }
 
 /// Mixed drop and keep clauses produce nested wrappers, each with a span

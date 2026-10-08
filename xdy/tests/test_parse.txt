@@ -631,6 +631,93 @@
 =
 (function [] (sub (reroll (standard-dice 3 6) (eq 1)) 1))
 
+3D6 explode = 6
+=
+(function [] (explode (standard-dice 3 6) (eq 6)))
+
+3D6 explode != 1 2 times
+=
+(function [] (explode (standard-dice 3 6) (ne 1) (times 2)))
+
+3D6 explode ≠ 1 1 time
+=
+(function [] (explode (standard-dice 3 6) (ne 1) (times 1)))
+
+3D6 explode < 2
+=
+(function [] (explode (standard-dice 3 6) (lt 2)))
+
+3D6 explode <= 1 ∞ times
+=
+(function [] (explode (standard-dice 3 6) (le 1) (unlimited)))
+
+3D6 explode > 5 unlimited times
+=
+(function [] (explode (standard-dice 3 6) (gt 5) (unlimited)))
+
+3D6 explode ≥ 5 3 times
+=
+(function [] (explode (standard-dice 3 6) (ge 5) (times 3)))
+
+3D[-1, 0, 1] explode in [-1, 1]
+=
+(function [] (explode (custom-dice 3 [-1 0 1]) (in [-1 1])))
+
+3D6 explode in [] ∞ times
+=
+(function [] (explode (standard-dice 3 6) (in []) (unlimited)))
+
+3D[-3, -2, -1, 0] explode in -3..-1
+=
+(function [] (explode (custom-dice 3 [-3 -2 -1 0]) (in-range -3 -1)))
+
+3D6 explode in 5..=6 2 times
+=
+(function [] (explode (standard-dice 3 6) (in-range-inclusive 5 6) (times 2)))
+
+{x}: 3D6 explode in {x}..=6 ∞ times
+=
+(function [{x}]
+	(explode (standard-dice 3 6) (in-range-inclusive {x} 6) (unlimited)))
+
+3D6 explode = (1D6) 1 time
+=
+(function [] (explode (standard-dice 3 6) (eq (standard-dice 1 6)) (times 1)))
+
+3D6 explode ≥ {a}@(5) + {a}
+=
+(function [] (add (explode (standard-dice 3 6) (ge (binding {a} 5))) {a}))
+
+4D6 drop lowest explode = 6 keep highest 2
+=
+(function []
+	(keep-highest (explode (drop-lowest (standard-dice 4 6)) (eq 6)) 2))
+
+4D6 explode = 6 drop lowest
+=
+(function [] (drop-lowest (explode (standard-dice 4 6) (eq 6))))
+
+4D6 reroll = 1 explode = 6 ∞ times
+=
+(function [] (explode (reroll (standard-dice 4 6) (eq 1)) (eq 6) (unlimited)))
+
+2D6 explode = 6 reroll = 1 explode = 5
+=
+(function []
+	(explode (reroll (explode (standard-dice 2 6) (eq 6)) (eq 1)) (eq 5)))
+
+3D1 explode = 1 ∞ times
+=
+(function [] (explode (standard-dice 3 1) (eq 1) (unlimited)))
+
+3D6 explode = 6 0 times
+=
+(function [] (explode (standard-dice 3 6) (eq 6) (times 0)))
+
+3D6 explode = 6 - 1
+=
+(function [] (sub (explode (standard-dice 3 6) (eq 6)) 1))
+
 highest(1, 2)
 =
 (function [] (highest 1 2))
