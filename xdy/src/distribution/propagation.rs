@@ -29,7 +29,10 @@
 //! total behaves as a die's result does, so an explode that no later reroll or
 //! explode reads reduces its chains to their totals at once, and the record
 //! holds dice, or a pool, of totals; otherwise, the record holds the chains
-//! whole, and a later reroll rerolls each of their kept dice alone. An
+//! whole, and a later reroll rerolls each of their kept dice alone. Rerolls
+//! and explodes act on each chain alone, so after a drop the record defers
+//! joining the chains still kept until a drop, a split, or a sum needs them
+//! together, and only rewrites the law of what each has become. An
 //! explode limited to `n` times counts the branches of each chain still kept
 //! as though it rolled every extension that it might need in advance, as a
 //! limited reroll does, and one without limit that matches every face

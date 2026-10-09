@@ -24,8 +24,9 @@
 //! An explode extends the dice still kept into [chains](super::chain), which
 //! the record holds whole only while a later reroll or explode may read them,
 //! as [i.i.d. chains](Roll::Chains) before any drop, or [stacks](Roll::Stacks)
-//! of chains after one, and otherwise as the totals of its chains, which
-//! behave as the results of dice do.
+//! of chains after one, whose joins wait until a drop, a split, or a sum needs
+//! them, and otherwise as the totals of its chains, which behave as the results
+//! of dice do.
 
 use std::{
 	collections::{BTreeMap, HashMap, hash_map::Entry},
@@ -33,7 +34,7 @@ use std::{
 };
 
 use super::{
-	chain::Chain,
+	chain::{Chain, Laws, laws_cells},
 	meter::{Halt, Meter, charge_of}
 };
 use crate::{Criterion, Distribution, Weight};
@@ -105,11 +106,24 @@ pub(super) enum Roll
 	},
 
 	/// The chains of a record that a drop, or a split, has made unlike, and
-	/// which a later reroll or explode reads: each multiset of them, in
-	/// ascending order, with the positive number of branches that reach it,
-	/// as a [pool](Self::Pool) holds the multisets of results. Every multiset
-	/// holds the same number of chains.
-	Stacks(Vec<(Vec<(Chain, i32)>, Weight)>)
+	/// which a later reroll or explode reads, whose multisets are joined only
+	/// when something needs them together: a drop, a split, or a sum. Later
+	/// rerolls and explodes act on each chain alone, so they rewrite only the
+	/// law of what each chain has become, and the record holds, for each
+	/// multiset of `pool`, independent draws of the law of each of its chains,
+	/// one for each copy, as [`laws`](super::chain::Laws) describes.
+	Stacks
+	{
+		/// Each multiset of the chains as they stood when last joined, in
+		/// ascending order, with the positive number of branches that reach
+		/// it, as a [pool](Self::Pool) holds the multisets of results. Every
+		/// multiset holds the same number of chains.
+		pool: Vec<(Vec<(Chain, i32)>, Weight)>,
+
+		/// The law of what each distinct chain of the pool has become since,
+		/// or nothing for a chain that is still itself.
+		laws: Laws
+	}
 }
 
 /// The die from which a reroll draws the replacements of the dice of a roll,
@@ -386,7 +400,7 @@ impl Roll
 				pool[0].0.iter().map(|(_, copies)| copies).sum()
 			},
 			Roll::Chains { count, .. } => (*count).max(0),
-			Roll::Stacks(pool) =>
+			Roll::Stacks { pool, .. } =>
 			{
 				pool[0].0.iter().map(|(_, copies)| copies).sum()
 			},
@@ -410,7 +424,7 @@ impl Roll
 			Roll::Range { .. }
 			| Roll::Results(_)
 			| Roll::Pool(_)
-			| Roll::Stacks(_) => 0
+			| Roll::Stacks { .. } => 0
 		}
 	}
 
@@ -418,7 +432,8 @@ impl Roll
 	/// for each distinct face of a custom die, or for each distinct fixed
 	/// result, or for each multiset of a pool and each of its distinct
 	/// results, or those of each chain that i.i.d. chains may be, or of each
-	/// multiset of stacks and each of its distinct chains.
+	/// multiset of stacks and each of its distinct chains, and those of their
+	/// laws.
 	///
 	/// # Returns
 	/// The number of cells.
@@ -436,9 +451,12 @@ impl Roll
 			{
 				law.iter().map(|(chain, _)| chain.cells()).sum()
 			},
-			Roll::Stacks(pool) =>
+			Roll::Stacks { pool, laws } =>
 			{
-				pool.iter().map(|(chains, _)| multiset_cells(chains)).sum()
+				pool.iter()
+					.map(|(chains, _)| multiset_cells(chains))
+					.sum::<u64>()
+					+ laws_cells(laws)
 			},
 			Roll::Range { .. } | Roll::Standard { .. } => 0
 		}
@@ -460,7 +478,7 @@ impl Roll
 			| Roll::Results(_)
 			| Roll::Pool(_)
 			| Roll::Chains { .. }
-			| Roll::Stacks(_) => 0
+			| Roll::Stacks { .. } => 0
 		}
 	}
 
@@ -468,8 +486,9 @@ impl Roll
 	/// through it: the width of a range, or the number of faces of a die raised
 	/// to the number of dice, or the branches of the multisets of a pool, or
 	/// the branches of a chain raised to the number of chains, or the branches
-	/// of the multisets of stacks. A roll without branches, like an empty
-	/// range, no dice, dice without faces, or fixed results, weighs one.
+	/// of the multisets of stacks, each times those of the law of each of its
+	/// chains raised to its number of copies. A roll without branches, like an
+	/// empty range, no dice, dice without faces, or fixed results, weighs one.
 	///
 	/// # Returns
 	/// The total weight.
@@ -502,7 +521,24 @@ impl Roll
 				.sum::<Weight>()
 				.pow(*count as u32),
 			Roll::Pool(pool) => pool.iter().map(|(_, weight)| weight).sum(),
-			Roll::Stacks(pool) => pool.iter().map(|(_, weight)| weight).sum(),
+			Roll::Stacks { pool, laws } => pool
+				.iter()
+				.map(|(chains, weight)| {
+					let mut total = weight.clone();
+					for (chain, copies) in chains
+					{
+						if let Some(law) = laws.get(chain)
+						{
+							let branches = law
+								.iter()
+								.map(|(_, weight)| weight)
+								.sum::<Weight>();
+							total *= branches.pow(*copies as u32);
+						}
+					}
+					total
+				})
+				.sum(),
 			_ => Weight::ONE
 		}
 	}
@@ -529,7 +565,7 @@ impl Roll
 			{
 				unreachable!("fixed results have no die")
 			},
-			Roll::Chains { .. } | Roll::Stacks(_) =>
+			Roll::Chains { .. } | Roll::Stacks { .. } =>
 			{
 				unreachable!("chains have no die")
 			}
@@ -552,7 +588,7 @@ impl Roll
 			Roll::Results(_)
 			| Roll::Pool(_)
 			| Roll::Chains { .. }
-			| Roll::Stacks(_) => None
+			| Roll::Stacks { .. } => None
 		}
 	}
 
@@ -623,7 +659,7 @@ impl Roll
 					})
 					.collect())
 			},
-			Roll::Chains { .. } | Roll::Stacks(_) =>
+			Roll::Chains { .. } | Roll::Stacks { .. } =>
 			{
 				return self.chain_outcomes(meter)
 			},
@@ -887,7 +923,7 @@ impl Roll
 	{
 		match self
 		{
-			Roll::Chains { .. } | Roll::Stacks(_) =>
+			Roll::Chains { .. } | Roll::Stacks { .. } =>
 			{
 				// A chain's total behaves as the result of a die does, so the
 				// chains reduce to their totals, which are summed as dice or a
@@ -1305,7 +1341,7 @@ impl Roll
 			Roll::Results(_)
 			| Roll::Pool(_)
 			| Roll::Chains { .. }
-			| Roll::Stacks(_) =>
+			| Roll::Stacks { .. } =>
 			{
 				unreachable!("fixed results and chains are not rewritten")
 			}

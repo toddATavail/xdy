@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d64608d32cbb7315097d9c4b616c4f9b8bc46f2cee3ba766f6d7910429125700 # shrinks to faces = Standard(2), count = 2, steps = [(true, Outside(1..=1), 1, 0, 0), (false, Within(0..=1), 1, 0, 0)]

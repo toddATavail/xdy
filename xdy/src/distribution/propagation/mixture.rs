@@ -197,7 +197,7 @@ impl Setup
 						0,
 						0
 					) => roll.rewrite(&redraw, meter)?,
-					(Roll::Chains { .. } | Roll::Stacks(_), ..) => roll
+					(Roll::Chains { .. } | Roll::Stacks { .. }, ..) => roll
 						.reroll_chains(
 							self.lowest,
 							self.highest,
@@ -320,7 +320,7 @@ impl Setup
 	{
 		match &self.roll
 		{
-			Some(roll @ (Roll::Chains { .. } | Roll::Stacks(_))) =>
+			Some(roll @ (Roll::Chains { .. } | Roll::Stacks { .. })) =>
 			{
 				let roll = roll.collapse(meter)?;
 				Ok(Setup {

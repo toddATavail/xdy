@@ -16,9 +16,16 @@
 //! record with [custom dice](Roll::Custom), or a [pool](Roll::Pool), of
 //! totals, which the rest of the pass treats as any other. Only where a later
 //! reroll or explode reads the record does the explode keep whole chains: as
-//! [i.i.d. chains](Roll::Chains) before any drop, or as [stacks](Roll::Stacks),
-//! the multisets of the chains still kept, after one. After the last such
-//! reader, the chains reduce to their totals.
+//! [i.i.d. chains](Roll::Chains) before any drop, or as [stacks](Roll::Stacks)
+//! after one. Stacks hold the multisets of the chains still kept as of the
+//! drop, or the split that fixed them, and the [law](Laws) of what each
+//! distinct chain of them has become since. Rerolls and explodes act on each
+//! chain alone, so a later one rewrites only those laws, and the multisets of
+//! the chains themselves are joined only when a drop or a split needs them
+//! together, which would otherwise multiply the work of every later reroll
+//! or explode by the multisets of the earlier ones. After the last such
+//! reader, the chains reduce to their totals, joining the laws of their
+//! totals rather than of the chains.
 //!
 //! An explode limited to `n` times counts its branches as though each chain
 //! still kept rolled in advance every extension that it might need, as
@@ -1078,6 +1085,367 @@ fn slice(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                                  Stacks.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The law of what each distinct chain of [stacks](Roll::Stacks) has become
+/// since its multisets were last joined: the distinct chains that each copy
+/// of it may now be, independently of every other, in ascending order, each
+/// with its branches. A chain that is still itself has none.
+pub(super) type Laws = BTreeMap<Chain, Vec<(Chain, Weight)>>;
+
+/// Answer the number of cells that the laws of stacks occupy: those of each
+/// chain, and of its law.
+///
+/// # Parameters
+/// - `laws`: The laws.
+///
+/// # Returns
+/// The number of cells.
+pub(super) fn laws_cells(laws: &Laws) -> u64
+{
+	laws.iter()
+		.map(|(chain, law)| chain.cells() + law_cells(law))
+		.sum()
+}
+
+/// Answer the chains that the chains of stacks may now be, kept or dropped:
+/// those of the law of each distinct chain of the pool, or the chain itself
+/// if it is still itself.
+///
+/// # Parameters
+/// - `pool`: The multisets of the stacks.
+/// - `laws`: The laws of the stacks.
+///
+/// # Returns
+/// The chains, perhaps with repeats.
+fn current<'a>(
+	pool: &'a Multisets<Chain>,
+	laws: &'a Laws
+) -> impl Iterator<Item = &'a Chain>
+{
+	pool.iter()
+		.flat_map(|(chains, _)| chains)
+		.flat_map(|(chain, _)| match laws.get(chain)
+		{
+			Some(law) => law.iter().map(|(chain, _)| chain).collect::<Vec<_>>(),
+			None => vec![chain]
+		})
+}
+
+/// Compose the law of what a chain of stacks has become with the specified law
+/// of what each chain becomes after a reroll or an explode: each chain that it
+/// may have become becomes the law that `becomes` answers, the first time
+/// that it arises, padded to the most kept dice of any, so that the composed
+/// law weighs the same whichever it had become.
+///
+/// # Type parameters
+/// - `T`: The type of what a chain becomes: a chain, or a total.
+///
+/// # Parameters
+/// - `chain`: The chain of the pool of the stacks.
+/// - `laws`: The laws of the stacks.
+/// - `padding`: The branches that a reroll adds to each kept die, `G`, or one
+///   for an explode.
+/// - `became`: The law of what each chain becomes, by chain, which this
+///   consults and extends, and whose laws stay charged to the meter.
+/// - `becomes`: The law of what a chain becomes, which charges it to the meter.
+/// - `meter`: The meter, to which the composed law stays charged.
+///
+/// # Returns
+/// The composed law, in ascending order, and the most kept dice of any chain
+/// that the chain may have become, by which a reroll pads the multisets that
+/// hold it.
+///
+/// # Errors
+/// [`Halt`] if the composition would exceed the budget or is cancelled.
+fn compose<T: Element>(
+	chain: &Chain,
+	laws: &Laws,
+	padding: &Weight,
+	became: &mut BTreeMap<Chain, Become<T>>,
+	becomes: &mut impl FnMut(&Chain, &mut Meter) -> Result<Become<T>, Halt>,
+	meter: &mut Meter
+) -> Result<Become<T>, Halt>
+{
+	let itself;
+	let law = match laws.get(chain)
+	{
+		Some(law) => law.as_slice(),
+		None =>
+		{
+			meter.charge(1, chain.cells())?;
+			itself = [(chain.clone(), Weight::ONE)];
+			&itself[..]
+		}
+	};
+	for (each, _) in law
+	{
+		if !became.contains_key(each)
+		{
+			let law = becomes(each, meter)?;
+			became.insert(each.clone(), law);
+		}
+	}
+	let most = law
+		.iter()
+		.map(|(each, _)| became[each].1)
+		.max()
+		.unwrap_or(0);
+	// Each law is padded and weighed, and its entries merged.
+	let entries = law
+		.iter()
+		.map(|(each, _)| became[each].0.len() as u128)
+		.sum::<u128>();
+	let steps = entries + law.len() as u128 * (1 + most as u128);
+	let cells = law
+		.iter()
+		.map(|(each, _)| law_cells(&became[each].0))
+		.sum::<u64>();
+	meter.charge(charge_of(steps), cells)?;
+	let mut composed = BTreeMap::<T, Weight>::new();
+	for (each, weight) in law
+	{
+		let (law, dice) = &became[each];
+		let factor = weight * padding.pow((most - dice) as u32);
+		for (value, branches) in law
+		{
+			*composed.entry(value.clone()).or_default() += &factor * branches;
+		}
+	}
+	let composed = composed.into_iter().collect::<Vec<_>>();
+	let identity = match laws.contains_key(chain)
+	{
+		true => 0,
+		false => chain.cells()
+	};
+	meter.free(cells - law_cells(&composed) + identity);
+	Ok((composed, most))
+}
+
+/// Transform stacks by the specified law of what each chain becomes after a
+/// reroll or an explode, chain by chain, without joining them: compose the
+/// law of what each distinct chain of the pool has become with it, and pad
+/// each multiset by `G^(D − d)`, where `d` is the sum, over its copies of its
+/// chains, of the most kept dice that each may have become, and `D` the most
+/// of any multiset. Every chain that a copy may have become is padded to the
+/// most of its law, so that every multiset weighs the same in all, as the
+/// multisets that [`transform_pool`] would join from the joined stacks do, and
+/// with the same weights, since the copies are independent.
+///
+/// # Parameters
+/// - `pool`: The multisets of the stacks, each in ascending order, with its
+///   branches.
+/// - `laws`: The laws of the stacks.
+/// - `padding`: The branches that a reroll adds to each kept die, `G`, or one
+///   for an explode.
+/// - `becomes`: The law of what a chain becomes, which charges it to the meter.
+/// - `meter`: The meter, to which the new stacks stay charged.
+///
+/// # Returns
+/// The new stacks.
+///
+/// # Errors
+/// [`Halt`] if the transform would exceed the budget or is cancelled.
+fn transform_stacks(
+	pool: &Multisets<Chain>,
+	laws: &Laws,
+	padding: &Weight,
+	mut becomes: impl FnMut(&Chain, &mut Meter) -> Result<Become<Chain>, Halt>,
+	meter: &mut Meter
+) -> Result<Roll, Halt>
+{
+	let mut became = BTreeMap::<Chain, Become<Chain>>::new();
+	let mut composed = BTreeMap::<Chain, Become<Chain>>::new();
+	let mut dice = Vec::with_capacity(pool.len());
+	for (chains, _) in pool
+	{
+		meter.charge(chains.len() as u64, 0)?;
+		let mut sum = 0u64;
+		for (chain, copies) in chains
+		{
+			if !composed.contains_key(chain)
+			{
+				meter.charge(0, chain.cells())?;
+				let law = compose(
+					chain,
+					laws,
+					padding,
+					&mut became,
+					&mut becomes,
+					meter
+				)?;
+				composed.insert(chain.clone(), law);
+			}
+			sum = sum.saturating_add(composed[chain].1 * *copies as u64);
+		}
+		dice.push(sum);
+	}
+	// Each multiset is copied and padded.
+	let most = dice.iter().copied().max().unwrap_or(0);
+	let steps = dice
+		.iter()
+		.map(|dice| 1 + (most - dice) as u128)
+		.sum::<u128>();
+	meter.charge(charge_of(steps), stacks_cells(pool))?;
+	let pool = pool
+		.iter()
+		.zip(dice)
+		.map(|((chains, branches), dice)| {
+			(chains.clone(), branches * padding.pow((most - dice) as u32))
+		})
+		.collect();
+	meter.free(became.values().map(|(law, _)| law_cells(law)).sum());
+	Ok(Roll::Stacks {
+		pool,
+		laws: composed
+			.into_iter()
+			.map(|(chain, (law, _))| (chain, law))
+			.collect()
+	})
+}
+
+/// Answer the multisets of the chains still kept of the specified multisets of
+/// chains, after their lowest `lowest` and their highest `highest` are
+/// dropped, merging those that coincide, as the pool of stacks whose chains
+/// are still themselves.
+///
+/// # Parameters
+/// - `outcomes`: The multisets of the chains, each in ascending order, with its
+///   branches.
+/// - `lowest`: The number of lowest chains dropped, already clamped.
+/// - `highest`: The number of highest chains dropped, already clamped, such
+///   that at least one chain is still kept.
+/// - `meter`: The meter, to which the multisets stay charged.
+///
+/// # Returns
+/// The multisets of the chains still kept, in ascending order, each with its
+/// branches.
+///
+/// # Errors
+/// [`Halt`] if the multisets would exceed the budget or are cancelled.
+fn kept_pool(
+	outcomes: &Multisets<Chain>,
+	lowest: i32,
+	highest: i32,
+	meter: &mut Meter
+) -> Result<Multisets<Chain>, Halt>
+{
+	let mut charged = 0u64;
+	let mut pool = BTreeMap::<Vec<(Chain, i32)>, Weight>::new();
+	for (chains, branches) in outcomes
+	{
+		let cells = multiset_cells(chains);
+		meter.charge(chains.len() as u64, cells)?;
+		charged = charged.saturating_add(cells);
+		*pool.entry(slice(chains, lowest, highest)).or_default() += branches;
+	}
+	let pool = pool.into_iter().collect::<Vec<_>>();
+	meter.free(charged - stacks_cells(&pool));
+	Ok(pool)
+}
+
+/// Join stacks: answer each multiset of the chains that they hold, with its
+/// branches, by joining independent draws of the law of each chain of each
+/// multiset of the pool, one for each copy, as [`transform_pool`] does.
+///
+/// # Parameters
+/// - `pool`: The multisets of the stacks, each in ascending order, with its
+///   branches.
+/// - `laws`: The laws of the stacks.
+/// - `meter`: The meter, to which the multisets stay charged.
+///
+/// # Returns
+/// The multisets, in ascending order, each with its branches.
+///
+/// # Errors
+/// [`Halt`] if the multisets would exceed the budget or are cancelled.
+fn joined(
+	pool: &Multisets<Chain>,
+	laws: &Laws,
+	meter: &mut Meter
+) -> Result<Multisets<Chain>, Halt>
+{
+	if laws.is_empty()
+	{
+		// Every chain is still itself.
+		meter.charge(pool.len() as u64, stacks_cells(pool))?;
+		return Ok(pool.clone())
+	}
+	transform_pool(
+		pool,
+		0,
+		0,
+		&Weight::ONE,
+		|chain, meter| match laws.get(chain)
+		{
+			Some(law) =>
+			{
+				meter.charge(law.len() as u64, law_cells(law))?;
+				Ok((law.clone(), 0))
+			},
+			None =>
+			{
+				meter.charge(1, chain.cells())?;
+				Ok((vec![(chain.clone(), Weight::ONE)], 0))
+			}
+		},
+		meter
+	)
+}
+
+/// Answer the multisets of the totals of the chains that stacks hold, with
+/// their branches, by joining independent draws of the law of the total of
+/// each chain of each multiset of the pool, one for each copy, as
+/// [`transform_pool`] does, and so without joining the chains themselves.
+///
+/// # Parameters
+/// - `pool`: The multisets of the stacks, each in ascending order, with its
+///   branches.
+/// - `laws`: The laws of the stacks.
+/// - `meter`: The meter, to which the multisets stay charged.
+///
+/// # Returns
+/// The multisets of the totals, in ascending order, each with its branches.
+///
+/// # Errors
+/// [`Halt`] if the multisets would exceed the budget or are cancelled.
+fn joined_totals(
+	pool: &Multisets<Chain>,
+	laws: &Laws,
+	meter: &mut Meter
+) -> Result<Multisets<i32>, Halt>
+{
+	transform_pool(
+		pool,
+		0,
+		0,
+		&Weight::ONE,
+		|chain, meter| match laws.get(chain)
+		{
+			Some(law) =>
+			{
+				let len = law.len() as u64;
+				meter.charge(len, len)?;
+				let mut totals = BTreeMap::<i32, Weight>::new();
+				for (chain, weight) in law
+				{
+					*totals.entry(chain.total()).or_default() += weight;
+				}
+				meter.free(len - totals.len() as u64);
+				Ok((totals.into_iter().collect(), 0))
+			},
+			None =>
+			{
+				meter.charge(1, 1)?;
+				Ok((vec![(chain.total(), Weight::ONE)], 0))
+			}
+		},
+		meter
+	)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                                   Rolls.                                   //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1087,11 +1455,16 @@ impl Roll
 	/// its highest `highest` chains are dropped, as the burst directs, which
 	/// neither does nothing nor saturates. If none has been dropped and the
 	/// roll is a range, dice, or i.i.d. chains, then its chains are
-	/// independent and alike, and the explode transforms the law of each;
-	/// otherwise, it transforms each multiset of the chains still kept, which
-	/// conditions exactly on them. Either way, the chains that the explode
-	/// does not extend keep their dice, and the total of the roll grows by the
-	/// padding of each chain still kept.
+	/// independent and alike, and the explode transforms the law of each. If
+	/// none has been dropped and the roll is stacks, then the explode
+	/// transforms the law of what each chain of their pool has become,
+	/// without joining them, into stacks if `whole`, and otherwise joins the
+	/// totals of those laws. Otherwise, it transforms each multiset of the
+	/// chains still kept, which conditions exactly on them: into the pool of
+	/// stacks whose laws it transforms if `whole`, and into a pool of totals
+	/// otherwise. Either way, the chains that the explode does not extend keep
+	/// their dice, and the total of the roll grows by the padding of each
+	/// chain still kept.
 	///
 	/// # Parameters
 	/// - `lowest`: The number of lowest chains dropped, already clamped.
@@ -1154,19 +1527,62 @@ impl Roll
 				meter.free(law_cells(&law));
 				Ok(roll)
 			},
+			(Roll::Stacks { pool, laws }, 0, 0) => match whole
+			{
+				true => transform_stacks(
+					pool,
+					laws,
+					&Weight::ONE,
+					|chain, meter| burst.chains(chain, meter),
+					meter
+				),
+				false =>
+				{
+					// Each chain of the pool reduces to the totals of what it
+					// has become, exploded, without joining the chains.
+					let mut became = BTreeMap::new();
+					let pool = transform_pool(
+						pool,
+						0,
+						0,
+						&Weight::ONE,
+						|chain, meter| {
+							compose(
+								chain,
+								laws,
+								&Weight::ONE,
+								&mut became,
+								&mut |chain, meter| burst.totals(chain, meter),
+								meter
+							)
+						},
+						meter
+					)?;
+					meter.free(
+						became.values().map(|(law, _)| law_cells(law)).sum()
+					);
+					Ok(Roll::Pool(pool))
+				}
+			},
 			_ =>
 			{
 				let outcomes = self.stacks(meter)?;
 				let roll = match whole
 				{
-					true => Roll::Stacks(transform_pool(
-						&outcomes,
-						lowest,
-						highest,
-						&Weight::ONE,
-						|chain, meter| burst.chains(chain, meter),
-						meter
-					)?),
+					true =>
+					{
+						let pool =
+							kept_pool(&outcomes, lowest, highest, meter)?;
+						let roll = transform_stacks(
+							&pool,
+							&Laws::new(),
+							&Weight::ONE,
+							|chain, meter| burst.chains(chain, meter),
+							meter
+						)?;
+						meter.free(stacks_cells(&pool));
+						roll
+					},
 					false => Roll::Pool(transform_pool(
 						&outcomes,
 						lowest,
@@ -1185,10 +1601,12 @@ impl Roll
 	/// Reroll the chains still kept of the roll, i.i.d. chains or stacks,
 	/// after its lowest `lowest` and its highest `highest` chains are dropped,
 	/// as the redraw directs. If none has been dropped and the roll is i.i.d.
-	/// chains, then the reroll transforms the law of each; otherwise, it
-	/// transforms each multiset of the chains still kept. Either way, the total
-	/// of the roll grows by the padding of the most kept dice of any chain, or
-	/// multiset, as [`rerolled`] and [`transform_pool`] pad them.
+	/// chains, then the reroll transforms the law of each, and if it is
+	/// stacks, the law of what each chain of their pool has become, without
+	/// joining them; otherwise, it transforms the law of each chain still kept
+	/// of each multiset of the chains still kept, into stacks. Either way, the
+	/// total of the roll grows by the padding of the most kept dice of any
+	/// chain, or multiset, as [`rerolled`] and [`transform_stacks`] pad them.
 	///
 	/// # Parameters
 	/// - `lowest`: The number of lowest chains dropped, already clamped.
@@ -1227,19 +1645,27 @@ impl Roll
 					meter
 				)?
 			}),
-			(Roll::Chains { .. } | Roll::Stacks(_), ..) =>
+			(Roll::Stacks { pool, laws }, 0, 0) => transform_stacks(
+				pool,
+				laws,
+				&redraw.padding,
+				|chain, meter| rerolled(chain, redraw, &mut draws, meter),
+				meter
+			),
+			(Roll::Chains { .. } | Roll::Stacks { .. }, ..) =>
 			{
 				let outcomes = self.stacks(meter)?;
-				let stacks = transform_pool(
-					&outcomes,
-					lowest,
-					highest,
+				let pool = kept_pool(&outcomes, lowest, highest, meter)?;
+				meter.free(stacks_cells(&outcomes));
+				let stacks = transform_stacks(
+					&pool,
+					&Laws::new(),
 					&redraw.padding,
 					|chain, meter| rerolled(chain, redraw, &mut draws, meter),
 					meter
 				)?;
-				meter.free(stacks_cells(&outcomes));
-				Ok(Roll::Stacks(stacks))
+				meter.free(stacks_cells(&pool));
+				Ok(stacks)
 			},
 			_ => unreachable!("only chains are rerolled as chains")
 		}
@@ -1274,10 +1700,10 @@ impl Roll
 		let total = self.total();
 		Ok(match whole
 		{
-			true => Roll::Stacks(vec![(
-				vec![(Chain::saturated(value), kept)],
-				total
-			)]),
+			true => Roll::Stacks {
+				pool: vec![(vec![(Chain::saturated(value), kept)], total)],
+				laws: Laws::new()
+			},
 			false => Roll::Pool(vec![(vec![(value, kept)], total)])
 		})
 	}
@@ -1291,9 +1717,10 @@ impl Roll
 	{
 		match self
 		{
-			Roll::Stacks(pool) => pool.iter().any(|(chains, _)| {
-				chains.iter().any(|(c, _)| c.is_saturated())
-			}),
+			Roll::Stacks { pool, laws } =>
+			{
+				current(pool, laws).any(|chain| chain.is_saturated())
+			},
 			_ => false
 		}
 	}
@@ -1333,18 +1760,16 @@ impl Roll
 			Roll::Chains { law, .. } => law.iter().any(|(chain, _)| {
 				chain.end.is_some_and(|e| criterion.matches(e))
 			}),
-			Roll::Stacks(pool) => pool.iter().any(|(chains, _)| {
-				chains.iter().any(|(chain, _)| {
-					chain.end.is_some_and(|e| criterion.matches(e))
-				})
-			})
+			Roll::Stacks { pool, laws } => current(pool, laws)
+				.any(|chain| chain.end.is_some_and(|e| criterion.matches(e)))
 		}
 	}
 
 	/// Reduce the chains of the roll to their totals, which behave as the
 	/// results of dice do: i.i.d. chains to custom dice whose faces are their
-	/// totals, and stacks to a pool of the multisets of their totals. Any other
-	/// roll stays as it is.
+	/// totals, and stacks to a pool of the multisets of their totals, which
+	/// [joins](joined_totals) the laws of their totals rather than their
+	/// chains. Any other roll stays as it is.
 	///
 	/// # Parameters
 	/// - `meter`: The meter, to which the reduced roll stays charged.
@@ -1373,27 +1798,10 @@ impl Roll
 					faces: faces.into_iter().collect()
 				})
 			},
-			Roll::Stacks(stacks) =>
+			Roll::Stacks { pool, laws } =>
 			{
-				let entries = stacks
-					.iter()
-					.map(|(chains, _)| 1 + chains.len() as u64)
-					.sum::<u64>();
-				meter.charge(entries, 1 + entries)?;
-				let mut pool = BTreeMap::<Vec<(i32, i32)>, Weight>::new();
-				for (chains, weight) in stacks
-				{
-					let mut totals = BTreeMap::<i32, i32>::new();
-					for (chain, copies) in chains
-					{
-						*totals.entry(chain.total()).or_default() += copies;
-					}
-					*pool.entry(totals.into_iter().collect()).or_default() +=
-						weight;
-				}
-				let pool = Roll::Pool(pool.into_iter().collect());
-				meter.free(1 + entries - pool.cells());
-				Ok(pool)
+				meter.charge(1, 1)?;
+				Ok(Roll::Pool(joined_totals(pool, laws, meter)?))
 			},
 			_ =>
 			{
@@ -1433,7 +1841,7 @@ impl Roll
 				meter.charge(law.len() as u64, cells)?;
 				return Ok((*count, law.clone()))
 			},
-			Roll::Results(_) | Roll::Pool(_) | Roll::Stacks(_) =>
+			Roll::Results(_) | Roll::Pool(_) | Roll::Stacks { .. } =>
 			{
 				unreachable!("fixed results are not alike")
 			}
@@ -1475,11 +1883,7 @@ impl Roll
 			{
 				multisets(law, (*count).max(0) as usize, meter)
 			},
-			Roll::Stacks(stacks) =>
-			{
-				meter.charge(stacks.len() as u64, stacks_cells(stacks))?;
-				Ok(stacks.clone())
-			},
+			Roll::Stacks { pool, laws } => joined(pool, laws, meter),
 			_ =>
 			{
 				let outcomes = self.outcomes(meter)?;
@@ -1534,7 +1938,11 @@ impl Roll
 		Ok(outcomes
 			.into_iter()
 			.map(|(chains, weight)| {
-				(Roll::Stacks(vec![(chains, Weight::ONE)]), weight)
+				let stacks = Roll::Stacks {
+					pool: vec![(chains, Weight::ONE)],
+					laws: Laws::new()
+				};
+				(stacks, weight)
 			})
 			.collect())
 	}
@@ -1553,4 +1961,185 @@ fn stacks_cells(stacks: &Multisets<Chain>) -> u64
 		.iter()
 		.map(|(chains, _)| multiset_cells(chains))
 		.sum()
+}
+
+#[cfg(test)]
+mod tests
+{
+	use std::collections::BTreeMap;
+
+	use proptest::prelude::*;
+
+	use super::{Burst, Draws, Laws, burst, joined, rerolled, transform_pool};
+	use crate::{
+		Criterion, Weight,
+		distribution::propagation::{
+			cost::{Class, Cost},
+			meter::{Budget, Meter, Unobserved},
+			record::{Die, Effect, Multisets, Roll, distinct_faces, redraw}
+		}
+	};
+
+	/// A step of [`test_deferred_stacks_join_as_eager`]: whether it explodes
+	/// or rerolls, the results that it explodes or rerolls, its limit, and the
+	/// numbers of lowest and highest chains dropped before it.
+	type Step = (bool, Criterion, i32, i32, i32);
+
+	/// Answer a strategy that generates a criterion of every form over the
+	/// faces of small dice.
+	///
+	/// # Returns
+	/// The strategy.
+	fn criterion() -> impl Strategy<Value = Criterion>
+	{
+		prop_oneof![
+			(-2..=4, -2..=4).prop_map(|(a, b): (i32, i32)| {
+				Criterion::within(a.min(b) as i64, a.max(b) as i64)
+			}),
+			(-2..=4).prop_map(|v| Criterion::Outside(v..=v)),
+			prop::collection::vec(-2..=4, 0..=3).prop_map(|mut values| {
+				values.sort_unstable();
+				values.dedup();
+				Criterion::Among(values)
+			})
+		]
+	}
+
+	/// Answer the multisets of the totals of the specified multisets of
+	/// chains, with their branches.
+	///
+	/// # Parameters
+	/// - `stacks`: The multisets of chains, with their branches.
+	///
+	/// # Returns
+	/// The multisets of their totals, in ascending order, with their branches.
+	fn totals(stacks: &Multisets<super::Chain>) -> Multisets<i32>
+	{
+		let mut pool = BTreeMap::<Vec<(i32, i32)>, Weight>::new();
+		for (chains, weight) in stacks
+		{
+			let mut totals = BTreeMap::<i32, i32>::new();
+			for (chain, copies) in chains
+			{
+				*totals.entry(chain.total()).or_default() += copies;
+			}
+			*pool.entry(totals.into_iter().collect()).or_default() += weight;
+		}
+		pool.into_iter().collect()
+	}
+
+	proptest! {
+		/// Stacks that defer their joins, through any sequence of explodes and
+		/// rerolls, with drops between them, hold exactly the multisets of
+		/// chains, with exactly the branches, that joining them after every
+		/// step does, as the pass once did; and their totals join alike.
+		#[test]
+		fn test_deferred_stacks_join_as_eager(
+			faces in prop_oneof![
+				(2..=4).prop_map(Die::Standard),
+				prop::collection::vec(-2..=3, 1..=3)
+					.prop_map(|faces| Die::Custom(distinct_faces(&faces)))
+			],
+			count in 1..=3,
+			steps in prop::collection::vec(
+				(any::<bool>(), criterion(), 1..=2, 0..=1, 0..=1),
+				1..=3
+			)
+		)
+		{
+			let estimate = Cost {
+				steps: 0,
+				cells: 0,
+				worlds: 0,
+				bits: 0,
+				class: Class::default()
+			};
+			let mut meter =
+				Meter::new(Budget::UNLIMITED, 0, &estimate, &Unobserved)
+					.unwrap();
+			let roll = match &faces
+			{
+				&Die::Standard(faces) => Roll::Standard { count, faces },
+				Die::Custom(faces) => Roll::Custom {
+					count,
+					faces: faces.clone()
+				},
+				Die::Range { .. } => unreachable!("no ranges are generated")
+			};
+			let mut eager = roll.stacks(&mut meter).unwrap();
+			let mut deferred = Roll::Stacks {
+				pool: eager.clone(),
+				laws: Laws::new()
+			};
+			let mut count = count;
+			for step in steps
+			{
+				let (explodes, criterion, limit, lowest, highest): Step = step;
+				if lowest + highest >= count
+				{
+					continue
+				}
+				if explodes
+				{
+					let burst =
+						burst(&faces, &criterion, Some(limit), true, &mut meter)
+							.unwrap();
+					if !matches!(burst, Burst::Extend(_))
+					{
+						continue
+					}
+					eager = transform_pool(
+						&eager,
+						lowest,
+						highest,
+						&Weight::ONE,
+						|chain, meter| burst.chains(chain, meter),
+						&mut meter
+					)
+					.unwrap();
+					deferred = deferred
+						.explode(lowest, highest, &burst, true, &mut meter)
+						.unwrap();
+				}
+				else
+				{
+					let Effect::Redraw(redraw) =
+						redraw(&faces, &criterion, Some(limit), &mut meter)
+							.unwrap()
+					else
+					{
+						continue
+					};
+					let mut draws = Draws::new();
+					eager = transform_pool(
+						&eager,
+						lowest,
+						highest,
+						&redraw.padding,
+						|chain, meter| {
+							rerolled(chain, &redraw, &mut draws, meter)
+						},
+						&mut meter
+					)
+					.unwrap();
+					deferred = deferred
+						.reroll_chains(lowest, highest, &redraw, &mut meter)
+						.unwrap();
+				}
+				count -= lowest + highest;
+				let Roll::Stacks { pool, laws } = &deferred
+				else
+				{
+					unreachable!("whole chains stay stacks")
+				};
+				prop_assert_eq!(&joined(pool, laws, &mut meter).unwrap(), &eager);
+				let Roll::Pool(collapsed) = deferred.collapse(&mut meter).unwrap()
+				else
+				{
+					unreachable!("stacks collapse to a pool")
+				};
+				prop_assert_eq!(collapsed, totals(&eager));
+			}
+		}
+	}
 }

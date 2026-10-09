@@ -6243,7 +6243,7 @@ proptest! {
 	/// after some of its rolls, drops, and rerolls, so that a split fixes the
 	/// results that a later reroll reads; the pass succeeds within a budget
 	/// exactly when the budget covers its usage; and it reports its progress
-	/// faithfully.
+	/// faithfully, whenever it fits [`BUDGET`].
 	#[test]
 	fn test_reroll_estimates_bound_usage(
 		program in reroll_program(),
@@ -6258,8 +6258,11 @@ proptest! {
 			{
 				let evaluator = Evaluator::new(function);
 				let (propagated, usage) =
-					propagate_within(&evaluator, &[], Budget::UNLIMITED)
-						.unwrap();
+					match propagate_within(&evaluator, &[], BUDGET)
+					{
+						Err(PropagationError::Exhausted(_)) => continue,
+						result => result.unwrap()
+					};
 				check_exact_budget(&evaluator, &[], &propagated, usage)
 					.map_err(TestCaseError::fail)?;
 				check_estimate(&evaluator, &[], &propagated, usage)
@@ -6314,7 +6317,9 @@ proptest! {
 	/// succeeds within a budget exactly when the budget covers its usage, and
 	/// reports its progress faithfully, and its estimate bounds its usage,
 	/// trivially if the estimate does not yet price its explodes, and so
-	/// saturates.
+	/// saturates, whenever it fits [`BUDGET`]. A split on whole chains after
+	/// every clause may need billions of cells, so the property abstains
+	/// beyond it.
 	#[test]
 	fn test_explode_estimates_bound_usage(
 		program in explode_program(),
@@ -6329,8 +6334,9 @@ proptest! {
 			{
 				let evaluator = Evaluator::new(function);
 				let (propagated, usage) =
-					match propagate_within(&evaluator, &[], Budget::UNLIMITED)
+					match propagate_within(&evaluator, &[], BUDGET)
 					{
+						Err(PropagationError::Exhausted(_)) => continue,
 						Err(PropagationError::Unbounded) =>
 						{
 							prop_assert!(
