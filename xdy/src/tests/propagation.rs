@@ -2820,8 +2820,9 @@ fn test_gapped_counts()
 
 /// Ensure that the estimate stays tight where it is not exact: within the
 /// specified ratio of the usage, in steps and in cells, on mixtures, splits,
-/// explodes, and every case of the distribution corpus but those whose explodes
-/// the estimate does not yet price, and so saturates. The budget decides which
+/// explodes, whole chains, and every case of the distribution corpus but those
+/// that may hold stacks of whole chains, which the estimate does not yet price,
+/// and so saturates. The budget decides which
 /// functions are reasonable, so a loose estimate would refuse reasonable
 /// functions.
 #[test]
@@ -2906,7 +2907,47 @@ fn test_tight_estimates()
 		("4D6 drop lowest (1D2) explode = 6 2 times", 1.6),
 		("4D6 drop lowest 1 explode ≥ (1D6) 2 times", 2.3),
 		("4D6 drop lowest 1 explode = 6 (1D3) times", 1.6),
-		("{x}@(1D4) + 6D6 drop lowest {x} explode = 6 2 times", 1.35)
+		("{x}@(1D4) + 6D6 drop lowest {x} explode = 6 2 times", 1.35),
+		// An explode whose chains a later reroll or explode reads keeps them
+		// whole. A reroll of chains rerolls their ends, and, if it may match
+		// the faces from which explodes grew them, the dice besides their
+		// ends, of which the estimate prices the costliest chains that the
+		// bounds admit.
+		("4D6 explode = 6 2 times reroll = 1", 1.2),
+		("4D6 explode = 6 2 times reroll ≤ 2 2 times", 1.2),
+		("4D6 explode = 6 2 times reroll = 1 ∞ times", 1.2),
+		("4D6 explode = 6 2 times reroll ≤ 6 ∞ times", 1.2),
+		("10D6 explode = 6 3 times reroll = 1", 1.1),
+		("2D10 explode = 10 3 times reroll ≤ 2", 1.2),
+		("4D6 explode = 6 2 times reroll = 6", 1.4),
+		("4D6 explode ≥ 5 2 times reroll ≥ 5", 1.4),
+		("4D6 explode ≥ 1 2 times reroll = 1", 1.45),
+		("4D6 explode ≥ 4 3 times reroll ≤ 3 2 times", 1.75),
+		("3D6 explode = 6 2 times reroll = 1 reroll = 2", 1.2),
+		("4D6 reroll = 1 explode = 6 2 times reroll = 2", 1.2),
+		("4D6 explode = 6 2 times reroll = 1 keep highest 3", 1.1),
+		("2D6 explode = 6 2 times reroll = 1 drop lowest 1", 1.2),
+		("3D[1, 3, 5] explode = 5 2 times reroll = 1", 1.8),
+		("3D[-2, 0, 3] explode = 3 2 times reroll = -2", 2.7),
+		// Chained explodes grow the chains whose ends match.
+		("3D6 explode = 6 1 times explode = 6 1 times", 1.25),
+		("3D6 explode = 6 2 times explode = 6 2 times", 1.3),
+		("3D6 explode ≥ 5 2 times explode = 1 1 times", 1.7),
+		(
+			"4D6 explode = 6 2 times reroll = 1 explode = 6 1 times",
+			1.1
+		),
+		(
+			"3D6 explode ≥ 5 3 times reroll ≥ 5 2 times explode = 6 2 times",
+			1.65
+		),
+		// Random counts, thresholds, and limits, and splits of registers.
+		("(1D4)D6 explode = 6 2 times reroll = 1", 1.2),
+		("4D6 explode ≥ (1D6) 2 times reroll = 1", 1.45),
+		("4D6 explode = 6 (1D3) times reroll = 1", 1.6),
+		("4D6 explode = 6 2 times reroll ≤ (1D3)", 1.2),
+		("{x}@(1D3) + {x}D6 explode = 6 2 times reroll = 1", 1.2),
+		("{x}@(1D3) + 4D6 explode = 6 {x} times reroll ≤ {x}", 1.25)
 	]
 	{
 		let (cost, usage) = estimated(source);
@@ -2945,7 +2986,8 @@ fn test_tight_estimates()
 		let cost = estimate(&evaluator, args.iter().copied()).unwrap();
 		if cost.steps == u64::MAX
 		{
-			// The estimate does not yet price every explode, so it saturates.
+			// The estimate does not yet price stacks of whole chains, so it
+			// saturates.
 			continue
 		}
 		within(source, cost, usage, 2.0);
@@ -3165,6 +3207,39 @@ fn test_classes()
 			),
 			Class {
 				dynamic: true,
+				explodes: true,
+				..none
+			}
+		),
+		// Whole chains explode and reroll alike; a clause that cannot change
+		// them does not.
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&["explode = 6 up to 2 times", "reroll = 1 up to 1 times"]
+			),
+			Class {
+				explodes: true,
+				rerolls: true,
+				..none
+			}
+		),
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&["explode = 6 up to 2 times", "reroll = 7 up to 1 times"]
+			),
+			Class {
+				explodes: true,
+				..none
+			}
+		),
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&["explode = 6 up to 1 times", "explode = 6 up to 1 times"]
+			),
+			Class {
 				explodes: true,
 				..none
 			}
@@ -6316,8 +6391,9 @@ proptest! {
 	/// reroll or explode reads, refuses it only if it explodes without limit,
 	/// succeeds within a budget exactly when the budget covers its usage, and
 	/// reports its progress faithfully, and its estimate bounds its usage,
-	/// trivially if the estimate does not yet price its explodes, and so
-	/// saturates, whenever it fits [`BUDGET`]. A split on whole chains after
+	/// trivially if the record may hold stacks of whole chains, which the
+	/// estimate does not yet price, and so saturates, whenever it fits
+	/// [`BUDGET`]. A split on whole chains after
 	/// every clause may need billions of cells, so the property abstains
 	/// beyond it.
 	#[test]

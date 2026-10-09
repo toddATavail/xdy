@@ -77,11 +77,26 @@
 //! chains spread as evenly as they can among the faces that the explode
 //! matches, which join the most multisets. An explode without limit that
 //! matches every face saturates every chain still kept, leaving a pool of one
-//! multiset. The estimate does not yet price an explode whose chains a later
-//! reroll or explode reads, which keep them whole, so the estimate of a
-//! function that has one saturates every quantity, and its class describes
-//! nothing; nor does it price a function in which an explode without limit
-//! may grow a chain without bound, which the pass
+//! multiset.
+//!
+//! An explode whose chains a later reroll or explode reads keeps them whole.
+//! Of alike dice, or of [i.i.d. chains](Kind::Chains), none of which has been
+//! dropped, it grows the law of a chain by the tails of the program, whose
+//! states are then the multisets of the faces that the explode matches, and
+//! a reroll of i.i.d. chains rerolls the kept dice of each chain of the law
+//! alone, padding every chain to the most kept dice of any, `l`, which the
+//! bounds answer. The estimate bounds the chains of the law by those that the
+//! bounds admit: each holds at most `l` kept dice, and those other than its
+//! end show only faces that an explode matched, from which it grew the chain,
+//! or replacements that a reroll drew for them, so a reroll that cannot match
+//! those faces rerolls only the ends. After the last such reader, or at a
+//! sum, the chains collapse to the custom dice of their totals. The estimate
+//! does not yet price [stacks](super::record::Roll::Stacks): whole chains
+//! after a drop or keep, or on results that a split fixed, or on a pool, or
+//! that an explode without limit saturated, nor a split of whole chains, so
+//! the estimate of a function that may hold them saturates every quantity,
+//! and its class describes nothing; nor does it price a function in which an
+//! explode without limit may grow a chain without bound, which the pass
 //! [refuses](crate::BuildError::Unbounded) before it begins. The pass still
 //! meters every explode, so a finite budget refuses one only when the pass
 //! would exceed it.
@@ -233,19 +248,20 @@ fn observe(
 		})
 	}
 	let plan = Plan::new(&function.instructions);
-	if unbounded(evaluator, &args) || !priced(&function.instructions)
+	// The pass refuses a function in which an explode may grow a chain without
+	// bound, whatever its budget, and the estimate does not yet price stacks of
+	// whole chains, so price such a function beyond every budget but the
+	// unlimited one.
+	let unpriced = Cost {
+		steps: u64::MAX,
+		cells: u64::MAX,
+		worlds: u64::MAX,
+		bits: u64::MAX,
+		class: Class::default()
+	};
+	if unbounded(evaluator, &args)
 	{
-		// The pass refuses a function in which an explode may grow a chain
-		// without bound, whatever its budget, and the estimate does not yet
-		// price every explode, so price such a function beyond every budget
-		// but the unlimited one.
-		return Ok(Cost {
-			steps: u64::MAX,
-			cells: u64::MAX,
-			worlds: u64::MAX,
-			bits: u64::MAX,
-			class: Class::default()
-		})
+		return Ok(unpriced)
 	}
 	// The pass fixes every binding, and an unbound external variable holds
 	// zero, so every binding is a degenerate interval.
@@ -269,7 +285,19 @@ fn observe(
 	let mut depths = depths(&plan, function.instructions.len()).into_iter();
 	for (pc, inst) in function.instructions.iter().enumerate()
 	{
-		consumed.charge(lane.instruction(inst));
+		// A reroll or explode keeps the chains of its record whole only if a
+		// later one reads them.
+		let whole = match inst
+		{
+			Instruction::Reroll(Reroll { dest, .. })
+			| Instruction::Explode(Explode { dest, .. }) => rerolled(
+				&function.instructions,
+				ProgramCounter(pc),
+				Location::RollingRecord(*dest)
+			),
+			_ => false
+		};
+		consumed.charge(lane.instruction(inst, whole));
 		for step in plan.steps(ProgramCounter(pc))
 		{
 			// A split of a record that a later reroll reads keeps its die.
@@ -295,31 +323,12 @@ fn observe(
 		}
 	}
 	debug_assert!(lane.fork.is_none(), "every split merges by the end");
+	if lane.shadow.unpriced
+	{
+		return Ok(unpriced)
+	}
 	consumed.charge(lane.shadow.finish());
 	Ok(lane.shadow.cost(&consumed))
-}
-
-/// Answer whether the estimate prices every explode of the specified function:
-/// whether no later reroll or explode reads the chains of any, so that they
-/// reduce to their totals at once. Then no record holds whole chains, since
-/// only an explode that a later one reads keeps them whole.
-///
-/// # Parameters
-/// - `instructions`: The instructions of the function.
-///
-/// # Returns
-/// `true` if the estimate prices every explode, `false` otherwise.
-fn priced(instructions: &[Instruction]) -> bool
-{
-	instructions.iter().enumerate().all(|(pc, inst)| match inst
-	{
-		Instruction::Explode(Explode { dest, .. }) => !rerolled(
-			instructions,
-			ProgramCounter(pc),
-			Location::RollingRecord(*dest)
-		),
-		_ => true
-	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -507,10 +516,13 @@ impl<'f> Lane<'f>
 	///
 	/// # Parameters
 	/// - `inst`: The instruction.
+	/// - `whole`: Whether the instruction is a reroll or explode that a later
+	///   reroll or explode reads, so that the [chains](super::chain) of its
+	///   record stay whole, rather than reduce to their totals.
 	///
 	/// # Returns
 	/// The event.
-	fn instruction(&mut self, inst: &Instruction) -> Event
+	fn instruction(&mut self, inst: &Instruction, whole: bool) -> Event
 	{
 		let before = self.bounds.registers().to_vec();
 		self.bounds.step(inst);
@@ -520,6 +532,7 @@ impl<'f> Lane<'f>
 			before: &before,
 			after: self.bounds.registers(),
 			rolls: &self.bounds,
+			whole,
 			tally: Tally::default()
 		};
 		inst.visit(&mut pricing).unwrap();
@@ -547,8 +560,16 @@ impl<'f> Lane<'f>
 				let events = fork
 					.children
 					.iter_mut()
-					.map(|(values, child)| (*values, child.instruction(inst)))
+					.map(|(values, child)| {
+						(*values, child.instruction(inst, whole))
+					})
 					.collect::<Vec<_>>();
+				// An event of a child that meets what the estimate does not yet
+				// price may be too low, so the lane saturates with it.
+				self.shadow.unpriced |= fork
+					.children
+					.iter()
+					.any(|(_, child)| child.shadow.unpriced);
 				own.min(fork.combine(&events, Settling::Each))
 			}
 		}
@@ -597,6 +618,8 @@ impl<'f> Lane<'f>
 			.iter_mut()
 			.map(|(values, child)| (*values, child.step(step, carried)))
 			.collect::<Vec<_>>();
+		self.shadow.unpriced |=
+			fork.children.iter().any(|(_, child)| child.shadow.unpriced);
 		let mut combined = fork.combine(&events, Settling::Once);
 		match *step
 		{
@@ -1051,7 +1074,12 @@ struct Shadow
 	log: f64,
 
 	/// The class of the function.
-	class: Class
+	class: Class,
+
+	/// Whether some record may hold [stacks](super::record::Roll::Stacks) of
+	/// whole chains, which the estimate does not yet price, so that it
+	/// saturates.
+	unpriced: bool
 }
 
 /// The bounds of a value in every world.
@@ -1137,7 +1165,8 @@ impl Shadow
 			splits: Vec::new(),
 			scaled: false,
 			log: 0.0,
-			class: Class::default()
+			class: Class::default(),
+			unpriced: false
 		}
 	}
 
@@ -1396,6 +1425,11 @@ struct Pricing<'a>
 	/// The bounds evaluator after the instruction, which holds the kind of
 	/// the roll that last filled each rolling record.
 	rolls: &'a BoundsEvaluator<'a>,
+
+	/// Whether the instruction is a reroll or explode that a later reroll or
+	/// explode reads, so that the [chains](super::chain) of its record stay
+	/// whole, rather than reduce to their totals.
+	whole: bool,
 
 	/// The tally of the instruction's work in one world.
 	tally: Tally
@@ -1808,19 +1842,16 @@ impl InstructionVisitor<()> for Pricing<'_>
 
 	fn visit_explode(&mut self, inst: &Explode) -> Result<(), ()>
 	{
-		// The explode reduces its chains to their totals at once, which lie
-		// within the hull of the totals that the bounds admit.
-		let shape = match self.rolls.totals(inst.dest)
-		{
-			Some(hull) => Die::run(hull.min, hull.max),
-			None => Die::custom(Vec::new())
-		};
+		let chaining = self.chaining(inst.dest);
 		let (resolution, most, changed) = self.predicated(
 			inst.dest.0,
 			&inst.operands(),
 			&inst.predicate,
 			inst.limit,
-			|part, resolution, groups| part.explode(resolution, &shape, groups)
+			&chaining,
+			|part, resolution, groups| {
+				part.explode(resolution, &chaining, groups)
+			}
 		);
 		self.shadow.class.explodes |= changed;
 		// Only a limited explode pads the chains that it may extend; one that
@@ -1834,12 +1865,16 @@ impl InstructionVisitor<()> for Pricing<'_>
 
 	fn visit_reroll(&mut self, inst: &Reroll) -> Result<(), ()>
 	{
+		let chaining = self.chaining(inst.dest);
 		let (resolution, most, changed) = self.predicated(
 			inst.dest.0,
 			&inst.operands(),
 			&inst.predicate,
 			inst.limit,
-			|part, resolution, groups| part.reroll(resolution, groups)
+			&chaining,
+			|part, resolution, groups| {
+				part.reroll(resolution, &chaining, groups)
+			}
 		);
 		self.shadow.class.rerolls |= changed;
 		self.shadow.log += most as f64 * resolution.padding_log();
@@ -2090,16 +2125,44 @@ impl Pricing<'_>
 		count.bounds
 	}
 
+	/// Answer what the bounds say of the chains of the specified rolling record
+	/// after a reroll or an explode, and whether they stay whole.
+	///
+	/// # Parameters
+	/// - `dest`: The record.
+	///
+	/// # Returns
+	/// The chaining.
+	fn chaining(&self, dest: RollingRecordIndex) -> Chaining
+	{
+		// The totals of the chains lie within the hull of the totals that the
+		// bounds admit.
+		let shape = match self.rolls.totals(dest)
+		{
+			Some(hull) => Die::run(hull.min, hull.max),
+			None => Die::custom(Vec::new())
+		};
+		Chaining {
+			whole: self.whole,
+			length: self.rolls.length(dest) as u128,
+			shape
+		}
+	}
+
 	/// Apply a reroll or an explode to the specified rolling record, as
 	/// [`Mixture::resolve`](super::mixture::Mixture) does: read each distinct
 	/// operand once, resolve the predicate by each joint outcome, and apply it
-	/// to every setup, part by part.
+	/// to every setup, part by part. If the chains of the record do not stay
+	/// whole, every setup of [i.i.d. chains](Kind::Chains) then
+	/// [collapses](Part::collapse) to the custom dice of their totals, which
+	/// `apply` charges.
 	///
 	/// # Parameters
 	/// - `dest`: The index of the record.
 	/// - `operands`: The operands of the predicate and the limit.
 	/// - `predicate`: The predicate.
 	/// - `limit`: The limit.
+	/// - `chaining`: The chaining of the record after the clause.
 	/// - `apply`: The reroll or explode of the setups of one part by one
 	///   resolution, given the groups of the multisets of the part computed so
 	///   far.
@@ -2113,6 +2176,7 @@ impl Pricing<'_>
 		operands: &[AddressingMode],
 		predicate: &Predicate,
 		limit: Limit,
+		chaining: &Chaining,
 		apply: impl Fn(&Part, &Resolution, &mut Groups) -> Effects
 	) -> (Resolution, u128, bool)
 	{
@@ -2246,6 +2310,7 @@ impl Pricing<'_>
 				changed |= effects.crossed
 					|| effects.redrawn > 0
 					|| !effects.redraws.is_empty();
+				self.shadow.unpriced |= effects.unpriced;
 				for part in effects.redraws
 				{
 					absorb(&mut parts, part);
@@ -2253,6 +2318,15 @@ impl Pricing<'_>
 			}
 		}
 		self.tally.then(work);
+		if !chaining.whole
+		{
+			// The chains of the setups that the clause leaves as they were, or
+			// crosses out, reduce to their totals too.
+			parts = parts.into_iter().fold(Vec::new(), |mut parts, part| {
+				absorb(&mut parts, part.collapse(resolution.source.cells).1);
+				parts
+			});
+		}
 		record.parts = parts;
 		// The setups that the clause leaves as they were, or crosses out, merge
 		// across the outcomes of the operands, and weigh their sum.
@@ -2644,8 +2718,31 @@ struct Effects
 
 	/// The most dice still kept that the reroll may redraw, or the most chains
 	/// still kept that a limited explode may extend, which raise the total of
-	/// a setup by their paddings, or zero.
-	redrawn: u128
+	/// a setup by their paddings, or zero. A reroll of chains redraws every
+	/// kept die of each.
+	redrawn: u128,
+
+	/// Whether the reroll or explode may leave [stacks](super::record::Roll)
+	/// of whole chains, or join chains after a drop, which the estimate does
+	/// not yet price.
+	unpriced: bool
+}
+
+/// What the bounds say of the [chains](super::chain) of a rolling record after
+/// a reroll or an explode, and whether they stay whole.
+#[derive(Debug, Clone)]
+struct Chaining
+{
+	/// Whether a later reroll or explode reads the record before a roll
+	/// refills it, so that its chains stay whole, rather than reduce to
+	/// their totals.
+	whole: bool,
+
+	/// The most kept dice of a chain still kept, `l`.
+	length: u128,
+
+	/// The shape of a die whose faces are the totals of the chains still kept.
+	shape: Die
 }
 
 impl Part
@@ -2654,26 +2751,44 @@ impl Part
 	/// [`Setup::reroll`](super::mixture) does for each setup and each outcome
 	/// of the operands that resolves so.
 	///
+	/// If the chains of the record do not stay whole, every setup of i.i.d.
+	/// chains then [collapses](Self::collapse) to the custom dice of their
+	/// totals, whether the reroll changes it or not.
+	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the reroll.
+	/// - `chaining`: The chaining of the record after the reroll.
 	/// - `groups`: The [`groups`] of the multisets of the part, by the faces
 	///   that a reroll may match and their arrangement, and whether it matches
 	///   exactly those, computed so far.
 	///
 	/// # Returns
 	/// The reroll.
-	fn reroll(&self, resolution: &Resolution, groups: &mut Groups) -> Effects
+	fn reroll(
+		&self,
+		resolution: &Resolution,
+		chaining: &Chaining,
+		groups: &mut Groups
+	) -> Effects
 	{
+		// The setups that the reroll leaves as they were, or crosses out,
+		// collapse their chains if they do not stay whole.
+		let collapse = match chaining.whole
+		{
+			true => Tally::default(),
+			false => self.collapse(resolution.source.cells).0
+		};
 		let kept = self.kept();
 		if kept.max <= 0
 		{
 			// No setup has a die still kept, so none has anything to reroll.
 			return Effects {
-				each: Tally::default(),
+				each: collapse,
 				unchanged: true,
 				crossed: false,
 				redraws: Vec::new(),
-				redrawn: 0
+				redrawn: 0,
+				unpriced: false
 			}
 		}
 		// Counting the branches of the die takes a step, and one for each face
@@ -2682,6 +2797,8 @@ impl Part
 		each.charge(1 + resolution.source.cells, 0);
 		let mut redraws = Vec::new();
 		let mut redrawn = 0;
+		let mut unpriced = false;
+		let mut paths = collapse;
 		if resolution.redraw
 		{
 			// The redraw lists the faces of the die, weighs them, and keeps the
@@ -2697,7 +2814,6 @@ impl Part
 			redraw.free(distinct);
 			redraw.charge(0, resolution.source.cells);
 			let setups = self.setups.saturating_mul(resolution.outcomes);
-			let mut paths = Tally::default();
 			let undropped = self.lowest.min <= 0 && self.highest.min <= 0;
 			let dropped = self.lowest.max > 0 || self.highest.max > 0;
 			let (rewrite, pool) = match self.kind
@@ -2709,6 +2825,39 @@ impl Part
 					(undropped, dropped)
 				},
 				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
+				Kind::Chains { length, .. } =>
+				{
+					// A reroll of chains after a drop joins them into stacks,
+					// which the part stands for until the estimate prices them.
+					if dropped
+					{
+						unpriced = true;
+						redraws.push(self.clone());
+					}
+					if undropped
+					{
+						let (tally, part) =
+							self.reroll_chains(resolution, chaining, setups);
+						let mut path = redraw;
+						path.then(tally);
+						let part = match chaining.whole
+						{
+							true => part,
+							false =>
+							{
+								let (tally, part) =
+									part.collapse(resolution.source.cells);
+								path.then(tally);
+								part
+							}
+						};
+						paths = paths.max(path);
+						redraws.push(part);
+					}
+					// Every kept die of each chain is rerolled, and padded.
+					redrawn = (kept.max as u128).saturating_mul(length);
+					(false, false)
+				},
 				Kind::Empty => (false, false)
 			};
 			if rewrite
@@ -2728,15 +2877,16 @@ impl Part
 				paths = paths.max(path);
 				redraws.push(part);
 			}
-			each.then(paths);
-			redrawn = kept.max as u128;
+			redrawn = redrawn.max(kept.max as u128);
 		}
+		each.then(paths);
 		Effects {
 			each,
 			unchanged: kept.min <= 0 || resolution.idle,
 			crossed: resolution.cross,
 			redraws,
-			redrawn
+			redrawn,
+			unpriced
 		}
 	}
 
@@ -3005,26 +3155,32 @@ impl Resolution
 	}
 
 	/// Resolve a limited explode of one setup that may extend its chains, as
-	/// [`burst`](super::chain::burst) does when the chains reduce to their
-	/// totals: list the faces of the die, and run the program over the
-	/// extensions, whose states are the folds of the extensions so far of the
-	/// chains that may still grow, stage by stage.
+	/// [`burst`](super::chain::burst) does: list the faces of the die, and run
+	/// the program over the extensions, whose states are the extensions so far
+	/// of the chains that may still grow, stage by stage: their folds, when
+	/// the chains reduce to their totals, and their multisets, when they stay
+	/// whole.
 	///
 	/// At stage `j`, each of the states rolls each of the `D` faces of the
-	/// die. The states are the folds of `j − 1` faces that the explode matches,
-	/// which number at most `m` times those of the stage before, for `m`
-	/// matching faces, and at most the multisets of `j − 1` of them, or, if
-	/// they are of one sign, so that their folds are their sums, at most the
-	/// [sums](Die::support) of `j − 1` of them. The tails that the stages close
-	/// number at most the moves that close them, and, if the faces are of one
-	/// sign, at most the sums of from one to `n` faces. The stages beyond
-	/// [`LISTED`] are priced at the most states of any.
+	/// die. The states are the folds or the multisets of `j − 1` faces that the
+	/// explode matches, which number at most `m` times those of the stage
+	/// before, for `m` matching faces, and at most the multisets of `j − 1` of
+	/// them, or, if they are folds of faces of one sign, so that the folds are
+	/// their sums, at most the [sums](Die::support) of `j − 1` of them. The
+	/// tails that the stages close number at most the moves that close them,
+	/// and, if they are folds of faces of one sign, at most the sums of from
+	/// one to `n` faces. A fold occupies a cell, and a tail of whole chains
+	/// two, and one for each distinct value of its extensions, though the
+	/// program charges each state of stage `j` as `j + 2`. The stages
+	/// beyond [`LISTED`] are priced at the most states of any.
+	///
+	/// # Parameters
+	/// - `whole`: Whether the chains stay whole, for a later reroll or explode.
 	///
 	/// # Returns
 	/// The tally of the resolution, which leaves the tails charged, and a
-	/// bound on the tails, which are the folds by which a matching chain may
-	/// grow.
-	fn extensions(&self) -> (Tally, u128)
+	/// bound on the tails by which a matching chain may grow.
+	fn extensions(&self, whole: bool) -> (Tally, u128)
 	{
 		let source = &self.source;
 		let d = source.distinct;
@@ -3039,27 +3195,39 @@ impl Resolution
 		// The faces that end a chain before its limit is spent.
 		let ends = source.faces.difference(&self.criteria.certain).len().min(d);
 		let signed = |set: &ResultSet| {
-			set.hull()
-				.is_some_and(|hull| hull.min >= 0 || hull.max <= 0)
+			!whole
+				&& set
+					.hull()
+					.is_some_and(|hull| hull.min >= 0 || hull.max <= 0)
 		};
 		let die = Die::covering(&matching, source.listed);
 		let summed = signed(&matching);
-		// A bound on the folds of `k` matching faces.
-		let folds = |k: u128| match (k, summed)
+		// A bound on the states of `k` matching faces.
+		let states_of = |k: u128| match (k, summed)
 		{
 			(0, _) => 1,
 			(k, true) => die.support(k),
 			(k, false) => binomial(k + m - 1, m - 1)
 		};
-		let (mut moves, mut closed, mut states) = (0u128, 0u128, 1u128);
+		// The cells that the program charges for each move of stage `j`: two
+		// and one for each extension, for whole chains, whatever their values.
+		let cells = |j: u128| match whole
+		{
+			true => j.saturating_add(2),
+			false => 1
+		};
+		let (mut moves, mut charged, mut closed, mut states) =
+			(0u128, 0u128, 0u128, 1u128);
 		let listed = n.min(LISTED);
 		for j in 1..=listed
 		{
 			if j > 1
 			{
-				states = states.saturating_mul(m).min(folds(j - 1));
+				states = states.saturating_mul(m).min(states_of(j - 1));
 			}
-			moves = moves.saturating_add(states.saturating_mul(d));
+			let stage = states.saturating_mul(d);
+			moves = moves.saturating_add(stage);
+			charged = charged.saturating_add(stage.saturating_mul(cells(j)));
 			let closing = match j < n
 			{
 				true => ends,
@@ -3070,14 +3238,17 @@ impl Resolution
 		if n > listed
 		{
 			// The later stages hold at most the states of the last.
-			let rest = (n - listed).saturating_mul(folds(n - 1).min(
+			let rest = (n - listed).saturating_mul(states_of(n - 1).min(
 				states.saturating_mul(m.saturating_pow((n - listed) as u32))
 			));
-			moves = moves.saturating_add(rest.saturating_mul(d));
-			closed = closed.saturating_add(rest.saturating_mul(d));
+			let stage = rest.saturating_mul(d);
+			moves = moves.saturating_add(stage);
+			charged = charged.saturating_add(stage.saturating_mul(cells(n)));
+			closed = closed.saturating_add(stage);
 		}
-		// Each stage takes a step, and each move a step and a cell.
-		tally.charge(moves.saturating_add(n), moves);
+		// Each stage takes a step, and each move a step and the cells of a
+		// state.
+		tally.charge(moves.saturating_add(n), charged);
 		let tails = match (signed(&source.faces), source.faces.hull())
 		{
 			(true, Some(hull)) =>
@@ -3089,8 +3260,15 @@ impl Resolution
 			},
 			_ => closed
 		};
-		// The tails stay charged; the states and the faces do not.
-		tally.keep(moves, tails);
+		// The tails stay charged, each of a cell, or, for whole chains, of two
+		// and one for each distinct value of its extensions, every one but the
+		// last of which shows a matching face; the states and the faces do not.
+		let occupied = match whole
+		{
+			true => 2 + n.min(m + 1).min(d),
+			false => 1
+		};
+		tally.keep(charged, tails.saturating_mul(occupied));
 		tally.free(d.saturating_mul(2));
 		(tally, tails)
 	}
@@ -3100,15 +3278,19 @@ impl Part
 {
 	/// Explode the setups of the part by one resolution, as
 	/// [`Setup::explode`](super::mixture) does for each setup and each outcome
-	/// of the operands that resolves so, when no later reroll or explode reads
-	/// the chains, which reduce to their totals at once: into the law of the
-	/// totals of alike dice, none of which has been dropped, and otherwise into
-	/// a pool of the multisets of the totals of the chains still kept.
+	/// of the operands that resolves so. If a later reroll or explode reads
+	/// the chains, then an explode of alike dice or i.i.d. chains, none of
+	/// which has been dropped, keeps them [whole](Self::chains); otherwise,
+	/// the chains reduce to their totals at once: into the law of the
+	/// totals of alike dice or i.i.d. chains, none of which has been
+	/// dropped, and otherwise into a pool of the multisets of the totals of
+	/// the chains still kept. If the chains do not stay whole, every setup
+	/// of i.i.d. chains that the explode leaves as it was
+	/// [collapses](Self::collapse) too.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the explode.
-	/// - `shape`: The shape of a die whose faces are the totals of the chains
-	///   that the explode may grow.
+	/// - `chaining`: The chaining of the record after the explode.
 	/// - `groups`: The [`groups`] of the multisets of the part computed so far.
 	///
 	/// # Returns
@@ -3116,20 +3298,28 @@ impl Part
 	fn explode(
 		&self,
 		resolution: &Resolution,
-		shape: &Die,
+		chaining: &Chaining,
 		groups: &mut Groups
 	) -> Effects
 	{
+		// The setups that the explode leaves as they were collapse their chains
+		// if they do not stay whole.
+		let collapse = match chaining.whole
+		{
+			true => Tally::default(),
+			false => self.collapse(resolution.source.cells).0
+		};
 		let kept = self.kept();
 		if kept.max <= 0
 		{
 			// No setup has a chain still kept, so none has anything to explode.
 			return Effects {
-				each: Tally::default(),
+				each: collapse,
 				unchanged: true,
 				crossed: false,
 				redraws: Vec::new(),
-				redrawn: 0
+				redrawn: 0,
+				unpriced: false
 			}
 		}
 		let source = &resolution.source;
@@ -3139,21 +3329,24 @@ impl Part
 		let mut each = Tally::default();
 		each.charge(1 + source.cells, 0);
 		let setups = self.setups.saturating_mul(resolution.outcomes);
-		let mut paths = Tally::default();
+		let mut paths = collapse;
 		let mut redraws = Vec::new();
 		let mut redrawn = 0;
+		let mut unpriced = false;
 		if burst.saturate
 		{
+			// Saturated chains that stay whole are stacks.
+			unpriced |= chaining.whole;
 			// The total takes a step for each die, and the pool of one multiset
 			// of saturated chains takes three cells; the setup keeps a copy of
 			// the die.
-			let dice =
-				match &self.kind
-				{
-					Kind::Standard { count, .. }
-					| Kind::Custom { count, .. } => dice(count),
-					_ => 0
-				};
+			let dice = match &self.kind
+			{
+				Kind::Standard { count, .. }
+				| Kind::Custom { count, .. }
+				| Kind::Chains { count, .. } => dice(count),
+				_ => 0
+			};
 			let cells = 3 + source.cells;
 			let mut path = Tally::default();
 			path.charge(1 + dice, cells);
@@ -3173,7 +3366,7 @@ impl Part
 		}
 		if burst.extend
 		{
-			let (extensions, tails) = resolution.extensions();
+			let (extensions, tails) = resolution.extensions(chaining.whole);
 			let undropped = self.lowest.min <= 0 && self.highest.min <= 0;
 			let dropped = self.lowest.max > 0 || self.highest.max > 0;
 			let (law, pool) = match self.kind
@@ -3184,26 +3377,53 @@ impl Part
 				{
 					(undropped, dropped)
 				},
+				Kind::Chains { .. } =>
+				{
+					// An explode of chains after a drop joins them, which the
+					// part stands for until the estimate prices them.
+					if dropped
+					{
+						unpriced = true;
+						redraws.push(self.clone());
+					}
+					(undropped, false)
+				},
 				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
 				Kind::Empty => (false, false)
 			};
 			if law
 			{
-				let (tally, part) =
-					self.totals(resolution, tails, shape, setups);
+				let (tally, part) = match chaining.whole
+				{
+					true => self.chains(resolution, tails, chaining, setups),
+					false =>
+					{
+						self.totals(resolution, tails, &chaining.shape, setups)
+					},
+				};
 				let mut path = extensions;
 				path.then(tally);
 				paths = paths.max(path);
 				redraws.push(part);
 			}
 			if pool
-				&& let Some((tally, part)) =
-					self.pool_totals(resolution, tails, shape, setups, groups)
 			{
-				let mut path = extensions;
-				path.then(tally);
-				paths = paths.max(path);
-				redraws.push(part);
+				// Whole chains of fixed results, of a pool, or after a drop,
+				// are stacks.
+				unpriced |= chaining.whole;
+				if let Some((tally, part)) = self.pool_totals(
+					resolution,
+					tails,
+					&chaining.shape,
+					setups,
+					groups
+				)
+				{
+					let mut path = extensions;
+					path.then(tally);
+					paths = paths.max(path);
+					redraws.push(part);
+				}
 			}
 			redrawn = kept.max as u128;
 		}
@@ -3213,16 +3433,17 @@ impl Part
 			unchanged: kept.min <= 0 || burst.idle,
 			crossed: false,
 			redraws,
-			redrawn
+			redrawn,
+			unpriced
 		}
 	}
 
-	/// Explode the alike dice of one setup of the part, none of which has been
-	/// dropped, into the law of the totals of their chains, as
-	/// [`Roll::explode`](super::record::Roll) does: list the law of a chain,
-	/// one die of each face, then the totals of each chain, those of a chain
-	/// whose end matches by each tail, and merge them into the faces of custom
-	/// dice.
+	/// Explode the alike dice or i.i.d. chains of one setup of the part, none
+	/// of which has been dropped, into the law of the totals of their chains,
+	/// as [`Roll::explode`](super::record::Roll) does: list the law of a chain,
+	/// one die of each face, or a copy of the law of the chains, then the
+	/// totals of each chain, those of a chain whose end matches by each tail,
+	/// and merge them into the faces of custom dice.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the explode.
@@ -3240,81 +3461,506 @@ impl Part
 		setups: u128
 	) -> (Tally, Part)
 	{
-		let one = Operand {
-			bounds: 1.into(),
-			support: 1,
-			varied: false,
-			random: false,
-			dense: true
-		};
 		let source = &resolution.source;
-		let (count, chains, faces, laws) = match &self.kind
-		{
-			// A range is one die.
-			Kind::Range { .. } =>
-			{
-				(one, source.distinct, source.faces.clone(), self.setups)
-			},
-			Kind::Standard {
-				count, faces, dies, ..
-			} => (
-				*count,
-				faces.bounds.max.max(1) as u128,
-				source.faces.clone(),
-				*dies
-			),
-			Kind::Custom {
-				count, die, laws, ..
-			} => (*count, die.faces, die.set(), *laws),
-			_ => unreachable!("only a roll of alike dice explodes into totals")
-		};
-		// The chains of the law whose ends the explode may match.
-		let matching = faces
-			.intersection(&resolution.criteria.possible)
-			.len()
-			.min(chains);
-		let law = matching
+		let law = self.law(source);
+		let chains = law.chains;
+		let matching = law.ending(resolution.matching(&law.faces).0);
+		let totals = matching
 			.saturating_mul(tails)
 			.saturating_add(chains - matching);
+		let values = law.values(source.distinct);
+		let held = chains.saturating_mul(1 + values);
 		let mut tally = Tally::default();
 		// The explode takes a step and a cell, and the law of a chain lists
-		// each face as a chain of one die, of two cells.
+		// each face as a chain of one die, of two cells, or copies the law of
+		// the chains.
 		tally.charge(1, 1);
-		tally.charge(chains, chains.saturating_mul(2));
-		// Each chain whose end matches folds each tail into a total, and any
-		// other keeps its own.
+		tally.charge(chains, held);
+		// Each chain whose end matches folds its dice and each tail into a
+		// total, and any other keeps its own.
 		tally.charge(
 			matching
-				.saturating_mul(tails.saturating_add(1))
+				.saturating_mul(tails.saturating_add(values))
 				.saturating_add(chains - matching),
-			law
+			totals
 		);
 		// The totals are weighed and merged, leaving the faces of the dice,
 		// which the shape covers, and the law of a chain is freed.
-		tally.charge(law.saturating_add(chains), law);
-		let totals = law.min(shape.faces);
-		tally.keep(law.saturating_mul(2), totals);
-		tally.free(chains.saturating_mul(2));
+		tally.charge(totals.saturating_add(chains), totals);
+		let faces = totals.min(shape.faces);
+		tally.keep(totals.saturating_mul(2), faces);
+		tally.free(held);
 		// The setup keeps a copy of the die.
 		tally.charge(0, source.cells);
 		let part = Part {
 			kind: Kind::Custom {
-				count,
+				count: law.count,
 				die: shape.clone(),
-				laws: laws.saturating_mul(resolution.outcomes).min(setups),
+				laws: law.laws.saturating_mul(resolution.outcomes).min(setups),
 				exact: false
 			},
 			setups,
 			cells: setups.saturating_mul(
-				1u128.saturating_add(totals).saturating_add(source.cells)
+				1u128.saturating_add(faces).saturating_add(source.cells)
 			),
-			dice: setups.saturating_mul(dice(&count)),
+			dice: setups.saturating_mul(dice(&law.count)),
 			lowest: 0.into(),
 			highest: 0.into()
 		};
 		(tally, part)
 	}
 
+	/// Explode the alike dice or i.i.d. chains of one setup of the part, none
+	/// of which has been dropped, keeping their chains whole for a later reroll
+	/// or explode, as [`Roll::explode`](super::record::Roll) does: list the law
+	/// of a chain, one die of each face, or a copy of the law of the chains,
+	/// grow each chain whose end matches by each tail, and merge them into the
+	/// law of i.i.d. chains, among the [chains](Law::distinct) that the
+	/// bounds admit. The end of a chain that grows, and every extension but
+	/// the last, show faces that the explode matches, which join the faces of
+	/// the dice other than the ends.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `chaining`: The chaining of the record after the explode.
+	/// - `setups`: A bound on the exploded setups.
+	///
+	/// # Returns
+	/// The tally of the explode, and the part that bounds the exploded setups.
+	fn chains(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		chaining: &Chaining,
+		setups: u128
+	) -> (Tally, Part)
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let n = resolution.limit.map_or(0, |limit| limit.max.max(0) as u128);
+		let law = self.law(source);
+		let chains = law.chains;
+		let matching = law.ending(resolution.matching(&law.faces).0);
+		let matched = source.faces.intersection(&resolution.criteria.possible);
+		let m = matched.len().clamp(1, d);
+		let inner = law.inner.union(&matched);
+		let grown = Law {
+			length: chaining.length,
+			inner: inner.clone(),
+			..law.clone()
+		};
+		// The cells of a chain before the explode, and after, and of a tail,
+		// every extension but the last of which shows a matching face.
+		let before = 1 + law.values(d);
+		let after = 1 + grown.values(d);
+		let tail = 2 + n.min(m + 1).min(d);
+		let held = chains.saturating_mul(before);
+		let mut tally = Tally::default();
+		// The explode takes a step and a cell, and the law of a chain lists
+		// each face as a chain of one die, of two cells, or copies the law of
+		// the chains.
+		tally.charge(1, 1);
+		tally.charge(chains, held);
+		// Each chain whose end matches joins each tail, and any other keeps its
+		// dice.
+		let extended = matching.saturating_mul(tails.max(1));
+		let kept = chains - matching;
+		let entries = extended.saturating_add(kept);
+		let charged = extended
+			.saturating_mul(before + tail)
+			.saturating_add(kept.saturating_mul(before));
+		tally.charge(entries, charged);
+		let scratch = entries.saturating_mul(after);
+		tally.keep(charged, scratch);
+		// The chains are weighed and merged, leaving the new law, and the law
+		// of a chain is freed.
+		tally.charge(entries.saturating_add(chains), scratch);
+		let chains = entries.min(grown.distinct(d));
+		let occupied = chains.saturating_mul(after);
+		tally.keep(scratch.saturating_mul(2), occupied);
+		tally.free(held);
+		// The setup keeps a copy of the die.
+		tally.charge(0, source.cells);
+		let part = Part {
+			kind: Kind::Chains {
+				count: law.count,
+				law: chains,
+				laws: law.laws.saturating_mul(resolution.outcomes).min(setups),
+				length: chaining.length,
+				inner,
+				totals: chaining.shape.clone()
+			},
+			setups,
+			cells: setups.saturating_mul(
+				1u128.saturating_add(occupied).saturating_add(source.cells)
+			),
+			dice: setups.saturating_mul(dice(&law.count)),
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
+	}
+
+	/// Reroll the i.i.d. chains of one setup of the part, none of which has
+	/// been dropped, as [`Roll::reroll_chains`](super::record::Roll) does:
+	/// reroll every kept die of each chain of the law that the reroll matches,
+	/// alone, and merge the chains that they become into the new law.
+	///
+	/// A chain of at most `l` kept dice holds at most `l − 1` dice besides its
+	/// end, of the `i` faces that they may show, of which the reroll may match
+	/// `q`. A chain of `k` dice besides its end that the reroll matches becomes
+	/// at most the multisets of their replacements, from a law of `L` faces,
+	/// each joined with each of the `L` ends, if the reroll may match the end,
+	/// or with the end alone, if not; or the [chains](Law::distinct) that the
+	/// bounds admit, if fewer. Of the chains that the bounds admit, those of
+	/// `k` such dice end at one of `d` faces, and hold the multisets of `k`
+	/// dice of the `q` faces and of from `0` to `l − 1 − k` dice of the other
+	/// `i − q`, so the chains of the law are priced as the costliest of them,
+	/// as many as the law holds. The multisets of the replacements of each
+	/// number of matched dice are drawn the first time that a chain meets it,
+	/// which may be after any other chain, and stay charged.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll.
+	/// - `chaining`: The chaining of the record after the reroll.
+	/// - `setups`: A bound on the rerolled setups.
+	///
+	/// # Returns
+	/// The tally of the reroll, and the part that bounds the rerolled setups.
+	///
+	/// # Panics
+	/// If the part is not i.i.d. chains.
+	fn reroll_chains(
+		&self,
+		resolution: &Resolution,
+		chaining: &Chaining,
+		setups: u128
+	) -> (Tally, Part)
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let law = self.law(source);
+		let length = law.length;
+		let faces = resolution.len;
+		// The faces of the dice besides the end that the reroll may match, and
+		// those that it may not, and the most such dice of a chain; their
+		// replacements show any face of its law.
+		let i = law.inner.len();
+		let q = law
+			.inner
+			.intersection(&resolution.criteria.possible)
+			.len()
+			.min(i);
+		let (others, inner) = match q > 0
+		{
+			true => (length - 1, law.inner.union(&resolution.law)),
+			false => (0, law.inner.clone())
+		};
+		let rerolled = Law {
+			inner: inner.clone(),
+			..law.clone()
+		};
+		let cap = rerolled.distinct(d);
+		let values = law.values(d);
+		let (before, after) = (1 + values, 1 + rerolled.values(d));
+		let mut tally = Tally::default();
+		// The reroll takes a step and a cell.
+		tally.charge(1, 1);
+		// The multisets of each number of matched dice besides the end, at
+		// most `others`, the first time that a chain meets it: the chains meet
+		// at most as many numbers as there are chains, the dearest the most.
+		let drawn = |k: u128| {
+			let mut each = Tally::default();
+			multisets(&mut each, k, faces);
+			each
+		};
+		let taken = (others + 1).min(law.chains.max(1));
+		let listed = taken.min(LISTED);
+		let mut draws = Tally::default();
+		for k in others + 1 - listed..=others
+		{
+			draws.then(drawn(k));
+		}
+		if taken > listed
+		{
+			// The rest are dearest at the most of them.
+			draws.then(drawn(others - listed).times(taken - listed));
+		}
+		// The chains that the bounds admit of `k` matched dice besides the end,
+		// by the ways in which each becomes chains: those whose ends the reroll
+		// may match, and the rest.
+		let multisets_of = |kinds: u128, k: u128| match kinds
+		{
+			0 => (k == 0) as u128,
+			kinds => binomial(k + kinds - 1, kinds - 1)
+		};
+		let unmatched = i - q;
+		let shapes = |k: u128| {
+			let rest = length - 1 - k;
+			multisets_of(q, k)
+				.saturating_mul(binomial(rest + unmatched, unmatched.min(rest)))
+		};
+		let r = resolution.matching(&source.faces).0.min(d);
+		let replacements = |k: u128| binomial(k + faces - 1, faces - 1);
+		let mut groups = Vec::<(u128, u128)>::new();
+		for k in 0..=others.min(LISTED)
+		{
+			let shapes = shapes(k);
+			let ways = replacements(k);
+			groups.push((r.saturating_mul(shapes), ways.saturating_mul(faces)));
+			groups.push(((d - r).saturating_mul(shapes), ways));
+		}
+		if others > LISTED
+		{
+			// The rest are dearest at the most matched dice.
+			groups
+				.push((law.chains, replacements(others).saturating_mul(faces)));
+		}
+		// Each chain lists its distinct dice, sorts them into survivors and
+		// matched dice, and pads those that the reroll does not match; then
+		// each multiset of replacements joins the survivors, and each end.
+		let most = others.min(faces);
+		let each = |ways: u128| {
+			let joined = ways.saturating_mul(3 + values + most);
+			let mut each = Tally::default();
+			each.charge(values, before);
+			each.charge(length.saturating_add(ways), joined);
+			each.keep(joined, ways.min(cap).saturating_mul(after));
+			each.free(before);
+			each
+		};
+		let chains = costliest(
+			groups.iter().map(|&(count, ways)| (each(ways), count)),
+			law.chains
+		);
+		tally.then(chains.beside(draws));
+		// The chains are padded, weighed, and merged, leaving the new law.
+		let entries = allot(
+			law.chains,
+			groups.iter().map(|&(count, ways)| (count, ways.min(cap)))
+		);
+		let scratch = entries.saturating_mul(after);
+		tally.charge(
+			entries.saturating_add(law.chains.saturating_mul(1 + length)),
+			scratch
+		);
+		let chains = entries.min(cap);
+		let occupied = chains.saturating_mul(after);
+		tally.keep(scratch.saturating_mul(2), occupied);
+		let part = Part {
+			kind: Kind::Chains {
+				count: law.count,
+				law: chains,
+				laws: law.laws.saturating_mul(resolution.outcomes).min(setups),
+				length,
+				inner,
+				totals: chaining.shape.clone()
+			},
+			setups,
+			cells: setups.saturating_mul(
+				1u128.saturating_add(occupied).saturating_add(source.cells)
+			),
+			dice: setups.saturating_mul(dice(&law.count)),
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
+	}
+
+	/// Reduce the i.i.d. chains of each setup of the part to their totals, as
+	/// [`Roll::collapse`](super::record::Roll) does: weigh the total of each
+	/// chain of the law, and merge them into the faces of custom dice, which
+	/// the shape of the totals covers. Any other part stays as it is.
+	///
+	/// # Parameters
+	/// - `die`: The cells of the die that each setup keeps.
+	///
+	/// # Returns
+	/// The tally of the collapse of one setup, which leaves the faces charged,
+	/// and the part that bounds the collapsed setups.
+	fn collapse(&self, die: u128) -> (Tally, Part)
+	{
+		let mut tally = Tally::default();
+		let Kind::Chains {
+			count,
+			law,
+			laws,
+			totals,
+			..
+		} = &self.kind
+		else
+		{
+			return (tally, self.clone())
+		};
+		let faces = (*law).min(totals.faces);
+		tally.charge(*law, law.saturating_add(1));
+		tally.keep(law.saturating_add(1), faces + 1);
+		let part = Part {
+			kind: Kind::Custom {
+				count: *count,
+				die: totals.clone(),
+				laws: *laws,
+				exact: false
+			},
+			cells: self.setups.saturating_mul((faces + 1).saturating_add(die)),
+			..self.clone()
+		};
+		(tally, part)
+	}
+
+	/// Answer the law of one chain of a setup of the part, as
+	/// [`Roll::chain_law`](super::record::Roll) lists it, for alike dice, each
+	/// of which is a chain of one die, or i.i.d. chains.
+	///
+	/// # Parameters
+	/// - `source`: The die from which the clause draws.
+	///
+	/// # Returns
+	/// The law.
+	///
+	/// # Panics
+	/// If the part is neither alike dice nor i.i.d. chains.
+	fn law(&self, source: &Source) -> Law
+	{
+		let dice = |count, chains, laws, faces| Law {
+			count,
+			chains,
+			laws,
+			faces,
+			length: 1,
+			inner: ResultSet::default()
+		};
+		match &self.kind
+		{
+			// A range is one die.
+			Kind::Range { .. } => dice(
+				Operand {
+					bounds: 1.into(),
+					support: 1,
+					varied: false,
+					random: false,
+					dense: true
+				},
+				source.distinct,
+				self.setups,
+				source.faces.clone()
+			),
+			Kind::Standard {
+				count, faces, dies, ..
+			} => dice(
+				*count,
+				faces.bounds.max.max(1) as u128,
+				*dies,
+				source.faces.clone()
+			),
+			Kind::Custom {
+				count, die, laws, ..
+			} => dice(*count, die.faces, *laws, die.set()),
+			Kind::Chains {
+				count,
+				law,
+				laws,
+				length,
+				inner,
+				..
+			} => Law {
+				count: *count,
+				chains: *law,
+				laws: *laws,
+				faces: source.faces.clone(),
+				length: (*length).max(1),
+				inner: inner.clone()
+			},
+			_ => unreachable!(
+				"only alike dice or chains have the law of a chain"
+			)
+		}
+	}
+}
+
+/// The law of one chain of the setups of a part of alike dice, each of which
+/// is a chain of one die, or of i.i.d. chains, as
+/// [`Roll::chain_law`](super::record::Roll) lists it.
+#[derive(Debug, Clone)]
+struct Law
+{
+	/// The number of dice or chains.
+	count: Operand,
+
+	/// A bound on the distinct chains of the law.
+	chains: u128,
+
+	/// A bound on the distinct laws of the setups.
+	laws: u128,
+
+	/// The faces that the end of a chain may show.
+	faces: ResultSet,
+
+	/// The most kept dice of a chain, `l`, which is positive.
+	length: u128,
+
+	/// The faces that a kept die of a chain other than its end may show.
+	inner: ResultSet
+}
+
+impl Law
+{
+	/// Answer a bound on the distinct values of the kept dice of a chain: its
+	/// kept dice, or the faces that those other than its end may show, and its
+	/// end.
+	///
+	/// # Parameters
+	/// - `d`: The number of faces of the die, which is positive.
+	///
+	/// # Returns
+	/// The bound.
+	fn values(&self, d: u128) -> u128
+	{
+		self.length.min(self.inner.len().saturating_add(1)).min(d)
+	}
+
+	/// Answer a bound on the distinct [chains](super::chain::Chain) that the
+	/// law may hold, of at most `l` kept dice, of `d` faces: for each end, the
+	/// multisets of from `0` to `l − 1` other dice, of the `i` faces that they
+	/// may show, which sum to `C(l − 1 + i, i)`, so `d · C(l − 1 + i, i)` in
+	/// all.
+	///
+	/// # Parameters
+	/// - `d`: The number of faces of the die, which is positive.
+	///
+	/// # Returns
+	/// The bound.
+	fn distinct(&self, d: u128) -> u128 { d.saturating_mul(self.others()) }
+
+	/// Answer a bound on the chains of the law whose ends a clause may match,
+	/// which show one of `r` faces: the law, or `r · C(l − 1 + i, i)`, as
+	/// [`distinct`](Self::distinct) counts them, if fewer.
+	///
+	/// # Parameters
+	/// - `r`: The number of faces that the clause may match.
+	///
+	/// # Returns
+	/// The bound.
+	fn ending(&self, r: u128) -> u128
+	{
+		self.chains.min(r.saturating_mul(self.others()))
+	}
+
+	/// Answer the multisets of from `0` to `l − 1` dice of the `i` faces that
+	/// the kept dice of a chain other than its end may show, `C(l − 1 + i, i)`.
+	///
+	/// # Returns
+	/// The number of multisets.
+	fn others(&self) -> u128
+	{
+		let i = self.inner.len();
+		binomial(self.length - 1 + i, i.min(self.length - 1))
+	}
+}
+
+impl Part
+{
 	/// Explode the chains still kept of one setup of the part, after a drop,
 	/// or of fixed results or a pool, into the multisets of their totals, as
 	/// [`Roll::explode`](super::record::Roll) does: enumerate the outcomes of
@@ -4054,6 +4700,11 @@ impl Shadow
 			Location::RollingRecord(rec) =>
 			{
 				let record = &mut self.records[rec.0];
+				// Each outcome of whole chains is stacks.
+				self.unpriced |= record
+					.parts
+					.iter()
+					.any(|part| matches!(part.kind, Kind::Chains { .. }));
 				let (outcomes, outcome_cells) =
 					record.outcomes(&mut tally, die);
 				record.fix(outcome_cells, die);
@@ -4431,6 +5082,34 @@ enum Kind
 		distinct: u128
 	},
 
+	/// The [i.i.d. chains](super::record::Roll::Chains) of dice that an
+	/// explode extended, none of which has been dropped, and which a later
+	/// reroll or explode reads, so that they stay whole.
+	Chains
+	{
+		/// The number of chains.
+		count: Operand,
+
+		/// A bound on the distinct chains of the law of each setup.
+		law: u128,
+
+		/// A bound on the distinct laws of the setups' chains, whose totals
+		/// share their convolution powers only if they share their law.
+		laws: u128,
+
+		/// The most kept dice of a chain, `l`, which is positive.
+		length: u128,
+
+		/// The faces that a kept die of a chain other than its end may show:
+		/// those that an explode matched, from which it extended the chain,
+		/// and the replacements of those that a reroll matched.
+		inner: ResultSet,
+
+		/// The shape of a die whose faces are the totals of the chains, which
+		/// bounds the faces of the custom dice to which they collapse.
+		totals: Die
+	},
+
 	/// Results fixed by a split.
 	Results
 	{
@@ -4562,10 +5241,9 @@ impl Part
 		{
 			Kind::Empty => 0.into(),
 			Kind::Range { .. } => 1.into(),
-			Kind::Standard { count, .. } | Kind::Custom { count, .. } =>
-			{
-				count.bounds.max(0.into())
-			},
+			Kind::Standard { count, .. }
+			| Kind::Custom { count, .. }
+			| Kind::Chains { count, .. } => count.bounds.max(0.into()),
 			Kind::Pool { kept, .. } => *kept,
 			Kind::Results { results, .. } => *results
 		}
@@ -4633,8 +5311,10 @@ impl Part
 					&& count.bounds.max as i64 * largest as i64
 						<= i32::MAX as i64
 			},
-			// A rewritten die may show fewer faces than its die.
+			// A rewritten die may show fewer faces than its die, as the totals
+			// of chains may show fewer than their shape.
 			Kind::Custom { exact: false, .. }
+			| Kind::Chains { .. }
 			| Kind::Pool { .. }
 			| Kind::Empty
 			| Kind::Results { .. } => false
@@ -5096,7 +5776,27 @@ impl Part
 				(each.times(self.setups), support.saturating_mul(self.setups))
 			},
 			Kind::Range { start, end } => (self.range_sums(start, end), limit),
-			Kind::Standard { .. } | Kind::Custom { .. } => self.dice_sums(limit)
+			Kind::Standard { .. } | Kind::Custom { .. } =>
+			{
+				self.dice_sums(limit)
+			},
+			Kind::Chains { .. } =>
+			{
+				// Each setup collapses its chains to their totals before its
+				// sum, and frees them after it, so at most one setup holds its
+				// totals, or its collapse, atop the sums.
+				let (collapse, custom) = self.collapse(0);
+				let (sums, outcomes) = custom.dice_sums(limit);
+				let tally = Tally {
+					steps: collapse
+						.steps
+						.saturating_mul(self.setups)
+						.saturating_add(sums.steps),
+					working: sums.working,
+					peak: sums.peak.saturating_add(collapse.peak)
+				};
+				(tally, outcomes)
+			}
 		}
 	}
 
@@ -5155,7 +5855,19 @@ impl Part
 					limit
 				)
 			},
-			Kind::Custom { count, die, .. } => self.dice_sum(count, die, limit)
+			Kind::Custom { count, die, .. } => self.dice_sum(count, die, limit),
+			Kind::Chains { .. } =>
+			{
+				// The chains collapse to their totals, which are summed as
+				// custom dice, and then freed.
+				let (collapse, custom) = self.collapse(0);
+				let (sum, support) = custom.setup_sum(limit);
+				tally.then(collapse);
+				let faces = tally.working;
+				tally.then(sum);
+				tally.free(faces);
+				(tally, support)
+			}
 		}
 	}
 
@@ -6088,6 +6800,13 @@ impl Part
 			Kind::Custom { count, die, .. } =>
 			{
 				multisets(each, dice(count), die.faces)
+			},
+			// The outcomes of chains are stacks, which the estimate does not
+			// yet price, so a split of them flags the shadow as unpriced, and
+			// these stand for them.
+			Kind::Chains { count, law, .. } =>
+			{
+				multisets(each, dice(count), (*law).clamp(1, u64::MAX as u128))
 			},
 		}
 	}

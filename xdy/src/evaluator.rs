@@ -3307,6 +3307,23 @@ impl<'eval> BoundsEvaluator<'eval>
 		self.record(op).totals.hull()
 	}
 
+	/// Answer the greatest number of kept dice of a
+	/// [chain](crate::RollingRecord::chains) still kept by the specified
+	/// rolling record that no saturated die decides.
+	///
+	/// # Parameters
+	/// - `op`: The rolling record.
+	///
+	/// # Returns
+	/// The number of kept dice, which saturates at `u64::MAX` if an explode
+	/// without limit may grow a chain without bound, and is `0` for a record
+	/// never rolled.
+	#[inline]
+	pub(crate) fn length(&self, op: RollingRecordIndex) -> u64
+	{
+		self.record(op).length
+	}
+
 	/// Obtain the specified rolling record bounds.
 	///
 	/// # Parameters
