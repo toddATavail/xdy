@@ -56,7 +56,7 @@ use crate::{
 	diagnostics::diagnose,
 	s_expr::{SExpressible, SExpressibleOptions, read_s_expr},
 	support::{SMALL_STACK_SIZE, on_small_stack},
-	tests::corpus::TOKENS
+	tests::corpus::{TOKENS, sources}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -207,10 +207,11 @@ fn test_optimized_rerolls()
 /// combination of a die, ordinary or with one face, constant or not; a
 /// predicate of every form, constant or not, that matches some faces, every
 /// face, or none; a limit of every form; and the clauses around it, of every
-/// kind, before it or after it, among them rerolls and other explodes, over
-/// values of the parameter that make every operand that is not constant match
-/// differently, and that their distributions agree, unless the forward pass
-/// refuses an explode without limit.
+/// kind, before it or after it, among them rerolls and other explodes, and
+/// after an explode that saturates every chain of a die whose faces are
+/// positive, over values of the parameter that make every operand that is not
+/// constant match differently, and that their distributions agree, unless the
+/// forward pass refuses an explode without limit.
 #[test]
 fn test_optimized_explodes()
 {
@@ -237,7 +238,9 @@ fn test_optimized_explodes()
 		"{dice} explode {explode} keep highest",
 		"{dice} explode {explode} explode {explode}",
 		"{dice} reroll = 1 explode {explode}",
-		"{dice} explode {explode} reroll ≥ 2 ∞ times"
+		"{dice} explode {explode} reroll ≥ 2 ∞ times",
+		"{dice} explode ≥ 1 ∞ times reroll {explode}",
+		"{dice} explode ≥ 1 ∞ times drop lowest explode {explode}"
 	];
 	for dice in dice
 	{
@@ -264,6 +267,34 @@ fn test_optimized_explodes()
 					}
 				}
 			}
+		}
+	}
+}
+
+/// Ensure that optimization never changes the distribution of any source of
+/// the test files that compiles, over values of its parameters and externals
+/// that are negative, zero, one, and greater.
+#[test]
+fn test_optimized_corpus()
+{
+	for source in sources()
+	{
+		let Ok(function) = compile_unoptimized(&source)
+		else
+		{
+			continue
+		};
+		for x in [-1, 0, 1, 3]
+		{
+			let args = vec![x; function.arity()];
+			let externals = function
+				.externals
+				.iter()
+				.map(|name| (name.as_str(), x))
+				.collect::<Vec<_>>();
+			check_optimization_with(&source, &args, &externals)
+				.map_err(|e| format!("{}, x = {}: {}", source, x, e))
+				.unwrap();
 		}
 	}
 }
@@ -629,6 +660,32 @@ fn check_optimization(
 	externals: &[i32]
 ) -> Result<(), TestCaseError>
 {
+	let externals = NAMES
+		.iter()
+		.copied()
+		.zip(externals.iter().copied())
+		.collect::<Vec<_>>();
+	check_optimization_with(source, args, &externals)
+}
+
+/// Check that optimizing a source, if it compiles, never changes its
+/// distribution, as [`check_optimization`] does, but with externals of any
+/// names.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `args`: The arguments, of which the function takes as many as its arity.
+/// - `externals`: The names and values of the externals, of which the function
+///   binds those that it reads.
+///
+/// # Errors
+/// [`TestCaseError`] if the property fails.
+fn check_optimization_with(
+	source: &str,
+	args: &[i32],
+	externals: &[(&str, i32)]
+) -> Result<(), TestCaseError>
+{
 	let Ok(unoptimized) = compile_unoptimized(source)
 	else
 	{
@@ -640,11 +697,10 @@ fn check_optimization(
 	let args = &args[..unoptimized.arity()];
 	let evaluator = |function: &IrFunction| {
 		let mut evaluator = Evaluator::new(function.clone());
-		let externals = NAMES
+		let externals = externals
 			.iter()
-			.zip(externals)
 			.filter(|(name, _)| function.externals.contains(&name.to_string()))
-			.map(|(name, value)| (*name, *value))
+			.copied()
 			.collect::<Vec<_>>();
 		for (name, value) in &externals
 		{

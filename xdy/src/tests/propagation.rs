@@ -6559,16 +6559,20 @@ proptest! {
 	/// predicate form, limited or not, with fixed or random operands, some of
 	/// them shared, and their totals are the counts of outcomes that their
 	/// bounds report. The pass refuses a function only if it explodes without
-	/// limit.
+	/// limit. The optimizer may fold away an explode without limit that the
+	/// pass refuses, as when a later drop crosses out every chain, which the
+	/// reference cannot follow, so the optimized distribution must then hold
+	/// every result of the unoptimized function, sampled.
 	#[test]
 	fn test_explodes_agree_with_reference(program in explode_program())
 	{
 		let assembly = program.assembly();
 		let function = Assembler::assemble(&assembly).unwrap();
 		let expected = OnceLock::new();
-		for function in [function.clone(), optimize(function, Passes::all())]
+		let mut refused = false;
+		for optimized in [function.clone(), optimize(function.clone(), Passes::all())]
 		{
-			let evaluator = Evaluator::new(function);
+			let evaluator = Evaluator::new(optimized);
 			let propagated = match propagate(&evaluator, [])
 			{
 				Err(PropagationError::Unbounded) =>
@@ -6578,10 +6582,28 @@ proptest! {
 						"{}",
 						assembly
 					);
+					refused = true;
 					continue
 				},
 				result => result.unwrap()
 			};
+			if refused
+			{
+				let mut unoptimized = Evaluator::new(function.clone());
+				for seed in 0..16
+				{
+					let result = unoptimized
+						.evaluate([], &mut StdRng::seed_from_u64(seed))
+						.unwrap()
+						.result;
+					prop_assert!(
+						propagated.iter().any(|(outcome, _)| outcome == result),
+						"{assembly}\nsampled {result} outside \
+						 propagated:\n{propagated}"
+					);
+				}
+				continue
+			}
 			let expected = expected.get_or_init(|| program.reference());
 			prop_assert!(
 				agree(&propagated, expected),

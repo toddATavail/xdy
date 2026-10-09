@@ -129,7 +129,7 @@ pub(super) fn corpus() -> &'static [String]
 ///
 /// # Returns
 /// The sources.
-fn sources() -> BTreeSet<String>
+pub(super) fn sources() -> BTreeSet<String>
 {
 	let mut sources = BTreeSet::new();
 	for text in [

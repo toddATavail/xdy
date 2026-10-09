@@ -13,8 +13,14 @@
 //! dice with one face, and rerolls whose predicates match none of the results
 //! that the dice still kept may show, which it tracks through the clauses of
 //! each roll, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`.
-//! It does not yet reduce a roll that an explode extends, nor eliminate an
-//! explode, but keeps every explode in place, with the clauses around it.
+//! It eliminates explodes that cannot extend any chain: those limited to zero
+//! times or fewer, and those whose predicates match none of the results that
+//! the dice still kept may show, e.g., the explode of `3D6 explode = 7`. An
+//! unlimited explode that surely matches every face saturates every chain
+//! still kept, which later rerolls and explodes leave alone, so it eliminates
+//! every one of them, e.g., the reroll of `{x}D6 explode ≥ 1 ∞ times reroll =
+//! 1`, though not a drop or keep. It does not reduce a roll that an explode
+//! extends to its count of dice.
 //!
 //! The strength reducer knows the bounds of every register, as the [bounds
 //! evaluator](crate::evaluator::BoundsEvaluator) computes them over every
@@ -554,10 +560,41 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			unreachable!("an explode of a roll reduced to a value")
 		};
-		// An extension may show any face, which a later reroll may match.
+		let new = explode.map(dest, |op| self.replacement(op));
+		let criteria = criteria(&new.predicate);
+		let unlimited = match new.limit
+		{
+			// A limit of zero or less explodes nothing, so we can eliminate
+			// the explode.
+			Limit::Times(AddressingMode::Immediate(Immediate(..=0))) =>
+			{
+				return Ok(())
+			},
+			Limit::Times(_) => false,
+			Limit::Unlimited => true
+		};
 		let results = self.results.get_mut(&explode.dest).unwrap();
-		results.live = results.faces.clone();
-		self.emit(explode.map(dest, |op| self.replacement(op)));
+		// If the predicate cannot match any result that the dice still kept may
+		// show, then it cannot match the end of any chain, so the explode
+		// extends nothing, and we can eliminate it.
+		if !results.live.meets(&criteria.possible)
+		{
+			return Ok(())
+		}
+		// Update the results that the dice still kept may show. An unlimited
+		// explode that surely matches every face saturates every chain still
+		// kept, which later rerolls and explodes leave alone, so they may
+		// match no die; after any other explode, an extension may show any
+		// face.
+		results.live = match unlimited
+		{
+			true if results.faces.is_subset(&criteria.certain) =>
+			{
+				ResultSet::default()
+			},
+			_ => results.faces.clone()
+		};
+		self.emit(new);
 		Ok(())
 	}
 
@@ -1285,11 +1322,14 @@ struct Results
 	/// that it may have, if its faces are not constant.
 	faces: ResultSet,
 
-	/// The results that the dice still kept may show, which are among the
-	/// [faces](Self::faces): all of them at first, and fewer after an
-	/// unlimited reroll, which leaves only the faces that its predicate
-	/// misses, and all of them again after an explode, whose extensions may
-	/// show any face. Drops and keeps leave them as they were, since they
-	/// leave some of the same dice.
+	/// The results that the dice still kept may show, apart from those of
+	/// saturated chains, which later rerolls and explodes leave alone. They
+	/// are among the [faces](Self::faces): all of them at first, and fewer
+	/// after an unlimited reroll, which leaves only the faces that its
+	/// predicate misses; none after an unlimited explode that surely matches
+	/// every face, which saturates every chain still kept; and all of them
+	/// again after any other explode, whose extensions may show any face.
+	/// Drops and keeps leave them as they were, since they leave some of the
+	/// same dice.
 	live: ResultSet
 }

@@ -6,9 +6,14 @@
 //! die is zero, e.g., `3D6 reroll ≤ 6 ∞ times`, since an unlimited reroll that
 //! matches every face crosses out every die; and a roll of dice with one face
 //! is that face times the dice kept, since no reroll can change it, e.g.,
-//! `3D1 reroll = 1` is `3`. It does not yet fold a roll that an explode
-//! extends, whose chains may hold any number of dice. The constant folder
-//! requires the function to be in static single assignment (SSA) form.
+//! `3D1 reroll = 1` is `3`. It follows the chains of a roll through its
+//! explodes, too: a roll whose chains still kept an unlimited explode that
+//! matches every face saturated is their saturated value, e.g., `3D6 explode ≥
+//! 1 ∞ times` is `i32::MAX`, since later rerolls and explodes leave saturated
+//! chains alone; and a roll of dice with one face whose explodes match it, or
+//! miss it, a known number of times is that face times the dice of its chains,
+//! e.g., `3D1 explode = 1 2 times` is `9`. The constant folder requires the
+//! function to be in static single assignment (SSA) form.
 
 use std::collections::HashMap;
 
@@ -17,8 +22,8 @@ use crate::{
 	DropHighest, DropLowest, Exp, Explode, Function, Immediate,
 	InstructionVisitor, KeepHighest, KeepLowest, Limit, Max, Min, Mod, Mul,
 	Neg, ProgramCounter, RegisterIndex, Reroll, Return, RollCustomDice,
-	RollRange, RollStandardDice, RollingRecordIndex, Sub, SumRollingRecord,
-	evaluator::ResultSet, ir::Instruction
+	RollRange, RollStandardDice, RollingRecordIndex, RollingRecordKind, Sub,
+	SumRollingRecord, evaluator::ResultSet, ir::Instruction
 };
 
 use super::{criteria, faces};
@@ -136,11 +141,12 @@ impl InstructionVisitor<()> for ConstantFolder
 		if let Some((start, end)) = range.const_ops()
 		{
 			// We can fold the range if it contains one or fewer possible
-			// outcomes, or if its clauses cross out its die. An empty range is
-			// zero whatever its clauses do, but a range with a single value is
-			// that value only if its clauses keep its die: the grammar admits
-			// no clauses on ranges, but strength reduction turns 1Dn into
-			// [1:n], clauses and all. Folding involves eliminating the
+			// outcomes, or if its clauses cross out its die, or saturate its
+			// chain. An empty range is zero whatever its clauses do, but a
+			// range with a single value is that value times the dice of its
+			// chain only if its clauses keep its die: the grammar admits no
+			// clauses on ranges, but strength reduction turns 1Dn into [1:n],
+			// clauses and all. Folding involves eliminating the
 			// instruction completely and replacing its rolling record with the
 			// new constant value. When we subsequently encounter the
 			// corresponding SumRollingRecord instruction, we will eliminate it
@@ -152,24 +158,21 @@ impl InstructionVisitor<()> for ConstantFolder
 				self.replace(range.dest, Immediate(0));
 				return Ok(())
 			}
+			// A range with a single value is a die with one face, which no
+			// reroll can change, so its chain holds only that value.
 			let faces = faces(&(*range).into());
-			match self.kept_dice(range.dest, Some(1), &faces)
+			let saturated =
+				RollingRecordKind::Range { start, end }.saturated_value();
+			if let Some(sum) = self.known_sum(
+				range.dest,
+				Some(1),
+				&faces,
+				(start == end).then_some(start),
+				saturated
+			)
 			{
-				Some(0) =>
-				{
-					// The die is crossed out, so the result is zero.
-					self.replace(range.dest, Immediate(0));
-					return Ok(())
-				},
-				Some(_) if start == end =>
-				{
-					// The range contains a single value, which must be the
-					// result, however the die was rerolled.
-					self.replace(range.dest, Immediate(start));
-					return Ok(())
-				},
-				_ =>
-				{}
+				self.replace(range.dest, Immediate(sum));
+				return Ok(())
 			}
 		}
 		// The range can't be folded, but we may still need to allocate a new
@@ -212,28 +215,25 @@ impl InstructionVisitor<()> for ConstantFolder
 		if let AddressingMode::Immediate(Immediate(faces)) = roll.faces
 		{
 			// Scan forward for any clauses that target the same rolling
-			// record, and apply them, in order, to the count of dice, which
-			// need not be constant if the clauses cross out every die.
+			// record, and apply them, in order, to the chains of the dice,
+			// whose count need not be constant if the clauses cross out every
+			// die. Dice with only one face show `1`, which no reroll can
+			// change.
 			let count = roll.const_ops().map(|(count, _)| count);
 			let die = super::faces(&(*roll).into());
-			match self.kept_dice(roll.dest, count, &die)
+			// The count of dice does not decide the saturated value.
+			let saturated = RollingRecordKind::Standard { count: 0, faces }
+				.saturated_value();
+			if let Some(sum) = self.known_sum(
+				roll.dest,
+				count,
+				&die,
+				(faces == 1).then_some(1),
+				saturated
+			)
 			{
-				Some(0) =>
-				{
-					// Every die is crossed out, so the contribution is zero,
-					// however many dice there are and faces they have.
-					self.replace(roll.dest, Immediate(0));
-					return Ok(())
-				},
-				Some(kept) if faces == 1 =>
-				{
-					// The dice have only one face, which no reroll can change,
-					// so the result is the count of dice kept.
-					self.replace(roll.dest, Immediate(kept));
-					return Ok(())
-				},
-				_ =>
-				{}
+				self.replace(roll.dest, Immediate(sum));
+				return Ok(())
 			}
 		}
 		// The roll can't be folded, but we may still need to allocate a new
@@ -277,29 +277,27 @@ impl InstructionVisitor<()> for ConstantFolder
 			return Ok(())
 		}
 		// Scan forward for any clauses that target the same rolling record, and
-		// apply them, in order, to the count of dice, which need not be
-		// constant if the clauses cross out every die.
+		// apply them, in order, to the chains of the dice, whose count need not
+		// be constant if the clauses cross out every die. A die with only one
+		// distinct face shows it, which no reroll can change.
 		let faces = faces(&roll.clone().into());
-		match self.kept_dice(roll.dest, roll.const_ops(), &faces)
+		// The count of dice does not decide the saturated value, but every
+		// face does, however often it repeats.
+		let saturated = RollingRecordKind::Custom {
+			count: 0,
+			faces: roll.faces.clone()
+		}
+		.saturated_value();
+		if let Some(sum) = self.known_sum(
+			roll.dest,
+			roll.const_ops(),
+			&faces,
+			(roll.distinct_faces() == 1).then_some(roll.faces[0]),
+			saturated
+		)
 		{
-			Some(0) =>
-			{
-				// Every die is crossed out, so the contribution is zero,
-				// however many dice there are and whatever their faces.
-				self.replace(roll.dest, Immediate(0));
-				return Ok(())
-			},
-			Some(kept) if roll.distinct_faces() == 1 =>
-			{
-				// There's only one distinct face, which no reroll can change,
-				// so multiply the count of dice kept by the face value to get
-				// the result.
-				let face = roll.faces[0];
-				self.replace(roll.dest, Immediate(kept.saturating_mul(face)));
-				return Ok(())
-			},
-			_ =>
-			{}
+			self.replace(roll.dest, Immediate(sum));
+			return Ok(())
 		}
 		// The roll can't be folded, but we may still need to allocate a new
 		// rolling record due to renumbering. The operands are guaranteed to be
@@ -458,9 +456,8 @@ impl InstructionVisitor<()> for ConstantFolder
 			AddressingMode::Immediate(_) =>
 			{
 				// The rolling record is an immediate value, so the roll must
-				// have been folded away, which it is only if it has no dice
-				// or its die shows only `0`, which explodes only into more
-				// `0`s, or saturates to `0`. Eliminate the explode
+				// have been folded away, which it is only if its result is
+				// known despite its explodes. Eliminate the explode
 				// instruction.
 				Ok(())
 			},
@@ -663,14 +660,14 @@ impl ConstantFolder
 		*self.replacements.get(&op).unwrap_or(&op)
 	}
 
-	/// Find every drop, keep, and reroll instruction subsequent to the current
-	/// program counter that targets the given rolling record.
+	/// Find every drop, keep, reroll, and explode instruction subsequent to the
+	/// current program counter that targets the given rolling record.
 	///
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
 	///
 	/// # Returns
-	/// The relevant drop, keep, and reroll instructions.
+	/// The relevant drop, keep, reroll, and explode instructions.
 	fn find_drop_instructions(
 		&self,
 		dest: RollingRecordIndex
@@ -686,20 +683,67 @@ impl ConstantFolder
 			.map(move |&drop| &previous[drop])
 	}
 
-	/// Answer how many of the specified number of dice of a roll remain kept
-	/// after every subsequent clause that targets its rolling record. The
-	/// clauses apply in order, since a keep counts from the dice still kept,
-	/// and so does not commute with drops or other keeps: a drop of `c` drops
-	/// `c` of the dice still kept, or none if `c` is zero or less, and a keep
-	/// of `c` drops [all but `c`](keep_drops) of them, or all of them if `c` is
-	/// zero or less. A reroll crosses out every die still kept if it is
-	/// unlimited and its predicate matches every face of the die, since no
-	/// reroll could ever stop; any other reroll replaces each die that it
-	/// crosses out, and so keeps as many dice as it found. Once no die is kept,
-	/// none is kept after any clause, so neither the count of dice nor the
-	/// counts of the later clauses need be known. An explode makes the result
-	/// of the roll more than the count of the dice kept, so the dice of a roll
-	/// that an explode extends are never known.
+	/// Answer the sum of a roll, if every subsequent clause that targets its
+	/// rolling record leaves it known: `0` if no [chain](Chains) is still
+	/// kept, however many dice there are and whatever their faces; the
+	/// saturated value if every chain still kept is saturated, since the sum
+	/// folds the totals of the chains, which are all that value, and
+	/// saturated chains stay so; and for a die with one face, that face times
+	/// the dice of every chain still kept, if their number is known.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record of the roll.
+	/// - `count`: The number of dice, which is positive, or `None` if it is not
+	///   constant.
+	/// - `faces`: The faces of the die, exactly.
+	/// - `face`: The sole face of the die, or `None` if it has several.
+	/// - `saturated`: The value of a saturated die of the roll.
+	///
+	/// # Returns
+	/// The sum, or `None` if it is not known.
+	fn known_sum(
+		&self,
+		dest: RollingRecordIndex,
+		count: Option<i32>,
+		faces: &ResultSet,
+		face: Option<i32>,
+		saturated: i32
+	) -> Option<i32>
+	{
+		match self.chains(dest, count, faces)
+		{
+			Chains { count: Some(0), .. } => Some(0),
+			Chains {
+				count: Some(_),
+				saturated: Some(true),
+				..
+			} => Some(saturated),
+			Chains {
+				count: Some(count),
+				saturated: Some(false),
+				length: Some(length)
+			} =>
+			{
+				// The dice of a chain share their sign, so the ascending
+				// saturating folds of the dice of a chain, and of the totals
+				// of the chains, saturate only where their products do.
+				face.map(|face| {
+					count.saturating_mul(length.saturating_mul(face))
+				})
+			},
+			_ => None
+		}
+	}
+
+	/// Answer what is known of the [chains](Chains) of the specified number of
+	/// dice of a roll after every subsequent clause that targets its rolling
+	/// record. The clauses apply in order, since a keep counts from the chains
+	/// still kept, and so does not commute with drops or other keeps; see
+	/// [`dropped_chains`](Self::dropped_chains),
+	/// [`rerolled_chains`](Self::rerolled_chains), and
+	/// [`exploded_chains`](Self::exploded_chains). Once no chain is kept, none
+	/// is kept after any clause, so neither the count of dice nor the operands
+	/// of the later clauses need be known.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record of the roll.
@@ -708,46 +752,175 @@ impl ConstantFolder
 	/// - `faces`: The faces of the die, exactly.
 	///
 	/// # Returns
-	/// The number of dice kept, which is never negative, or `None` if it
-	/// depends on a count of dice, a drop, or a keep that is not constant, or
-	/// on whether a predicate that is not constant matches every face, or if
-	/// an explode extends the dice.
-	fn kept_dice(
+	/// The chains still kept.
+	fn chains(
 		&self,
 		dest: RollingRecordIndex,
 		count: Option<i32>,
 		faces: &ResultSet
-	) -> Option<i32>
+	) -> Chains
 	{
-		if self
-			.find_drop_instructions(dest)
-			.any(|clause| matches!(clause, Instruction::Explode(_)))
-		{
-			// Decline to fold an exploded roll until folding understands
-			// chains.
-			return None
-		}
+		// Each die begins a chain of its own, which no explode has saturated.
+		let chains = Chains {
+			count,
+			saturated: Some(false),
+			length: Some(1)
+		};
 		self.find_drop_instructions(dest)
-			.fold(count, |kept, clause| match (kept, clause)
+			.fold(chains, |chains, clause| match clause
 			{
-				(Some(0), _) => Some(0),
-				(_, Instruction::Reroll(reroll)) =>
+				_ if chains.count == Some(0) => chains,
+				Instruction::Reroll(reroll) =>
 				{
-					self.rerolled_dice(kept, reroll, faces)
+					self.rerolled_chains(chains, reroll, faces)
 				},
-				(Some(kept), clause) =>
+				Instruction::Explode(explode) =>
 				{
-					let count = self.resolved_count(clause)?;
-					let dropped = match clause
+					self.exploded_chains(chains, explode, faces)
+				},
+				clause => self.dropped_chains(chains, clause)
+			})
+	}
+
+	/// Answer what is known of the [chains](Chains) still kept after the
+	/// specified drop or keep, which crosses out whole chains: a drop of `c`
+	/// drops `c` of the chains still kept, or none if `c` is zero or less, and
+	/// a keep of `c` drops [all but `c`](keep_drops) of them, or all of them if
+	/// `c` is zero or less. Every chain still kept is saturated, or none is,
+	/// and every one that is not holds the same number of kept dice, so the
+	/// chains left are like those crossed out.
+	///
+	/// # Parameters
+	/// - `chains`: The chains still kept before the drop or keep.
+	/// - `drop`: The drop or keep, relative to the original function.
+	///
+	/// # Returns
+	/// The chains still kept after the drop or keep.
+	fn dropped_chains(&self, chains: Chains, drop: &Instruction) -> Chains
+	{
+		let count =
+			chains
+				.count
+				.zip(self.resolved_count(drop))
+				.map(|(kept, count)| {
+					let dropped = match drop
 					{
 						Instruction::KeepLowest(_)
 						| Instruction::KeepHighest(_) => keep_drops(kept, 0, 0, count),
 						_ => count.clamp(0, kept)
 					};
-					Some(kept - dropped)
+					kept - dropped
+				});
+		Chains { count, ..chains }
+	}
+
+	/// Answer what is known of the [chains](Chains) still kept after the
+	/// specified reroll, which leaves saturated chains alone, and acts on
+	/// each kept die of every other: it crosses out every such die if it is
+	/// unlimited and its predicate matches every face of the die, since no
+	/// reroll could ever stop, and so crosses out every chain that is not
+	/// saturated; and any other reroll replaces each die that it crosses out,
+	/// in its place in its chain, and so keeps as many chains as it found,
+	/// each with as many kept dice.
+	///
+	/// # Parameters
+	/// - `chains`: The chains still kept before the reroll.
+	/// - `reroll`: The reroll, relative to the original function.
+	/// - `faces`: The faces of the die, exactly.
+	///
+	/// # Returns
+	/// The chains still kept after the reroll.
+	fn rerolled_chains(
+		&self,
+		chains: Chains,
+		reroll: &Reroll,
+		faces: &ResultSet
+	) -> Chains
+	{
+		let count = match chains.saturated
+		{
+			// Rerolls leave saturated chains alone.
+			Some(true) => chains.count,
+			Some(false) => self.rerolled_dice(chains.count, reroll, faces),
+			// The reroll crosses out the chains only if they are not
+			// saturated, so the count is known only if the reroll keeps them.
+			None => self
+				.rerolled_dice(chains.count, reroll, faces)
+				.filter(|&count| Some(count) == chains.count)
+		};
+		Chains { count, ..chains }
+	}
+
+	/// Answer what is known of the [chains](Chains) still kept after the
+	/// specified explode, which leaves saturated chains alone, and extends the
+	/// end of every other that it matches. An explode limited to zero times or
+	/// fewer, or whose predicate matches no face, extends nothing. An
+	/// unlimited explode whose predicate matches every face saturates every
+	/// chain still kept, since every end matches. A limited explode whose
+	/// predicate matches every face extends every chain by exactly its limit,
+	/// since every extension matches too. Any other explode extends chains by
+	/// numbers of dice that are not known, and an unlimited one whose
+	/// predicate may match every face may saturate them. No explode crosses
+	/// out a chain.
+	///
+	/// # Parameters
+	/// - `chains`: The chains still kept before the explode.
+	/// - `explode`: The explode, relative to the original function.
+	/// - `faces`: The faces of the die, exactly.
+	///
+	/// # Returns
+	/// The chains still kept after the explode.
+	fn exploded_chains(
+		&self,
+		chains: Chains,
+		explode: &Explode,
+		faces: &ResultSet
+	) -> Chains
+	{
+		let limit = match explode.limit
+		{
+			Limit::Times(limit) => match self.replacement(limit)
+			{
+				AddressingMode::Immediate(Immediate(..=0)) => return chains,
+				AddressingMode::Immediate(Immediate(limit)) =>
+				{
+					Some(Some(limit))
 				},
-				(None, _) => None
-			})
+				_ => Some(None)
+			},
+			Limit::Unlimited => None
+		};
+		let criteria =
+			criteria(&explode.predicate.map(|op| self.replacement(op)));
+		if chains.saturated == Some(true) || !faces.meets(&criteria.possible)
+		{
+			// Explodes leave saturated chains alone, and the predicate matches
+			// no face.
+			return chains
+		}
+		let certain = faces.is_subset(&criteria.certain);
+		match limit
+		{
+			None if certain => Chains {
+				saturated: Some(true),
+				..chains
+			},
+			None if faces.is_subset(&criteria.possible) => Chains {
+				saturated: None,
+				length: None,
+				..chains
+			},
+			Some(Some(limit)) if certain => Chains {
+				length: chains
+					.length
+					.map(|length| length.saturating_add(limit)),
+				..chains
+			},
+			_ => Chains {
+				length: None,
+				..chains
+			}
+		}
 	}
 
 	/// Answer how many of the specified number of dice of a roll remain kept
@@ -877,6 +1050,32 @@ impl ConstantFolder
 	{
 		self.instructions.push(inst.into());
 	}
+}
+
+/// What a [constant folder](ConstantFolder) knows of the chains still kept of
+/// a roll, as its clauses leave them. Each die of the roll begins a chain, and
+/// drops and keeps cross out whole chains, so the chains still kept are alike:
+/// an unlimited explode that matches every face saturates all of them, and
+/// any other explode or reroll acts on each alike, so either all of them are
+/// saturated or none is, and those that are not hold equally many kept dice
+/// whenever their number is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Chains
+{
+	/// The number of chains still kept, which is never negative, or `None` if
+	/// it depends on a count of dice, a drop, or a keep that is not constant,
+	/// or on whether a predicate that is not constant matches every face.
+	count: Option<i32>,
+
+	/// Whether every chain still kept is saturated, `Some(true)`, or none is,
+	/// `Some(false)`, or `None` if it depends on whether a predicate that is
+	/// not constant matches every face.
+	saturated: Option<bool>,
+
+	/// The number of kept dice of each chain still kept that is not
+	/// saturated, or `None` if it depends on the faces that the dice show, or
+	/// on an operand that is not constant.
+	length: Option<i32>
 }
 
 /// Extract a complete set of [immediate](Immediate) operands from an

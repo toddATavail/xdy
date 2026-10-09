@@ -14537,15 +14537,15 @@ args: 1
 
 1D6 explode ≥ 1 ∞ times
 =
-2147483647: 6
+2147483647: 1
 
 2D[-1, -2] explode ≤ -1 ∞ times
 =
--2147483648: 4
+-2147483648: 1
 
 1D[-1, 1] explode in [-1, 1] ∞ times
 =
-0: 2
+0: 1
 
 {n}: 1D6 explode = 6 {n} times
 =

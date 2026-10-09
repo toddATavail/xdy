@@ -1065,13 +1065,45 @@ Function() r#1 ⚅#1
 
 3D1 explode = 1 ∞ times
 =
-Function() r#1 ⚅#1
+Function() r#0 ⚅#0
 	extern[]
 	body:
-		⚅0 <- roll standard dice 3D1
-		⚅0 <- explode = 1 unlimited times from ⚅0
-		@0 <- sum rolling record ⚅0
-		return @0
+		return 2147483647
+
+3D1 explode = 1 2 times
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 9
+
+3D6 explode ≥ 1 ∞ times
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2147483647
+
+3D6 explode ≥ 1 ∞ times reroll = 1
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 2147483647
+
+2D[-1, -1, 2] explode in [-1, 2] ∞ times
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
+
+4D6 keep highest 0 explode = 6
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return 0
 
 3D6 explode = 1 - 1
 =

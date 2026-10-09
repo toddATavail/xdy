@@ -397,6 +397,51 @@ fn test_optimize_max_and_min_by_bounds()
 	}
 }
 
+/// Test that the bounds by which the strength reducer eliminates a
+/// [maximum](crate::Max) or a [minimum](crate::Min) reflect explosion: an
+/// exploded roll may exceed the greatest sum of its dice, but never the
+/// greatest sum of its chains, nor fall below the least sum of its dice, and
+/// that the optimized function agrees with the original, distribution for
+/// distribution.
+#[test]
+fn test_optimize_max_and_min_by_bounds_of_explodes()
+{
+	for (source, eliminated) in [
+		("highest(3D6 explode = 6, 3)", true),
+		("lowest(3D6 explode = 6, 18)", false),
+		("lowest(3D6 explode = 6, 36)", true),
+		("lowest(3D6 explode = 6 2 times, 36)", false),
+		("lowest(3D6 explode = 6 2 times, 54)", true),
+		("highest(2D[-2, 1] explode = -2 1 times, -8)", true),
+		("highest(2D[-2, 1] explode = -2 1 times, -7)", false)
+	]
+	{
+		let function = compile_valid(source);
+		let optimized = optimize(function.clone(), Passes::all());
+		let text = optimized.to_string();
+		assert_eq!(
+			!text.contains(" max ") && !text.contains(" min "),
+			eliminated,
+			"{}\n{}",
+			source,
+			optimized
+		);
+		let distribution = |function: &crate::Function| {
+			Evaluator::new(function.clone())
+				.plan_distribution([])
+				.unwrap()
+				.build(Budget::UNLIMITED, &Unobserved)
+				.unwrap()
+		};
+		assert!(
+			agree(&distribution(&function), &distribution(&optimized)),
+			"{}\noptimized:\n{}",
+			source,
+			optimized
+		);
+	}
+}
+
 /// Test that register coalescing never lets a write that nothing reads clobber
 /// a register that is live across it.
 #[test]
@@ -849,73 +894,111 @@ Function({x}@0) r#1 ⚅#1
 	}
 }
 
-/// Test that constant folding and strength reduction decline to fold or
-/// reduce a roll that an explode extends, even when its dice show only one
-/// face, since each chain may hold any number of dice, and that every set of
-/// passes agrees on the result, saturated or not; a later unlimited reroll
-/// that matches every face crosses out the dice of every chain but a saturated
-/// one. A roll without dice, or whose die shows only `0`, still folds to `0`,
-/// whatever its explodes.
+/// Test that constant folding folds a roll that an explode targets whenever its
+/// result is known: when an unlimited explode that matches every face of its
+/// die saturates every chain still kept, whatever the faces, and whichever
+/// rerolls and explodes follow, which leave saturated chains alone; when its
+/// dice show only one face, which each explode matches or misses a known
+/// number of times; and when its clauses keep no chain, it rolls no dice, or
+/// only zeros. Every set of passes agrees on the result.
 #[test]
-fn test_exploded_rolls_do_not_fold()
+fn test_explodes_fold_when_their_results_are_known()
 {
-	for (roll, clauses, expected, folds) in [
-		(
-			"standard dice 3D1",
-			&["explode = 1 up to 2 times"][..],
-			9,
-			false
-		),
+	for (roll, clauses, expected) in [
+		("standard dice 3D1", &["explode = 1 up to 2 times"][..], 9),
 		(
 			"standard dice 3D1",
 			&["explode = 1 unlimited times"],
-			i32::MAX,
-			false
+			i32::MAX
 		),
 		(
 			"custom dice 2D[-2, -2]",
 			&["explode = -2 unlimited times"],
-			i32::MIN,
-			false
+			i32::MIN
 		),
-		("range 2:2", &["explode = 2 up to 1 times"], 4, false),
+		("range 2:2", &["explode = 2 up to 1 times"], 4),
+		("range -2:-2", &["explode = -2 up to 3 times"], -8),
 		(
 			"standard dice 4D1",
 			&["keep highest 2", "explode = 1 up to 1 times"],
-			4,
-			false
+			4
 		),
 		(
 			"standard dice 4D1",
 			&["explode = 1 up to 1 times", "keep highest 2"],
-			4,
-			false
+			4
 		),
 		(
 			"standard dice 3D1",
+			&["explode = 1 up to 1 times", "explode = 1 up to 2 times"],
+			12
+		),
+		(
+			"standard dice 3D1",
+			&["reroll = 1 up to 1 times", "explode = 1 up to 1 times"],
+			6
+		),
+		("standard dice 3D1", &["explode = 2 unlimited times"], 3),
+		("standard dice 3D1", &["explode = 1 up to 0 times"], 3),
+		(
+			"standard dice 3D1",
 			&["explode = 1 up to 1 times", "reroll = 1 unlimited times"],
-			0,
-			false
+			0
 		),
 		(
 			"standard dice 3D1",
 			&["explode = 1 unlimited times", "reroll = 1 unlimited times"],
-			i32::MAX,
-			false
+			i32::MAX
 		),
 		(
-			"standard dice 0D6",
-			&["explode < 9 unlimited times"],
-			0,
-			true
+			"standard dice 3D1",
+			&["explode = 1 unlimited times", "explode = 1 up to 2 times"],
+			i32::MAX
 		),
 		(
-			"standard dice 3D0",
-			&["explode = 0 unlimited times"],
-			0,
-			true
+			"standard dice 3D6",
+			&["explode >= 1 unlimited times"],
+			i32::MAX
 		),
-		("range 3:1", &["explode = 0 up to 3 times"], 0, true)
+		(
+			"standard dice 3D6",
+			&[
+				"explode = 6 up to 2 times",
+				"explode in 1..=6 unlimited times",
+				"reroll = 1 unlimited times",
+				"drop lowest 1",
+				"explode = 6 unlimited times"
+			],
+			i32::MAX
+		),
+		(
+			"standard dice 3D6",
+			&["explode >= 1 unlimited times", "keep highest 0"],
+			0
+		),
+		(
+			"standard dice 3D6",
+			&["keep lowest 0", "explode = 6 unlimited times"],
+			0
+		),
+		(
+			"standard dice 3D6",
+			&["explode = 6 up to 1 times", "reroll <= 6 unlimited times"],
+			0
+		),
+		(
+			"custom dice 2D[-1, -1, 2]",
+			&["explode in [-1, 2] unlimited times"],
+			0
+		),
+		(
+			"custom dice 2D[-3, 1]",
+			&["explode != 0 unlimited times"],
+			i32::MIN
+		),
+		("standard dice 0D6", &["explode < 9 unlimited times"], 0),
+		("standard dice 3D0", &["explode = 0 unlimited times"], 0),
+		("range 3:1", &["explode = 0 up to 3 times"], 0)
 	]
 	{
 		let clauses = clauses
@@ -944,26 +1027,44 @@ fn test_exploded_rolls_do_not_fold()
 				.unwrap()
 				.result;
 			assert_eq!(result, expected, "{:?}\n{}", passes, optimized);
-			let body = optimized.to_string();
-			let body = body.split_once("body:\n").unwrap().1;
-			match folds && passes.contains(Pass::ConstantFolding)
+			if passes.contains(Pass::ConstantFolding)
 			{
-				true => assert_eq!(
-					body,
+				assert_eq!(
+					optimized.to_string().split_once("body:\n").unwrap().1,
 					format!("\t\treturn {expected}\n"),
 					"{:?}",
 					passes
-				),
-				false if !folds => assert!(
-					body.contains("explode"),
-					"{:?}\n{}",
-					passes,
-					optimized
-				),
-				false =>
-				{}
+				);
 			}
 		}
+	}
+}
+
+/// Test that constant folding declines to fold a roll that an explode targets
+/// whenever its result is not known: when its dice show several faces, and no
+/// explode saturates them; when an operand that is not constant decides
+/// whether an explode saturates, how many dice it adds to a chain, how many
+/// chains there are, or whether a reroll after an explode that may saturate
+/// crosses them out.
+#[test]
+fn test_explodes_do_not_fold_when_their_results_are_unknown()
+{
+	for source in [
+		"3D6 explode = 6",
+		"3D6 explode ≥ 2 ∞ times",
+		"{x}: 3D1 explode = {x} ∞ times",
+		"{x}: 3D1 explode = 1 {x} times",
+		"{x}: {x}D6 explode ≥ 1 ∞ times",
+		"{x}: 3D6 explode ≥ {x} ∞ times reroll ≤ 6 ∞ times"
+	]
+	{
+		let optimized = optimize(compile_valid(source), Passes::all());
+		assert!(
+			optimized.to_string().contains("explode"),
+			"{}\n{}",
+			source,
+			optimized
+		);
 	}
 }
 
