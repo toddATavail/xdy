@@ -2888,11 +2888,52 @@ fn test_tight_estimates()
 		("(1D4)D6 explode = 6 2 times", 1.2),
 		("4D6 explode ≥ (1D6) 2 times", 1.1),
 		("4D6 explode = 6 (1D3) times", 1.7),
-		("{x}@(1D6) + {x}D6 explode = 6 2 times", 1.1)
+		("{x}@(1D6) + {x}D6 explode = 6 2 times", 1.1),
+		// After a drop or keep, or on the pool of a reroll, an explode pools
+		// the multisets of the totals of the chains still kept, pricing each
+		// outcome by the most multisets that its matched chains may join,
+		// which spreads them evenly among the faces that it matches.
+		("4D6 drop lowest 1 explode = 6 2 times", 1.25),
+		("5D6 keep highest 3 explode = 6 3 times", 1.2),
+		("3D20 keep highest 2 explode = 20", 1.15),
+		("10D6 drop lowest 3 explode = 6 2 times", 1.5),
+		("3D10 drop lowest 1 explode = 10 4 times", 1.7),
+		("4D6 drop lowest 1 explode = 1 2 times", 1.6),
+		("4D[1, 3, 5] drop lowest 1 explode = 5 2 times", 1.5),
+		("4D6 drop lowest 1 reroll = 1 explode = 6 2 times", 1.3),
+		("6D6 drop highest 2 explode ≥ 5 2 times", 2.7),
+		("4D6 drop lowest 1 explode ≥ 2 2 times", 2.3),
+		("4D6 drop lowest (1D2) explode = 6 2 times", 1.6),
+		("4D6 drop lowest 1 explode ≥ (1D6) 2 times", 2.3),
+		("4D6 drop lowest 1 explode = 6 (1D3) times", 1.6),
+		("{x}@(1D4) + 6D6 drop lowest {x} explode = 6 2 times", 1.35)
 	]
 	{
 		let (cost, usage) = estimated(source);
 		within(source, cost, usage, ratio);
+	}
+	// An explode after a split on its record prices every world as its
+	// costliest.
+	for assembly in [
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 4D6\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- explode = 6 up \
+		 to 2 times from ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + \
+		 @1\n\t\treturn @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 4D6\n\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t@0 <- sum rolling \
+		 record ⚅0\n\t\t⚅0 <- explode >= 5 up to 2 times from ⚅0\n\t\t@1 <- \
+		 sum rolling record ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll custom \
+		 dice 3D[1, 3, 5]\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- reroll \
+		 = 1 up to 1 times from ⚅0\n\t\t⚅0 <- explode = 5 up to 2 times from \
+		 ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn \
+		 @2\n"
+	]
+	{
+		for (cost, _) in estimated_assembly(assembly)
+		{
+			assert!(cost.steps < u64::MAX, "{assembly}");
+		}
 	}
 	for (source, args, externs, _) in
 		read_distribution_test_cases(DISTRIBUTION_TEST_SOURCE)
@@ -3093,6 +3134,17 @@ fn test_classes()
 				&["explode >= 1 unlimited times"]
 			),
 			Class {
+				explodes: true,
+				..none
+			}
+		),
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&["drop lowest 1", "explode = 6 up to 2 times"]
+			),
+			Class {
+				drops: true,
 				explodes: true,
 				..none
 			}

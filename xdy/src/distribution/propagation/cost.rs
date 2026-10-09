@@ -62,17 +62,23 @@
 //! [`u64::MAX`] reports [`u64::MAX`], which no budget but the
 //! [unlimited](super::meter::Budget::UNLIMITED) one admits.
 //!
-//! An [explode](crate::Explode) of alike dice, none of which has been dropped,
-//! whose chains no later reroll or explode reads, reduces the chains to their
-//! totals at once, rewriting the law of the dice, as a reroll may. Its
-//! resolution runs a program over the extensions of a chain, stage by stage,
-//! whose states the estimate bounds in closed form, by the multisets or the
-//! sums of the faces that the explode matches, exactly when one face matches;
-//! the totals form custom dice that span the hull of the totals that the
-//! bounds admit, which may fill gaps between them, as those of `3D[1, 3, 5]
-//! explode = 5 2 times` leave. An explode without limit that matches every face
-//! saturates every chain still kept, leaving a pool of one multiset. The
-//! estimate does not yet price any other explode, so the estimate of a
+//! An [explode](crate::Explode) whose chains no later reroll or explode reads
+//! reduces the chains to their totals at once. Its resolution runs a program
+//! over the extensions of a chain, stage by stage, whose states the estimate
+//! bounds in closed form, by the multisets or the sums of the faces that the
+//! explode matches, exactly when one face matches. Of alike dice, none of which
+//! has been dropped, it rewrites the law of the dice, as a reroll may, into
+//! custom dice that span the hull of the totals that the bounds admit, which
+//! may fill gaps between them, as those of `3D[1, 3, 5] explode = 5 2 times`
+//! leave. After a drop, or on results that a split fixed, or on a pool, it
+//! pools the multisets of the totals of the chains still kept, which the
+//! estimate groups by how many chains still kept of each outcome the explode
+//! matches, as it does for a reroll, and prices each as though its matched
+//! chains spread as evenly as they can among the faces that the explode
+//! matches, which join the most multisets. An explode without limit that
+//! matches every face saturates every chain still kept, leaving a pool of one
+//! multiset. The estimate does not yet price an explode whose chains a later
+//! reroll or explode reads, which keep them whole, so the estimate of a
 //! function that has one saturates every quantity, and its class describes
 //! nothing; nor does it price a function in which an explode without limit
 //! may grow a chain without bound, which the pass
@@ -227,7 +233,7 @@ fn observe(
 		})
 	}
 	let plan = Plan::new(&function.instructions);
-	if unbounded(evaluator, &args) || !priced(&function.instructions, &plan)
+	if unbounded(evaluator, &args) || !priced(&function.instructions)
 	{
 		// The pass refuses a function in which an explode may grow a chain
 		// without bound, whatever its budget, and the estimate does not yet
@@ -294,58 +300,25 @@ fn observe(
 }
 
 /// Answer whether the estimate prices every explode of the specified function:
-/// whether each explodes the alike dice of a roll, none of which a drop or
-/// keep has crossed out, nor a split fixed, since the roll filled its record,
-/// and no later reroll or explode reads its chains, so that they reduce to
-/// their totals at once.
+/// whether no later reroll or explode reads the chains of any, so that they
+/// reduce to their totals at once. Then no record holds whole chains, since
+/// only an explode that a later one reads keeps them whole.
 ///
 /// # Parameters
 /// - `instructions`: The instructions of the function.
-/// - `plan`: The plan of the function.
 ///
 /// # Returns
 /// `true` if the estimate prices every explode, `false` otherwise.
-fn priced(instructions: &[Instruction], plan: &Plan) -> bool
+fn priced(instructions: &[Instruction]) -> bool
 {
-	instructions.iter().enumerate().all(|(pc, inst)| {
-		let Instruction::Explode(Explode { dest, .. }) = inst
-		else
-		{
-			return true
-		};
-		let record = Location::RollingRecord(*dest);
-		if rerolled(instructions, ProgramCounter(pc), record)
-		{
-			return false
-		}
-		let writes = AddressingMode::RollingRecord(*dest);
-		for earlier in (0..pc).rev()
-		{
-			if plan
-				.steps(ProgramCounter(earlier))
-				.contains(&Step::Split(record))
-			{
-				return false
-			}
-			let inst = &instructions[earlier];
-			if inst.destination() != Some(writes)
-			{
-				continue
-			}
-			match inst
-			{
-				Instruction::RollRange(_)
-				| Instruction::RollStandardDice(_)
-				| Instruction::RollCustomDice(_) => return true,
-				Instruction::DropLowest(_)
-				| Instruction::DropHighest(_)
-				| Instruction::KeepLowest(_)
-				| Instruction::KeepHighest(_) => return false,
-				_ =>
-				{}
-			}
-		}
-		true
+	instructions.iter().enumerate().all(|(pc, inst)| match inst
+	{
+		Instruction::Explode(Explode { dest, .. }) => !rerolled(
+			instructions,
+			ProgramCounter(pc),
+			Location::RollingRecord(*dest)
+		),
+		_ => true
 	})
 }
 
@@ -1847,7 +1820,7 @@ impl InstructionVisitor<()> for Pricing<'_>
 			&inst.operands(),
 			&inst.predicate,
 			inst.limit,
-			|part, resolution, _| part.explode(resolution, &shape)
+			|part, resolution, groups| part.explode(resolution, &shape, groups)
 		);
 		self.shadow.class.explodes |= changed;
 		// Only a limited explode pads the chains that it may extend; one that
@@ -3128,16 +3101,24 @@ impl Part
 	/// Explode the setups of the part by one resolution, as
 	/// [`Setup::explode`](super::mixture) does for each setup and each outcome
 	/// of the operands that resolves so, when no later reroll or explode reads
-	/// the chains, which reduce to their totals at once.
+	/// the chains, which reduce to their totals at once: into the law of the
+	/// totals of alike dice, none of which has been dropped, and otherwise into
+	/// a pool of the multisets of the totals of the chains still kept.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the explode.
 	/// - `shape`: The shape of a die whose faces are the totals of the chains
 	///   that the explode may grow.
+	/// - `groups`: The [`groups`] of the multisets of the part computed so far.
 	///
 	/// # Returns
 	/// The effects of the explode.
-	fn explode(&self, resolution: &Resolution, shape: &Die) -> Effects
+	fn explode(
+		&self,
+		resolution: &Resolution,
+		shape: &Die,
+		groups: &mut Groups
+	) -> Effects
 	{
 		let kept = self.kept();
 		if kept.max <= 0
@@ -3192,11 +3173,38 @@ impl Part
 		}
 		if burst.extend
 		{
-			let (mut path, tails) = resolution.extensions();
-			let (tally, part) = self.totals(resolution, tails, shape, setups);
-			path.then(tally);
-			paths = paths.max(path);
-			redraws.push(part);
+			let (extensions, tails) = resolution.extensions();
+			let undropped = self.lowest.min <= 0 && self.highest.min <= 0;
+			let dropped = self.lowest.max > 0 || self.highest.max > 0;
+			let (law, pool) = match self.kind
+			{
+				// A range has one result, so a drop leaves none to explode.
+				Kind::Range { .. } => (undropped, false),
+				Kind::Standard { .. } | Kind::Custom { .. } =>
+				{
+					(undropped, dropped)
+				},
+				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
+				Kind::Empty => (false, false)
+			};
+			if law
+			{
+				let (tally, part) =
+					self.totals(resolution, tails, shape, setups);
+				let mut path = extensions;
+				path.then(tally);
+				paths = paths.max(path);
+				redraws.push(part);
+			}
+			if pool
+				&& let Some((tally, part)) =
+					self.pool_totals(resolution, tails, shape, setups, groups)
+			{
+				let mut path = extensions;
+				path.then(tally);
+				paths = paths.max(path);
+				redraws.push(part);
+			}
 			redrawn = kept.max as u128;
 		}
 		each.then(paths);
@@ -3306,6 +3314,255 @@ impl Part
 		};
 		(tally, part)
 	}
+
+	/// Explode the chains still kept of one setup of the part, after a drop,
+	/// or of fixed results or a pool, into the multisets of their totals, as
+	/// [`Roll::explode`](super::record::Roll) does: enumerate the outcomes of
+	/// the roll as multisets of chains of one die, list the law of the totals
+	/// of each distinct chain still kept, the first time that it arises, and
+	/// the multisets of the totals of each number of its copies, and join
+	/// those of the chains still kept of each outcome, one distinct chain at a
+	/// time, in ascending order, into the multisets of a pool.
+	///
+	/// The cost turns on how many chains still kept of each outcome the
+	/// explode matches, so the estimate groups the multisets of the roll's
+	/// results by it, as [`groups`] does, and charges the costliest groups,
+	/// each as often as it has multisets, until it has charged every outcome,
+	/// as [`pool`](Self::pool) does. The `k` matched chains of an outcome join
+	/// at most [`spread`] multisets of their totals, and the joins take as
+	/// steps the products of the multisets joined so far, which [`prefixes`]
+	/// bounds. A chain that the explode does not match keeps its total, and
+	/// its join takes a step for each multiset joined so far: one, if its face
+	/// lies below every face that the explode may match, and at most the
+	/// product of the matched chains otherwise.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `shape`: The shape of a die whose faces are the totals of the chains.
+	/// - `setups`: A bound on the exploded setups.
+	/// - `cache`: The groups of the multisets of the part computed so far.
+	///
+	/// # Returns
+	/// The tally of the explode, and the part that bounds the exploded setups,
+	/// or `None` if no setup that pools keeps a chain.
+	fn pool_totals(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		shape: &Die,
+		setups: u128,
+		cache: &mut Groups
+	) -> Option<(Tally, Part)>
+	{
+		let pooling = self.pooling(resolution, cache)?;
+		let (least, most, r, unmatched) =
+			(pooling.least, pooling.most, pooling.r, pooling.unmatched);
+		let source = &resolution.source;
+		// The totals that any chain may reach, and those that a matching
+		// chain may.
+		let reach = shape.faces.max(1);
+		let t = tails.min(reach).max(1);
+		let mut tally = Tally::default();
+		// The explode takes a step and a cell.
+		tally.charge(1, 1);
+		// The outcomes of the roll stay charged until the pool is built, each
+		// result becoming the chain of one die, of one more cell.
+		let (outcomes, cells) = self.enumerate(&mut tally);
+		let lens = pooling.lens(outcomes, cells);
+		tally.charge(lens, lens);
+		let stacks = outcomes.saturating_mul(cells).saturating_add(lens);
+		// The transform scans the chains of each outcome, and charges the
+		// cells of each, which it frees, with all else that it charges but
+		// the pool, once the pool is built.
+		let scan = outcomes.saturating_add(lens.saturating_mul(2));
+		tally.charge(lens, scan);
+		// The law of each distinct chain still kept, the first time that it
+		// arises: a chain whose end matches folds each tail into a total, and
+		// merges those that coincide, and any other keeps its own.
+		tally.charge(
+			r.saturating_mul(tails.saturating_add(1))
+				.saturating_add(unmatched),
+			r.saturating_mul(tails).saturating_add(unmatched)
+		);
+		tally.keep(r.saturating_mul(tails), r.saturating_mul(t));
+		let mut scratch = scan
+			.saturating_add(r.saturating_mul(t))
+			.saturating_add(unmatched);
+		// The multisets of the totals of each number of copies of each
+		// distinct chain still kept, from one to `K`, the first time that a
+		// join meets it, which may be after every other join, so they are
+		// charged after the joins.
+		let drawn = |copies: u128, law: u128| {
+			let mut each = Tally::default();
+			multisets(&mut each, copies, law);
+			each
+		};
+		let draws = |copies: u128| {
+			let mut each = drawn(copies, t).times(r);
+			each.then(drawn(copies, 1).times(unmatched));
+			each
+		};
+		let listed = most.min(LISTED);
+		let mut drawing = Tally::default();
+		for copies in 1..=listed
+		{
+			drawing.then(draws(copies));
+		}
+		if most > listed
+		{
+			// The rest are dearest at the most copies.
+			drawing.then(draws(most).times(most - listed));
+		}
+		// The steps that join an outcome whose matched chains still kept
+		// number from `lo` to `hi`: one for the outcome, and those of the
+		// matched chains, and of the others, which lie below every face that
+		// the explode may match, and so join one multiset, or elsewhere, and
+		// so join at most the product of the matched chains.
+		let (below, elsewhere) = match pooling.arrangement
+		{
+			Arrangement::Run { below } =>
+			{
+				let below = below.min(unmatched);
+				(below, unmatched - below)
+			},
+			Arrangement::Scattered => (0, unmatched)
+		};
+		let joins = |(lo, hi): (u128, u128)| {
+			let others = most.saturating_sub(lo);
+			1u128
+				.saturating_add(prefixes(hi, r, t))
+				.saturating_add(others.min(below))
+				.saturating_add(
+					others.min(elsewhere).saturating_mul(spread(hi, r, t))
+				)
+		};
+		// Each step of a join holds a multiset joined so far and one drawn,
+		// whose distinct totals number at most `K`, and a cell apiece, and the
+		// outcome takes a cell.
+		let steps = allot(
+			outcomes,
+			pooling
+				.groups
+				.iter()
+				.map(|group| (group.count, joins(group.matched)))
+		);
+		let joined = allot(
+			outcomes,
+			pooling.groups.iter().map(|group| {
+				(
+					group.count,
+					(joins(group.matched) - 1)
+						.saturating_mul(most.saturating_add(2))
+						.saturating_add(1)
+				)
+			})
+		);
+		tally.charge(steps, joined);
+		tally.then(drawing);
+		scratch = scratch
+			.saturating_add(joined)
+			.saturating_add(drawing.working);
+		// The pool holds the multisets of the totals that the chains still
+		// kept may reach.
+		let pooled = allot(
+			outcomes,
+			pooling
+				.groups
+				.iter()
+				.map(|group| (group.count, spread(group.matched.1, r, t)))
+		);
+		let multisets =
+			pooled.min(binomial(most + reach - 1, reach - 1)).max(1);
+		let distinct = most.min(reach);
+		let occupied = multisets.saturating_mul(distinct + 1);
+		// The transform frees all but the pool, and then the outcomes; the
+		// setup keeps a copy of the die.
+		tally.keep(scratch, occupied);
+		tally.free(stacks);
+		tally.charge(0, source.cells);
+		let part = Part {
+			kind: Kind::Pool {
+				kept: (least as i32, most as i32).into(),
+				multisets,
+				distinct
+			},
+			setups,
+			cells: setups.saturating_mul(
+				occupied.saturating_add(1).saturating_add(source.cells)
+			),
+			dice: 0,
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		Some((tally, part))
+	}
+}
+
+/// Answer the most multisets into which the totals of `k` chains still kept,
+/// whose ends an explode matches, may join, among `r` matching faces, the
+/// chains of each of which may reach `t` totals: the greatest product, over
+/// the copies `cᵢ` of each face, which sum to `k`, of the multisets
+/// `C(cᵢ + t − 1, t − 1)` of their totals. The logarithm of each factor is
+/// concave in `cᵢ`, and splitting the copies of a face between two never
+/// lowers the product, so it is greatest when the copies spread as evenly as
+/// they can over `min(k, r)` faces.
+///
+/// # Parameters
+/// - `k`: The number of matched chains.
+/// - `r`: The number of matching faces.
+/// - `t`: The number of totals of each chain, which is positive.
+///
+/// # Returns
+/// The greatest product.
+fn spread(k: u128, r: u128, t: u128) -> u128
+{
+	let q = k.min(r);
+	if q == 0
+	{
+		return 1
+	}
+	let (each, more) = (k / q, k % q);
+	let power = |copies: u128, faces: u128| {
+		binomial(copies + t - 1, t - 1)
+			.saturating_pow(faces.min(u32::MAX as u128) as u32)
+	};
+	power(each + 1, more).saturating_mul(power(each, q - more))
+}
+
+/// Answer a bound on the steps that joining the multisets of the totals of `k`
+/// chains still kept, whose ends an explode matches, takes, among `r` matching
+/// faces, the chains of each of which may reach `t` totals: the sum, over the
+/// groups of copies of each face, in ascending order, of the products of their
+/// multisets so far. A group of `c` copies joins at most `C(c + t − 1, t − 1)`
+/// multisets, which is at least `t`, so the products, from the last back, are
+/// at most `P`, `P / t`, `P / t²`, and so on, for a product `P`, which
+/// [`spread`] bounds, and they sum to at most `P · (1 + 1/t + … + 1/t^(q − 1))`
+/// over `q` groups.
+///
+/// # Parameters
+/// - `k`: The number of matched chains.
+/// - `r`: The number of matching faces.
+/// - `t`: The number of totals of each chain, which is positive.
+///
+/// # Returns
+/// The bound.
+fn prefixes(k: u128, r: u128, t: u128) -> u128
+{
+	let q = k.min(r);
+	let mut product = spread(k, r, t);
+	let mut sum = 0u128;
+	for groups in 0..q
+	{
+		if product <= 1
+		{
+			// Every earlier product is at most one.
+			return sum.saturating_add(q - groups)
+		}
+		sum = sum.saturating_add(product);
+		product = product.div_ceil(t);
+	}
+	sum
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3345,43 +3602,14 @@ impl Part
 		cache: &mut Groups
 	) -> Option<(Tally, Part)>
 	{
-		let n = self.results().max.max(0) as u128;
-		let kept = self.kept();
-		let (faces, alike) = match &self.kind
-		{
-			Kind::Custom { die, .. } => (die.set(), true),
-			Kind::Standard { .. } => (resolution.source.faces.clone(), true),
-			_ => (resolution.source.faces.clone(), false)
-		};
-		// A roll of alike dice pools only after a drop.
-		let most = match alike
-		{
-			true => (kept.max as u128).min(n.saturating_sub(1)),
-			false => kept.max as u128
-		};
-		if most == 0
-		{
-			return None
-		}
-		let least = (kept.min.max(1) as u128).min(most);
-		let d = faces.len().max(1);
+		let pooling = self.pooling(resolution, cache)?;
+		let (least, most, unmatched, groups) = (
+			pooling.least,
+			pooling.most,
+			pooling.unmatched,
+			pooling.groups
+		);
 		let law = resolution.len;
-		let (r, arrangement) = resolution.matching(&faces);
-		let unmatched =
-			faces.difference(&resolution.criteria.certain).len().min(d);
-		let clamp = |bound: i32| (bound.max(0) as u128).min(n);
-		let window = Window {
-			n,
-			widest: (clamp(self.lowest.min), clamp(self.highest.min)),
-			narrowest: (clamp(self.lowest.max), clamp(self.highest.max)),
-			least,
-			most
-		};
-		let exact = resolution.fixed_on(&faces);
-		let groups =
-			cache.entry((r, arrangement, exact)).or_insert_with(|| {
-				groups(d, r.min(d), arrangement, &window, exact)
-			});
 		// The multisets of `k` faces of the law.
 		let replaced = |k: u128| binomial(k + law - 1, law - 1);
 		// A bound on the cells that join an outcome whose matched dice still
@@ -3400,14 +3628,8 @@ impl Part
 		// The outcomes of the roll stay charged, and then the paddings.
 		let (outcomes, cells) = self.enumerate(&mut tally);
 		tally.charge(most + 1, most + 1);
-		// Each outcome charges its distinct results, which, over every
-		// multiset of `n` results of `d` faces, number `d · C(n + d − 2, d −
-		// 1)`, since each face lies in the multisets of the other `n − 1`.
-		let mut lens = outcomes.saturating_mul(cells - 1);
-		if alike
-		{
-			lens = lens.min(d.saturating_mul(binomial(n + d - 2, d - 1)));
-		}
+		// Each outcome charges its distinct results.
+		let lens = pooling.lens(outcomes, cells);
 		tally.charge(lens, lens);
 		let join = allot(
 			outcomes,
@@ -3454,7 +3676,7 @@ impl Part
 				.iter()
 				.map(|group| (group.count, replaced(group.matched.1)))
 		);
-		let results = faces.union(&resolution.law).len().max(1);
+		let results = pooling.faces.union(&resolution.law).len().max(1);
 		let multisets =
 			pooled.min(binomial(most + results - 1, results - 1)).max(1);
 		let distinct = most.min(results);
@@ -3476,6 +3698,142 @@ impl Part
 			highest: 0.into()
 		};
 		Some((tally, part))
+	}
+
+	/// Group the multisets of the results of the roll of one setup of the
+	/// part that a reroll or an explode pools, after a drop, or of fixed
+	/// results or a pool, by the dice still kept that it may match, as
+	/// [`groups`] does.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll or explode.
+	/// - `cache`: The groups of the multisets of the part computed so far.
+	///
+	/// # Returns
+	/// The pooling, or `None` if no setup that pools keeps a die.
+	fn pooling<'g>(
+		&self,
+		resolution: &Resolution,
+		cache: &'g mut Groups
+	) -> Option<Pooling<'g>>
+	{
+		let n = self.results().max.max(0) as u128;
+		let kept = self.kept();
+		let (faces, alike) = match &self.kind
+		{
+			Kind::Custom { die, .. } => (die.set(), true),
+			Kind::Standard { .. } => (resolution.source.faces.clone(), true),
+			_ => (resolution.source.faces.clone(), false)
+		};
+		// A roll of alike dice pools only after a drop.
+		let most = match alike
+		{
+			true => (kept.max as u128).min(n.saturating_sub(1)),
+			false => kept.max as u128
+		};
+		if most == 0
+		{
+			return None
+		}
+		let least = (kept.min.max(1) as u128).min(most);
+		let d = faces.len().max(1);
+		let (r, arrangement) = resolution.matching(&faces);
+		let unmatched =
+			faces.difference(&resolution.criteria.certain).len().min(d);
+		let clamp = |bound: i32| (bound.max(0) as u128).min(n);
+		let window = Window {
+			n,
+			widest: (clamp(self.lowest.min), clamp(self.highest.min)),
+			narrowest: (clamp(self.lowest.max), clamp(self.highest.max)),
+			least,
+			most
+		};
+		let exact = resolution.fixed_on(&faces);
+		let groups =
+			cache.entry((r, arrangement, exact)).or_insert_with(|| {
+				groups(d, r.min(d), arrangement, &window, exact)
+			});
+		Some(Pooling {
+			n,
+			least,
+			most,
+			faces,
+			d,
+			alike,
+			r: r.min(d),
+			arrangement,
+			unmatched,
+			groups
+		})
+	}
+}
+
+/// The multisets of the results of the roll of one setup of a part that a
+/// reroll or an explode pools, grouped by the dice still kept that it may
+/// match.
+#[derive(Debug)]
+struct Pooling<'g>
+{
+	/// The most results, `n`.
+	n: u128,
+
+	/// The fewest dice still kept of a setup that pools, which is positive.
+	least: u128,
+
+	/// The most dice still kept of a setup that pools, `K`, which is
+	/// positive.
+	most: u128,
+
+	/// The faces that the results may show.
+	faces: ResultSet,
+
+	/// The number of faces, `d`, which is positive.
+	d: u128,
+
+	/// Whether the results are those of alike dice, whose outcomes are every
+	/// multiset of their faces.
+	alike: bool,
+
+	/// The number of faces that the reroll or explode may match, `r`, at most
+	/// `d`.
+	r: u128,
+
+	/// How the faces that the reroll or explode may match lie among the
+	/// faces.
+	arrangement: Arrangement,
+
+	/// The number of faces that the reroll or explode may not match.
+	unmatched: u128,
+
+	/// The groups of the multisets.
+	groups: &'g [Group]
+}
+
+impl Pooling<'_>
+{
+	/// Answer a bound on the distinct results of every outcome of the roll,
+	/// which, over every multiset of `n` results of `d` faces, number
+	/// `d · C(n + d − 2, d − 1)`, since each face lies in the multisets of the
+	/// other `n − 1`.
+	///
+	/// # Parameters
+	/// - `outcomes`: A bound on the outcomes of the roll.
+	/// - `cells`: A bound on the cells of each, one more than its distinct
+	///   results.
+	///
+	/// # Returns
+	/// The bound.
+	fn lens(&self, outcomes: u128, cells: u128) -> u128
+	{
+		let lens = outcomes.saturating_mul(cells - 1);
+		match self.alike
+		{
+			true => lens.min(
+				self.d
+					.saturating_mul(binomial(self.n + self.d - 2, self.d - 1))
+			),
+			false => lens
+		}
 	}
 }
 
@@ -5809,8 +6167,9 @@ mod tests
 	use pretty_assertions::assert_eq;
 
 	use super::{
-		Arrangement, Die, LANES, Lane, Tally, Window, any_power,
-		convolution_power, groups, kept_pairs, observe, order_sum, power_sum
+		Arrangement, Die, LANES, Lane, Tally, Window, any_power, binomial,
+		convolution_power, groups, kept_pairs, observe, order_sum, power_sum,
+		prefixes, spread
 	};
 	use crate::{
 		Evaluator, Passes,
@@ -6221,6 +6580,60 @@ mod tests
 							}
 						}
 					}
+				}
+			}
+		}
+	}
+
+	/// Ensure that the joins of the totals of the matched chains still kept of
+	/// an outcome, however their copies fall among the matching faces, and
+	/// however few totals each chain reaches, join at most the multisets that
+	/// [`spread`] answers, exactly its count at the most totals, and take at
+	/// most the steps that [`prefixes`] answers, exactly its count for one
+	/// matching face.
+	#[test]
+	fn test_spread_and_prefixes()
+	{
+		for r in 1..=4u128
+		{
+			for t in 1..=4u128
+			{
+				for k in 0..=6u128
+				{
+					let mut most = 0u128;
+					for copies in compositions(k as usize, r as usize)
+					{
+						for reached in 1..=t
+						{
+							// The products of the multisets joined so far,
+							// group by group, in
+							// ascending order of face.
+							let products = copies
+								.iter()
+								.filter(|&&c| c > 0)
+								.scan(1u128, |product, &c| {
+									*product *= binomial(
+										c as u128 + reached - 1,
+										reached - 1
+									);
+									Some(*product)
+								})
+								.collect::<Vec<_>>();
+							let product = products.last().copied().unwrap_or(1);
+							let steps = products.iter().sum::<u128>();
+							assert!(product <= spread(k, r, t), "{r} {t} {k}");
+							assert!(steps <= prefixes(k, r, t), "{r} {t} {k}");
+							if reached == t
+							{
+								most = most.max(product);
+							}
+							if r == 1 && reached == t
+							{
+								assert_eq!(steps, prefixes(k, r, t));
+							}
+						}
+					}
+					assert_eq!(most, spread(k, r, t), "{r} {t} {k}");
 				}
 			}
 		}
