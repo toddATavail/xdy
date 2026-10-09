@@ -116,12 +116,12 @@
 //!   forward pass refuses a function in which an explode without limit, which
 //!   does not match every face, may grow a chain without bound. It builds the
 //!   exact distributions of limited explodes, and of unlimited ones that match
-//!   every face, and so saturate. The estimate prices every explode whose
-//!   chains no later reroll or explode reads, which reduce to their totals at
-//!   once, and every explode and reroll of whole chains, for a later reroll or
-//!   explode, none of which has been dropped, but not yet whole chains after a
-//!   drop or keep, on results that a split fixed, or that an explode without
-//!   limit saturated, nor a split of whole chains.
+//!   every face, and so saturate. The estimate prices every function that the
+//!   pass builds: every explode whose chains no later reroll or explode reads,
+//!   which reduce to their totals at once, and every explode and reroll of
+//!   whole chains, for a later reroll or explode, whether before or after a
+//!   drop or keep, on results that a split fixed, or on chains that an explode
+//!   without limit saturated, and every split of whole chains.
 //! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, `Reroll`, and
 //!   `Explode`, and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),

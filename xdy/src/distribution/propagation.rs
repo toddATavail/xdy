@@ -2230,8 +2230,7 @@ pub enum BuildError
 	/// face, and so saturate, are built. The
 	/// [estimate](DistributionPlan::estimate) of a function that the build
 	/// refuses so exceeds every budget but the [unlimited](Budget::UNLIMITED)
-	/// one, as does that of a function that may hold whole chains that it does
-	/// not yet price.
+	/// one.
 	Unbounded
 }
 

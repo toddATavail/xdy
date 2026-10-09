@@ -90,16 +90,31 @@
 //! end show only faces that an explode matched, from which it grew the chain,
 //! or replacements that a reroll drew for them, so a reroll that cannot match
 //! those faces rerolls only the ends. After the last such reader, or at a
-//! sum, the chains collapse to the custom dice of their totals. The estimate
-//! does not yet price [stacks](super::record::Roll::Stacks): whole chains
-//! after a drop or keep, or on results that a split fixed, or on a pool, or
-//! that an explode without limit saturated, nor a split of whole chains, so
-//! the estimate of a function that may hold them saturates every quantity,
-//! and its class describes nothing; nor does it price a function in which an
-//! explode without limit may grow a chain without bound, which the pass
-//! [refuses](crate::BuildError::Unbounded) before it begins. The pass still
-//! meters every explode, so a finite budget refuses one only when the pass
-//! would exceed it.
+//! sum, the chains collapse to the custom dice of their totals.
+//!
+//! After a drop or keep, on results that a split fixed, or on a pool, whole
+//! chains are [stacks](Kind::Stacks): the multisets of the chains still kept,
+//! as their pool, and the law of what each distinct chain of the pool has
+//! become since, which a later reroll or explode composes without joining
+//! the multisets, as [`Roll::Stacks`](super::record::Roll::Stacks) defers
+//! them. The estimate bounds the distinct chains of the pool by
+//! [cohorts](Cohort) whose laws are alike in size: a clause changes only the
+//! chains of a cohort still themselves that it may match, by their ends, or
+//! by the dice besides them, and grows the law of each chain of any other.
+//! Only a drop, a split, or the collapse at the last reader or at a sum joins
+//! the stacks, which the estimate prices as [`join`] does, over the distinct
+//! multisets of the pool, by the sizes of the laws of their chains: of the
+//! chains themselves, or of their totals, which vary only by the dice that
+//! an explode added or a reroll redrew since the cohort formed, each within
+//! the span of the die. An explode without limit that matches every face
+//! saturates every chain still kept, which stacks of one multiset hold, and
+//! which a later reroll leaves alone.
+//!
+//! So the estimate prices every function that the pass builds. It saturates
+//! every quantity of a function in which an explode without limit may grow a
+//! chain without bound, which the pass [refuses](crate::BuildError::Unbounded)
+//! before it begins. The pass still meters every explode, so a finite budget
+//! refuses one only when the pass would exceed it.
 
 use std::{
 	cmp::Reverse,
@@ -249,19 +264,17 @@ fn observe(
 	}
 	let plan = Plan::new(&function.instructions);
 	// The pass refuses a function in which an explode may grow a chain without
-	// bound, whatever its budget, and the estimate does not yet price stacks of
-	// whole chains, so price such a function beyond every budget but the
-	// unlimited one.
-	let unpriced = Cost {
-		steps: u64::MAX,
-		cells: u64::MAX,
-		worlds: u64::MAX,
-		bits: u64::MAX,
-		class: Class::default()
-	};
+	// bound, whatever its budget, so price such a function beyond every budget
+	// but the unlimited one.
 	if unbounded(evaluator, &args)
 	{
-		return Ok(unpriced)
+		return Ok(Cost {
+			steps: u64::MAX,
+			cells: u64::MAX,
+			worlds: u64::MAX,
+			bits: u64::MAX,
+			class: Class::default()
+		})
 	}
 	// The pass fixes every binding, and an unbound external variable holds
 	// zero, so every binding is a degenerate interval.
@@ -323,10 +336,6 @@ fn observe(
 		}
 	}
 	debug_assert!(lane.fork.is_none(), "every split merges by the end");
-	if lane.shadow.unpriced
-	{
-		return Ok(unpriced)
-	}
 	consumed.charge(lane.shadow.finish());
 	Ok(lane.shadow.cost(&consumed))
 }
@@ -564,12 +573,6 @@ impl<'f> Lane<'f>
 						(*values, child.instruction(inst, whole))
 					})
 					.collect::<Vec<_>>();
-				// An event of a child that meets what the estimate does not yet
-				// price may be too low, so the lane saturates with it.
-				self.shadow.unpriced |= fork
-					.children
-					.iter()
-					.any(|(_, child)| child.shadow.unpriced);
 				own.min(fork.combine(&events, Settling::Each))
 			}
 		}
@@ -618,8 +621,6 @@ impl<'f> Lane<'f>
 			.iter_mut()
 			.map(|(values, child)| (*values, child.step(step, carried)))
 			.collect::<Vec<_>>();
-		self.shadow.unpriced |=
-			fork.children.iter().any(|(_, child)| child.shadow.unpriced);
 		let mut combined = fork.combine(&events, Settling::Once);
 		match *step
 		{
@@ -1074,12 +1075,7 @@ struct Shadow
 	log: f64,
 
 	/// The class of the function.
-	class: Class,
-
-	/// Whether some record may hold [stacks](super::record::Roll::Stacks) of
-	/// whole chains, which the estimate does not yet price, so that it
-	/// saturates.
-	unpriced: bool
+	class: Class
 }
 
 /// The bounds of a value in every world.
@@ -1165,8 +1161,7 @@ impl Shadow
 			splits: Vec::new(),
 			scaled: false,
 			log: 0.0,
-			class: Class::default(),
-			unpriced: false
+			class: Class::default()
 		}
 	}
 
@@ -2153,9 +2148,9 @@ impl Pricing<'_>
 	/// [`Mixture::resolve`](super::mixture::Mixture) does: read each distinct
 	/// operand once, resolve the predicate by each joint outcome, and apply it
 	/// to every setup, part by part. If the chains of the record do not stay
-	/// whole, every setup of [i.i.d. chains](Kind::Chains) then
-	/// [collapses](Part::collapse) to the custom dice of their totals, which
-	/// `apply` charges.
+	/// whole, every setup of [i.i.d. chains](Kind::Chains) or
+	/// [stacks](Kind::Stacks) then [collapses](Part::collapse) to their
+	/// totals, which `apply` charges.
 	///
 	/// # Parameters
 	/// - `dest`: The index of the record.
@@ -2310,7 +2305,6 @@ impl Pricing<'_>
 				changed |= effects.crossed
 					|| effects.redrawn > 0
 					|| !effects.redraws.is_empty();
-				self.shadow.unpriced |= effects.unpriced;
 				for part in effects.redraws
 				{
 					absorb(&mut parts, part);
@@ -2379,6 +2373,24 @@ struct Source
 
 impl Source
 {
+	/// Answer the span of the die, which bounds the variation of any one kept
+	/// die of a chain, whether present or not, as a total reads it: the width
+	/// of the hull of its faces and zero, less one.
+	///
+	/// # Returns
+	/// The span.
+	fn span(&self) -> u128
+	{
+		match self.faces.hull()
+		{
+			Some(hull) =>
+			{
+				(hull.max.max(0) as i64 - hull.min.min(0) as i64) as u128
+			},
+			None => 0
+		}
+	}
+
 	/// Answer the die from which the rerolls of a record draw, given the kind
 	/// of the roll that last filled it.
 	///
@@ -2720,12 +2732,7 @@ struct Effects
 	/// still kept that a limited explode may extend, which raise the total of
 	/// a setup by their paddings, or zero. A reroll of chains redraws every
 	/// kept die of each.
-	redrawn: u128,
-
-	/// Whether the reroll or explode may leave [stacks](super::record::Roll)
-	/// of whole chains, or join chains after a drop, which the estimate does
-	/// not yet price.
-	unpriced: bool
+	redrawn: u128
 }
 
 /// What the bounds say of the [chains](super::chain) of a rolling record after
@@ -2749,11 +2756,16 @@ impl Part
 {
 	/// Reroll the setups of the part by one resolution, as
 	/// [`Setup::reroll`](super::mixture) does for each setup and each outcome
-	/// of the operands that resolves so.
+	/// of the operands that resolves so. A reroll of i.i.d. chains, none of
+	/// which has been dropped, [rerolls](Self::reroll_chains) the law of a
+	/// chain; any other reroll of chains or stacks [restacks](Self::restack)
+	/// them, transforming the laws of stacks none of which has been dropped,
+	/// and joining the chains still kept otherwise. A reroll leaves alone the
+	/// chains that saturated dice decide.
 	///
 	/// If the chains of the record do not stay whole, every setup of i.i.d.
-	/// chains then [collapses](Self::collapse) to the custom dice of their
-	/// totals, whether the reroll changes it or not.
+	/// chains or stacks then [collapses](Self::collapse) to their totals,
+	/// whether the reroll changes it or not.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the reroll.
@@ -2787,17 +2799,18 @@ impl Part
 				unchanged: true,
 				crossed: false,
 				redraws: Vec::new(),
-				redrawn: 0,
-				unpriced: false
+				redrawn: 0
 			}
 		}
+		// A reroll that would cross out every chain that saturated dice decide
+		// leaves them alone.
+		let saturated = matches!(self.kind, Kind::Stacks { length: 0, .. });
 		// Counting the branches of the die takes a step, and one for each face
 		// of a custom die.
 		let mut each = Tally::default();
 		each.charge(1 + resolution.source.cells, 0);
 		let mut redraws = Vec::new();
 		let mut redrawn = 0;
-		let mut unpriced = false;
 		let mut paths = collapse;
 		if resolution.redraw
 		{
@@ -2825,19 +2838,11 @@ impl Part
 					(undropped, dropped)
 				},
 				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
-				Kind::Chains { length, .. } =>
+				Kind::Chains { length, .. } | Kind::Stacks { length, .. } =>
 				{
-					// A reroll of chains after a drop joins them into stacks,
-					// which the part stands for until the estimate prices them.
-					if dropped
-					{
-						unpriced = true;
-						redraws.push(self.clone());
-					}
-					if undropped
-					{
-						let (tally, part) =
-							self.reroll_chains(resolution, chaining, setups);
+					// Each rerolled setup collapses its chains, if they do not
+					// stay whole.
+					let mut chained = |tally: Tally, part: Part| {
 						let mut path = redraw;
 						path.then(tally);
 						let part = match chaining.whole
@@ -2853,6 +2858,36 @@ impl Part
 						};
 						paths = paths.max(path);
 						redraws.push(part);
+					};
+					let becomes = |law: &Law| match saturated
+					{
+						true => law.saturated(),
+						false => law.rerolled(resolution)
+					};
+					// I.i.d. chains none of which has been dropped transform
+					// their law, and stacks none of which has been dropped
+					// their laws; any others join into
+					// stacks.
+					if undropped
+					{
+						let (tally, part) = match self.kind
+						{
+							Kind::Chains { .. } =>
+							{
+								self.reroll_chains(resolution, chaining, setups)
+							},
+							_ => self.restack(
+								resolution, chaining, setups, false, becomes, 0
+							)
+						};
+						chained(tally, part);
+					}
+					if dropped
+					{
+						let (tally, part) = self.restack(
+							resolution, chaining, setups, true, becomes, 0
+						);
+						chained(tally, part);
 					}
 					// Every kept die of each chain is rerolled, and padded.
 					redrawn = (kept.max as u128).saturating_mul(length);
@@ -2882,11 +2917,12 @@ impl Part
 		each.then(paths);
 		Effects {
 			each,
-			unchanged: kept.min <= 0 || resolution.idle,
-			crossed: resolution.cross,
+			unchanged: kept.min <= 0
+				|| resolution.idle
+				|| saturated && resolution.cross,
+			crossed: resolution.cross && !saturated,
 			redraws,
-			redrawn,
-			unpriced
+			redrawn
 		}
 	}
 
@@ -3280,13 +3316,16 @@ impl Part
 	/// [`Setup::explode`](super::mixture) does for each setup and each outcome
 	/// of the operands that resolves so. If a later reroll or explode reads
 	/// the chains, then an explode of alike dice or i.i.d. chains, none of
-	/// which has been dropped, keeps them [whole](Self::chains); otherwise,
-	/// the chains reduce to their totals at once: into the law of the
-	/// totals of alike dice or i.i.d. chains, none of which has been
-	/// dropped, and otherwise into a pool of the multisets of the totals of
-	/// the chains still kept. If the chains do not stay whole, every setup
-	/// of i.i.d. chains that the explode leaves as it was
-	/// [collapses](Self::collapse) too.
+	/// which has been dropped, keeps them [whole](Self::chains), and any other
+	/// explode [restacks](Self::restack) them; otherwise, the chains reduce to
+	/// their totals at once: into the law of the totals of alike dice or
+	/// i.i.d. chains, none of which has been dropped, and otherwise into a
+	/// pool of the multisets of the totals of the chains still kept, by
+	/// [`pool_totals`](Self::pool_totals) for results, and by
+	/// [`stack_totals`](Self::stack_totals) for chains and stacks. An explode
+	/// leaves alone the chains that saturated dice decide. If the chains do
+	/// not stay whole, every setup of i.i.d. chains or stacks that the explode
+	/// leaves as it was [collapses](Self::collapse) too.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the explode.
@@ -3310,16 +3349,17 @@ impl Part
 			false => self.collapse(resolution.source.cells).0
 		};
 		let kept = self.kept();
-		if kept.max <= 0
+		if kept.max <= 0 || matches!(self.kind, Kind::Stacks { length: 0, .. })
 		{
-			// No setup has a chain still kept, so none has anything to explode.
+			// No setup has a chain still kept, or only chains that saturated
+			// dice decide, which have no end from which to grow, so none has
+			// anything to explode.
 			return Effects {
 				each: collapse,
 				unchanged: true,
 				crossed: false,
 				redraws: Vec::new(),
-				redrawn: 0,
-				unpriced: false
+				redrawn: 0
 			}
 		}
 		let source = &resolution.source;
@@ -3332,14 +3372,11 @@ impl Part
 		let mut paths = collapse;
 		let mut redraws = Vec::new();
 		let mut redrawn = 0;
-		let mut unpriced = false;
 		if burst.saturate
 		{
-			// Saturated chains that stay whole are stacks.
-			unpriced |= chaining.whole;
-			// The total takes a step for each die, and the pool of one multiset
-			// of saturated chains takes three cells; the setup keeps a copy of
-			// the die.
+			// The total takes a step for each die, and the pool or stacks of
+			// one multiset of saturated chains take three cells;
+			// the setup keeps a copy of the die.
 			let dice = match &self.kind
 			{
 				Kind::Standard { count, .. }
@@ -3351,11 +3388,32 @@ impl Part
 			let mut path = Tally::default();
 			path.charge(1 + dice, cells);
 			paths = paths.max(path);
+			let kept = (kept.min.max(1), kept.max).into();
 			redraws.push(Part {
-				kind: Kind::Pool {
-					kept: (kept.min.max(1), kept.max).into(),
-					multisets: 1,
-					distinct: 1
+				kind: match chaining.whole
+				{
+					true => Kind::Stacks {
+						kept,
+						multisets: 1,
+						distinct: 1,
+						chains: 1,
+						laws: vec![Cohort {
+							chains: 1,
+							law: 0,
+							others: 1,
+							free: 0
+						}],
+						current: 1,
+						length: 0,
+						inner: ResultSet::default(),
+						totals: chaining.shape.clone(),
+						span: 0
+					},
+					false => Kind::Pool {
+						kept,
+						multisets: 1,
+						distinct: 1
+					}
 				},
 				setups,
 				cells: setups.saturating_mul(cells),
@@ -3369,28 +3427,34 @@ impl Part
 			let (extensions, tails) = resolution.extensions(chaining.whole);
 			let undropped = self.lowest.min <= 0 && self.highest.min <= 0;
 			let dropped = self.lowest.max > 0 || self.highest.max > 0;
-			let (law, pool) = match self.kind
+			// Whether the explode may transform the law of alike dice or
+			// i.i.d. chains, none of which has been dropped; the multisets of
+			// the dice still kept of the roll, which are results; and stacks,
+			// none of which has been dropped, or chains of which some has been.
+			let (law, pool, stacks, joins) = match self.kind
 			{
 				// A range has one result, so a drop leaves none to explode.
-				Kind::Range { .. } => (undropped, false),
+				Kind::Range { .. } => (undropped, false, false, false),
 				Kind::Standard { .. } | Kind::Custom { .. } =>
 				{
-					(undropped, dropped)
+					(undropped, dropped, false, false)
 				},
-				Kind::Chains { .. } =>
+				Kind::Chains { .. } => (undropped, false, false, dropped),
+				Kind::Results { .. } | Kind::Pool { .. } =>
 				{
-					// An explode of chains after a drop joins them, which the
-					// part stands for until the estimate prices them.
-					if dropped
-					{
-						unpriced = true;
-						redraws.push(self.clone());
-					}
-					(undropped, false)
+					(false, true, false, false)
 				},
-				Kind::Results { .. } | Kind::Pool { .. } => (false, true),
-				Kind::Empty => (false, false)
+				Kind::Stacks { .. } => (false, false, undropped, dropped),
+				Kind::Empty => (false, false, false, false)
 			};
+			let mut exploded = |tally: Tally, part: Part| {
+				let mut path = extensions;
+				path.then(tally);
+				paths = paths.max(path);
+				redraws.push(part);
+			};
+			let grown =
+				|law: &Law| law.grown(resolution, tails, chaining.length);
 			if law
 			{
 				let (tally, part) = match chaining.whole
@@ -3401,29 +3465,60 @@ impl Part
 						self.totals(resolution, tails, &chaining.shape, setups)
 					},
 				};
-				let mut path = extensions;
-				path.then(tally);
-				paths = paths.max(path);
-				redraws.push(part);
+				exploded(tally, part);
 			}
 			if pool
 			{
-				// Whole chains of fixed results, of a pool, or after a drop,
-				// are stacks.
-				unpriced |= chaining.whole;
-				if let Some((tally, part)) = self.pool_totals(
-					resolution,
-					tails,
-					&chaining.shape,
-					setups,
-					groups
-				)
+				match chaining.whole
 				{
-					let mut path = extensions;
-					path.then(tally);
-					paths = paths.max(path);
-					redraws.push(part);
+					true =>
+					{
+						let (tally, part) = self.restack(
+							resolution,
+							chaining,
+							setups,
+							true,
+							grown,
+							source.cells
+						);
+						exploded(tally, part);
+					},
+					false =>
+					{
+						if let Some((tally, part)) = self.pool_totals(
+							resolution,
+							tails,
+							&chaining.shape,
+							setups,
+							groups
+						)
+						{
+							exploded(tally, part);
+						}
+					}
 				}
+			}
+			for (applies, dropped) in [(stacks, false), (joins, true)]
+			{
+				if !applies
+				{
+					continue
+				}
+				let (tally, part) = match chaining.whole
+				{
+					true => self.restack(
+						resolution,
+						chaining,
+						setups,
+						dropped,
+						grown,
+						source.cells
+					),
+					false => self.stack_totals(
+						resolution, tails, chaining, setups, dropped
+					)
+				};
+				exploded(tally, part);
 			}
 			redrawn = kept.max as u128;
 		}
@@ -3433,8 +3528,7 @@ impl Part
 			unchanged: kept.min <= 0 || burst.idle,
 			crossed: false,
 			redraws,
-			redrawn,
-			unpriced
+			redrawn
 		}
 	}
 
@@ -3538,46 +3632,23 @@ impl Part
 	{
 		let source = &resolution.source;
 		let d = source.distinct;
-		let n = resolution.limit.map_or(0, |limit| limit.max.max(0) as u128);
 		let law = self.law(source);
 		let chains = law.chains;
-		let matching = law.ending(resolution.matching(&law.faces).0);
-		let matched = source.faces.intersection(&resolution.criteria.possible);
-		let m = matched.len().clamp(1, d);
-		let inner = law.inner.union(&matched);
-		let grown = Law {
-			length: chaining.length,
-			inner: inner.clone(),
-			..law.clone()
-		};
-		// The cells of a chain before the explode, and after, and of a tail,
-		// every extension but the last of which shows a matching face.
-		let before = 1 + law.values(d);
-		let after = 1 + grown.values(d);
-		let tail = 2 + n.min(m + 1).min(d);
-		let held = chains.saturating_mul(before);
+		let held = chains.saturating_mul(1 + law.values(d));
 		let mut tally = Tally::default();
 		// The explode takes a step and a cell, and the law of a chain lists
 		// each face as a chain of one die, of two cells, or copies the law of
 		// the chains.
 		tally.charge(1, 1);
 		tally.charge(chains, held);
-		// Each chain whose end matches joins each tail, and any other keeps its
-		// dice.
-		let extended = matching.saturating_mul(tails.max(1));
-		let kept = chains - matching;
-		let entries = extended.saturating_add(kept);
-		let charged = extended
-			.saturating_mul(before + tail)
-			.saturating_add(kept.saturating_mul(before));
-		tally.charge(entries, charged);
-		let scratch = entries.saturating_mul(after);
-		tally.keep(charged, scratch);
+		let grown = law.grown(resolution, tails, chaining.length);
+		tally.then(grown.tally);
 		// The chains are weighed and merged, leaving the new law, and the law
 		// of a chain is freed.
-		tally.charge(entries.saturating_add(chains), scratch);
-		let chains = entries.min(grown.distinct(d));
-		let occupied = chains.saturating_mul(after);
+		let scratch = grown.laws;
+		tally.charge(grown.entries.saturating_add(chains), scratch);
+		let merged = grown.entries.min(grown.law.distinct(d));
+		let occupied = merged.saturating_mul(grown.cells);
 		tally.keep(scratch.saturating_mul(2), occupied);
 		tally.free(held);
 		// The setup keeps a copy of the die.
@@ -3585,10 +3656,10 @@ impl Part
 		let part = Part {
 			kind: Kind::Chains {
 				count: law.count,
-				law: chains,
+				law: merged,
 				laws: law.laws.saturating_mul(resolution.outcomes).min(setups),
 				length: chaining.length,
-				inner,
+				inner: grown.law.inner,
 				totals: chaining.shape.clone()
 			},
 			setups,
@@ -3605,21 +3676,8 @@ impl Part
 	/// Reroll the i.i.d. chains of one setup of the part, none of which has
 	/// been dropped, as [`Roll::reroll_chains`](super::record::Roll) does:
 	/// reroll every kept die of each chain of the law that the reroll matches,
-	/// alone, and merge the chains that they become into the new law.
-	///
-	/// A chain of at most `l` kept dice holds at most `l − 1` dice besides its
-	/// end, of the `i` faces that they may show, of which the reroll may match
-	/// `q`. A chain of `k` dice besides its end that the reroll matches becomes
-	/// at most the multisets of their replacements, from a law of `L` faces,
-	/// each joined with each of the `L` ends, if the reroll may match the end,
-	/// or with the end alone, if not; or the [chains](Law::distinct) that the
-	/// bounds admit, if fewer. Of the chains that the bounds admit, those of
-	/// `k` such dice end at one of `d` faces, and hold the multisets of `k`
-	/// dice of the `q` faces and of from `0` to `l − 1 − k` dice of the other
-	/// `i − q`, so the chains of the law are priced as the costliest of them,
-	/// as many as the law holds. The multisets of the replacements of each
-	/// number of matched dice are drawn the first time that a chain meets it,
-	/// which may be after any other chain, and stay charged.
+	/// alone, as [`Law::rerolled`] prices it, and merge the chains that they
+	/// become into the new law.
 	///
 	/// # Parameters
 	/// - `resolution`: The resolution of the reroll.
@@ -3642,111 +3700,20 @@ impl Part
 		let d = source.distinct;
 		let law = self.law(source);
 		let length = law.length;
-		let faces = resolution.len;
-		// The faces of the dice besides the end that the reroll may match, and
-		// those that it may not, and the most such dice of a chain; their
-		// replacements show any face of its law.
-		let i = law.inner.len();
-		let q = law
-			.inner
-			.intersection(&resolution.criteria.possible)
-			.len()
-			.min(i);
-		let (others, inner) = match q > 0
-		{
-			true => (length - 1, law.inner.union(&resolution.law)),
-			false => (0, law.inner.clone())
-		};
-		let rerolled = Law {
-			inner: inner.clone(),
-			..law.clone()
-		};
-		let cap = rerolled.distinct(d);
-		let values = law.values(d);
-		let (before, after) = (1 + values, 1 + rerolled.values(d));
 		let mut tally = Tally::default();
 		// The reroll takes a step and a cell.
 		tally.charge(1, 1);
-		// The multisets of each number of matched dice besides the end, at
-		// most `others`, the first time that a chain meets it: the chains meet
-		// at most as many numbers as there are chains, the dearest the most.
-		let drawn = |k: u128| {
-			let mut each = Tally::default();
-			multisets(&mut each, k, faces);
-			each
-		};
-		let taken = (others + 1).min(law.chains.max(1));
-		let listed = taken.min(LISTED);
-		let mut draws = Tally::default();
-		for k in others + 1 - listed..=others
-		{
-			draws.then(drawn(k));
-		}
-		if taken > listed
-		{
-			// The rest are dearest at the most of them.
-			draws.then(drawn(others - listed).times(taken - listed));
-		}
-		// The chains that the bounds admit of `k` matched dice besides the end,
-		// by the ways in which each becomes chains: those whose ends the reroll
-		// may match, and the rest.
-		let multisets_of = |kinds: u128, k: u128| match kinds
-		{
-			0 => (k == 0) as u128,
-			kinds => binomial(k + kinds - 1, kinds - 1)
-		};
-		let unmatched = i - q;
-		let shapes = |k: u128| {
-			let rest = length - 1 - k;
-			multisets_of(q, k)
-				.saturating_mul(binomial(rest + unmatched, unmatched.min(rest)))
-		};
-		let r = resolution.matching(&source.faces).0.min(d);
-		let replacements = |k: u128| binomial(k + faces - 1, faces - 1);
-		let mut groups = Vec::<(u128, u128)>::new();
-		for k in 0..=others.min(LISTED)
-		{
-			let shapes = shapes(k);
-			let ways = replacements(k);
-			groups.push((r.saturating_mul(shapes), ways.saturating_mul(faces)));
-			groups.push(((d - r).saturating_mul(shapes), ways));
-		}
-		if others > LISTED
-		{
-			// The rest are dearest at the most matched dice.
-			groups
-				.push((law.chains, replacements(others).saturating_mul(faces)));
-		}
-		// Each chain lists its distinct dice, sorts them into survivors and
-		// matched dice, and pads those that the reroll does not match; then
-		// each multiset of replacements joins the survivors, and each end.
-		let most = others.min(faces);
-		let each = |ways: u128| {
-			let joined = ways.saturating_mul(3 + values + most);
-			let mut each = Tally::default();
-			each.charge(values, before);
-			each.charge(length.saturating_add(ways), joined);
-			each.keep(joined, ways.min(cap).saturating_mul(after));
-			each.free(before);
-			each
-		};
-		let chains = costliest(
-			groups.iter().map(|&(count, ways)| (each(ways), count)),
-			law.chains
-		);
-		tally.then(chains.beside(draws));
+		let rerolled = law.rerolled(resolution);
+		tally.then(rerolled.tally);
 		// The chains are padded, weighed, and merged, leaving the new law.
-		let entries = allot(
-			law.chains,
-			groups.iter().map(|&(count, ways)| (count, ways.min(cap)))
-		);
-		let scratch = entries.saturating_mul(after);
+		let entries = rerolled.entries;
+		let scratch = rerolled.laws;
 		tally.charge(
 			entries.saturating_add(law.chains.saturating_mul(1 + length)),
 			scratch
 		);
-		let chains = entries.min(cap);
-		let occupied = chains.saturating_mul(after);
+		let chains = entries.min(rerolled.law.distinct(d));
+		let occupied = chains.saturating_mul(rerolled.cells);
 		tally.keep(scratch.saturating_mul(2), occupied);
 		let part = Part {
 			kind: Kind::Chains {
@@ -3754,7 +3721,7 @@ impl Part
 				law: chains,
 				laws: law.laws.saturating_mul(resolution.outcomes).min(setups),
 				length,
-				inner,
+				inner: rerolled.law.inner,
 				totals: chaining.shape.clone()
 			},
 			setups,
@@ -3768,10 +3735,13 @@ impl Part
 		(tally, part)
 	}
 
-	/// Reduce the i.i.d. chains of each setup of the part to their totals, as
-	/// [`Roll::collapse`](super::record::Roll) does: weigh the total of each
-	/// chain of the law, and merge them into the faces of custom dice, which
-	/// the shape of the totals covers. Any other part stays as it is.
+	/// Reduce the chains of each setup of the part to their totals, as
+	/// [`Roll::collapse`](super::record::Roll) does. For i.i.d. chains, weigh
+	/// the total of each chain of the law, and merge them into the faces of
+	/// custom dice, which the shape of the totals covers. For stacks, list the
+	/// law of the totals of each distinct chain of the pool, which the shape
+	/// covers, and [`join`] them into a pool of their multisets, as
+	/// [`joined_totals`](super::chain) does. Any other part stays as it is.
 	///
 	/// # Parameters
 	/// - `die`: The cells of the die that each setup keeps.
@@ -3782,36 +3752,92 @@ impl Part
 	fn collapse(&self, die: u128) -> (Tally, Part)
 	{
 		let mut tally = Tally::default();
-		let Kind::Chains {
-			count,
-			law,
-			laws,
-			totals,
-			..
-		} = &self.kind
-		else
+		match &self.kind
 		{
-			return (tally, self.clone())
-		};
-		let faces = (*law).min(totals.faces);
-		tally.charge(*law, law.saturating_add(1));
-		tally.keep(law.saturating_add(1), faces + 1);
-		let part = Part {
-			kind: Kind::Custom {
-				count: *count,
-				die: totals.clone(),
-				laws: *laws,
-				exact: false
+			Kind::Chains {
+				count,
+				law,
+				laws,
+				totals,
+				..
+			} =>
+			{
+				let faces = (*law).min(totals.faces);
+				tally.charge(*law, law.saturating_add(1));
+				tally.keep(law.saturating_add(1), faces + 1);
+				let part = Part {
+					kind: Kind::Custom {
+						count: *count,
+						die: totals.clone(),
+						laws: *laws,
+						exact: false
+					},
+					cells: self
+						.setups
+						.saturating_mul((faces + 1).saturating_add(die)),
+					..self.clone()
+				};
+				(tally, part)
 			},
-			cells: self.setups.saturating_mul((faces + 1).saturating_add(die)),
-			..self.clone()
-		};
-		(tally, part)
+			Kind::Stacks {
+				kept, totals, span, ..
+			} =>
+			{
+				let (pool, cohorts) = self.stacked();
+				let faces = totals.faces.max(1);
+				// The collapse takes a step and a cell, and each distinct chain
+				// of the pool weighs the totals of its law, or its own, merging
+				// those that coincide.
+				tally.charge(1, 1);
+				let (entries, held) = cohorts.iter().fold(
+					(0u128, 0u128),
+					|(entries, held), cohort| {
+						let law = cohort.law.max(1);
+						(
+							entries.saturating_add(
+								cohort.chains.saturating_mul(law)
+							),
+							held.saturating_add(
+								cohort.chains.saturating_mul(law.min(faces))
+							)
+						)
+					}
+				);
+				let mut laws = Tally::default();
+				laws.charge(entries, entries);
+				laws.keep(entries, held);
+				let (joining, pile) = join(
+					&pool,
+					pool.chains,
+					&reaches(&cohorts, *span, faces),
+					laws,
+					1,
+					faces
+				);
+				tally.then(joining);
+				let part = Part {
+					kind: Kind::Pool {
+						kept: *kept,
+						multisets: pile.multisets,
+						distinct: pile.distinct
+					},
+					cells: self.setups.saturating_mul(
+						pile.occupied().saturating_add(1).saturating_add(die)
+					),
+					..self.clone()
+				};
+				(tally, part)
+			},
+			_ => (tally, self.clone())
+		}
 	}
 
 	/// Answer the law of one chain of a setup of the part, as
 	/// [`Roll::chain_law`](super::record::Roll) lists it, for alike dice, each
-	/// of which is a chain of one die, or i.i.d. chains.
+	/// of which is a chain of one die, or i.i.d. chains; or the law of the
+	/// chains that any chain of the setup may be, for fixed results or a pool,
+	/// each result of which is a chain of one die, or stacks, whose chains may
+	/// be those of their laws.
 	///
 	/// # Parameters
 	/// - `source`: The die from which the clause draws.
@@ -3820,7 +3846,7 @@ impl Part
 	/// The law.
 	///
 	/// # Panics
-	/// If the part is neither alike dice nor i.i.d. chains.
+	/// If the part has no roll.
 	fn law(&self, source: &Source) -> Law
 	{
 		let dice = |count, chains, laws, faces| Law {
@@ -3857,6 +3883,39 @@ impl Part
 			Kind::Custom {
 				count, die, laws, ..
 			} => dice(*count, die.faces, *laws, die.set()),
+			// Fixed results and a pool are chains of one die each.
+			Kind::Results { .. } | Kind::Pool { .. } => dice(
+				Operand {
+					bounds: self.results(),
+					support: 1,
+					varied: false,
+					random: false,
+					dense: false
+				},
+				source.distinct,
+				self.setups,
+				source.faces.clone()
+			),
+			Kind::Stacks {
+				kept,
+				current,
+				length,
+				inner,
+				..
+			} => Law {
+				count: Operand {
+					bounds: *kept,
+					support: 1,
+					varied: false,
+					random: false,
+					dense: false
+				},
+				chains: *current,
+				laws: self.setups,
+				faces: source.faces.clone(),
+				length: (*length).max(1),
+				inner: inner.clone()
+			},
 			Kind::Chains {
 				count,
 				law,
@@ -3872,9 +3931,7 @@ impl Part
 				length: (*length).max(1),
 				inner: inner.clone()
 			},
-			_ => unreachable!(
-				"only alike dice or chains have the law of a chain"
-			)
+			Kind::Empty => unreachable!("only a roll has the law of a chain")
 		}
 	}
 }
@@ -3956,6 +4013,373 @@ impl Law
 	{
 		let i = self.inner.len();
 		binomial(self.length - 1 + i, i.min(self.length - 1))
+	}
+
+	/// Answer what an explode makes of each distinct chain of the law, keeping
+	/// it whole, as [`Burst::chains`](super::chain::Burst) does: a chain whose
+	/// end matches joins each tail, and any other keeps its dice. The end of
+	/// a chain that grows, and every extension but the last, show faces that
+	/// the explode matches, which join the faces of the dice other than the
+	/// ends.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `length`: The most kept dice of a chain after the explode.
+	///
+	/// # Returns
+	/// What each chain of the law becomes.
+	fn grown(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		length: u128
+	) -> Becoming
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let n = resolution.limit.map_or(0, |limit| limit.max.max(0) as u128);
+		let r = resolution.matching(&self.faces).0;
+		let matching = self.ending(r);
+		let matched = source.faces.intersection(&resolution.criteria.possible);
+		let m = matched.len().clamp(1, d);
+		let grown = Law {
+			length,
+			inner: self.inner.union(&matched),
+			..self.clone()
+		};
+		// The cells of a chain before the explode, and after, and of a tail,
+		// every extension but the last of which shows a matching face.
+		let before = 1 + self.values(d);
+		let after = 1 + grown.values(d);
+		let tail = 2 + n.min(m + 1).min(d);
+		let extended = matching.saturating_mul(tails.max(1));
+		let kept = self.chains - matching;
+		let entries = extended.saturating_add(kept);
+		let charged = extended
+			.saturating_mul(before + tail)
+			.saturating_add(kept.saturating_mul(before));
+		let laws = entries.saturating_mul(after);
+		let mut tally = Tally::default();
+		tally.charge(entries, charged);
+		tally.keep(charged, laws);
+		let each = match matching
+		{
+			0 => 1,
+			_ => tails.max(1)
+		};
+		Becoming {
+			tally,
+			entries,
+			each: each.min(grown.distinct(d)),
+			ends: r,
+			inner: false,
+			extends: n,
+			rerolls: false,
+			laws,
+			law: grown,
+			cells: after,
+			padding: 0
+		}
+	}
+
+	/// Answer what a reroll makes of each distinct chain of the law, as
+	/// [`rerolled`](super::chain) does: reroll every kept die of the chain
+	/// that the reroll matches, alone, the replacement of its end becoming its
+	/// new end.
+	///
+	/// A chain of at most `l` kept dice holds at most `l − 1` dice besides its
+	/// end, of the `i` faces that they may show, of which the reroll may match
+	/// `q`. A chain of `k` dice besides its end that the reroll matches becomes
+	/// at most the multisets of their replacements, from a law of `L` faces,
+	/// each joined with each of the `L` ends, if the reroll may match the end,
+	/// or with the end alone, if not; or the [chains](Law::distinct) that the
+	/// bounds admit, if fewer. Of the chains that the bounds admit, those of
+	/// `k` such dice end at one of `d` faces, and hold the multisets of `k`
+	/// dice of the `q` faces and of from `0` to `l − 1 − k` dice of the other
+	/// `i − q`, so the chains of the law are priced as the costliest of them,
+	/// as many as the law holds. The multisets of the replacements of each
+	/// number of matched dice are drawn the first time that a chain meets it,
+	/// which may be after any other chain, and stay charged.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll.
+	///
+	/// # Returns
+	/// What each chain of the law becomes.
+	fn rerolled(&self, resolution: &Resolution) -> Becoming
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let length = self.length;
+		let faces = resolution.len;
+		// The faces of the dice besides the end that the reroll may match, and
+		// those that it may not, and the most such dice of a chain; their
+		// replacements show any face of its law.
+		let i = self.inner.len();
+		let q = self
+			.inner
+			.intersection(&resolution.criteria.possible)
+			.len()
+			.min(i);
+		let (others, inner) = match q > 0
+		{
+			true => (length - 1, self.inner.union(&resolution.law)),
+			false => (0, self.inner.clone())
+		};
+		let rerolled = Law {
+			inner,
+			..self.clone()
+		};
+		let cap = rerolled.distinct(d);
+		let values = self.values(d);
+		let (before, after) = (1 + values, 1 + rerolled.values(d));
+		// The multisets of each number of matched dice besides the end, at
+		// most `others`, the first time that a chain meets it: the chains meet
+		// at most as many numbers as there are chains, the dearest the most.
+		let drawn = |k: u128| {
+			let mut each = Tally::default();
+			draw(&mut each, k, faces, 1);
+			each
+		};
+		let taken = (others + 1).min(self.chains.max(1));
+		let listed = taken.min(LISTED);
+		let mut draws = Tally::default();
+		for k in others + 1 - listed..=others
+		{
+			draws.then(drawn(k));
+		}
+		if taken > listed
+		{
+			// The rest are dearest at the most of them.
+			draws.then(drawn(others - listed).times(taken - listed));
+		}
+		// The chains that the bounds admit of `k` matched dice besides the end,
+		// by the ways in which each becomes chains: those whose ends the reroll
+		// may match, and the rest.
+		let multisets_of = |kinds: u128, k: u128| match kinds
+		{
+			0 => (k == 0) as u128,
+			kinds => binomial(k + kinds - 1, kinds - 1)
+		};
+		let unmatched = i - q;
+		let shapes = |k: u128| {
+			let rest = length - 1 - k;
+			multisets_of(q, k)
+				.saturating_mul(binomial(rest + unmatched, unmatched.min(rest)))
+		};
+		let r = resolution.matching(&source.faces).0.min(d);
+		let replacements = |k: u128| binomial(k + faces - 1, faces - 1);
+		let mut groups = Vec::<(u128, u128)>::new();
+		for k in 0..=others.min(LISTED)
+		{
+			let shapes = shapes(k);
+			let ways = replacements(k);
+			groups.push((r.saturating_mul(shapes), ways.saturating_mul(faces)));
+			groups.push(((d - r).saturating_mul(shapes), ways));
+		}
+		if others > LISTED
+		{
+			// The rest are dearest at the most matched dice.
+			groups.push((
+				self.chains,
+				replacements(others).saturating_mul(faces)
+			));
+		}
+		// Each chain lists its distinct dice, sorts them into survivors and
+		// matched dice, and pads those that the reroll does not match; then
+		// each multiset of replacements joins the survivors, and each end.
+		let most = others.min(faces);
+		let each = |ways: u128| {
+			let joined = ways.saturating_mul(3 + values + most);
+			let mut each = Tally::default();
+			each.charge(values, before);
+			each.charge(length.saturating_add(ways), joined);
+			each.keep(joined, ways.min(cap).saturating_mul(after));
+			each.free(before);
+			each
+		};
+		let chains = costliest(
+			groups.iter().map(|&(count, ways)| (each(ways), count)),
+			self.chains
+		);
+		let entries = allot(
+			self.chains,
+			groups.iter().map(|&(count, ways)| (count, ways.min(cap)))
+		);
+		let most = groups
+			.iter()
+			.filter(|(count, _)| *count > 0)
+			.map(|(_, ways)| (*ways).min(cap))
+			.max()
+			.unwrap_or(1);
+		Becoming {
+			tally: chains.beside(draws),
+			entries,
+			each: most,
+			ends: r,
+			inner: q > 0,
+			extends: 0,
+			rerolls: true,
+			laws: chains.working,
+			law: rerolled,
+			cells: after,
+			padding: length
+		}
+	}
+
+	/// Answer what a reroll makes of each distinct chain of the law, all of
+	/// which saturated dice decide, as [`rerolled`](super::chain) does: it
+	/// leaves each alone, as the law of itself.
+	///
+	/// # Returns
+	/// What each chain of the law becomes.
+	fn saturated(&self) -> Becoming
+	{
+		let mut tally = Tally::default();
+		tally.charge(self.chains, self.chains);
+		Becoming {
+			tally,
+			entries: self.chains,
+			each: 1,
+			ends: 0,
+			inner: false,
+			extends: 0,
+			rerolls: false,
+			laws: self.chains,
+			law: self.clone(),
+			cells: 1,
+			padding: 0
+		}
+	}
+
+	/// Answer the law of the totals that an explode makes of each distinct
+	/// chain of the law, as [`Burst::totals`](super::chain::Burst) does: a
+	/// chain whose end matches folds its dice and each tail into a total, and
+	/// merges those that coincide, among the totals that the bounds admit, and
+	/// any other keeps its own.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `totals`: A bound on the totals that the bounds admit.
+	///
+	/// # Returns
+	/// The law of the totals of each chain, as what each becomes.
+	fn totalled(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		totals: u128
+	) -> Becoming
+	{
+		let d = resolution.source.distinct;
+		let n = resolution.limit.map_or(0, |limit| limit.max.max(0) as u128);
+		let r = resolution.matching(&self.faces).0;
+		let matching = self.ending(r);
+		let kept = self.chains - matching;
+		let each = tails.max(1).min(totals);
+		let folded = matching.saturating_mul(tails).saturating_add(kept);
+		let mut tally = Tally::default();
+		tally.charge(
+			matching
+				.saturating_mul(tails.saturating_add(self.values(d)))
+				.saturating_add(kept),
+			folded
+		);
+		let laws = matching.saturating_mul(each).saturating_add(kept);
+		tally.keep(folded, laws);
+		Becoming {
+			tally,
+			entries: laws,
+			each: match matching
+			{
+				0 => 1,
+				_ => each
+			},
+			ends: r,
+			inner: false,
+			extends: n,
+			rerolls: false,
+			laws,
+			law: Law {
+				length: self.length.saturating_add(n),
+				..self.clone()
+			},
+			cells: 1,
+			padding: 0
+		}
+	}
+}
+
+/// What a reroll or an explode makes of each of the distinct chains of a
+/// [law](Law), alone, as the `becomes` of a transform answers it in the pass:
+/// the law of the chains that it may become.
+#[derive(Debug, Clone)]
+struct Becoming
+{
+	/// The tally of the laws of every chain, which leaves them charged, and
+	/// any multisets of replacements that the reroll drew for them.
+	tally: Tally,
+
+	/// A bound on the chains of the laws of every chain together.
+	entries: u128,
+
+	/// A bound on the chains of the law of any one chain.
+	each: u128,
+
+	/// The number of faces at the end of a chain that the reroll or explode
+	/// may match, which changes the chain, so that its law may hold more than
+	/// one chain.
+	ends: u128,
+
+	/// Whether the reroll may match the faces of the kept dice of a chain
+	/// besides its end, which changes the chain too.
+	inner: bool,
+
+	/// The most extensions that the explode adds to a chain, or zero for a
+	/// reroll.
+	extends: u128,
+
+	/// Whether a reroll redraws the chains.
+	rerolls: bool,
+
+	/// A bound on the cells of the laws of every chain together, which the
+	/// tally leaves charged.
+	laws: u128,
+
+	/// The law of the chains that they become, whose number of chains is
+	/// that of the chains that became them.
+	law: Law,
+
+	/// A bound on the cells of a chain that they become.
+	cells: u128,
+
+	/// The most kept dice of a chain, by which a reroll pads the chains of
+	/// fewer, or zero for an explode.
+	padding: u128
+}
+
+impl Becoming
+{
+	/// Answer a bound on the chains of the specified cohort, each of which is
+	/// still itself, or whose law holds one chain, that the reroll or explode
+	/// may change: those that end at a face that it may match, or, if it may
+	/// match the faces of the kept dice besides the ends, every chain that has
+	/// such dice.
+	///
+	/// # Parameters
+	/// - `cohort`: The cohort.
+	///
+	/// # Returns
+	/// The bound.
+	fn changes(&self, cohort: &Cohort) -> u128
+	{
+		match self.inner && cohort.others > 1
+		{
+			true => cohort.chains,
+			false => cohort.chains.min(self.ends.saturating_mul(cohort.others))
+		}
 	}
 }
 
@@ -4661,6 +5085,962 @@ fn groups(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//                                  Stacks.                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Bounds on multisets of the chains of one setup: the outcomes of its roll as
+/// multisets of chains, as [`Roll::stacks`](super::record::Roll) answers them,
+/// or the pool of [stacks](Kind::Stacks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Pile
+{
+	/// A bound on the multisets.
+	multisets: u128,
+
+	/// The most chains of a multiset, `K`.
+	chains: u128,
+
+	/// A bound on the distinct chains of a multiset.
+	distinct: u128,
+
+	/// A bound on the distinct chains of every multiset together.
+	keys: u128,
+
+	/// A bound on the cells of a chain.
+	cells: u128
+}
+
+impl Pile
+{
+	/// Answer a bound on the cells that the multisets occupy, as
+	/// [`multiset_cells`](super::record::multiset_cells) counts them: one for
+	/// each, and those of each of its distinct chains.
+	///
+	/// # Returns
+	/// The bound.
+	fn occupied(&self) -> u128
+	{
+		self.multisets.saturating_mul(
+			self.distinct.saturating_mul(self.cells).saturating_add(1)
+		)
+	}
+}
+
+/// Answer the multisets of the chains still kept of the specified multisets,
+/// merging those that coincide, as [`kept_pool`](super::chain) does: each
+/// multiset charges its distinct chains and its cells, which the pool replaces.
+///
+/// # Parameters
+/// - `outcomes`: The multisets.
+/// - `kept`: The most chains still kept of each.
+///
+/// # Returns
+/// The tally, which leaves the pool charged, and the pool.
+fn kept_pool(outcomes: &Pile, kept: u128) -> (Tally, Pile)
+{
+	let mut tally = Tally::default();
+	let scanned = outcomes.occupied();
+	tally.charge(
+		outcomes.multisets.saturating_mul(outcomes.distinct),
+		scanned
+	);
+	let distinct = outcomes.distinct.min(kept);
+	let keys = outcomes.keys.max(1);
+	let multisets = outcomes
+		.multisets
+		.min(binomial(kept.saturating_add(keys - 1), keys - 1))
+		.max(1);
+	let pool = Pile {
+		multisets,
+		chains: kept,
+		distinct,
+		keys: outcomes.keys.min(multisets.saturating_mul(distinct)),
+		cells: outcomes.cells
+	};
+	tally.keep(scanned, pool.occupied());
+	(tally, pool)
+}
+
+/// A cohort of the distinct chains of the pool of [stacks](Kind::Stacks),
+/// whose laws are alike in size. Every chain of the pool is still itself until
+/// a reroll or an explode transforms them. A clause may extend or redraw only
+/// some of the chains that are still themselves, or whose laws hold one
+/// chain, which then split into those that it may change and the rest, so the
+/// cohorts number at most one more than the clauses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Cohort
+{
+	/// The number of chains of the cohort.
+	chains: u128,
+
+	/// A bound on the chains of the law of each, or zero if it is still
+	/// itself.
+	law: u128,
+
+	/// A bound on the chains of the cohort that end at any one face: one for
+	/// the chains of one die, or the [others](Law::others) of the law of
+	/// i.i.d. chains.
+	others: u128,
+
+	/// A bound on the kept dice of a chain of the law of each that an explode
+	/// added or a reroll may have redrawn since the cohort formed, which alone
+	/// vary among those chains, each within the [span](Kind::Stacks) of the
+	/// die, or zero if none has.
+	free: u128
+}
+
+impl Cohort
+{
+	/// Answer a bound on the totals of the law of each chain of the cohort:
+	/// its chains, or the totals that the bounds admit, or those that its
+	/// free dice may reach, each within the span of the die, if fewer.
+	///
+	/// # Parameters
+	/// - `span`: The span of the die.
+	/// - `faces`: A bound on the totals that the bounds admit.
+	///
+	/// # Returns
+	/// The bound.
+	fn totals(&self, span: u128, faces: u128) -> u128
+	{
+		self.law
+			.max(1)
+			.min(faces.max(1))
+			.min(self.free.saturating_mul(span).saturating_add(1))
+	}
+}
+
+/// The cohorts of the distinct chains of the pool of stacks.
+type Cohorts = Vec<Cohort>;
+
+/// Add a cohort to the specified cohorts, merging it with one alike but for its
+/// chains.
+///
+/// # Parameters
+/// - `cohorts`: The cohorts.
+/// - `cohort`: The cohort.
+fn enlist(cohorts: &mut Cohorts, cohort: Cohort)
+{
+	if cohort.chains == 0
+	{
+		return
+	}
+	match cohorts.iter_mut().find(|other| {
+		other.law == cohort.law
+			&& other.others == cohort.others
+			&& other.free == cohort.free
+	})
+	{
+		Some(other) =>
+		{
+			other.chains = other.chains.saturating_add(cohort.chains)
+		},
+		None => cohorts.push(cohort)
+	}
+}
+
+/// Answer whether every chain of the specified cohorts is still itself.
+///
+/// # Parameters
+/// - `cohorts`: The cohorts.
+///
+/// # Returns
+/// `true` if every chain is still itself.
+fn themselves(cohorts: &[Cohort]) -> bool
+{
+	cohorts.iter().all(|cohort| cohort.law == 0)
+}
+
+/// Answer the cohorts of the distinct chains of the pool after a reroll or an
+/// explode: a cohort of chains whose laws hold one chain, or none, splits into
+/// those that it may change, whose laws then hold at most `each` chains, and
+/// the rest, whose laws hold one; and the law of each chain of any other cohort
+/// grows by `each`.
+///
+/// # Parameters
+/// - `cohorts`: The cohorts before.
+/// - `becoming`: What the reroll or explode makes of each chain.
+/// - `each`: A bound on the chains of the law of what any one chain becomes.
+/// - `cap`: A bound on the chains of the law of any chain of the pool.
+///
+/// # Returns
+/// The cohorts after.
+fn compose(
+	cohorts: &[Cohort],
+	becoming: &Becoming,
+	each: u128,
+	cap: u128
+) -> Cohorts
+{
+	let mut composed = Cohorts::new();
+	for &cohort in cohorts
+	{
+		// The dice of a changed chain that vary: an explode adds as many as
+		// its limit, and a reroll redraws the end, which varies thereafter, or
+		// every kept die, if it may match those besides the end.
+		let free = match (becoming.extends, becoming.rerolls)
+		{
+			(0, false) => cohort.free,
+			(0, true) if becoming.inner => becoming.law.length,
+			(0, true) => cohort.free.max(1),
+			(extends, _) => cohort.free.saturating_add(extends)
+		}
+		.min(becoming.law.length);
+		match cohort.law
+		{
+			0 | 1 =>
+			{
+				let changed = becoming.changes(&cohort);
+				enlist(
+					&mut composed,
+					Cohort {
+						chains: changed,
+						law: each,
+						free,
+						..cohort
+					}
+				);
+				enlist(
+					&mut composed,
+					Cohort {
+						chains: cohort.chains - changed,
+						law: 1,
+						..cohort
+					}
+				);
+			},
+			law => enlist(
+				&mut composed,
+				Cohort {
+					law: law.saturating_mul(each).min(cap),
+					free,
+					..cohort
+				}
+			)
+		}
+	}
+	composed
+}
+
+/// Answer the sizes of the laws of the chains of the specified cohorts, as
+/// [`join`] takes them: the number of chains of each cohort, and a bound on
+/// the chains of the law of each, which is at least one, as for a chain still
+/// itself, and at most the specified cap.
+///
+/// # Parameters
+/// - `cohorts`: The cohorts.
+/// - `cap`: The cap.
+///
+/// # Returns
+/// The sizes.
+fn sizes(cohorts: &[Cohort], cap: u128) -> Vec<(u128, u128)>
+{
+	cohorts
+		.iter()
+		.map(|cohort| (cohort.chains, cohort.law.max(1).min(cap.max(1))))
+		.collect()
+}
+
+/// Answer the sizes of the laws of the totals of the chains of the specified
+/// cohorts, as [`join`] takes them: the number of chains of each cohort, and
+/// a bound on the [totals](Cohort::totals) of the law of each.
+///
+/// # Parameters
+/// - `cohorts`: The cohorts.
+/// - `span`: The span of the die.
+/// - `faces`: A bound on the totals that the bounds admit.
+///
+/// # Returns
+/// The sizes.
+fn reaches(cohorts: &[Cohort], span: u128, faces: u128) -> Vec<(u128, u128)>
+{
+	cohorts
+		.iter()
+		.map(|cohort| (cohort.chains, cohort.totals(span, faces)))
+		.collect()
+}
+
+/// Transform stacks by what a reroll or an explode makes of each chain, as
+/// [`transform_stacks`](super::chain) does, without joining them: each
+/// multiset charges its distinct chains, and each distinct chain of the pool
+/// [composes](super::chain) its law with what each chain of it becomes, the
+/// first time that it arises, which the becoming prices, charging those laws,
+/// and leaving the composed law; then each multiset is copied and padded by
+/// the kept dice of its chains, and the laws of what each became are freed.
+/// A chain of the pool whose law holds one chain, or none, becomes more than
+/// one only if the clause may change it, and any other may.
+///
+/// # Parameters
+/// - `pool`: The pool of the stacks.
+/// - `cohorts`: The cohorts of the distinct chains of the pool.
+/// - `becoming`: What the reroll or explode makes of each chain that the chains
+///   of the pool may now be.
+/// - `cap`: A bound on the distinct chains that the bounds admit after the
+///   reroll or explode.
+///
+/// # Returns
+/// The tally, which leaves the new stacks charged, but for the pool that it
+/// copied; the cohorts of the distinct chains of the pool after it; and a
+/// bound on the distinct chains that the chains of the pool may then be.
+fn transform_stacks(
+	pool: &Pile,
+	cohorts: &[Cohort],
+	becoming: &Becoming,
+	cap: u128
+) -> (Tally, Cohorts, u128)
+{
+	let (multisets, keys) = (pool.multisets, pool.keys);
+	let after = becoming.cells;
+	let mut tally = Tally::default();
+	// Each multiset charges a step for each of its distinct chains, and each
+	// distinct chain of the pool the cells of its key.
+	tally.charge(
+		multisets.saturating_mul(pool.distinct),
+		keys.saturating_mul(pool.cells)
+	);
+	if themselves(cohorts)
+	{
+		// A chain still itself charges the law of itself, which the
+		// composition frees.
+		tally.charge(keys, pool.cells);
+		tally.free(pool.cells);
+	}
+	tally.then(becoming.tally);
+	// Each distinct chain of the pool weighs and merges the laws of what each
+	// chain of its law became, padded, which leave its composed law.
+	let each = becoming.each.min(cap).max(1);
+	let (mut steps, mut merged) = (0u128, 0u128);
+	for cohort in cohorts
+	{
+		let laws = cohort.law.max(1);
+		steps = steps.saturating_add(
+			cohort.chains.saturating_mul(laws).saturating_mul(
+				each.saturating_add(1).saturating_add(becoming.padding)
+			)
+		);
+		merged = merged.max(laws.saturating_mul(each).saturating_mul(after));
+	}
+	let composed =
+		compose(cohorts, becoming, each, becoming.entries.min(cap).max(1));
+	let held = composed.iter().fold(0u128, |held, cohort| {
+		held.saturating_add(
+			cohort
+				.chains
+				.saturating_mul(cohort.law)
+				.saturating_mul(after)
+		)
+	});
+	tally.charge(steps, held.saturating_add(merged));
+	tally.free(merged);
+	// Each multiset is copied, and padded by the most kept dice of its chains,
+	// and the laws of what each chain became are freed.
+	tally.charge(
+		multisets.saturating_mul(
+			pool.chains
+				.saturating_mul(becoming.padding)
+				.saturating_add(1)
+		),
+		pool.occupied()
+	);
+	tally.free(becoming.laws);
+	(tally, composed, becoming.entries.min(cap).max(1))
+}
+
+/// Join multisets of chains into the multisets of what their chains still kept
+/// become, as [`transform_pool`](super::chain) does: scan each multiset, list
+/// the law of each distinct chain still kept, the first time that it arises,
+/// and join the multisets of draws of the laws of the chains still kept of
+/// each multiset, one distinct chain at a time, which charges the products of
+/// the multisets joined so far, and the multisets of each number of copies of
+/// each distinct chain, the first time that a join meets it, all of which stay
+/// charged until the new multisets are built.
+///
+/// The `c` copies of a chain whose law holds at most `t` chains join at most
+/// `C(c + t − 1, c)` multisets, at least `t`, so the products of a multiset
+/// of `k` chains still kept are at most [`spread`], and sum to at most
+/// [`prefixes`], and those of chains whose laws hold one chain at most that
+/// product. The multisets themselves are distinct, and dropping chains only
+/// lowers a product, so over the multisets of at most `n` chains among
+/// cohorts of `kᵢ` chains whose laws hold at most `tᵢ`, the products are at
+/// most the coefficients of `xⁿ` and below in `∏ (1 − x)^(−kᵢ·tᵢ)`, which sum
+/// to `C(n + V, n)`, for `V = Σ kᵢ·tᵢ`; and since every factor of a chain
+/// whose law may hold more than one is at least the least such `t`, `τ`, the
+/// joins of a multiset that holds `u` chains whose laws hold one take at most
+/// `u + τ / (τ − 1)` times its product, which sum to at most
+/// `C(n + V, n) · τ / (τ − 1) + k₁ · C(n + V, n − 1)`, for the `k₁` such
+/// chains.
+///
+/// # Parameters
+/// - `scan`: The distinct multisets, of at most `n` chains each.
+/// - `kept`: The most chains still kept of each, `k`.
+/// - `classes`: The sizes of the laws of every distinct chain of the multisets:
+///   the number of chains of each cohort, and a bound on the chains of the law
+///   of each.
+/// - `laws`: The tally of the laws of the distinct chains still kept, which
+///   leaves them charged.
+/// - `element`: A bound on the cells of a chain of the laws.
+/// - `values`: A bound on the distinct chains of the laws together.
+///
+/// # Returns
+/// The tally, which leaves the new multisets charged, and the new multisets.
+#[allow(clippy::too_many_arguments)]
+fn join(
+	scan: &Pile,
+	kept: u128,
+	classes: &[(u128, u128)],
+	laws: Tally,
+	element: u128,
+	values: u128
+) -> (Tally, Pile)
+{
+	let multisets = scan.multisets;
+	let values = values.clamp(1, u64::MAX as u128);
+	// Bounds beyond `u64::MAX` saturate the binomials anyway.
+	let classes = classes
+		.iter()
+		.map(|&(chains, t)| (chains, t.clamp(1, u64::MAX as u128)))
+		.collect::<Vec<_>>();
+	let mut tally = Tally::default();
+	// Each multiset charges its distinct chains, and its cells.
+	tally.charge(multisets.saturating_mul(scan.distinct), scan.occupied());
+	tally.then(laws);
+	let s = scan.distinct.min(kept);
+	let t = classes.iter().map(|(_, t)| *t).max().unwrap_or(1).max(1);
+	let varying = classes
+		.iter()
+		.filter(|(_, t)| *t > 1)
+		.fold(0u128, |sum, (chains, _)| sum.saturating_add(*chains));
+	let units = classes
+		.iter()
+		.filter(|(_, t)| *t <= 1)
+		.fold(0u128, |sum, (chains, _)| sum.saturating_add(*chains));
+	// Each multiset takes a step and a cell, and then its joins, of the chains
+	// whose laws may hold more than one chain, and of the rest; each step of a
+	// join holds a multiset joined so far and one drawn.
+	let r = varying.min(s);
+	let product = spread(kept, r, t);
+	let mut products = multisets.saturating_mul(product);
+	let mut joins = multisets.saturating_mul(
+		prefixes(kept, r, t).saturating_add((s - r).saturating_mul(product))
+	);
+	let n = scan.chains;
+	let v = classes.iter().fold(0u128, |v, (chains, t)| {
+		v.saturating_add(chains.saturating_mul((*t).max(1)))
+	});
+	let all = binomial(n.saturating_add(v), n);
+	let fewer = match n
+	{
+		0 => 0,
+		n => binomial(n.saturating_add(v), n - 1)
+	};
+	let least = classes
+		.iter()
+		.filter(|(_, t)| *t > 1)
+		.map(|(_, t)| *t)
+		.min()
+		.unwrap_or(2);
+	products = products.min(all);
+	joins = joins.min(
+		all.saturating_add(all.div_ceil(least - 1))
+			.saturating_add(units.saturating_mul(fewer))
+	);
+	let width = kept
+		.min(values.saturating_mul(2))
+		.saturating_mul(element)
+		.saturating_add(2);
+	tally.charge(
+		multisets.saturating_add(joins),
+		multisets.saturating_add(joins.saturating_mul(width))
+	);
+	// The multisets of each number of copies of each distinct chain still
+	// kept, the first time that a join meets it: at most as many of each
+	// number as there are chains, and as many in all as the multisets hold
+	// distinct chains, the dearest the most.
+	let listed = kept.min(LISTED);
+	let mut draws = Vec::new();
+	for &(chains, t) in &classes
+	{
+		let drawn = |copies: u128| {
+			let mut each = Tally::default();
+			draw(&mut each, copies, t.max(1), element);
+			each
+		};
+		for copies in kept + 1 - listed..=kept
+		{
+			draws.push((drawn(copies), chains));
+		}
+		if kept > listed
+		{
+			// The rest are dearest at the most of them.
+			draws.push((
+				drawn(kept - listed),
+				chains.saturating_mul(kept - listed)
+			));
+		}
+	}
+	tally.then(costliest(draws.into_iter(), multisets.saturating_mul(s)));
+	// The new multisets hold at most `k` chains of the laws.
+	let joined = products
+		.min(binomial(kept.saturating_add(values) - 1, kept))
+		.max(1);
+	let distinct = kept.min(values);
+	let pile = Pile {
+		multisets: joined,
+		chains: kept,
+		distinct,
+		keys: values.min(joined.saturating_mul(distinct)),
+		cells: element
+	};
+	tally.keep(tally.working, pile.occupied());
+	(tally, pile)
+}
+
+impl Part
+{
+	/// Answer the pool of the stacks of each setup of the part, and the
+	/// cohorts of its distinct chains.
+	///
+	/// # Returns
+	/// The pool, and the cohorts.
+	///
+	/// # Panics
+	/// If the part is not stacks.
+	fn stacked(&self) -> (Pile, Cohorts)
+	{
+		let Kind::Stacks {
+			kept,
+			multisets,
+			distinct,
+			chains,
+			laws,
+			..
+		} = &self.kind
+		else
+		{
+			unreachable!("only stacks have a pool")
+		};
+		let pool = Pile {
+			multisets: *multisets,
+			chains: kept.max.max(0) as u128,
+			distinct: *distinct,
+			keys: *chains,
+			cells: self.chain_cells()
+		};
+		(pool, laws.clone())
+	}
+
+	/// Answer a bound on the cells of a chain that a setup of the part may
+	/// hold, now or in the laws of its stacks: one, and one for each distinct
+	/// value of its kept dice, which are its end and the faces that the others
+	/// may show, or two for a die, as the chain of one die.
+	///
+	/// # Returns
+	/// The bound.
+	fn chain_cells(&self) -> u128
+	{
+		match &self.kind
+		{
+			Kind::Chains { length, inner, .. }
+			| Kind::Stacks { length, inner, .. } =>
+			{
+				1 + (*length).min(inner.len().saturating_add(1))
+			},
+			_ => 2
+		}
+	}
+
+	/// Answer a bound on the chains of one setup of the part, as multisets of
+	/// chains, that end at any one face: one for dice, results, or a pool,
+	/// each result of which is the chain of one die, and the
+	/// [others](Law::others) of the law of a chain otherwise.
+	///
+	/// # Parameters
+	/// - `law`: The law of a chain of the part.
+	///
+	/// # Returns
+	/// The bound.
+	fn others(&self, law: &Law) -> u128
+	{
+		match &self.kind
+		{
+			Kind::Chains { .. } | Kind::Stacks { .. } => law.others(),
+			_ => 1
+		}
+	}
+
+	/// Answer every outcome of the roll of one setup of the part as multisets
+	/// of chains, as [`Roll::stacks`](super::record::Roll) does: the multisets
+	/// of the law of i.i.d. chains; the [`joined`] stacks; or each
+	/// outcome of the roll, each result of which becomes the chain of one die,
+	/// of one more cell.
+	///
+	/// # Parameters
+	/// - `law`: The law of a chain of the part.
+	/// - `d`: The number of faces of the die, which is positive.
+	///
+	/// # Returns
+	/// The tally, which leaves the multisets charged, and the multisets.
+	fn pile(&self, law: &Law, d: u128) -> (Tally, Pile)
+	{
+		let mut tally = Tally::default();
+		let pile = match &self.kind
+		{
+			Kind::Chains { count, .. } =>
+			{
+				let n = dice(count);
+				let cells = 1 + law.values(d);
+				let chains = law.chains.max(1);
+				let (multisets, _) = draw(&mut tally, n, chains, cells);
+				Pile {
+					multisets,
+					chains: n,
+					distinct: n.min(chains),
+					keys: chains,
+					cells
+				}
+			},
+			Kind::Stacks { current, .. } =>
+			{
+				let (pool, cohorts) = self.stacked();
+				let (joining, pile) = joined(&pool, &cohorts, *current);
+				tally.then(joining);
+				pile
+			},
+			_ =>
+			{
+				let (outcomes, cells) = self.enumerate(&mut tally);
+				let distinct = cells - 1;
+				let results = outcomes.saturating_mul(distinct);
+				tally.charge(results, results);
+				Pile {
+					multisets: outcomes,
+					chains: self.results().max.max(0) as u128,
+					distinct,
+					keys: law.chains,
+					cells: 2
+				}
+			}
+		};
+		(tally, pile)
+	}
+
+	/// Reroll or explode the chains still kept of one setup of the part into
+	/// stacks, as [`Roll::reroll_chains`](super::record::Roll) and
+	/// [`Roll::explode`](super::record::Roll) do: transform the stacks of the
+	/// part, if none has been dropped; and otherwise enumerate the outcomes of
+	/// the roll as multisets of chains, keep the multisets of the chains still
+	/// kept, and transform those stacks, whose chains are still themselves, and
+	/// free the outcomes.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the reroll or explode.
+	/// - `chaining`: The chaining of the record after the reroll or explode.
+	/// - `setups`: A bound on the rerolled or exploded setups.
+	/// - `dropped`: Whether some chain has been dropped.
+	/// - `becomes`: What the reroll or explode makes of each chain of a law.
+	/// - `die`: The cells of the copy of the die that the setup keeps, which
+	///   the explode charges after it, and the reroll before.
+	///
+	/// # Returns
+	/// The tally of the reroll or explode, and the part that bounds the new
+	/// setups.
+	fn restack(
+		&self,
+		resolution: &Resolution,
+		chaining: &Chaining,
+		setups: u128,
+		dropped: bool,
+		becomes: impl Fn(&Law) -> Becoming,
+		die: u128
+	) -> (Tally, Part)
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let law = self.law(source);
+		let mut tally = Tally::default();
+		// The reroll or explode takes a step and a cell.
+		tally.charge(1, 1);
+		let (pool, cohorts, kept, outcomes) = match (dropped, &self.kind)
+		{
+			(false, Kind::Stacks { kept, .. }) =>
+			{
+				let (pool, cohorts) = self.stacked();
+				(pool, cohorts, *kept, 0)
+			},
+			(false, _) => unreachable!("only stacks are transformed whole"),
+			(true, _) =>
+			{
+				let (entry, outcomes) = self.pile(&law, d);
+				tally.then(entry);
+				let kept = self.kept();
+				let (keeping, pool) =
+					kept_pool(&outcomes, kept.max.max(0) as u128);
+				tally.then(keeping);
+				// The chains still kept are still themselves.
+				let cohort = Cohort {
+					chains: pool.keys,
+					law: 0,
+					others: self.others(&law),
+					free: 0
+				};
+				(
+					pool,
+					vec![cohort],
+					(kept.min.max(1), kept.max).into(),
+					outcomes.occupied()
+				)
+			}
+		};
+		// The chains that the chains of the pool may now be: their own, if
+		// still themselves.
+		let current = match themselves(&cohorts)
+		{
+			true => pool.keys,
+			false => law.chains
+		};
+		let becoming = becomes(&Law {
+			chains: current,
+			..law
+		});
+		// Saturated chains stay themselves.
+		let saturated = matches!(self.kind, Kind::Stacks { length: 0, .. });
+		let cap = match saturated
+		{
+			true => current,
+			false => becoming.law.distinct(d)
+		};
+		let (transform, cohorts, current) =
+			transform_stacks(&pool, &cohorts, &becoming, cap);
+		tally.then(transform);
+		if dropped
+		{
+			// The pool of the chains still kept, and the outcomes, are freed.
+			tally.free(pool.occupied().saturating_add(outcomes));
+		}
+		tally.charge(0, die);
+		let after = becoming.cells;
+		let occupied = cohorts.iter().fold(
+			Pile {
+				cells: after,
+				..pool
+			}
+			.occupied(),
+			|occupied, cohort| {
+				occupied.saturating_add(
+					cohort
+						.chains
+						.saturating_mul(after)
+						.saturating_mul(cohort.law.saturating_add(1))
+				)
+			}
+		);
+		let part = Part {
+			kind: Kind::Stacks {
+				kept,
+				multisets: pool.multisets,
+				distinct: pool.distinct,
+				chains: pool.keys,
+				laws: cohorts,
+				current,
+				length: match saturated
+				{
+					true => 0,
+					false => becoming.law.length
+				},
+				inner: becoming.law.inner,
+				totals: chaining.shape.clone(),
+				span: source.span()
+			},
+			setups,
+			cells: setups.saturating_mul(
+				occupied.saturating_add(1).saturating_add(source.cells)
+			),
+			dice: 0,
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
+	}
+
+	/// Explode the chains still kept of one setup of the part into the
+	/// multisets of their totals, as [`Roll::explode`](super::record::Roll)
+	/// does for stacks, or for i.i.d. chains after a drop: for stacks of which
+	/// none has been dropped, compose the law of each distinct chain of the
+	/// pool with the law of the totals of what each chain of it becomes, and
+	/// join the multisets of the pool; otherwise, enumerate the outcomes of the
+	/// roll as multisets of chains, and join the totals of what their chains
+	/// still kept become, and free the outcomes.
+	///
+	/// # Parameters
+	/// - `resolution`: The resolution of the explode.
+	/// - `tails`: A bound on the tails by which a matching chain may grow.
+	/// - `chaining`: The chaining of the record after the explode.
+	/// - `setups`: A bound on the exploded setups.
+	/// - `dropped`: Whether some chain has been dropped.
+	///
+	/// # Returns
+	/// The tally of the explode, and the part that bounds the exploded setups.
+	fn stack_totals(
+		&self,
+		resolution: &Resolution,
+		tails: u128,
+		chaining: &Chaining,
+		setups: u128,
+		dropped: bool
+	) -> (Tally, Part)
+	{
+		let source = &resolution.source;
+		let d = source.distinct;
+		let law = self.law(source);
+		let totals = chaining.shape.faces.max(1);
+		let mut tally = Tally::default();
+		// The explode takes a step and a cell.
+		tally.charge(1, 1);
+		let (joining, pile, kept, outcomes) = match (dropped, &self.kind)
+		{
+			(false, Kind::Stacks { kept, .. }) =>
+			{
+				let (pool, cohorts) = self.stacked();
+				let keys = pool.keys;
+				let becoming = law.totalled(resolution, tails, totals);
+				// Each distinct chain of the pool composes its law with the
+				// totals of what each chain of it becomes, which are freed once
+				// the multisets are joined.
+				let mut composing = Tally::default();
+				if themselves(&cohorts)
+				{
+					composing.charge(keys, pool.cells);
+					composing.free(pool.cells);
+				}
+				composing.then(becoming.tally);
+				let (mut steps, mut merged) = (0u128, 0u128);
+				for cohort in &cohorts
+				{
+					let laws = cohort.law.max(1);
+					steps = steps.saturating_add(
+						cohort
+							.chains
+							.saturating_mul(laws)
+							.saturating_mul(becoming.each.saturating_add(1))
+					);
+					merged = merged.max(laws.saturating_mul(becoming.each));
+				}
+				let composed =
+					compose(&cohorts, &becoming, becoming.each, totals);
+				let held = composed.iter().fold(0u128, |held, cohort| {
+					held.saturating_add(
+						cohort.chains.saturating_mul(cohort.law)
+					)
+				});
+				composing.charge(steps, held.saturating_add(merged));
+				composing.free(merged);
+				let (joining, pile) = join(
+					&pool,
+					pool.chains,
+					&reaches(&composed, source.span(), totals),
+					composing,
+					1,
+					totals
+				);
+				(joining, pile, *kept, 0)
+			},
+			(false, _) => unreachable!("only stacks are transformed whole"),
+			(true, _) =>
+			{
+				let (entry, outcomes) = self.pile(&law, d);
+				tally.then(entry);
+				let kept = self.kept();
+				let most = kept.max.max(0) as u128;
+				let keys = outcomes.keys.min(
+					outcomes
+						.multisets
+						.saturating_mul(outcomes.distinct.min(most))
+				);
+				let becoming = Law {
+					chains: keys,
+					..law.clone()
+				}
+				.totalled(resolution, tails, totals);
+				// Every chain of the outcomes is still itself.
+				let cohort = Cohort {
+					chains: outcomes.keys,
+					law: 0,
+					others: self.others(&law),
+					free: 0
+				};
+				let composed =
+					compose(&[cohort], &becoming, becoming.each, totals);
+				let (joining, pile) = join(
+					&outcomes,
+					most,
+					&reaches(&composed, source.span(), totals),
+					becoming.tally,
+					1,
+					totals
+				);
+				(
+					joining,
+					pile,
+					(kept.min.max(1), kept.max).into(),
+					outcomes.occupied()
+				)
+			}
+		};
+		// The outcomes are freed once the multisets are joined.
+		tally.then(joining);
+		tally.free(outcomes);
+		// The setup keeps a copy of the die.
+		tally.charge(0, source.cells);
+		let part = Part {
+			kind: Kind::Pool {
+				kept,
+				multisets: pile.multisets,
+				distinct: pile.distinct
+			},
+			setups,
+			cells: setups.saturating_mul(
+				pile.occupied()
+					.saturating_add(1)
+					.saturating_add(source.cells)
+			),
+			dice: 0,
+			lowest: 0.into(),
+			highest: 0.into()
+		};
+		(tally, part)
+	}
+}
+
+/// Join stacks into the multisets of the chains that they hold, as
+/// [`joined`](super::chain) does: copy the pool, if every chain is still
+/// itself, and otherwise copy the law of each distinct chain of the pool and
+/// [`join`] them.
+///
+/// # Parameters
+/// - `pool`: The pool of the stacks.
+/// - `cohorts`: The cohorts of the distinct chains of the pool.
+/// - `current`: A bound on the distinct chains that the chains of the pool may
+///   now be.
+///
+/// # Returns
+/// The tally, which leaves the multisets charged, and the multisets.
+fn joined(pool: &Pile, cohorts: &[Cohort], current: u128) -> (Tally, Pile)
+{
+	let mut tally = Tally::default();
+	if themselves(cohorts)
+	{
+		tally.charge(pool.multisets, pool.occupied());
+		return (tally, *pool)
+	}
+	let sizes = sizes(cohorts, current);
+	let entries = sizes.iter().fold(0u128, |entries, (chains, law)| {
+		entries.saturating_add(chains.saturating_mul(*law))
+	});
+	tally.charge(entries, entries.saturating_mul(pool.cells));
+	join(pool, pool.chains, &sizes, tally, pool.cells, current)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //                              Splits and merges.                            //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -4700,14 +6080,9 @@ impl Shadow
 			Location::RollingRecord(rec) =>
 			{
 				let record = &mut self.records[rec.0];
-				// Each outcome of whole chains is stacks.
-				self.unpriced |= record
-					.parts
-					.iter()
-					.any(|part| matches!(part.kind, Kind::Chains { .. }));
 				let (outcomes, outcome_cells) =
 					record.outcomes(&mut tally, die);
-				record.fix(outcome_cells, die);
+				record.fix(die);
 				(outcomes, outcome_cells)
 			},
 			Location::Answer => unreachable!("no instruction reads the answer")
@@ -5110,6 +6485,50 @@ enum Kind
 		totals: Die
 	},
 
+	/// The [stacks](super::record::Roll::Stacks) of whole chains that a
+	/// reroll or an explode leaves after a drop, or on results or chains that
+	/// a split fixed, or on a pool, or that an explode without limit
+	/// saturated, and which a later reroll or explode reads: the multisets of
+	/// the chains still kept as of the last drop or split, as their pool, and
+	/// the law of what each distinct chain of them has become since.
+	Stacks
+	{
+		/// The interval of the number of chains of each multiset of the pool.
+		kept: EvaluationBounds,
+
+		/// A bound on the multisets of the pool of each setup.
+		multisets: u128,
+
+		/// A bound on the distinct chains of each multiset of the pool.
+		distinct: u128,
+
+		/// A bound on the distinct chains of the pool of each setup.
+		chains: u128,
+
+		/// The cohorts of the distinct chains of the pool, by the chains of
+		/// the law of what each has become.
+		laws: Cohorts,
+
+		/// A bound on the distinct chains that the chains of the pool may now
+		/// be, among those of their laws.
+		current: u128,
+
+		/// The most kept dice of a chain, `l`, which is positive, or zero if a
+		/// saturated die decides every chain.
+		length: u128,
+
+		/// The faces that a kept die of a chain other than its end may show.
+		inner: ResultSet,
+
+		/// The shape of a die whose faces are the totals of the chains, which
+		/// bounds the totals of the pool to which they collapse.
+		totals: Die,
+
+		/// The [span](Source::span) of the die from which the chains grew, or
+		/// zero if none has grown since the cohorts formed.
+		span: u128
+	},
+
 	/// Results fixed by a split.
 	Results
 	{
@@ -5177,41 +6596,166 @@ impl Record
 		}
 	}
 
-	/// Fix the record to one of its outcomes, as a split does.
+	/// Fix the record to one of its outcomes, as a split does: fixed results,
+	/// for a setup of dice, results, or a pool, or [stacks](Kind::Stacks) of
+	/// one multiset, whose chains are still themselves, for a setup of chains
+	/// or stacks. The setups of the record may be of both, so it may keep a
+	/// part of each, though each outcome is one setup.
 	///
 	/// # Parameters
-	/// - `cells`: A bound on the cells of an outcome.
 	/// - `die`: The cells of the die that the outcome keeps, if a later reroll
 	///   draws from it, or zero.
-	fn fix(&mut self, cells: u128, die: u128)
+	fn fix(&mut self, die: u128)
 	{
+		let (chains, results) =
+			self.parts.iter().partition::<Vec<_>, _>(|part| {
+				matches!(part.kind, Kind::Chains { .. } | Kind::Stacks { .. })
+			});
+		let mut parts = Vec::new();
 		// The outcome keeps the results and the drops of the setup that it
-		// came from.
-		let first = &self.parts[0];
-		let (results, lowest, highest) = self.parts[1..].iter().fold(
-			(first.results(), first.lowest, first.highest),
-			|(results, lowest, highest), part| {
+		// came from, and the cells of its outcome.
+		let hulls = |parts: &[&Part]| {
+			let first = parts[0];
+			parts[1..].iter().fold(
 				(
-					hull(results, part.results()),
-					hull(lowest, part.lowest),
-					hull(highest, part.highest)
-				)
-			}
-		);
-		self.parts = vec![Part {
-			kind: Kind::Results {
-				distinct: cells - 1 - die,
-				results
-			},
-			setups: 1,
-			cells,
-			dice: 0,
-			lowest,
-			highest
-		}];
+					first.results(),
+					first.lowest,
+					first.highest,
+					first.enumerate(&mut Tally::default()).1
+				),
+				|(results, lowest, highest, cells), part| {
+					(
+						hull(results, part.results()),
+						hull(lowest, part.lowest),
+						hull(highest, part.highest),
+						cells.max(part.enumerate(&mut Tally::default()).1)
+					)
+				}
+			)
+		};
+		if !results.is_empty()
+		{
+			let (results, lowest, highest, cells) = hulls(&results);
+			parts.push(Part {
+				kind: Kind::Results {
+					distinct: cells - 1,
+					results
+				},
+				setups: 1,
+				cells: cells.saturating_add(die),
+				dice: 0,
+				lowest,
+				highest
+			});
+		}
+		if !chains.is_empty()
+		{
+			let (kept, lowest, highest, cells) = hulls(&chains);
+			let (distinct, length, inner, totals) = chains[1..].iter().fold(
+				chains[0].stack(),
+				|(distinct, length, inner, totals), part| {
+					let (more, other, faces, shape) = part.stack();
+					(
+						distinct.max(more),
+						length.max(other),
+						inner.union(&faces),
+						Die::run(
+							totals.least.min(shape.least),
+							totals.greatest.max(shape.greatest)
+						)
+					)
+				}
+			);
+			// The chains of a law of at most `l` kept dice, besides those of
+			// `i` faces, end at any one face at most `C(l − 1 + i, i)` times.
+			let others = match length
+			{
+				0 => 1,
+				l => binomial(l - 1 + inner.len(), inner.len().min(l - 1))
+			};
+			parts.push(Part {
+				kind: Kind::Stacks {
+					kept,
+					multisets: 1,
+					distinct,
+					chains: distinct,
+					laws: vec![Cohort {
+						chains: distinct,
+						law: 0,
+						others,
+						free: 0
+					}],
+					current: distinct,
+					length,
+					inner,
+					totals,
+					// No chain has grown since the cohort formed.
+					span: 0
+				},
+				setups: 1,
+				cells: cells.saturating_add(die),
+				dice: 0,
+				lowest,
+				highest
+			});
+		}
+		self.parts = parts;
 		// Each outcome is one setup, of weight one.
 		self.weighted = false;
 		self.summed = false;
+	}
+}
+
+impl Part
+{
+	/// Answer what the stacks of an outcome of a setup of the part, of chains
+	/// or stacks, hold: a bound on its distinct chains, the most kept dice of
+	/// a chain, the faces that a kept die of a chain other than its end may
+	/// show, and the shape of a die whose faces are the totals of the chains.
+	///
+	/// # Returns
+	/// What the stacks hold.
+	///
+	/// # Panics
+	/// If the part is neither chains nor stacks.
+	fn stack(&self) -> (u128, u128, ResultSet, Die)
+	{
+		match &self.kind
+		{
+			Kind::Chains {
+				count,
+				law,
+				length,
+				inner,
+				totals,
+				..
+			} => (
+				dice(count).min((*law).max(1)),
+				*length,
+				inner.clone(),
+				totals.clone()
+			),
+			Kind::Stacks {
+				kept,
+				distinct,
+				laws,
+				current,
+				length,
+				inner,
+				totals,
+				..
+			} => (
+				match themselves(laws)
+				{
+					true => *distinct,
+					false => (kept.max.max(0) as u128).min(*current)
+				},
+				*length,
+				inner.clone(),
+				totals.clone()
+			),
+			_ => unreachable!("only chains and stacks have stacks")
+		}
 	}
 }
 
@@ -5244,7 +6788,7 @@ impl Part
 			Kind::Standard { count, .. }
 			| Kind::Custom { count, .. }
 			| Kind::Chains { count, .. } => count.bounds.max(0.into()),
-			Kind::Pool { kept, .. } => *kept,
+			Kind::Pool { kept, .. } | Kind::Stacks { kept, .. } => *kept,
 			Kind::Results { results, .. } => *results
 		}
 	}
@@ -5315,6 +6859,7 @@ impl Part
 			// of chains may show fewer than their shape.
 			Kind::Custom { exact: false, .. }
 			| Kind::Chains { .. }
+			| Kind::Stacks { .. }
 			| Kind::Pool { .. }
 			| Kind::Empty
 			| Kind::Results { .. } => false
@@ -5780,13 +7325,13 @@ impl Part
 			{
 				self.dice_sums(limit)
 			},
-			Kind::Chains { .. } =>
+			Kind::Chains { .. } | Kind::Stacks { .. } =>
 			{
 				// Each setup collapses its chains to their totals before its
 				// sum, and frees them after it, so at most one setup holds its
 				// totals, or its collapse, atop the sums.
-				let (collapse, custom) = self.collapse(0);
-				let (sums, outcomes) = custom.dice_sums(limit);
+				let (collapse, totals) = self.collapse(0);
+				let (sums, outcomes) = totals.sums(limit);
 				let tally = Tally {
 					steps: collapse
 						.steps
@@ -5856,12 +7401,12 @@ impl Part
 				)
 			},
 			Kind::Custom { count, die, .. } => self.dice_sum(count, die, limit),
-			Kind::Chains { .. } =>
+			Kind::Chains { .. } | Kind::Stacks { .. } =>
 			{
 				// The chains collapse to their totals, which are summed as
-				// custom dice, and then freed.
-				let (collapse, custom) = self.collapse(0);
-				let (sum, support) = custom.setup_sum(limit);
+				// custom dice or a pool, and then freed.
+				let (collapse, totals) = self.collapse(0);
+				let (sum, support) = totals.setup_sum(limit);
 				tally.then(collapse);
 				let faces = tally.working;
 				tally.then(sum);
@@ -6801,26 +8346,32 @@ impl Part
 			{
 				multisets(each, dice(count), die.faces)
 			},
-			// The outcomes of chains are stacks, which the estimate does not
-			// yet price, so a split of them flags the shadow as unpriced, and
-			// these stand for them.
+			// The outcomes of chains are the multisets of their chains, each of
+			// which becomes stacks, of one more cell.
 			Kind::Chains { count, law, .. } =>
 			{
-				multisets(each, dice(count), (*law).clamp(1, u64::MAX as u128))
+				let n = dice(count);
+				let (outcomes, cells) =
+					draw(each, n, (*law).max(1), self.chain_cells());
+				each.charge(outcomes, outcomes);
+				(outcomes, cells.saturating_add(1))
 			},
+			Kind::Stacks { current, .. } =>
+			{
+				let (pool, cohorts) = self.stacked();
+				let (joining, pile) = joined(&pool, &cohorts, *current);
+				each.then(joining);
+				each.charge(pile.multisets, pile.multisets);
+				(pile.multisets, pile.distinct * pile.cells + 2)
+			}
 		}
 	}
 }
 
 /// Enumerate the multisets of the results of dice, as
 /// [`Roll::outcomes`](super::record::Roll::outcomes) does, whatever their
-/// count in each world.
-///
-/// After the faces of index below `i`, the partial outcomes of `j` results
-/// number `C(j + i - 1, i - 1)`, and all of them `C(n + i, i)`. The face of
-/// index `i` grows each into `n - j + 1` others, which sum to
-/// `C(n + i + 1, i + 1)`, or, if it is the greatest, completes each, with a
-/// binomial of `j` steps, which sum to `i · C(n + i, i + 1) + C(n + i, i)`.
+/// count in each world: list the faces of the die, and [`draw`] the
+/// multisets.
 ///
 /// # Parameters
 /// - `tally`: The tally, to which the outcomes stay charged.
@@ -6836,12 +8387,43 @@ fn multisets(tally: &mut Tally, n: u128, d: u128) -> (u128, u128)
 		tally.charge(1, 1);
 		return (1, 1)
 	}
+	// The faces of the die are listed, and freed once the outcomes are drawn.
 	tally.charge(d, d);
+	let outcomes = draw(tally, n, d, 1);
+	tally.free(d);
+	outcomes
+}
+
+/// Draw every multiset of `n` independent draws of a die of `d` distinct
+/// faces, each of which occupies at most `c` cells, as
+/// [`multisets`](super::record::multisets) does, which charges `n + 1`
+/// partial outcomes for each face, but the greatest, which completes each
+/// with a binomial of as many steps as it has results, so that even `n = 0`
+/// takes a step for each face.
+///
+/// After the faces of index below `i`, the partial outcomes of `j` results
+/// number `C(j + i - 1, i - 1)`, and all of them `C(n + i, i)`. The face of
+/// index `i` grows each into `n - j + 1` others, which sum to
+/// `C(n + i + 1, i + 1)`, or, if it is the greatest, completes each, with a
+/// binomial of `j` steps, which sum to `i · C(n + i, i + 1) + C(n + i, i)`.
+///
+/// # Parameters
+/// - `tally`: The tally, to which the outcomes stay charged.
+/// - `n`: The greatest number of draws.
+/// - `d`: The number of distinct faces of the die, which is positive.
+/// - `c`: The most cells of a face.
+///
+/// # Returns
+/// A bound on the number of outcomes, and on the cells of each.
+fn draw(tally: &mut Tally, n: u128, d: u128, c: u128) -> (u128, u128)
+{
+	// Bounds beyond `u64::MAX` saturate the binomials anyway.
+	let (n, d) = (n.min(u64::MAX as u128), d.clamp(1, u64::MAX as u128));
 	let base = tally.working;
 	tally.charge(1, 1);
 	// Each partial outcome after `i` faces holds at most `min(i, n)` distinct
-	// results.
-	let cells = |i: u128| i.min(n) + 1;
+	// faces, each of at most `c` cells.
+	let cells = |i: u128| c.saturating_mul(i.min(n)).saturating_add(1);
 	let partials = |i: u128| binomial(n + i, i);
 	// The faces before the greatest, then the greatest.
 	let between = binomial(n + d, d - 1).saturating_sub(1);
@@ -6865,14 +8447,15 @@ fn multisets(tally: &mut Tally, n: u128, d: u128) -> (u128, u128)
 			true => partials(d - 1),
 			false => binomial(n + i + 1, i + 1)
 		};
-		peak = peak.max(held.saturating_add(grown.saturating_mul(i + 2)));
+		// Each grown partial outcome is charged a cell, and those of every face
+		// placed so far.
+		let placed = c.saturating_mul(i + 1).saturating_add(1);
+		peak = peak.max(held.saturating_add(grown.saturating_mul(placed)));
 	}
 	tally.peak = tally.peak.max(base.saturating_add(peak));
 	let outcomes = partials(d - 1);
 	let outcome_cells = cells(d);
 	tally.keep(1, outcomes.saturating_mul(outcome_cells));
-	// The die is freed.
-	tally.free(d);
 	(outcomes, outcome_cells)
 }
 

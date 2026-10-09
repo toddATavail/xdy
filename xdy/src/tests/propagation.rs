@@ -2820,11 +2820,9 @@ fn test_gapped_counts()
 
 /// Ensure that the estimate stays tight where it is not exact: within the
 /// specified ratio of the usage, in steps and in cells, on mixtures, splits,
-/// explodes, whole chains, and every case of the distribution corpus but those
-/// that may hold stacks of whole chains, which the estimate does not yet price,
-/// and so saturates. The budget decides which
-/// functions are reasonable, so a loose estimate would refuse reasonable
-/// functions.
+/// explodes, whole chains, stacks of whole chains, and every case of the
+/// distribution corpus. The budget decides which functions are reasonable, so
+/// a loose estimate would refuse reasonable functions.
 #[test]
 fn test_tight_estimates()
 {
@@ -2947,14 +2945,94 @@ fn test_tight_estimates()
 		("4D6 explode = 6 (1D3) times reroll = 1", 1.6),
 		("4D6 explode = 6 2 times reroll ≤ (1D3)", 1.2),
 		("{x}@(1D3) + {x}D6 explode = 6 2 times reroll = 1", 1.2),
-		("{x}@(1D3) + 4D6 explode = 6 {x} times reroll ≤ {x}", 1.25)
+		("{x}@(1D3) + 4D6 explode = 6 {x} times reroll ≤ {x}", 1.25),
+		// After a drop or keep, or on a pool, whole chains are stacks: the
+		// multisets of the chains still kept, and the laws of what each has
+		// become, which a reroll or an explode transforms without joining
+		// them. The estimate prices them by cohorts of chains whose laws are
+		// alike, and their joins over the distinct multisets of the pool. A
+		// reroll that may match the dice besides the ends, and small custom
+		// dice, are looser, since every chain of a cohort may change, and
+		// every step of a join is priced at the widest multisets.
+		("4D6 drop lowest 1 explode = 6 2 times reroll = 1", 2.0),
+		(
+			"3D4 drop lowest 1 explode != 5 2 times reroll > -1 1 times",
+			1.5
+		),
+		(
+			"4D4 drop lowest 1 explode != 5 2 times reroll > -1 1 times",
+			2.0
+		),
+		(
+			"5D6 keep highest 3 explode = 6 3 times reroll = 1 2 times",
+			1.8
+		),
+		(
+			"4D6 drop lowest 1 explode ≥ 4 3 times reroll ≤ 3 2 times",
+			1.4
+		),
+		(
+			"5D6 drop lowest 1 explode ≥ 5 2 times reroll ≤ 2 1 times",
+			1.85
+		),
+		(
+			"4D6 drop lowest 1 explode ≥ 4 3 times reroll ≤ 3 2 times explode = 6 1 times",
+			1.45
+		),
+		("4D6 drop lowest 1 explode = 6 2 times reroll ≥ 5", 6.7),
+		(
+			"4D6 drop lowest 1 reroll = 1 explode = 6 2 times reroll = 2",
+			2.0
+		),
+		(
+			"4D[1, 3, 5] drop lowest 1 explode = 5 2 times reroll = 1",
+			4.25
+		),
+		(
+			"4D[-2, 0, 3] drop lowest 1 explode = 3 2 times reroll = -2",
+			5.5
+		),
+		// Chained explodes after a keep.
+		(
+			"4D6 keep highest 3 explode = 6 1 times explode = 6 1 times",
+			3.9
+		),
+		(
+			"4D6 keep highest 3 explode = 6 2 times explode ≥ 5 1 times reroll = 1",
+			2.3
+		),
+		// Saturated chains, which rerolls leave alone.
+		("4D6 explode ≥ 1 ∞ times reroll = 1", 1.1),
+		("4D6 explode ≥ 1 ∞ times drop lowest 1 reroll = 1", 1.1),
+		// A drop between deferrals joins the stacks.
+		(
+			"4D6 explode = 6 2 times reroll = 1 drop lowest 1 explode = 6 2 times",
+			3.6
+		),
+		(
+			"4D6 explode = 6 2 times reroll = 1 drop lowest 1 reroll = 2",
+			1.25
+		),
+		(
+			"3D6 explode = 6 2 times drop lowest 1 reroll = 1 drop lowest 1 explode = 6 1 times",
+			1.2
+		),
+		// Random counts, thresholds, limits, and drops.
+		("(1D4)D6 drop lowest 1 explode = 6 2 times reroll = 1", 5.25),
+		("4D6 drop lowest 1 explode ≥ (1D6) 2 times reroll = 1", 3.5),
+		("4D6 drop lowest 1 explode = 6 (1D3) times reroll = 1", 1.9),
+		("4D6 drop lowest (1D2) explode = 6 2 times reroll = 1", 2.25),
+		(
+			"{x}@(1D3) + 4D6 drop lowest 1 explode = 6 {x} times reroll ≤ {x}",
+			1.5
+		)
 	]
 	{
 		let (cost, usage) = estimated(source);
 		within(source, cost, usage, ratio);
 	}
-	// An explode after a split on its record prices every world as its
-	// costliest.
+	// An explode after a split on its record, or a reroll or an explode after
+	// a split of whole chains, prices every world as its costliest.
 	for assembly in [
 		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
 		 dice 4D6\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- explode = 6 up \
@@ -2968,7 +3046,18 @@ fn test_tight_estimates()
 		 dice 3D[1, 3, 5]\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- reroll \
 		 = 1 up to 1 times from ⚅0\n\t\t⚅0 <- explode = 5 up to 2 times from \
 		 ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn \
-		 @2\n"
+		 @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 4D6\n\t\t⚅0 <- explode = 6 up to 2 times from ⚅0\n\t\t@0 <- \
+		 sum rolling record ⚅0\n\t\t⚅0 <- reroll = 1 up to 1 times from \
+		 ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + @1\n\t\treturn \
+		 @2\n",
+		"Function() r#3 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard \
+		 dice 4D6\n\t\t⚅0 <- drop lowest 1 from ⚅0\n\t\t⚅0 <- explode = 6 up \
+		 to 2 times from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\t⚅0 <- \
+		 reroll = 1 up to 1 times from ⚅0\n\t\t⚅0 <- explode = 6 up to 1 \
+		 times from ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\t@2 <- @0 + \
+		 @1\n\t\treturn @2\n"
 	]
 	{
 		for (cost, _) in estimated_assembly(assembly)
@@ -2984,12 +3073,6 @@ fn test_tight_estimates()
 		let (_, usage) =
 			propagate_within(&evaluator, &args, Budget::UNLIMITED).unwrap();
 		let cost = estimate(&evaluator, args.iter().copied()).unwrap();
-		if cost.steps == u64::MAX
-		{
-			// The estimate does not yet price stacks of whole chains, so it
-			// saturates.
-			continue
-		}
 		within(source, cost, usage, 2.0);
 	}
 }
@@ -3241,6 +3324,40 @@ fn test_classes()
 			),
 			Class {
 				explodes: true,
+				..none
+			}
+		),
+		// Whole chains after a drop are stacks, which explode and reroll
+		// alike, as do saturated chains.
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&[
+					"drop lowest 1",
+					"explode = 6 up to 2 times",
+					"reroll = 1 up to 1 times"
+				]
+			),
+			Class {
+				drops: true,
+				explodes: true,
+				rerolls: true,
+				..none
+			}
+		),
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&[
+					"explode >= 1 unlimited times",
+					"drop lowest 1",
+					"reroll = 1 up to 1 times"
+				]
+			),
+			Class {
+				drops: true,
+				explodes: true,
+				rerolls: true,
 				..none
 			}
 		)
@@ -6391,11 +6508,8 @@ proptest! {
 	/// reroll or explode reads, refuses it only if it explodes without limit,
 	/// succeeds within a budget exactly when the budget covers its usage, and
 	/// reports its progress faithfully, and its estimate bounds its usage,
-	/// trivially if the record may hold stacks of whole chains, which the
-	/// estimate does not yet price, and so saturates, whenever it fits
-	/// [`BUDGET`]. A split on whole chains after
-	/// every clause may need billions of cells, so the property abstains
-	/// beyond it.
+	/// whenever it fits [`BUDGET`]. A split on whole chains after every clause
+	/// may need billions of cells, so the property abstains beyond it.
 	#[test]
 	fn test_explode_estimates_bound_usage(
 		program in explode_program(),
