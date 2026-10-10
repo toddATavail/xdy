@@ -140,6 +140,47 @@ private theorem threeD2_invariants :
         (.single 2, [(.live [2] 1, 2), (.live [2] 2, 2), (.live [2] 2, 4)])]),
     die := some (.standard 2) }
 
+/-- The stacks that exploding three two-sided dice on `2` once leaves, after
+the lowest is dropped, are well formed, grounded, and have faces. -/
+private theorem threeD2Stacks_invariants :
+    (threeD2.burst (.within 2 2) (some 1) true).WellFormed ∧
+      (threeD2.burst (.within 2 2) (some 1) true).Grounded ∧
+      (threeD2.burst (.within 2 2) (some 1) true).Faced := by
+  obtain ⟨hs, hg, hf⟩ := threeD2_invariants
+  obtain ⟨hs', hf', hg'⟩ :=
+    Setup.burst_invariants (.within 2 2) (some 1) true hs hg hf
+  refine ⟨hs', hg' rfl fun v h => ?_, hf'⟩
+  rw [Burst.resolve_some true (by decide)] at h
+  cases h
+
+-- Exploding those stacks again, and rerolling them, whole or reduced to
+-- their totals, describe the specification's explodes and rerolls.
+example : (threeD2.burst (.within 2 2) (some 1) true).Bursts (.within 2 2)
+    (some 1) true :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : (threeD2.burst (.within 2 2) (some 1) true).Bursts (.within 2 2)
+    (some 1) false :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : (threeD2.burst (.within 2 2) (some 1) true).RerollsAs (.within 1 1)
+    (some 1) true :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : (threeD2.burst (.within 2 2) (some 1) true).RerollsAs (.within 1 1)
+    (some 1) false :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+-- What they leave is well formed, and grounded if the chains stay whole.
+example : ((threeD2.burst (.within 2 2) (some 1) true).burst (.within 2 2)
+    (some 1) false).WellFormed :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  (Setup.burst_invariants _ _ _ hs hg hf).1
+example : ((threeD2.burst (.within 2 2) (some 1) true).rerollAs (.within 1 1)
+    (some 1) true).Grounded :=
+  let ⟨hs, hg, hf⟩ := threeD2Stacks_invariants
+  (Setup.reroll_invariants _ _ _ hs hg hf).2.2 rfl
+
 -- Both describe the specification's explode, as every later instruction
 -- reads it.
 example : threeD2.Bursts (.within 2 2) (some 1) true :=

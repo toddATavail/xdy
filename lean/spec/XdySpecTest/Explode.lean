@@ -160,31 +160,34 @@ private theorem twoD2_alike : ∀ ρ ∈ twoD2.roll,
 example : twoD2.Bursts (.within 2 2) (some 1) true :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
   Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
-    (extendsAlike_of twoD2_alike)
+    (extendsAlike_of twoD2_alike) fun ⟨_, _, h⟩ => by cases h
 
 -- Reducing them to their totals describes it as a later sum reads it.
 example : twoD2.Bursts (.within 2 2) (some 3) false :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
   Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
-    (extendsAlike_of twoD2_alike)
+    (extendsAlike_of twoD2_alike) fun ⟨_, _, h⟩ => by cases h
 
 -- Saturating describes it too.
 example : twoD2.Bursts (.within 1 2) none true :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
   Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
-    (extendsAlike_of twoD2_alike)
+    (extendsAlike_of twoD2_alike) fun ⟨_, _, h⟩ => by cases h
 
 -- An explode of the chains that an explode left describes the
--- specification's, as every explode of chains that stay whole, and leave no
--- stacks, leaves them grounded.
+-- specification's, as every explode that keeps the chains whole, and does not
+-- saturate them, leaves them grounded.
 example : (twoD2.burst (.within 2 2) (some 1) true).Bursts (.within 1 1)
     (some 2) false := by
   obtain ⟨hs, hg, hf⟩ := twoD2_invariants
   obtain ⟨hs', hf', hg'⟩ := Setup.burst_invariants_alike (.within 2 2)
     (some 1) true hs hg hf (extendsAlike_of twoD2_alike)
-  refine Setup.law_burst_alike _ _ _ hs' (hg' rfl fun ms ls h => ?_) hf'
+    fun ⟨_, _, h⟩ => by cases h
+  refine Setup.law_burst_alike _ _ _ hs' (hg' rfl fun v h => ?_) hf'
     (explodes_of (by decide)) (extendsAlike_of fun ρ h => ?_)
-  · cases h
+    fun ⟨_, _, h⟩ => by cases h
+  · rw [Burst.resolve_some true (by decide)] at h
+    cases h
   · cases h
     exact ⟨rfl, rfl, rfl⟩
 

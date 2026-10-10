@@ -72,10 +72,14 @@
 //! over its weights, draws what each chain of stacks has become, so that the
 //! joins that stacks defer are the eager ones (`weighted_joined`); and that
 //! [`Roll::collapse`] of stacks, by [`joined_totals`], leaves the results of
-//! the records that they fill (`Roll.map_results_collapse`). The rerolls and
-//! explodes of stacks none of whose chains has been dropped, which compose the
-//! deferred laws of stacks, have no proof yet; the tests check every law
-//! against an independent enumeration.
+//! the records that they fill (`Roll.map_results_collapse`). It proves last
+//! that [`compose`] composes the law of what a chain of stacks has become with
+//! what it becomes (`weighted_compose`), and that [`transform_stacks`] pads
+//! each multiset to make up what its composed laws lack
+//! (`law_transformStacks`), and so the laws of the rerolls and explodes of
+//! stacks none of whose chains has been dropped (`Setup.law_burst`,
+//! `Setup.law_reroll`). Stacks of saturated chains have no proof yet; the
+//! tests check every law against an independent enumeration.
 
 use std::{
 	cmp::Ordering,
@@ -1323,9 +1327,9 @@ fn compose<T: Element>(
 /// padding makes up what the composed laws of each multiset lack, so that the
 /// new stacks weigh each multiset as the old did, and
 /// `map_coe_stackDraws_composed` that they draw each chain from what it had
-/// become and then from what that becomes. `Setup.law_burst` and
-/// `Setup.law_reroll` prove the explodes and rerolls of stacks without laws,
-/// such as [`kept_pool`] leaves; those of stacks with laws have no proof yet.
+/// become and then from what that becomes. So `Setup.law_burst` and
+/// `Setup.law_reroll` prove the explodes and rerolls of stacks, with laws or
+/// without, such as [`kept_pool`] leaves.
 fn transform_stacks(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1586,8 +1590,8 @@ impl Roll
 	/// `Roll.explode`, in `lean/spec/XdySpec/Explode.lean`, mirrors this,
 	/// `Roll.explodeStacks` its second arm, and `Roll.explodeMultisets` its
 	/// last. `Setup.law_burst_alike` proves the law of the first arm, and
-	/// `Setup.law_burst`, in `lean/spec/XdySpec/Stacks.lean`, that of the last
-	/// on every roll but stacks; the explodes of stacks have no proof yet.
+	/// `Setup.law_burst`, in `lean/spec/XdySpec/Stacks.lean`, those of the
+	/// second and the last.
 	pub(super) fn explode(
 		&self,
 		lowest: i32,
@@ -1735,8 +1739,7 @@ impl Roll
 	/// # Notes
 	/// `Roll.rerollChains`, in `lean/spec/XdySpec/Chains.lean`, mirrors this,
 	/// and `Setup.law_reroll`, in `lean/spec/XdySpec/Stacks.lean`, proves the
-	/// laws of the first and last arms on i.i.d. chains; the composition of the
-	/// laws of stacks has no proof yet.
+	/// laws of every arm.
 	pub(super) fn reroll_chains(
 		&self,
 		lowest: i32,

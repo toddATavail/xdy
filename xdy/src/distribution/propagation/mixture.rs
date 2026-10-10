@@ -24,12 +24,12 @@
 //! that rolling, dropping, keeping and summing a mixture act on that law as the
 //! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` and
 //! `lean/spec/XdySpec/Stacks.lean` prove that rerolling does, as every later
-//! instruction views the record, on any roll but stacks, dropped or not; and
+//! instruction views the record, on any roll, dropped or not; and
 //! `lean/spec/XdySpec/Explode.lean` and `lean/spec/XdySpec/Stacks.lean` prove
 //! that exploding does, when the explode does nothing, saturates every chain
-//! still kept, or extends the chains of any roll but stacks, dropped or not.
-//! Nothing yet proves that rerolling or exploding the [chains](super::chain)
-//! of stacks none of which has been dropped does. When those
+//! still kept, or extends the [chains](super::chain) of any roll, dropped or
+//! not. Nothing yet proves that rerolling or exploding stacks of saturated
+//! chains does. When those
 //! operands are rolls with fixed operands, every path through them is equally
 //! likely, and the mixture weighs each outcome by the number of paths that
 //! reach it. When some path to a setup is likelier than another, the least
@@ -161,15 +161,15 @@ impl Setup
 	/// the reroll cannot change keeps its drops, and one that it crosses out
 	/// drops every die still kept, where the specification's record keeps only
 	/// its kept results. `Setup.law_reroll`, in
-	/// `lean/spec/XdySpec/Stacks.lean`, lifts it to i.i.d. chains, dropped or
-	/// not, as a later reroll or explode reads their kept chains, and as every
-	/// other instruction reads their totals once [`Setup::collapse`] reduces
-	/// them. The proofs ask that the setup be grounded (`Setup.Grounded`):
-	/// every result a face of the die, which lies within the `i32` range,
-	/// and every chain normal, as `Setup.reroll_invariants` and
-	/// `Setup.burst_invariants` prove of every reroll and explode that
-	/// leaves no stacks; the rerolls of stacks none of whose chains has
-	/// been dropped have no proof yet.
+	/// `lean/spec/XdySpec/Stacks.lean`, lifts it to i.i.d. chains and stacks,
+	/// dropped or not, as a later reroll or explode reads their kept chains,
+	/// and as every other instruction reads their totals once
+	/// [`Setup::collapse`] reduces them. The proofs ask that the setup be
+	/// grounded (`Setup.Grounded`): every result a face of the die, which lies
+	/// within the `i32` range, and every chain normal, as
+	/// `Setup.reroll_invariants` and `Setup.burst_invariants` prove of every
+	/// reroll, and every explode that does not saturate, that keeps its chains
+	/// whole; the rerolls of stacks of saturated chains have no proof yet.
 	fn reroll(
 		&self,
 		criterion: &Criterion,
@@ -268,17 +268,18 @@ impl Setup
 	/// `lean/spec/XdySpec/Stacks.lean`, proves that, whether the explode does
 	/// nothing, saturates every chain still kept, extends the independent and
 	/// alike chains of a range, dice, or i.i.d. chains none of which has been
-	/// dropped, or extends the chains still kept of each multiset of the
-	/// chains of any other roll but stacks, the exploded setup, reduced to its
-	/// totals unless `whole`, describes the specification's explode of the
-	/// setup's records, as every later instruction reads them: their kept
-	/// chains and their die if `whole`, which a later reroll or explode reads,
-	/// and their kept results and their die otherwise. The proof asks that
-	/// every face of the die lie within the `i32` range, and that every chain
-	/// be normal and hold only faces of the die, and the setup hold no stacks
-	/// (`Setup.Grounded`), as `Setup.burst_invariants` proves of every explode
-	/// that keeps its chains whole and leaves no stacks. Nothing yet proves the
-	/// explodes of stacks.
+	/// dropped, extends the chains of stacks none of which has been dropped,
+	/// composing the laws that they defer, or extends the chains still kept of
+	/// each multiset of the chains of any other roll, the exploded setup,
+	/// reduced to its totals unless `whole`, describes the specification's
+	/// explode of the setup's records, as every later instruction reads them:
+	/// their kept chains and their die if `whole`, which a later reroll or
+	/// explode reads, and their kept results and their die otherwise. The
+	/// proof asks that every face of the die lie within the `i32` range, and
+	/// that every chain be normal, may still grow, and hold only faces of the
+	/// die (`Setup.Grounded`), as `Setup.burst_invariants` proves of every
+	/// explode that keeps its chains whole and does not saturate them. Nothing
+	/// yet proves the explodes of stacks of saturated chains.
 	fn explode(
 		&self,
 		criterion: &Criterion,
