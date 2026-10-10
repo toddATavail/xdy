@@ -311,6 +311,161 @@ private def dropped : State :=
 #guard step fresh (.reroll 0 (.eq (imm 0)) (.times (imm 1))) == .pure fresh
 #guard step fresh (.reroll 1 (.eq (imm 0)) .unlimited) == .pure fresh
 
+/-! ## Explodes -/
+
+/-- Roll `count` dice with `faces` faces into rolling record `0`, apply the
+explode, and sum. -/
+private def exploding (count faces : Int) (p : Predicate) (l : Limit) :
+    Function :=
+  prog [.rollStandardDice 0 (imm count) (imm faces), .explode 0 p l,
+    .sumRollingRecord 0 0, .return (reg 0)]
+
+/-- The law of the dice of a chain that begins with one die, and that an
+explode grows up to `limit` times while `grows` matches its last die, in the
+order drawn, composed from `Dist` alone. -/
+private def chainDice (die : Dist Int) (grows : Int → Bool) :
+    Nat → Dist (List Int)
+  | 0 => die.map ([·])
+  | n + 1 => die.bind fun x =>
+    if grows x then (chainDice die grows n).map (x :: ·) else .pure [x]
+
+/-- The law of the total of a chain that begins with one die, as
+`chainDice` grows it, which never saturates in these tests. -/
+private def chainTotal (die : Dist Int) (grows : Int → Bool) (limit : Nat) :
+    Dist Int :=
+  (chainDice die grows limit).map (·.foldl (· + ·) 0)
+
+-- `1D6 explode = 6`, in closed form over 36.
+#guard reduced (exploding 1 6 (.eq (imm 6)) (.times (imm 1))) ==
+  .ok [(1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (7, 1), (8, 1), (9, 1),
+    (10, 1), (11, 1), (12, 1)]
+-- Each chain grows independently: `2D6 explode = 6 2 times`.
+#guard reduced (exploding 2 6 (.eq (imm 6)) (.times (imm 2))) ==
+  lowest (sumDice 2 (chainTotal (d 6) (· == 6) 2))
+-- Custom faces are equally likely by position: `1D[1, 2, 2] explode = 2`.
+#guard reduced (prog [.rollCustomDice 0 (imm 1) [1, 2, 2],
+    .explode 0 (.eq (imm 2)) (.times (imm 1)), .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  lowest (chainTotal (customDie [1, 2, 2]) (· == 2) 1)
+-- A limit of `0` or less explodes nothing, and neither does an unlimited
+-- explode that matches no die.
+#guard reduced (exploding 2 6 (.eq (imm 6)) (.times (imm 0))) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 2) (imm 6)))
+#guard reduced (exploding 2 6 (.eq (imm 6)) (.times (imm i32Min))) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 2) (imm 6)))
+#guard reduced (exploding 2 6 (.gt (imm 6)) .unlimited) ==
+  reduced (sumOf (.rollStandardDice 0 (imm 2) (imm 6)))
+-- An unlimited explode whose predicate matches every face saturates every
+-- chain, toward the sign of the mean face, or at `0` if that mean is `0`.
+#guard dist (exploding 2 6 (.ge (imm 1)) .unlimited) == .ok [(i32Max, 36)]
+#guard dist (prog [.rollCustomDice 0 (imm 2) [-1, -2],
+    .explode 0 (.le (imm (-1))) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(i32Min, 4)]
+#guard dist (prog [.rollCustomDice 0 (imm 1) [-1, 1],
+    .explode 0 (.in [-1, 1]) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(0, 2)]
+#guard dist (exploding 2 0 (.in [0]) .unlimited) == .ok [(0, 1)]
+-- Any other unlimited explode that grows a chain may draw without bound, so
+-- the oracle refuses the function...
+#guard dist (exploding 1 6 (.eq (imm 6)) .unlimited) == .error unboundedMessage
+-- ...if any state that it reaches grows a chain, here only when `1D2` shows
+-- `1`, and the die then shows `6`...
+#guard dist (prog [.rollRange 1 (imm 1) (imm 2), .sumRollingRecord 0 1,
+    .binary .add 0 (reg 0) (imm 4), .rollStandardDice 0 (imm 1) (imm 6),
+    .explode 0 (.gt (reg 0)) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .error unboundedMessage
+-- ...but not if no chain that it reaches grows.
+#guard dist (prog [.rollStandardDice 0 (imm 2) (imm 6),
+    .dropLowest 0 (imm 2), .explode 0 (.eq (imm 6)) .unlimited,
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  .ok [(0, 36)]
+-- An explode grows a chain only from its end: `1D2 explode = 2 explode = 2`
+-- grows `[2, 1]` no further, though its `2` matches, and so is
+-- `1D2 explode = 2 2 times`.
+#guard reduced (prog [.rollStandardDice 0 (imm 1) (imm 2),
+    .explode 0 (.eq (imm 2)) (.times (imm 1)),
+    .explode 0 (.eq (imm 2)) (.times (imm 1)), .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  lowest (chainTotal (d 2) (· == 2) 2)
+-- Later drops and keeps count a chain as one die, worth its total:
+-- `2D6 explode = 6 keep highest 1`.
+#guard reduced (prog [.rollStandardDice 0 (imm 2) (imm 6),
+    .explode 0 (.eq (imm 6)) (.times (imm 1)), .keepHighest 0 (imm 1),
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  lowest ((chainTotal (d 6) (· == 6) 1).bind fun a =>
+    (chainTotal (d 6) (· == 6) 1).map (Max.max a ·))
+-- An explode grows only the chains still kept: `2D2 drop highest explode = 2`.
+#guard reduced (prog [.rollStandardDice 0 (imm 2) (imm 2),
+    .dropHighest 0 (imm 1), .explode 0 (.eq (imm 2)) (.times (imm 1)),
+    .sumRollingRecord 0 0, .return (reg 0)]) ==
+  lowest ((d 2).bind fun a => (d 2).bind fun b =>
+    let x := Min.min a b
+    if x == 2 then (d 2).map (x + ·) else .pure x)
+-- A reroll rerolls each die of a chain alone: `1D2 explode = 2 2 times
+-- reroll = 2` rerolls every `2` of the chain.
+#guard reduced (prog [.rollStandardDice 0 (imm 1) (imm 2),
+    .explode 0 (.eq (imm 2)) (.times (imm 2)),
+    .reroll 0 (.eq (imm 2)) (.times (imm 1)), .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  lowest ((chainDice (d 2) (· == 2) 2).bind fun xs =>
+    xs.foldl (fun t x => t.bind fun t =>
+        (if x == 2 then d 2 else .pure x).map (t + ·))
+      (.pure 0))
+-- The replacement of the last die of a chain becomes its last die, from which
+-- a later explode grows it: `1D2 explode = 2 reroll = 1 explode = 2`.
+#guard reduced (prog [.rollStandardDice 0 (imm 1) (imm 2),
+    .explode 0 (.eq (imm 2)) (.times (imm 1)),
+    .reroll 0 (.eq (imm 1)) (.times (imm 1)),
+    .explode 0 (.eq (imm 2)) (.times (imm 1)), .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  lowest (
+    let rerolled (y : Int) : Dist Int := if y == 1 then d 2 else .pure y
+    let grown (t y : Int) : Dist Int :=
+      if y == 2 then (d 2).map (t + y + ·) else .pure (t + y)
+    (d 2).bind fun x =>
+      if x == 2 then (d 2).bind fun e => (rerolled e).bind (grown 2)
+      else (rerolled x).bind (grown 0))
+-- An unlimited reroll that matches every face crosses out every chain that
+-- may still grow, whole.
+#guard dist (prog [.rollStandardDice 0 (imm 2) (imm 2),
+    .explode 0 (.eq (imm 2)) (.times (imm 1)),
+    .reroll 0 (.ge (imm 1)) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(0, 16)]
+-- Rerolls and explodes leave saturated chains alone.
+#guard dist (prog [.rollStandardDice 0 (imm 2) (imm 6),
+    .explode 0 (.ge (imm 1)) .unlimited,
+    .reroll 0 (.ge (imm 1)) .unlimited,
+    .reroll 0 (.ge (imm i32Min)) (.times (imm 1)),
+    .explode 0 (.ge (imm i32Min)) (.times (imm 1)),
+    .explode 0 (.eq (imm i32Max)) .unlimited, .sumRollingRecord 0 0,
+    .return (reg 0)]) ==
+  .ok [(i32Max, 36)]
+
+-- An explode leaves the kept chains, without drops, and its die, and a record
+-- whose chains are all single dice holds no chains.
+#guard step dropped (.explode 0 (.in []) .unlimited) ==
+  .pure (fresh.setRecord 0 { results := [2, 3], die := .standard 3 })
+#guard step dropped (.explode 0 (.eq (imm 2)) (.times (imm 0))) ==
+  .pure (fresh.setRecord 0 { results := [2, 3], die := .standard 3 })
+#guard step dropped (.explode 0 (.ge (imm 1)) .unlimited) ==
+  .pure (fresh.setRecord 0 {
+    results := [i32Max, i32Max], die := .standard 3
+    chains := [.saturated i32Max, .saturated i32Max] })
+-- A record never rolled holds no dice, so an explode changes nothing.
+#guard step fresh (.explode 0 (.eq (imm 0)) (.times (imm 1))) == .pure fresh
+#guard step fresh (.explode 1 (.eq (imm 0)) .unlimited) == .pure fresh
+-- Only an unlimited explode that does not saturate, but grows some chain
+-- still kept, may draw without bound.
+#guard unbounded dropped (.explode 0 (.eq (imm 2)) .unlimited)
+#guard !unbounded dropped (.explode 0 (.eq (imm 1)) .unlimited)
+#guard !unbounded dropped (.explode 0 (.ge (imm 1)) .unlimited)
+#guard !unbounded dropped (.explode 0 (.eq (imm 2)) (.times (imm 9)))
+#guard !unbounded dropped (.reroll 0 (.eq (imm 2)) .unlimited)
+
 /-! ## Sums, arithmetic and registers -/
 
 -- A rolling record that was never rolled sums to `0`.
@@ -529,6 +684,64 @@ private def sortedDice (n : Nat) (die : Dist Int) : Dist (List Int) :=
           (if x < 3 then rerolledOnce (d 6) (· < 3) else .pure x).map (t + ·))
       (.pure 0))
 
+-- `2D4 explode = 4`.
+#guard reduced (fixture (include_str "Fixtures/explode.json")) ==
+  lowest (sumDice 2 (chainTotal (d 4) (· == 4) 1))
+-- `1D4 explode = 4 3 times`, a range, in closed form over 256: a chain ends
+-- below `4` after one, two or three `4`s, or after three `4`s with any face.
+#guard reduced (fixture (include_str "Fixtures/explode_limited.json")) ==
+  .ok [(1, 64), (2, 64), (3, 64), (5, 16), (6, 16), (7, 16), (9, 4), (10, 4),
+    (11, 4), (13, 1), (14, 1), (15, 1), (16, 1)]
+-- `{x}: 2D6 explode ≥ {x} ∞ times`, which saturates if every face matches,
+-- grows nothing if none does, and is refused otherwise.
+#guard (reduced (fixture (include_str "Fixtures/explode_saturate.json")) ·)
+    [1] ==
+  .ok [(i32Max, 1)]
+#guard (reduced (fixture (include_str "Fixtures/explode_saturate.json")) ·)
+    [i32Min] ==
+  .ok [(i32Max, 1)]
+#guard (reduced (fixture (include_str "Fixtures/explode_saturate.json")) ·)
+    [7] ==
+  lowest (sumDice 2 (d 6))
+#guard (reduced (fixture (include_str "Fixtures/explode_saturate.json")) ·)
+    [6] ==
+  .error unboundedMessage
+-- `3D4 keep highest 2 explode = 4`: drop the lowest of three sorted dice, then
+-- explode each of the rest independently.
+#guard reduced (fixture (include_str "Fixtures/explode_after_keep.json")) ==
+  lowest ((sortedDice 3 (d 4)).bind fun xs =>
+    (xs.drop 1).foldl (fun t x =>
+        t.bind fun t =>
+          (if x == 4 then (d 4).map (x + ·) else .pure x).map (t + ·))
+      (.pure 0))
+-- `2D3 explode = 3 reroll = 1`: reroll each die of each chain independently.
+#guard reduced (fixture (include_str "Fixtures/reroll_after_explode.json")) ==
+  lowest (sumDice 2 (
+    let rerolled (y : Int) : Dist Int := if y == 1 then d 3 else .pure y
+    (d 3).bind fun x =>
+      if x == 3 then (d 3).bind fun e => (rerolled e).map (3 + ·)
+      else rerolled x))
+
+/-- Whether a chain, as its dice in the order drawn, precedes another in the
+order of drops and keeps, or equals it: by total, then by its dice in
+ascending order, compared lexicographically, then by its last die, as
+`cross_out` in `primitives.rs` orders them, written apart from `Chain.le`. -/
+private def precedes (a b : List Int) : Bool :=
+  let key (c : List Int) := (c.foldl (· + ·) 0, c.mergeSort (· ≤ ·), c.getLast?)
+  let (s, xs, x) := key a
+  let (t, ys, y) := key b
+  s < t || s == t && (xs < ys || xs == ys && (x == y || compare x y == .lt))
+
+-- `2D4 explode ≥ 3 drop lowest reroll = 2`: chains of equal totals, such as
+-- `[3, 2]` and `[4, 1]`, are ordered by their dice, so the drop crosses out
+-- `[4, 1]`, and the reroll then rerolls the `2` of `[3, 2]`.
+#guard reduced (fixture (include_str "Fixtures/explode_ties.json")) ==
+  lowest ((chainDice (d 4) (· ≥ 3) 1).bind fun a =>
+    (chainDice (d 4) (· ≥ 3) 1).bind fun b =>
+      (if precedes a b then b else a).foldl (fun t x =>
+          t.bind fun t => (if x == 2 then d 4 else .pure x).map (t + ·))
+        (.pure 0))
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (rollRange 1 3).total == 3
@@ -553,6 +766,37 @@ private def sortedDice (n : Nat) (die : Dist Int) : Dist (List Int) :=
 #guard reroll { results := [1, 2], lowest := 1, die := .standard 2 }
     (.within 1 1) (some 3)
   == .pure { results := [2], die := .standard 2 }
+#guard (rerollChain (· == 1) (.pure (.uniform [1, 2])) (.live [1, 3] 1)
+  |>.map (·.total)).toList == [(5, 1), (6, 2), (7, 1)]
+#guard rerollChain (fun _ => true) (.pure (.uniform [1, 2])) (.saturated 0)
+  == .pure (.saturated 0)
+#guard ((rerollChains (.standard 2) [.live [2] 1] (· == 1)
+    (.pure (.uniform [1, 2]))).map (·.results)).toList == [([3], 1), ([4], 1)]
+#guard (rerollEach { results := [1, 2], die := .standard 2 } (· == 1)
+    (.pure (.uniform [1, 2])) |>.map (·.results)).toList
+  == [([1, 2], 1), ([2, 2], 1)]
+#guard ((extension (.within 2 2) (.uniform [1, 2]) 2).map
+    fun (drawn, y) => drawn ++ [y]).toList
+  == [([1], 2), ([2, 1], 1), ([2, 2], 1)]
+#guard explodeChains (.standard 6) [.single 6, .single 3] (·.last == 6)
+    (.pure (.pure ([], 2)))
+  == .pure { results := [3, 8], die := .standard 6
+             chains := [.single 3, .live [6] 2] }
+#guard explode { results := [6, 6], lowest := 1, die := .standard 6 }
+    (.within 1 6) none
+  == .pure { results := [i32Max], die := .standard 6
+             chains := [.saturated i32Max] }
+#guard ((explode { results := [1, 2], die := .standard 2 } (.within 2 2)
+    (some 1)).map (·.results)).toList == [([1, 3], 1), ([1, 4], 1)]
+#guard unbounded
+    { registers := #[], records := #[{ results := [6], die := .standard 6 }] }
+    (.explode 0 (.eq (.immediate 6)) .unlimited)
+#guard !unbounded
+    { registers := #[], records := #[{ results := [5], die := .standard 6 }] }
+    (.explode 0 (.eq (.immediate 6)) .unlimited)
+#guard (stepAll (.pure { registers := #[0], records := #[{}] })
+    (.rollRange 0 (.immediate 1) (.immediate 2))).toOption.map (·.total)
+  == some 2
 #guard BinaryOp.sub.apply 1 2 == -1
 #guard BinaryOp.add.apply i32Max 1 == i32Max
 -- `1D6`.

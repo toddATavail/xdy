@@ -1429,6 +1429,64 @@ fn test_plan_rerolls()
 	);
 }
 
+/// Ensure that a plan splits on a rolling record that two sums read across an
+/// explode, which rewrites the record, and on a random threshold that an
+/// explode and a later instruction both read, as it does across a reroll.
+/// `lean/XdyTest/Plan.lean` checks the same plans.
+#[test]
+fn test_plan_explodes()
+{
+	assert_eq!(
+		schedule(
+			"Function() r#3 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		@0 <- sum rolling record ⚅0
+		⚅0 <- explode = 6 up to 1 times from ⚅0
+		@1 <- sum rolling record ⚅0
+		@2 <- @0 - @1
+		return @2"
+		),
+		vec![
+			(0, vec![Step::Split(record(0))]),
+			(
+				4,
+				vec![Step::Merge {
+					split: 0,
+					survivor: Some(register(2)),
+					dead: vec![register(0), record(0), register(1)]
+				}]
+			),
+		]
+	);
+	assert_eq!(
+		schedule(
+			"Function() r#2 ⚅#2
+	extern[]
+	body:
+		⚅0 <- roll range 4:6
+		@0 <- sum rolling record ⚅0
+		⚅1 <- roll standard dice 2D6
+		⚅1 <- explode >= @0 unlimited times from ⚅1
+		@1 <- sum rolling record ⚅1
+		@0 <- @0 + @1
+		return @0"
+		),
+		vec![
+			(1, vec![Step::Split(register(0))]),
+			(
+				5,
+				vec![Step::Merge {
+					split: 0,
+					survivor: Some(register(0)),
+					dead: vec![record(1), register(1)]
+				}]
+			),
+		]
+	);
+}
+
 /// Ensure that a split merges beneath a later split that is independent of
 /// it, but waits for a later split that depends on it to merge first.
 #[test]

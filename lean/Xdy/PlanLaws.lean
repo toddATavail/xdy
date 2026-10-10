@@ -62,7 +62,8 @@ def Instruction.operandsAreValues : Instruction → Bool
     a.isValue && b.isValue
   | .rollCustomDice _ c _ | .dropLowest _ c | .dropHighest _ c
   | .keepLowest _ c | .keepHighest _ c | .neg _ c | .return c => c.isValue
-  | .reroll _ p l => (p.operands ++ l.operands).all AddressingMode.isValue
+  | .reroll _ p l | .explode _ p l =>
+    (p.operands ++ l.operands).all AddressingMode.isValue
   | .sumRollingRecord .. => true
 
 /--
@@ -99,7 +100,7 @@ theorem Location.readBy_iff {ℓ : Location} {i : Instruction}
   cases i <;>
     simp_all [Location.readBy, Instruction.sources,
       Instruction.operandsAreValues, Location.isOperand_iff]
-  case reroll =>
+  case reroll | explode =>
     constructor <;> rintro (h' | ⟨x, hx, h'⟩ | ⟨x, hx, h'⟩)
     all_goals first
       | exact .inl h'

@@ -4,7 +4,8 @@ import XdySpec.Record
 # Rolling record tests
 
 Roll order, drop accumulation and clamping, keeps, the kept window of the
-sorted results, and the ascending saturating fold, mirroring `RollingRecord` in
+sorted results, the ascending saturating fold, and chains, their kept window
+and their sorted reading, mirroring `RollingRecord` in
 `xdy/src/primitives.rs`.
 -/
 
@@ -119,6 +120,42 @@ private def dropped : List (Record × Record) :=
 #guard ({ results := [2, 1], lowest := 2, highest := 2 } : Record).view ==
   ({ results := [] } : Record).view
 
+/-! ## Chains -/
+
+/-- A record of two chains, the first rolled grown by an explode. -/
+private def grown : Record :=
+  { results := [8, 4], chains := [.live [6] 2, .single 4] }
+
+/-- The record of the same chains, the first rolled not grown. -/
+private def grownLater : Record :=
+  { results := [4, 8], chains := [.single 4, .live [6] 2] }
+
+-- A record of chains reads, sorted, as the oracle's record of them, whatever
+-- order they were grown in.
+#guard grown.toOracle ==
+  { results := [4, 8], chains := [.single 4, .live [6] 2] }
+#guard grown.toOracle == grownLater.toOracle
+#guard grown != grownLater
+-- Its kept chains are a window of its chains, sorted, as the drops count
+-- them, and its kept results are their totals.
+#guard ({ results := [8, 4, 9], lowest := 1
+          chains := [.live [6] 2, .single 4, .live [5] 4] } : Record).keptChains
+  == [.live [6] 2, .live [5] 4]
+#guard ({ results := [8, 4, 9], lowest := 1
+          chains := [.live [6] 2, .single 4, .live [5] 4] } : Record).kept
+  == [8, 9]
+-- A record without chains keeps the chains of its kept results.
+#guard ((rec [5, 1, 3]).dropHighest 1).keptChains == [.single 1, .single 3]
+-- The oracle's kept chains of the sorted record are the specification's.
+#guard ({ results := [8, 4], highest := 1
+          chains := [.live [6] 2, .single 4] } : Record).toOracle.keptChains
+  == ({ results := [8, 4], highest := 1
+        chains := [.live [6] 2, .single 4] } : Record).keptChains
+-- A record of single dice holds no chains, so it is the record of their
+-- results.
+#guard Record.ofChains (.standard 6) [.single 5, .single 2]
+  == { results := [2, 5], die := .standard 6 }
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (({} : Record).push 3 |>.push 1 |>.push 2).results == [3, 1, 2]
@@ -141,6 +178,13 @@ private def dropped : List (Record × Record) :=
   == [1, 3]
 #guard (Record.toOracle { results := [3, 1, 2], lowest := 1 }).results
   == [1, 2, 3]
+
+#guard ({ results := [7, 2], highest := 1
+          chains := [.live [1] 6, .live [] 2] } : Record).keptChains
+  == [.single 2]
+#guard ({ results := [3, 1], lowest := 1 } : Record).keptChains
+  == [.single 3]
+#guard (Record.ofChains .none [.live [6] 2, .single 4]).results == [4, 8]
 
 #guard ({ results := [4, 1, 3], lowest := 1 } : Record).view == ([3, 4], .none)
 

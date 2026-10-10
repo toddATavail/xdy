@@ -206,6 +206,24 @@ def lowestTerms (d : Dist α) : Dist α :=
   ⟨d.weights.map fun _ w => w / g⟩
 
 /--
+Whether some possible outcome satisfies a predicate.
+
+# Parameters
+- `d`: The distribution.
+- `p`: The predicate.
+
+# Returns
+`true` if some outcome of positive weight satisfies `p`, `false` otherwise.
+
+# Examples
+```lean
+#guard (Dist.uniform [1, 2]).any (· == 2)
+#guard !(Dist.uniform [1, 2]).any (· == 3)
+```
+-/
+def any (d : Dist α) (p : α → Bool) : Bool := d.weights.toList.any (p ·.1)
+
+/--
 List the outcomes and their weights in ascending order of outcome.
 
 # Parameters

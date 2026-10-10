@@ -22,16 +22,26 @@ rolls; the specification merges nothing, so it follows the Rust as written.
 it, that sorting commutes with rolling, dropping, keeping and summing, and
 leaves alone the kept results, which a reroll rerolls, are how
 `XdySpec/Oracle.lean` proves that sorting early changes nothing.
+
+A record that an explode grew holds its chains beside its results, as the
+oracle's does, and its results are their totals. Its chains are the oracle's
+`Xdy.Chain`s, in the order in which their first dice were rolled, and
+`toOracle` sorts them as the oracle keeps them, by `Xdy.Chain.le`. A chain
+keeps the dice besides its last in ascending order, as the oracle's does: the
+order of the dice of a chain reaches nothing, as the order of the chains
+reaches nothing but the order in which a reroll or explode visits them.
 -/
 
 namespace Xdy.Spec
 
-open Xdy (Die)
+open Xdy (Die Chain)
 
 /-- The results of a range or a set of dice, in the order rolled, the drops
-applied to them, and the die from which they were drawn. -/
+applied to them, and the die from which they were drawn, with the chains that
+an explode grew, if any. -/
 structure Record where
-  /-- The results, in the order rolled. -/
+  /-- The results, in the order rolled: the totals of the chains, if the record
+  holds any. -/
   results : List Int := []
   /-- The number of lowest results dropped, at most the number of results. -/
   lowest : Nat := 0
@@ -39,6 +49,10 @@ structure Record where
   highest : Nat := 0
   /-- The die from which the results were drawn. -/
   die : Die := .none
+  /-- The chains, in the order in which their first dice were rolled, one for
+  each result, which is its total; or none, if every chain is a single die,
+  which is its result. -/
+  chains : List Chain := []
   deriving Repr, DecidableEq, Inhabited
 
 namespace Record
@@ -245,14 +259,42 @@ the kept results, which are sorted, not the results in the order rolled.
 def sum (r : Record) : Int := r.kept.foldl add 0
 
 /--
+Answer the chains that survive the drops, as `kept` answers their totals: sort
+the chains by `Xdy.Chain.le`, skip the lowest dropped, then take what the
+highest dropped leave.
+
+# Parameters
+- `r`: The record.
+
+# Returns
+The kept chains, sorted by `Xdy.Chain.le`: the chains in the kept window, if
+`r` holds chains, or else the chain of each kept result, a single die. Empty
+if the drops cover every chain.
+
+# Examples
+```lean
+#guard ({ results := [7, 2], highest := 1
+          chains := [.live [1] 6, .live [] 2] } : Record).keptChains
+  == [.single 2]
+#guard ({ results := [3, 1], lowest := 1 } : Record).keptChains
+  == [.single 3]
+```
+-/
+def keptChains (r : Record) : List Chain :=
+  if r.chains.isEmpty then r.kept.map .single
+  else
+    ((r.chains.mergeSort Chain.le).drop r.lowest).take
+      (r.results.length - r.lowest - r.highest)
+
+/--
 Read a record of the oracle as a record of the specification.
 
 # Parameters
 - `r`: The oracle's record, whose results are sorted.
 
 # Returns
-The record with the same results, in the same order, the same drops and the
-same die.
+The record with the same results and chains, in the same order, the same drops
+and the same die.
 
 # Notes
 The oracle's sorted results are one order in which they could have been
@@ -266,18 +308,19 @@ rolled, so the specification's record describes the same roll.
 -/
 def ofOracle (r : Xdy.Record) : Record :=
   { results := r.results, lowest := r.lowest, highest := r.highest,
-    die := r.die }
+    die := r.die, chains := r.chains }
 
 /--
 Read a record of the specification as a record of the oracle, by sorting its
-results. Inverse to `ofOracle` on sorted records.
+results and its chains. Inverse to `ofOracle` on sorted records.
 
 # Parameters
 - `r`: The specification's record, whose results are in roll order.
 
 # Returns
-The record with the same results, sorted in ascending order, as the oracle
-keeps them, the same drops and the same die.
+The record with the same results, sorted in ascending order, and the same
+chains, sorted by `Xdy.Chain.le`, as the oracle keeps them, the same drops and
+the same die.
 
 # Notes
 The oracle's distribution of states is the specification's, with every
@@ -292,7 +335,7 @@ specification relates them.
 -/
 def toOracle (r : Record) : Xdy.Record :=
   { results := r.sorted, lowest := r.lowest, highest := r.highest,
-    die := r.die }
+    die := r.die, chains := r.chains.mergeSort Chain.le }
 
 /--
 The sorted results are sorted.
@@ -326,7 +369,8 @@ theorem toOracle_push (r : Record) (x : Int) :
         (Xdy.Record.push_perm r.toOracle x).symm)
   rw [show r.toOracle.push x =
       { results := (r.toOracle.push x).results, lowest := r.lowest,
-        highest := r.highest, die := r.die } from rfl, ← hres]
+        highest := r.highest, die := r.die,
+        chains := r.chains.mergeSort Chain.le } from rfl, ← hres]
   rfl
 
 /--
@@ -405,6 +449,32 @@ theorem kept_toOracle (r : Record) : r.toOracle.kept = r.kept := by
   simp only [Xdy.Record.kept, kept, toOracle, sorted, List.length_mergeSort]
 
 /--
+The sorted reading of a record holds chains exactly when the record does.
+
+# Parameters
+- `r`: The record.
+-/
+theorem chains_isEmpty_toOracle (r : Record) :
+    r.toOracle.chains.isEmpty = r.chains.isEmpty := by
+  simp only [toOracle]
+  generalize r.chains = l
+  have h := List.length_mergeSort (le := Chain.le) l
+  cases hm : l.mergeSort Chain.le <;> cases l <;> simp_all
+
+/--
+The oracle's kept chains of the sorted record are the specification's, which
+it too takes from the sorted chains.
+
+# Parameters
+- `r`: The record.
+-/
+theorem keptChains_toOracle (r : Record) :
+    r.toOracle.keptChains = r.keptChains := by
+  have he := chains_isEmpty_toOracle r
+  simp only [Xdy.Record.keptChains, keptChains, kept_toOracle, he]
+  simp only [toOracle, sorted, List.length_mergeSort]
+
+/--
 The kept results are sorted, as a window of the sorted results.
 
 # Parameters
@@ -419,20 +489,37 @@ theorem toOracle_empty : ({} : Record).toOracle = {} := by
   simp [toOracle, sorted]
 
 /--
+The chains of the sorted reading of a record are sorted.
+
+# Parameters
+- `r`: The record.
+-/
+theorem chains_pairwise (r : Record) :
+    r.toOracle.chains.Pairwise (fun a b => a.le b = true) :=
+  List.pairwise_mergeSort (le := Chain.le) (fun _ _ _ => Chain.le_trans)
+    (fun a b => by simpa only [Bool.or_eq_true] using Chain.le_total a b)
+    r.chains
+
+/--
 Sorting the specification's reading of an oracle's record gives it back, if
-its results are sorted, as the oracle keeps them.
+its results and chains are sorted, as the oracle keeps them.
 
 # Parameters
 - `r`: The oracle's record.
 
 # Hypotheses
 - `sorted`: The results are sorted in ascending order.
+- `chainsSorted`: The chains are sorted by `Xdy.Chain.le`.
 -/
 theorem toOracle_ofOracle (r : Xdy.Record)
-    (sorted : r.results.Pairwise (· ≤ ·)) : (ofOracle r).toOracle = r := by
+    (sorted : r.results.Pairwise (· ≤ ·))
+    (chainsSorted : r.chains.Pairwise (fun a b => a.le b = true)) :
+    (ofOracle r).toOracle = r := by
   have : r.results.mergeSort (fun a b => decide (a ≤ b)) = r.results :=
     List.mergeSort_of_pairwise (by simpa using sorted)
-  simp only [toOracle, ofOracle, Record.sorted, this]
+  have hc : r.chains.mergeSort Chain.le = r.chains :=
+    List.mergeSort_of_pairwise chainsSorted
+  simp only [toOracle, ofOracle, Record.sorted, this, hc]
 
 /--
 Sort a record's results, keeping its drops: the record of the specification
@@ -463,7 +550,7 @@ Sorting a record leaves its sorted reading alone.
 - `r`: The record.
 -/
 theorem toOracle_sort (r : Record) : r.sort.toOracle = r.toOracle :=
-  toOracle_ofOracle _ (sorted_pairwise r)
+  toOracle_ofOracle _ (sorted_pairwise r) (chains_pairwise r)
 
 /--
 Sorting a sorted record leaves it alone.
@@ -489,18 +576,62 @@ theorem sort_eq_sort_iff {r r' : Record} :
   · intro h
     rw [sort, sort, h]
 
+/--
+Build a record of chains, without drops, as a reroll or an explode leaves its
+chains still kept: the oracle's record of the chains, read as the
+specification's.
+
+# Parameters
+- `die`: The die from which the dice of the chains were drawn.
+- `cs`: The chains, in any order.
+
+# Returns
+The record whose results are the totals of the chains, sorted by
+`Xdy.Chain.le`, and which holds the chains, unless every chain is a single
+die.
+
+# Examples
+```lean
+#guard (Record.ofChains .none [.live [6] 2, .single 4]).results == [4, 8]
+```
+-/
+def ofChains (die : Die) (cs : List Chain) : Record :=
+  ofOracle (Xdy.Record.ofChains die cs)
+
+/--
+Sorting a record of chains reads the oracle's record of them, which is sorted
+already.
+
+# Parameters
+- `die`: The die from which the dice of the chains were drawn.
+- `cs`: The chains.
+-/
+theorem toOracle_ofChains (die : Die) (cs : List Chain) :
+    (ofChains die cs).toOracle = Xdy.Record.ofChains die cs := by
+  have hs := List.pairwise_mergeSort (le := Chain.le)
+    (fun _ _ _ => Chain.le_trans)
+    (fun a b => by simpa only [Bool.or_eq_true] using Chain.le_total a b) cs
+  refine toOracle_ofOracle _ ?_ ?_
+  · exact List.pairwise_map.mpr (hs.imp Chain.total_le_of_le)
+  · simp only [Xdy.Record.ofChains]
+    split
+    · exact .nil
+    · exact hs
+
 /-! ## What later instructions read -/
 
 /--
-What every later instruction reads of a record: its kept results, in
-ascending order, and its die. A sum reads the kept results, a drop or keep
-narrows them (`kept_dropLowest`, `kept_dropHighest`), and a reroll rerolls
-them from the die, so records of the same view are alike to every later
-instruction (`view_dropLowest`, `view_dropHighest`, `view_keepLowest`,
+What every later instruction reads of a record that holds no chains: its kept
+results, in ascending order, and its die. A sum reads the kept results, a drop
+or keep narrows them (`kept_dropLowest`, `kept_dropHighest`), and a reroll
+rerolls them from the die, so records of the same view are alike to every
+later instruction (`view_dropLowest`, `view_dropHighest`, `view_keepLowest`,
 `view_keepHighest`, `sum_eq_of_view`). The Rust forward pass describes a
 record after a reroll only up to its view: it leaves a setup that the reroll
 cannot change with its drops, and crosses out every die still kept of one
-that the reroll crosses out by dropping them.
+that the reroll crosses out by dropping them. A reroll or explode reads a
+record that holds chains through its kept chains (`keptChains`), which the
+view leaves out; every record that the forward pass describes holds none.
 
 # Parameters
 - `r`: The record.

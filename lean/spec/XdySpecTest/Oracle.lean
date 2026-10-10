@@ -13,12 +13,14 @@ namespace Xdy.Spec.Test
 
 open Xdy
 
--- The specification fails, with the oracle's message, when the oracle does.
+-- The specification fails, with the oracle's message, when the oracle does,
+-- unless the oracle refuses an explode that may draw without bound.
 example (f : Function) (args : List Int) (externals : List (String × Int))
-    (message : String)
+    (message : String) (hm : message ≠ Xdy.unboundedMessage)
     (h : Xdy.Function.run f args externals = .error message) :
     run f args externals = .error message := by
-  have := run_eq f args externals
+  have := run_eq f args externals (by
+    rw [h]; exact fun he => hm (Except.error.inj he))
   rw [h] at this
   cases hr : run f args externals <;> simp_all [Except.map]
 
@@ -44,9 +46,9 @@ example (f : Function) (args : List Int) (externals : List (String × Int))
 
 /-! ## Rerolls -/
 
--- The oracle rerolls the sorted record, whose kept results are the
--- specification's, to the law of the specification's reroll, sorted, limited
--- or not.
+-- The oracle rerolls the sorted record, whose kept results and kept chains
+-- are the specification's, to the law of the specification's reroll, sorted,
+-- limited or not.
 example (r : Spec.Record) (c : Criterion) (l : Option Nat) :
     (Xdy.reroll r.toOracle c l).HasLaw
       ((Spec.reroll r c l).map Spec.Record.toOracle) :=
@@ -57,6 +59,38 @@ example (c : Criterion) (faces : List Int) (n : Nat) :
       (limitedReplacement c (Spec.customDie faces) n) :=
   hasLaw_limitedReplacement c n (hasLaw_customDie faces)
 
+/-! ## Explodes -/
+
+-- The oracle explodes the sorted record to the law of the specification's
+-- explode, sorted, if limited...
+example (r : Spec.Record) (c : Criterion) (n : Nat) :
+    (Xdy.explode r.toOracle c (some n)).HasLaw
+      ((Spec.explode r c (some n)).map Spec.Record.toOracle) :=
+  hasLaw_explode r c (some n) fun h => absurd h (by simp)
+-- ...or unlimited, if it matches every face, and so saturates...
+example (r : Spec.Record) (c : Criterion) (h : r.die.facesWithin c = true) :
+    (Xdy.explode r.toOracle c none).HasLaw
+      ((Spec.explode r c none).map Spec.Record.toOracle) :=
+  hasLaw_explode r c none fun _ hw => absurd h hw
+-- ...or if it grows no chain still kept.
+example (r : Spec.Record) (c : Criterion)
+    (h : ∀ ch ∈ r.keptChains, ch.grows c = false) :
+    (Xdy.explode r.toOracle c none).HasLaw
+      ((Spec.explode r c none).map Spec.Record.toOracle) :=
+  hasLaw_explode r c none fun _ _ => h
+-- The oracle refuses exactly the explodes that the specification finds
+-- unbounded, reading the state sorted.
+example (s : State) (i : Instruction) :
+    Xdy.unbounded s.toOracle i = unbounded s i :=
+  State.unbounded_toOracle s i
+-- A distribution answers no outcome that a law that it has cannot reach.
+example (d : Dist Int) (p : PMF Int) (h : d.HasLaw p) (x : Int)
+    (hx : x ∈ p.support) : d.any (· == x) = true := by
+  by_contra hn
+  have := Dist.any_eq_false_of_hasLaw (P := (· == x)) (g := id)
+    (by rwa [PMF.map_id]) (by simpa using hn) hx
+  simp at this
+
 /-! ## Sorting states -/
 
 -- Every record of an initial state is empty, so sorted.
@@ -66,6 +100,6 @@ example (f : Function) (args : List Int) (externals : List (String × Int))
   State.toOracle_ofOracle s fun r hr => by
     rw [initialState_records h] at hr
     rw [(Array.mem_replicate.mp hr).2]
-    exact .nil
+    exact ⟨.nil, .nil⟩
 
 end Xdy.Spec.Test

@@ -40,7 +40,10 @@ function's result in lowest terms:
 
 Weights are decimal strings, since they can exceed every fixed-width integer:
 `30D6` has a total of `6³⁰`, beyond `u64`. On failure, the executable writes a
-message to standard error instead, and exits with status `1`.
+message to standard error instead, and exits with status `1`: if the request
+is malformed, or if the function reaches an unlimited explode that may grow a
+chain without bound, whose distribution has infinitely many outcomes, as
+`Function.run` describes.
 -/
 
 namespace Xdy

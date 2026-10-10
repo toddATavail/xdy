@@ -56,7 +56,13 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard reads (include_str "Fixtures/max.json")
 #guard reads (include_str "Fixtures/min.json")
 #guard reads (include_str "Fixtures/range.json")
+#guard reads (include_str "Fixtures/explode.json")
+#guard reads (include_str "Fixtures/explode_after_keep.json")
+#guard reads (include_str "Fixtures/explode_limited.json")
+#guard reads (include_str "Fixtures/explode_saturate.json")
+#guard reads (include_str "Fixtures/explode_ties.json")
 #guard reads (include_str "Fixtures/reroll.json")
+#guard reads (include_str "Fixtures/reroll_after_explode.json")
 #guard reads (include_str "Fixtures/reroll_after_keep.json")
 #guard reads (include_str "Fixtures/reroll_cross_out.json")
 #guard reads (include_str "Fixtures/reroll_list.json")
@@ -205,6 +211,27 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
     .sumRollingRecord 0 0,
     .return (.register 0)] }
 
+-- `2D4 explode = 4`: an explode with a threshold and a count.
+#guard read (include_str "Fixtures/explode.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 2) (.immediate 4),
+    .explode 0 (.eq (.immediate 4)) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `{x}: 2D6 explode ≥ {x} ∞ times`: an unlimited explode, whose threshold is a
+-- parameter.
+#guard read (include_str "Fixtures/explode_saturate.json") == some {
+  parameters := #["x"], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 2) (.immediate 6),
+    .explode 0 (.ge (.register 0)) .unlimited,
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
 /--
 JSON text for a reroll of rolling record `0` with the given predicate and
 limit, as JSON text, then `return 0`.
@@ -241,6 +268,29 @@ private def instructions (s : String) : Option (Array Instruction) :=
       (.times (.immediate 2)),
     .return (.immediate 0)]
 
+/--
+JSON text for an explode of rolling record `0` with the given predicate and
+limit, as JSON text, then `return 0`.
+-/
+private def exploding (predicate limit : String) : String :=
+  body ("{\"Explode\": {\"dest\": 0, \"predicate\": " ++ predicate ++
+    ", \"limit\": " ++ limit ++ "}}, " ++ ret)
+
+-- An explode takes every predicate and limit that a reroll does.
+#guard instructions (exploding "{\"Le\": {\"Register\": 1}}"
+    "{\"Times\": {\"Register\": 0}}") ==
+  some #[.explode 0 (.le (.register 1)) (.times (.register 0)),
+    .return (.immediate 0)]
+#guard instructions (exploding
+    ("{\"InRangeInclusive\": {\"start\": {\"Immediate\": -1}, " ++
+      "\"end\": {\"Register\": 1}}}")
+    "\"Unlimited\"") ==
+  some #[.explode 0 (.inRangeInclusive (.immediate (-1)) (.register 1))
+      .unlimited,
+    .return (.immediate 0)]
+#guard instructions (exploding "{\"In\": [6, -2]}" "\"Unlimited\"") ==
+  some #[.explode 0 (.in [6, -2]) .unlimited, .return (.immediate 0)]
+
 /-! ## Malformed JSON is rejected -/
 
 #guard !reads "not json"
@@ -258,6 +308,11 @@ private def instructions (s : String) : Option (Array Instruction) :=
   "unknown limit Never"
 #guard rejects (rerolling "{\"In\": [2147483648]}" "\"Unlimited\"")
   "outside the i32 range"
+#guard rejects (exploding "{\"Odd\": {\"Immediate\": 1}}" "\"Unlimited\"")
+  "unknown predicate Odd"
+#guard rejects (exploding "{\"Eq\": {\"Immediate\": 1}}"
+    "{\"Never\": {\"Immediate\": 1}}")
+  "unknown limit Never"
 
 /-! ## Immediates must be `i32`s -/
 
@@ -309,6 +364,15 @@ private def instructions (s : String) : Option (Array Instruction) :=
 #guard rejects (rerolling "{\"Eq\": {\"Immediate\": 1}}"
     "{\"Times\": {\"Register\": 2}}")
   "register @2 does not exist"
+#guard rejects (body
+  ("{\"Explode\": {\"dest\": 1, \"predicate\": {\"In\": []}, " ++
+   "\"limit\": \"Unlimited\"}}, " ++ ret))
+  "rolling record ⚅1 does not exist"
+#guard rejects (exploding "{\"Ne\": {\"Register\": 2}}" "\"Unlimited\"")
+  "register @2 does not exist"
+#guard rejects (exploding "{\"Eq\": {\"Immediate\": 1}}"
+    "{\"Times\": {\"RollingRecord\": 0}}")
+  "rolling record ⚅0 used as a value"
 #guard rejects
   ("{\"parameters\": [\"a\", \"b\"], \"externals\": [\"c\"], " ++
    "\"register_count\": 2, \"rolling_record_count\": 0, " ++

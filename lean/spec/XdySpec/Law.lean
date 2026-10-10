@@ -94,8 +94,8 @@ private theorem scale_div (w v t l T : ℕ) (ht : 0 < t) (hdvd : t ∣ l)
       = m * (T * (w / T)) * (t * (v / t)) := by ring
     _ = w * m * v := by rw [hT', ht']; ring
 
-variable {α β σ τ : Type} [DecidableEq α] [Hashable α] [DecidableEq β]
-  [Hashable β]
+variable {α β σ τ : Type} [BEq α] [LawfulBEq α] [Hashable α] [BEq β]
+  [LawfulBEq β] [Hashable β]
 
 /-! ## Probabilities -/
 
@@ -138,6 +138,7 @@ theorem tsum_eq_sum_entries (d : Dist α) (g : α → ℕ → ℝ≥0∞)
     (hg : ∀ a, g a 0 = 0) :
     ∑' a, g a (d.weight a) =
       (d.weights.toList.map fun e => g e.1 e.2).sum := by
+  classical
   rw [tsum_eq_sum (s := (d.weights.toList.map (·.1)).toFinset) fun a ha => by
       have : d.weight a = 0 := by
         rw [weight, HashMap.getD_eq_getD_getElem?]
@@ -198,6 +199,7 @@ Transforming the outcomes transforms the law.
 -/
 theorem hasLaw_map (f : α → β) {d : Dist α} {p : PMF α} (h : d.HasLaw p) :
     (d.map f).HasLaw (p.map f) := by
+  classical
   obtain ⟨hpos, htot, hp⟩ := h
   refine ⟨positive_map f d hpos, by rw [total_map]; exact htot, fun b => ?_⟩
   rw [PMF.map_apply, prob, weight_map, total_map]
@@ -214,6 +216,7 @@ theorem hasLaw_map (f : α → β) {d : Dist α} {p : PMF α} (h : d.HasLaw p) :
   · simp [h]
   · simp [h, Ne.symm h]
 
+omit [LawfulBEq β] in
 /--
 A mixture over any common multiple of the continuations' totals has the law
 of `PMF.bind`, through transformations of the outcomes, as `bind` has over the
@@ -261,6 +264,7 @@ theorem hasLaw_mixture {d : Dist α} {k : α → Dist β} {e : Dist β} {l : ℕ
       (d.weights.toList.map fun x => x.2 * (l / (k x.1).total) *
         (k x.1).weight c).sum) :
     e.HasLaw ((p.bind q).map h) := by
+  classical
   obtain ⟨hpos, htot, hp⟩ := hd
   -- Every outcome of `d` transforms a possible outcome of `p`, so its
   -- continuation has a law, and with it a positive total.
@@ -389,6 +393,35 @@ theorem hasLaw_scale {d e : Dist α} {k : ℕ} {p : PMF α} (hk : 0 < k)
   refine ⟨hepos, by rw [hetot']; exact Nat.mul_pos hk htot, fun a => ?_⟩
   rw [hp, prob, prob, hetot, hw, Nat.cast_mul,
     ENNReal.mul_div_mul_left _ _ hk0 (ENNReal.natCast_ne_top k)]
+
+/--
+If no outcome of a distribution satisfies a predicate, then no possible
+outcome of a law that it has, transformed, does either: each such outcome,
+transformed, has positive probability, and so positive weight.
+
+# Parameters
+- `P`: The predicate.
+
+# Hypotheses
+- `hd`: `d` has the law of `p`, transformed by `g`.
+- `hP`: No outcome of `d` satisfies `P`.
+- `hs`: `s` is a possible outcome of `p`.
+-/
+theorem any_eq_false_of_hasLaw {d : Dist α} {p : PMF σ} {g : σ → α}
+    {P : α → Bool} (hd : d.HasLaw (p.map g)) (hP : d.any P = false) {s : σ}
+    (hs : s ∈ p.support) : P (g s) = false := by
+  have hpos : (p.map g) (g s) ≠ 0 := by
+    rw [← PMF.mem_support_iff, PMF.support_map]
+    exact ⟨s, hs, rfl⟩
+  rw [hd.2.2, prob, ne_eq, ENNReal.div_eq_zero_iff, not_or] at hpos
+  have hw : d.weight (g s) ≠ 0 := by exact_mod_cast hpos.1
+  rw [weight, Std.HashMap.getD_eq_getD_getElem?] at hw
+  cases hg : d.weights[g s]? with
+  | none => rw [hg] at hw; exact absurd rfl hw
+  | some w =>
+    have hmem := Std.HashMap.mem_toList_iff_getElem?_eq_some.mpr hg
+    simp only [any, List.any_eq_false] at hP
+    simpa using hP _ hmem
 
 end Dist
 

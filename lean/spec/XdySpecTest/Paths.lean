@@ -3,8 +3,9 @@ import XdySpec.Paths
 /-!
 # Path enumeration tests
 
-The forks of ranges, dice and rerolls, including their degenerate cases, and
-the number of paths of whole functions.
+The forks of ranges, dice, rerolls and explodes, including their degenerate
+cases and records that hold chains, and the number of paths of whole
+functions.
 -/
 
 namespace Xdy.Spec.Test
@@ -55,6 +56,50 @@ private def blankState : State :=
   == [(0, [1, 3]), (0, [3, 3])]
 -- A record never rolled forks once.
 #guard (forks blankState (.reroll 0 (.eq (.immediate 0)) .unlimited)).length
+  == 1
+
+/-! ## Rerolls of chains -/
+
+-- A reroll of a chain forks each die that it rerolls by each replacement, in
+-- its place, and leaves a saturated chain alone.
+#guard (chainForks (· == 1) [1, 2] (.live [1, 3] 1)).length == 4
+#guard chainForks (fun _ => true) [1, 2] (.saturated 0) == [.saturated 0]
+/-- `2D2 explode = 2`, as the chain `[2, 1]` beside a `2`. -/
+private def exploded : Record :=
+  { results := [3, 2], die := .standard 2
+    chains := [.live [2] 1, .single 2] }
+
+-- A reroll of a record that holds chains forks each die of each kept chain.
+#guard (rerollForks exploded (.within 1 1) (some 1)).map (·.results)
+  == [[2, 3], [2, 4]]
+-- An unlimited reroll that matches every face crosses out every chain that may
+-- still grow.
+#guard (rerollForks exploded (.within 1 2) none).map (·.results) == [[]]
+
+/-! ## Explodes -/
+
+-- A limited explode forks a chain that it grows by each face of each draw,
+-- until a draw no longer matches or the limit runs out.
+#guard extensionForks (.within 6 6) [1, 2, 3, 4, 5, 6] 1
+  == [1, 2, 3, 4, 5, 6].map ([], ·)
+#guard (extensionForks (.within 2 2) [1, 2] 3).length == 4
+-- It forks only the chains whose last dice match.
+#guard (explodeForks { results := [1, 2, 2], die := .standard 2 }
+  (.within 2 2) (some 1)).length == 4
+#guard (explodeForks { results := [1, 2, 2], die := .standard 2 }
+  (.within 2 2) (some 0)).map (·.results) == [[1, 2, 2]]
+-- An unlimited explode that matches every face forks once, saturating every
+-- chain, and one that grows nothing forks once.
+#guard (explodeForks { results := [1, 2], die := .standard 2 } (.within 1 2)
+  none).map (·.results) == [[i32Max, i32Max]]
+#guard (explodeForks { results := [1, 2], die := .standard 2 } (.within 3 3)
+  none).map (·.results) == [[1, 2]]
+-- An explode forks the chains that the drops kept, and forgets the drops.
+#guard (explodeForks { results := [1, 2], highest := 1, die := .standard 2 }
+  (.within 2 2) (some 1)).map (fun r => (r.lowest, r.highest, r.results))
+  == [(0, 0, [1])]
+-- A record never rolled forks once.
+#guard (forks blankState (.explode 0 (.eq (.immediate 0)) .unlimited)).length
   == 1
 
 /-! ## Paths -/
@@ -110,6 +155,29 @@ private def blankState : State :=
    .reroll 0 (.eq (.immediate 1)) .unlimited,
    .sumRollingRecord 0 0, .return (.register 0)]).length == 1
 
+-- `1D6 explode = 6`: 5 paths that end at once and 6 that explode.
+#guard (paths blankState
+  [.rollStandardDice 0 (.immediate 1) (.immediate 6),
+   .explode 0 (.eq (.immediate 6)) (.times (.immediate 1)),
+   .sumRollingRecord 0 0, .return (.register 0)]).length == 11
+-- `1D6 explode = 6 2 times`: 5 + 5 + 6 paths.
+#guard (paths blankState
+  [.rollStandardDice 0 (.immediate 1) (.immediate 6),
+   .explode 0 (.eq (.immediate 6)) (.times (.immediate 2)),
+   .sumRollingRecord 0 0, .return (.register 0)]).length == 16
+-- `2D6 explode ≥ 1 ∞ times`: 36 paths, each of which saturates.
+#guard (paths blankState
+  [.rollStandardDice 0 (.immediate 2) (.immediate 6),
+   .explode 0 (.ge (.immediate 1)) .unlimited,
+   .sumRollingRecord 0 0, .return (.register 0)]).length == 36
+-- `1D2 explode = 2 reroll = 1`: a `1` rerolled 2 ways, a `2` extended by a
+-- `1` rerolled 2 ways, and a `2` extended by a `2`.
+#guard (paths blankState
+  [.rollStandardDice 0 (.immediate 1) (.immediate 2),
+   .explode 0 (.eq (.immediate 2)) (.times (.immediate 1)),
+   .reroll 0 (.eq (.immediate 1)) (.times (.immediate 1)),
+   .sumRollingRecord 0 0, .return (.register 0)]).length == 5
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (rangeForks 1 3).map (·.results) == [[1], [2], [3]]
@@ -123,8 +191,18 @@ private def blankState : State :=
 #guard limitedForks (.within 1 1) [1, 2] 2 == [1, 2, 2]
 #guard (keptForks .none [1, 2, 1] (· == 1) [3, 4]).map (·.results)
   == [[3, 2, 3], [3, 2, 4], [4, 2, 3], [4, 2, 4]]
+#guard chainForks (· == 1) [3, 4] (.live [1, 2] 1)
+  == [.live [2, 3] 3, .live [2, 3] 4, .live [2, 4] 3, .live [2, 4] 4]
+#guard (chainsForks .none [.live [2] 1] (· == 1) [3, 4]).map (·.results)
+  == [[5], [6]]
 #guard (rerollForks { results := [1, 2], die := .standard 3 } (.within 1 1)
   none).map (·.results) == [[2, 2], [3, 2]]
+#guard extensionForks (.within 2 2) [1, 2] 2
+  == [([], 1), ([2], 1), ([2], 2)]
+#guard (explodeChainsForks .none [.single 2, .single 1] (·.last == 2)
+  [([], 1), ([], 2)]).map (·.results) == [[1, 3], [1, 4]]
+#guard (explodeForks { results := [1, 2], die := .standard 2 } (.within 2 2)
+  (some 1)).map (·.results) == [[1, 3], [1, 4]]
 #guard (forks { registers := #[0], records := #[{}] }
   (.rollStandardDice 0 (.immediate 2) (.immediate 6))).length == 36
 -- `3D6` forks 6 × 6 × 6 ways.

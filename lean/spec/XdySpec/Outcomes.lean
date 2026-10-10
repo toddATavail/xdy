@@ -843,11 +843,16 @@ theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed)
       Outcomes.tsum_pure_mul, outcomes, total]
     simp [OrderStatistics.integral, held, Record.toOracle, Record.sorted]
   · have h := ρ.tsum_law_sorted (hs ρ rfl)
-      fun ys => ψ ⟨ys, lowest, highest, die.getD ρ.replacement⟩
+      fun ys => ψ ⟨ys, lowest, highest, die.getD ρ.replacement, []⟩
     simp only [law, Option.map_some, Option.getD_some, tsum_map_mul]
-    refine h.trans ?_
-    simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def,
-      replacement]
+    refine (tsum_congr fun r => ?_).trans (h.trans ?_)
+    · by_cases hr : r ∈ ρ.law.support
+      · simp [Roll.chains_of_mem_support_law hr, Record.toOracle, Record.sorted,
+          replacement]
+      · rw [PMF.mem_support_iff, not_not] at hr
+        simp [hr]
+    · simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def,
+        replacement]
 
 /--
 The law of the record that a setup describes, read as the oracle reads it,
@@ -936,17 +941,40 @@ theorem setRecord_record (s : Xdy.State) (d : Nat) :
     split <;> simp_all
 
 /--
-Every record of a state read sorted is sorted.
+Every record of a state read sorted is sorted, its results in ascending order
+and its chains by `Xdy.Chain.le`.
 
 # Parameters
 - `s`: The state.
 -/
 theorem toOracle_sorted (s : State) :
-    ∀ r ∈ s.toOracle.records, r.results.Pairwise (· ≤ ·) := by
+    ∀ r ∈ s.toOracle.records, r.results.Pairwise (· ≤ ·) ∧
+      r.chains.Pairwise (fun a b => a.le b = true) := by
   intro r hr
   simp only [State.toOracle, Array.mem_map] at hr
   obtain ⟨a, _, rfl⟩ := hr
-  exact Record.sorted_pairwise a
+  exact ⟨Record.sorted_pairwise a, Record.chains_pairwise a⟩
+
+/--
+An explode depends on its record only through the record read sorted: its
+kept chains and its die.
+
+# Parameters
+- `r`, `r'`: The records.
+- `c`: The criterion.
+- `limit`: The number of times that each chain may be exploded, or `none`
+  for no limit.
+
+# Hypotheses
+- `h`: The records read alike sorted.
+-/
+private theorem explode_congr {r r' : Record}
+    (h : r.toOracle = r'.toOracle) (c : Criterion) (limit : Option Nat) :
+    explode r c limit = explode r' c limit := by
+  have hk : r.keptChains = r'.keptChains := by
+    rw [← Record.keptChains_toOracle, h, Record.keptChains_toOracle]
+  have hd : r.die = r'.die := congrArg Xdy.Record.die h
+  cases limit <;> simp only [explode, hk, hd]
 
 /--
 A step's law, read sorted, depends only on the state read sorted: it is the
@@ -961,10 +989,27 @@ has one law.
 theorem map_toOracle_step (s : State) (i : Instruction) :
     (step s i).map State.toOracle =
       (step (State.ofOracle s.toOracle) i).map State.toOracle := by
-  have h₁ := hasLaw_step s i
-  have h₂ := hasLaw_step (State.ofOracle s.toOracle) i
-  rw [State.toOracle_ofOracle _ (toOracle_sorted s)] at h₂
-  exact PMF.ext fun t => (h₁.2.2 t).trans (h₂.2.2 t).symm
+  have hs : (State.ofOracle s.toOracle).toOracle = s.toOracle :=
+    State.toOracle_ofOracle _ (toOracle_sorted s)
+  cases hb : unbounded s i
+  · have h₁ := hasLaw_step s i hb
+    have h₂ := hasLaw_step (State.ofOracle s.toOracle) i (by
+      rw [← State.unbounded_toOracle, hs, State.unbounded_toOracle, hb])
+    rw [hs] at h₂
+    exact PMF.ext fun t => (h₁.2.2 t).trans (h₂.2.2 t).symm
+  · -- Only an explode may draw without bound, and it reads its record only
+    -- through its kept chains and its die, which sorting leaves alone.
+    cases i <;> simp only [unbounded, Bool.false_eq_true] at hb
+    case explode d p l =>
+      have hv : (State.ofOracle s.toOracle).value = s.value := funext fun op =>
+        by rw [← State.value_toOracle, hs, State.value_toOracle]
+      have hr : ((State.ofOracle s.toOracle).record d).toOracle =
+          (s.record d).toOracle := by
+        rw [← State.record_toOracle, hs, State.record_toOracle]
+      simp only [step, PMF.map_comp, hv, explode_congr hr]
+      congr 1
+      funext x
+      simp only [Function.comp_apply, State.setRecord_toOracle, hs]
 
 /--
 A step's law of states, read sorted, is a function of the law of states
@@ -1029,7 +1074,8 @@ theorem exec_split_sorted (is : List Instruction) (μ : PMF State) (d : Nat) :
   have hsv := eq_of_mem_support_cond hv hs
   subst hsv
   rw [Function.comp_apply, State.setRecord_toOracle,
-    Record.toOracle_ofOracle _ (Record.sorted_pairwise (s.record d)),
+    Record.toOracle_ofOracle _ (Record.sorted_pairwise (s.record d))
+      (Record.chains_pairwise (s.record d)),
     ← State.record_toOracle, Outcomes.setRecord_record]
 
 /--

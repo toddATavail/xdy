@@ -68,6 +68,13 @@ private def twoDice (n : Nat) : Dist Nat :=
 #guard ((Dist.uniform [2, 2]).bind die).lowestTerms == die 2
 #guard (Dist.uniform ([] : List Nat)).lowestTerms.total == 0
 
+/-! ## Any outcome -/
+
+-- Only possible outcomes are asked, and the empty distribution has none.
+#guard (Dist.uniform [1, 2, 2]).any (· > 1)
+#guard !(Dist.uniform [1, 2, 2]).any (· > 2)
+#guard !(Dist.uniform ([] : List Nat)).any fun _ => true
+
 /-! ## Docstring examples, verbatim -/
 
 #guard (Dist.uniform [1, 2, 3]).total == 3
@@ -81,6 +88,8 @@ private def twoDice (n : Nat) : Dist Nat :=
 #guard ((Dist.uniform [1, 2]).bind fun n => Dist.uniform (List.range' 1 n))
   == Dist.uniform [1, 1, 1, 2]
 #guard (Dist.uniform [1, 1, 2, 2]).lowestTerms == Dist.uniform [1, 2]
+#guard (Dist.uniform [1, 2]).any (· == 2)
+#guard !(Dist.uniform [1, 2]).any (· == 3)
 #guard (Dist.uniform [3, 1, 3]).toList == [(1, 1), (3, 2)]
 
 end Xdy.Test

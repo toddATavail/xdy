@@ -64,7 +64,9 @@
 //! soon as the plan allows, rather than at the end. Its worlds never outnumber
 //! the paths through the function, each of which takes one branch of every
 //! range and of every die that it rolls: `worlds_le_paths_of_step`, in
-//! `lean/spec/XdySpec/Cost.lean`, proves it.
+//! `lean/spec/XdySpec/Cost.lean`, proves it of every function that reaches no
+//! explode that may grow a chain without bound, as every function that the
+//! pass builds does.
 //!
 //! The pass runs within a [budget](Budget) of steps and cells, which each of
 //! its operations charges to a [meter](Meter) before it expands anything, so
@@ -540,7 +542,9 @@ pub(crate) fn propagate(
 /// # Notes
 /// The count of worlds bounds the space that the pass needs. It never exceeds
 /// the number of paths through the function: `worlds_le_paths_of_step`, in
-/// `lean/spec/XdySpec/Cost.lean`, proves it after every step of the plan.
+/// `lean/spec/XdySpec/Cost.lean`, proves it after every step of the plan, of
+/// every function that reaches no explode that may grow a chain without
+/// bound, as every function that the pass builds does.
 #[cfg_attr(doc, aquamarine::aquamarine)]
 pub(crate) fn propagate_worlds(
 	evaluator: &Evaluator,

@@ -339,6 +339,46 @@ theorem mem_support_law_die {ρ : Roll} {r : Record}
     simp [replacement]
 
 /--
+Every record that a roll can fill holds no chains, since only an explode grows
+one.
+
+# Parameters
+- `ρ`: The roll.
+- `r`: The record.
+
+# Hypotheses
+- `h`: The roll can fill `r`.
+-/
+theorem chains_of_mem_support_law {ρ : Roll} {r : Record}
+    (h : r ∈ ρ.law.support) : r.chains = [] := by
+  cases ρ with
+  | range start stop =>
+    simp only [law, rollRange] at h
+    split at h
+    · simp only [PMF.mem_support_pure_iff] at h
+      subst h
+      rfl
+    · simp only [PMF.support_map, Set.mem_image] at h
+      obtain ⟨x, _, rfl⟩ := h
+      rfl
+  | standard count faces =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    exact (chains_of_mem_support_rollDice hr : r.chains = [])
+  | custom count faces =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨r, hr, rfl⟩ := h
+    exact (chains_of_mem_support_rollDice hr : r.chains = [])
+  | fixed rs =>
+    simp only [law, PMF.mem_support_pure_iff] at h
+    subst h
+    rfl
+  | pool outcomes =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨_, _, rfl⟩ := h
+    rfl
+
+/--
 Every record that an even roll can fill holds its number of results, drops
 none of them, and holds the die that the roll shows.
 
@@ -643,6 +683,31 @@ theorem law_keepHighest {s : Setup} (hs : s.Even) (count : Int) :
   refine map_congr_support fun r hr => ?_
   obtain ⟨hlen, hlow, hhigh⟩ := mem_support_law hs hr
   simp only [Record.keepHighest, hlen, hlow, hhigh]
+
+/--
+Every record that a setup describes holds no chains, since only an explode
+grows one.
+
+# Parameters
+- `s`: The setup.
+- `r`: The record.
+
+# Hypotheses
+- `h`: The setup describes `r`.
+-/
+theorem chains_of_mem_support_law {s : Setup} {r : Record}
+    (h : r ∈ s.law.support) : r.chains = [] := by
+  simp only [law, PMF.support_map, Set.mem_image] at h
+  obtain ⟨r', hr', rfl⟩ := h
+  cases hρ : s.roll with
+  | none =>
+    simp only [hρ, Option.map_none, Option.getD_none,
+      PMF.mem_support_pure_iff] at hr'
+    subst hr'
+    rfl
+  | some ρ =>
+    simp only [hρ, Option.map_some, Option.getD_some] at hr'
+    exact (Roll.chains_of_mem_support_law hr' : r'.chains = [])
 
 /--
 A setup of a roll without drops describes the roll's law, as

@@ -29,6 +29,11 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `dynamic_faces` | `3D(2D6)` | a face count from a register |
 | `dynamic_keeps` | `{n}, {m}: 5D6 keep highest {n} drop lowest {m}` | a keep count from a parameter; a drop after a keep |
 | `dynamic_range` | `[1D3:2D6]` | range endpoints from registers |
+| `explode` | `2D4 explode = 4` | `Explode`, limited to once |
+| `explode_after_keep` | `3D4 keep highest 2 explode = 4` | an explode of the dice that a keep kept |
+| `explode_limited` | `1D4 explode = 4 3 times` | an explode of a range, three times |
+| `explode_saturate` | `{x}: 2D6 explode ≥ {x} ∞ times` | an unlimited explode, whose threshold is a parameter: it saturates if every face matches, grows nothing if none does, and is refused otherwise |
+| `explode_ties` | `2D4 explode ≥ 3 drop lowest reroll = 2` | a drop between chains of equal totals, which their contents order, and a reroll of the chain that it keeps |
 | `external` | `1D6 + {y}` | an external variable |
 | `extrema` | `lowest(highest(1D4, 1D6), 1D8)` | `Max` and `Min` of random registers |
 | `keep_highest` | `4D6 keep highest 3` | `KeepHighest` |
@@ -36,6 +41,7 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `min` | `{x}: lowest({x}, 3)` | `Min` |
 | `range` | `[1:6]` | `RollRange` |
 | `reroll` | `3D4 reroll = 1` | `Reroll`, limited to once |
+| `reroll_after_explode` | `2D3 explode = 3 reroll = 1` | a reroll of each die of the chains that an explode grew |
 | `reroll_after_keep` | `4D6 keep highest 3 reroll < 3 2 times` | a reroll of the dice that a keep kept, twice |
 | `reroll_cross_out` | `{x}: 2D{x} reroll ≤ 6 ∞ times` | an unlimited reroll whose predicate matches every face of some dice, known only at runtime |
 | `reroll_list` | `2D[1, 3, 5] reroll in [1, 5]` | a reroll of custom dice by a list |

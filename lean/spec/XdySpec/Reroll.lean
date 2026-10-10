@@ -2366,11 +2366,14 @@ A reroll that matches none of the kept results leaves them.
   no limit.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `h`: The criterion matches no kept result.
 -/
 theorem reroll_view_of_unmatched {r : Record} {c : Criterion}
-    (limit : Option Nat) (h : ∀ x ∈ r.kept, c.matches x = false) :
+    (limit : Option Nat) (hc : r.chains = [])
+    (h : ∀ x ∈ r.kept, c.matches x = false) :
     (reroll r c limit).map Record.view = PMF.pure r.view := by
+  have hce : r.chains.isEmpty = true := by simp [hc]
   have hpure : ∀ (rerolled : Int → Bool) (replacement : PMF Int),
       (∀ x ∈ r.kept, rerolled x = true → c.matches x = true) →
       (rerollKept r.die r.kept rerolled replacement).map Record.view =
@@ -2382,14 +2385,14 @@ theorem reroll_view_of_unmatched {r : Record} {c : Criterion}
   cases limit with
   | none =>
     by_cases hw : r.die.facesWithin c
-    · simp only [reroll, hw, ↓reduceDIte]
+    · simp only [reroll, hw, ↓reduceDIte, hce, ↓reduceIte]
       rw [PMF.pure_map, List.filter_eq_self.mpr fun x hx => by simp [h x hx],
         view_sorted (Record.kept_pairwise r)]
       rfl
-    · simp only [reroll, hw]
+    · simp only [reroll, hw, rerollEach, hce, ↓reduceIte]
       exact hpure _ _ fun _ _ h => h
   | some n =>
-    simp only [reroll]
+    simp only [reroll, rerollEach, hce, ↓reduceIte]
     exact hpure _ _ fun _ _ h => by
       simp only [Bool.and_eq_true] at h
       exact h.2
@@ -2400,10 +2403,13 @@ A reroll limited to no times leaves the kept results.
 # Parameters
 - `r`: The record.
 - `c`: The criterion.
+
+# Hypotheses
+- `hc`: The record holds no chains.
 -/
-theorem reroll_view_of_zero (r : Record) (c : Criterion) :
+theorem reroll_view_of_zero (r : Record) (c : Criterion) (hc : r.chains = []) :
     (reroll r c (some 0)).map Record.view = PMF.pure r.view := by
-  simp only [reroll]
+  simp only [reroll, rerollEach, hc, List.isEmpty_nil, ↓reduceIte]
   rw [rerollKept_of_pure fun _ _ h => by simp at h, PMF.pure_map,
     view_sorted (Record.kept_pairwise r)]
   rfl
@@ -2424,14 +2430,15 @@ leaves them.
 - `n`: The limit.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `hy`: The die has one face.
 - `hk`: Every kept result is a face of the die.
 -/
 theorem reroll_view_of_one_face {r : Record} {c : Criterion} {y : Int}
-    (n : Nat) (hy : r.die.faces = [y])
+    (n : Nat) (hc : r.chains = []) (hy : r.die.faces = [y])
     (hk : ∀ x ∈ r.kept, x ∈ r.die.faces) :
     (reroll r c (some n)).map Record.view = PMF.pure r.view := by
-  simp only [reroll]
+  simp only [reroll, rerollEach, hc, List.isEmpty_nil, ↓reduceIte]
   rw [rerollKept_of_pure fun x hx _ => by
       rw [hy, customDie_singleton, limitedReplacement, repeat_redraw_pure]
       have := hk x hx
@@ -2445,13 +2452,15 @@ An unlimited reroll that matches every face of the die crosses out every kept
 result, if each is a face.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `hw`: The criterion matches every face of the die.
 - `hk`: Every kept result is a face of the die.
 -/
 theorem reroll_view_of_crossOut {r : Record} {c : Criterion}
-    (hw : r.die.facesWithin c) (hk : ∀ x ∈ r.kept, x ∈ r.die.faces) :
+    (hc : r.chains = []) (hw : r.die.facesWithin c)
+    (hk : ∀ x ∈ r.kept, x ∈ r.die.faces) :
     (reroll r c none).map Record.view = PMF.pure ([], r.die) := by
-  simp only [reroll, hw, ↓reduceDIte]
+  simp only [reroll, hw, ↓reduceDIte, hc, List.isEmpty_nil, ↓reduceIte]
   rw [PMF.pure_map]
   have : r.kept.filter (!c.matches ·) = [] := by
     refine List.filter_eq_nil_iff.mpr fun x hx => ?_
@@ -2468,15 +2477,16 @@ rerolls each kept result that it matches by the `limitedLaw`.
 - `c`: The criterion.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `hn`: The limit is positive.
 - `hF`: The die has faces.
 -/
-theorem reroll_some {r : Record} (c : Criterion) {n : Nat} (hn : n ≠ 0)
-    (hF : r.die.faces ≠ []) :
+theorem reroll_some {r : Record} (c : Criterion) {n : Nat}
+    (hc : r.chains = []) (hn : n ≠ 0) (hF : r.die.faces ≠ []) :
     reroll r c (some n) =
       rerollKept r.die r.kept c.matches
         (weightedDie (limitedLaw r.die c n)) := by
-  simp only [reroll]
+  simp only [reroll, rerollEach, hc, List.isEmpty_nil, ↓reduceIte]
   rw [weightedDie_limitedLaw c n hF]
   congr 1
   funext x
@@ -2491,14 +2501,15 @@ that it matches by the `unlimitedLaw`.
 - `c`: The criterion.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `hw`: The criterion does not match every face.
 -/
-theorem reroll_none {r : Record} {c : Criterion}
+theorem reroll_none {r : Record} {c : Criterion} (hc : r.chains = [])
     (hw : ¬r.die.facesWithin c = true) :
     reroll r c none =
       rerollKept r.die r.kept c.matches
         (weightedDie (unlimitedLaw r.die c)) := by
-  simp only [reroll, hw]
+  simp only [reroll, hw, rerollEach, hc, List.isEmpty_nil, ↓reduceIte]
   rw [weightedDie_unlimitedLaw hw]
   rfl
 
@@ -2604,11 +2615,12 @@ theorem reroll_of_redraw {s : Setup} {c : Criterion} {limit : Option Nat}
   intro r hr
   have hdie := (mem_support_law_die hr).1
   rcases hcase with ⟨n, rfl, hn, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
-  · rw [reroll_some c hn (by rw [hdie]; exact hF), hdie]
+  · rw [reroll_some c (Setup.chains_of_mem_support_law hr) hn
+      (by rw [hdie]; exact hF), hdie]
   · have hw : ¬r.die.facesWithin c = true := by
       rw [hdie, Die.facesWithin, List.all_eq_true]
       exact fun h => hmF (List.countP_eq_length.mpr h)
-    rw [reroll_none hw, hdie]
+    rw [reroll_none (Setup.chains_of_mem_support_law hr) hw, hdie]
 
 /--
 A reroll that pools a well-formed setup describes the specification's reroll
@@ -2729,25 +2741,29 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
   | none =>
     have hk : s.results - s.lowest - s.highest = 0 := by simp [results, hρ]
     exact rerolls_of_stays (by simp [reroll, hρ]) fun r hr =>
-      reroll_view_of_unmatched limit fun x hx => by
+      reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hr)
+        fun x hx => by
         rw [hempty hk r hr] at hx
         cases hx
   | some ρ =>
     by_cases hk : s.results - s.lowest - s.highest = 0
     · exact rerolls_of_stays (by simp [reroll, hρ, hk]) fun r hr =>
-        reroll_view_of_unmatched limit fun x hx => by
+        reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hr)
+          fun x hx => by
           rw [hempty hk r hr] at hx
           cases hx
     cases he : Effect.resolve s.replacement c limit with
     | nothing =>
       refine rerolls_of_stays (by simp [reroll, hρ, hk, he]) fun r hr => ?_
       rcases Effect.resolve_nothing he with hm | rfl | ⟨n, rfl, hF⟩
-      · exact reroll_view_of_unmatched limit fun x hx => by
-          have := List.countP_eq_zero.mp hm x (hkf r hr x hx)
-          simpa using this
-      · exact reroll_view_of_zero r c
+      · exact reroll_view_of_unmatched limit
+          (Setup.chains_of_mem_support_law hr) fun x hx => by
+            have := List.countP_eq_zero.mp hm x (hkf r hr x hx)
+            simpa using this
+      · exact reroll_view_of_zero r c (Setup.chains_of_mem_support_law hr)
       · obtain ⟨y, hy⟩ := List.length_eq_one_iff.mp hF
-        exact reroll_view_of_one_face n (by rw [hdie r hr, hy])
+        exact reroll_view_of_one_face n (Setup.chains_of_mem_support_law hr)
+          (by rw [hdie r hr, hy])
           fun x hx => by rw [hdie r hr]; exact hkf r hr x hx
     | crossOut =>
       obtain ⟨rfl, hm⟩ := Effect.resolve_crossOut he
@@ -2758,7 +2774,8 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         simp [reroll, hρ, hk, he]
       rw [Rerolls, hs', PMF.map_bind]
       rw [bind_congr_support fun r hr => (hdie r hr) ▸
-        reroll_view_of_crossOut ((hdie r hr) ▸ hw)
+        reroll_view_of_crossOut (Setup.chains_of_mem_support_law hr)
+          ((hdie r hr) ▸ hw)
           fun x hx => (hdie r hr) ▸ hkf r hr x hx]
       rw [PMF.bind_const, map_congr_support (g := fun _ => ([], s.replacement))
         fun r hr => ?_]
@@ -2988,7 +3005,7 @@ theorem Faithful.of_eq {s s' : Setup} (hr : s.roll = s'.roll)
   obtain ⟨r₀, h₀, rfl⟩ := hr'
   have hrep : s.replacement = s'.replacement := by simp [replacement, hr, hd]
   rw [← hrep]
-  refine h ⟨r₀.results, s.lowest, s.highest, s.replacement⟩ ?_ x hx
+  refine h ⟨r₀.results, s.lowest, s.highest, s.replacement, r₀.chains⟩ ?_ x hx
   rw [law, PMF.support_map, hr]
   exact ⟨r₀, h₀, rfl⟩
 
@@ -3069,8 +3086,8 @@ private theorem faithful_rerollPool {s : Setup} {ρ : Roll} {c : Criterion}
         (List.mem_of_mem_filter hx))
       obtain ⟨r, hr, hre⟩ := Roll.exists_sorted_of_mem_outcomes hρw ha
       rw [← hre, Record.sorted] at hx
-      refine hfaith ⟨r.results, s.lowest, s.highest, s.replacement⟩ ?_ x
-        ((List.mergeSort_perm _ _).mem_iff.mp hx)
+      refine hfaith ⟨r.results, s.lowest, s.highest, s.replacement, r.chains⟩
+        ?_ x ((List.mergeSort_perm _ _).mem_iff.mp hx)
       rw [law, PMF.support_map, hρ]
       exact ⟨r, hr, rfl⟩
     · -- A replacement is a final result of a matched die.
@@ -3164,8 +3181,8 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
       have hff : ∀ x ∈ Roll.expand ρ.dice.2, x ∈ s.replacement.faces :=
         fun x hx => by
           obtain ⟨r, hr, hxr⟩ := exists_results_alike halike hn hx
-          refine hfaith ⟨r.results, s.lowest, s.highest, s.replacement⟩ ?_ x
-            hxr
+          refine hfaith
+            ⟨r.results, s.lowest, s.highest, s.replacement, r.chains⟩ ?_ x hxr
           rw [law, PMF.support_map, hρ]
           exact ⟨r, hr, rfl⟩
       have hmem : ∀ x ∈ Roll.expand (rewriteFaces ρ.dice.2 c G g),

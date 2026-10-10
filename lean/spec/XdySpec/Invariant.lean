@@ -209,7 +209,7 @@ private theorem checkInstruction_ok {f : Function} {i : Instruction}
     exact ⟨by simp [Instruction.operandsAreValues, checkValue_ok h],
       by simpa [State.Has, Instruction.destination, hr] using
         checkRegister_ok hd'⟩
-  case reroll =>
+  case reroll | explode =>
     obtain ⟨hd', h⟩ := bind_ok h
     have hv := forM_ok h
     exact ⟨by

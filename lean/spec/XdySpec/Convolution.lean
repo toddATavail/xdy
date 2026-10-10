@@ -353,6 +353,33 @@ theorem mem_support_rollDice {n : Int} {die : PMF Int} {r : Record}
   mem_support_repeat n.toNat hr
 
 /--
+Every possible record of a set of dice holds no chains, since only an explode
+grows one.
+
+# Parameters
+- `n`: The number of dice.
+- `die`: The law of one die.
+- `r`: The record.
+
+# Hypotheses
+- `hr`: The record is possible.
+-/
+theorem chains_of_mem_support_rollDice {n : Int} {die : PMF Int} {r : Record}
+    (hr : r ∈ (rollDice n die).support) : r.chains = [] := by
+  unfold rollDice at hr
+  generalize n.toNat = m at hr
+  induction m generalizing r with
+  | zero =>
+    simp only [Nat.repeat, PMF.mem_support_pure_iff] at hr
+    subst hr
+    rfl
+  | succ m ih =>
+    simp only [Nat.repeat, PMF.mem_support_bind_iff,
+      PMF.mem_support_map_iff] at hr
+    obtain ⟨r', hr', x, _, rfl⟩ := hr
+    exact (ih hr' : r'.chains = [])
+
+/--
 Transformations that agree on the support of a law transform it alike.
 
 # Parameters

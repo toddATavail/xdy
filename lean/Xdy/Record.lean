@@ -22,6 +22,20 @@ also keeps its results sorted in ascending order as they arrive. Sorting early
 means that two records holding the same multiset of results are equal, which
 lets the oracle merge machine states that differ only in the order of their
 rolls: `3D6` then has `56` states rather than `216`.
+
+An explode grows _chains_, as `chains` in `primitives.rs` describes them:
+every die that descends from one rolled die, by replacement or extension. The
+sum and every later drop and keep count a chain as one die, worth its total,
+so a record that an explode grew holds its chains beside its results, and its
+results are their totals. Drops and keeps order chains by their totals, then
+by their contents, so the chains are kept sorted in that order, and the drop
+counts count chains, exactly as they count results: the drops, keeps, kept
+window and sum of a record need not know that it holds chains at all. Only a
+reroll, which acts on each die of a chain, and an explode, which grows a chain
+from its end, look at them. A record holds chains only if some chain holds
+more than one die or saturated, so that a record whose explode grew nothing
+equals the record without chains that holds the same results, and their
+states merge.
 -/
 
 namespace Xdy
@@ -158,8 +172,9 @@ end Criterion
 namespace Die
 
 /--
-Whether a criterion matches every face of a die, as an unlimited reroll asks
-before it rerolls anything. Mirrors `faces_within` in `primitives.rs`.
+Whether a criterion matches every face of a die, as an unlimited reroll or
+explode asks before it rolls anything. Mirrors `faces_within` in
+`primitives.rs`.
 
 # Parameters
 - `d`: The die.
@@ -182,15 +197,323 @@ faces, which costs no more than the oracle's roll of the die did.
 -/
 def facesWithin (d : Die) (c : Criterion) : Bool := d.faces.all c.matches
 
+/--
+The value of a saturated die of a die, which stands for an endless chain of
+its dice: `i32Max` or `i32Min` by the sign of the mean face value, or `0` if
+that mean is `0`. Mirrors `saturated_value` in `primitives.rs`.
+
+# Parameters
+- `d`: The die.
+
+# Returns
+The saturated value. A die without faces, or an empty range, shows only `0`,
+and a record never rolled has no die, so the value of each is `0`.
+
+# Notes
+The sign of the mean is the sign of the sum of the faces, and the sum of a
+range has the sign of the sum of its endpoints, so the value takes time
+independent of the width of a range, as in the Rust.
+
+# Examples
+```lean
+#guard (Die.standard 6).saturatedValue == i32Max
+#guard (Die.range (-3) 2).saturatedValue == i32Min
+#guard (Die.ofFaces [-1, 1]).saturatedValue == 0
+#guard (Die.standard 0).saturatedValue == 0
+```
+-/
+def saturatedValue (d : Die) : Int :=
+  let sum : Int := match d with
+    | .none => 0
+    | .range start stop => if stop < start then 0 else start + stop
+    | .custom faces => faces.sum
+  if 0 < sum then i32Max else if sum < 0 then i32Min else 0
+
 end Die
+
+/-! ## Chains -/
+
+/-- A chain of a record that an explode grew, still kept: every kept die that
+descends from one rolled die, by replacement or extension, as `chains` in
+`primitives.rs` describes it. The sum and every drop and keep count a chain as
+one die, worth its total. -/
+inductive Chain where
+  /-- A chain that may still grow: its kept dice other than its `last`,
+  sorted in ascending order, and its `last`, the die at its end, which no die
+  extends, and from which alone an explode grows the chain. A chain of one die
+  has no other dice. -/
+  | live (body : List Int) (last : Int)
+  /-- A chain that a saturated die decides, worth its `value`, which no later
+  reroll or explode changes.
+
+  The Rust chain keeps the dice that the saturated die extends, which order
+  it among chains of equal totals. An explode saturates every chain still
+  kept of its record at the same value, so no drop or keep can tell apart the
+  chains of a record that holds one, and this chain forgets them. -/
+  | saturated (value : Int)
+  deriving Repr, DecidableEq, Hashable, Inhabited
+
+namespace Chain
+
+/--
+The chain of one die, as a roll leaves every die.
+
+# Parameters
+- `x`: The result of the die.
+
+# Returns
+The chain.
+-/
+def single (x : Int) : Chain := .live [] x
+
+/--
+Whether a chain is the chain of one die, as a roll leaves every die.
+
+# Parameters
+- `c`: The chain.
+
+# Returns
+`true` if `c` holds one die and has not saturated, `false` otherwise.
+
+# Examples
+```lean
+#guard (Chain.single 3).isSingle
+#guard !(Chain.live [1] 3).isSingle
+#guard !(Chain.saturated 0).isSingle
+```
+-/
+def isSingle : Chain → Bool
+  | .live [] _ => true
+  | _ => false
+
+/--
+The kept dice of a chain, in ascending order: those of its body and its last.
+
+# Parameters
+- `c`: The chain.
+
+# Returns
+The dice. A saturated chain shows only its value.
+
+# Examples
+```lean
+#guard (Chain.live [2, 6] 1).dice == [1, 2, 6]
+#guard (Chain.saturated i32Max).dice == [i32Max]
+```
+-/
+def dice : Chain → List Int
+  | .live body last => (last :: body).mergeSort
+  | .saturated value => [value]
+
+/--
+The die at the end of a chain, from which alone an explode grows it.
+
+# Parameters
+- `c`: The chain.
+
+# Returns
+The last die of a chain that may still grow, or the value of a saturated
+chain, whose saturated die stands at its end.
+-/
+def last : Chain → Int
+  | .live _ last => last
+  | .saturated value => value
+
+/--
+Whether a chain has saturated.
+
+# Parameters
+- `c`: The chain.
+
+# Returns
+`true` if a saturated die decides `c`, `false` otherwise.
+-/
+def saturates : Chain → Bool
+  | .live .. => false
+  | .saturated _ => true
+
+/--
+The total of a chain, which the sum and every drop and keep count: the value
+of a saturated chain, or else the sum of its dice, folded in ascending order
+with saturating addition, as `kept_chains` in `primitives.rs` folds them.
+
+# Parameters
+- `c`: The chain.
+
+# Returns
+The total.
+
+# Examples
+```lean
+#guard (Chain.live [6] 2).total == 8
+#guard (Chain.live [i32Max, i32Max] i32Min).total == i32Max - 1
+#guard (Chain.saturated i32Min).total == i32Min
+```
+-/
+def total : Chain → Int
+  | .saturated value => value
+  | c => c.dice.foldl add 0
+
+/--
+Whether a chain precedes another, or equals it, in the order of drops and
+keeps: by their totals, then by their contents, their dice in ascending
+order, compared lexicographically, and then their last dice, as `cross_out` in
+`primitives.rs` orders them. A chain that may still grow precedes a saturated
+chain that agrees with it so far, though no record holds both.
+
+# Parameters
+- `a`, `b`: The chains.
+
+# Returns
+`true` if `a` precedes `b` or equals it, `false` otherwise.
+
+# Notes
+The Rust orders only identical chains by the order in which their earliest
+kept dice were rolled. Chains that agree on every key here are equal, so the
+order is total, and sorting a multiset of chains answers one list.
+
+# Examples
+```lean
+-- `[5, 2]` and `[6, 1]` both total `7`, but `[1, 6]` precedes `[2, 5]`.
+#guard (Chain.live [6] 1).le (.live [5] 2)
+#guard !(Chain.live [5] 2).le (.live [6] 1)
+#guard (Chain.single 4).le (.live [6] 2)
+```
+-/
+def le (a b : Chain) : Bool :=
+  decide (a.total < b.total) || a.total == b.total &&
+    (decide (a.dice < b.dice) || a.dice == b.dice &&
+      (decide (a.last < b.last) || a.last == b.last &&
+        (!a.saturates || b.saturates)))
+
+/--
+Of any two chains, one precedes the other, or equals it, so that sorting by
+`le` sorts every list of chains.
+
+# Parameters
+- `a`, `b`: The chains.
+-/
+theorem le_total (a b : Chain) : a.le b = true ∨ b.le a = true := by
+  simp only [le, Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq,
+    beq_iff_eq, Bool.not_eq_true']
+  rcases Int.lt_trichotomy a.total b.total with h | h | h
+  · exact .inl (.inl h)
+  · rcases Std.lt_trichotomy a.dice b.dice with h' | h' | h'
+    · exact .inl (.inr ⟨h, .inl h'⟩)
+    · rcases Int.lt_trichotomy a.last b.last with h'' | h'' | h''
+      · exact .inl (.inr ⟨h, .inr ⟨h', .inl h''⟩⟩)
+      · cases ha : a.saturates <;> cases hb : b.saturates <;> simp_all
+      · exact .inr (.inr ⟨h.symm, .inr ⟨h'.symm, .inl h''⟩⟩)
+    · exact .inr (.inr ⟨h.symm, .inl h'⟩)
+  · exact .inr (.inl h)
+
+/--
+The order of chains is transitive, so that sorting by `le` sorts every list of
+chains.
+
+# Parameters
+- `a`, `b`, `c`: The chains.
+
+# Hypotheses
+- `hab`: `a` precedes `b`, or equals it.
+- `hbc`: `b` precedes `c`, or equals it.
+-/
+theorem le_trans {a b c : Chain} (hab : a.le b = true) (hbc : b.le c = true) :
+    a.le c = true := by
+  simp only [le, Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq,
+    beq_iff_eq, Bool.not_eq_true'] at hab hbc ⊢
+  rcases hab with h1 | ⟨e1, h1 | ⟨d1, h1 | ⟨l1, s1⟩⟩⟩ <;>
+  rcases hbc with h2 | ⟨e2, h2 | ⟨d2, h2 | ⟨l2, s2⟩⟩⟩
+  all_goals first
+    | exact .inl (by omega)
+    | skip
+  all_goals refine .inr ⟨by omega, ?_⟩
+  · exact .inl (List.lt_trans h1 h2)
+  · exact .inl (d2 ▸ h1)
+  · exact .inl (d2 ▸ h1)
+  · exact .inl (d1 ▸ h2)
+  · exact .inr ⟨d1.trans d2, .inl (by omega)⟩
+  · exact .inr ⟨d1.trans d2, .inl (by omega)⟩
+  · exact .inl (d1 ▸ h2)
+  · exact .inr ⟨d1.trans d2, .inl (by omega)⟩
+  · refine .inr ⟨d1.trans d2, .inr ⟨by omega, ?_⟩⟩
+    rcases s1 with s1 | s1
+    · exact .inl s1
+    · rcases s2 with s2 | s2
+      · simp [s1] at s2
+      · exact .inr s2
+
+/--
+A chain that precedes another totals no more than it, so that the totals of
+chains sorted by `le` are sorted.
+
+# Parameters
+- `a`, `b`: The chains.
+
+# Hypotheses
+- `h`: `a` precedes `b`, or equals it.
+-/
+theorem total_le_of_le {a b : Chain} (h : a.le b = true) :
+    a.total ≤ b.total := by
+  simp only [le, Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq,
+    beq_iff_eq] at h
+  omega
+
+/--
+Whether an explode that matches a criterion grows a chain: whether the
+chain may still grow, and the criterion matches its last die.
+
+# Parameters
+- `c`: The chain.
+- `crit`: The criterion.
+
+# Returns
+`true` if an explode by `crit` extends `c`, `false` otherwise.
+
+# Examples
+```lean
+#guard (Chain.live [1] 6).grows (.within 6 6)
+#guard !(Chain.live [6] 1).grows (.within 6 6)
+#guard !(Chain.saturated i32Max).grows (.within i32Min i32Max)
+```
+-/
+def grows (c : Chain) (crit : Criterion) : Bool :=
+  !c.saturates && crit.matches c.last
+
+/--
+Saturate a chain, as an unlimited explode whose criterion matches every face
+of the die saturates every chain still kept, appending a saturated die to its
+end.
+
+# Parameters
+- `value`: The saturated value of the die.
+- `c`: The chain.
+
+# Returns
+The saturated chain of the value, or `c` itself if it has saturated already,
+since an explode leaves a saturated chain alone.
+
+# Examples
+```lean
+#guard (Chain.live [6] 6).saturate i32Max == .saturated i32Max
+#guard (Chain.saturated 0).saturate i32Max == .saturated 0
+```
+-/
+def saturate (value : Int) : Chain → Chain
+  | .live .. => .saturated value
+  | c => c
+
+end Chain
 
 /-! ## Records -/
 
 /-- The results of a range or a set of dice, the drops applied to them, and
-the die from which they were drawn. Equality is decided, not merely a `BEq`,
-so that it is lawful, as proofs about a `Dist` of records require. -/
+the die from which they were drawn, with the chains that an explode grew, if
+any. Equality is decided, not merely a `BEq`, so that it is lawful, as proofs
+about a `Dist` of records require. -/
 structure Record where
-  /-- The results, sorted in ascending order. -/
+  /-- The results, sorted in ascending order: the totals of the chains, if the
+  record holds any. -/
   results : List Int := []
   /-- The number of lowest results dropped, at most the number of results. -/
   lowest : Nat := 0
@@ -198,6 +521,9 @@ structure Record where
   highest : Nat := 0
   /-- The die from which the results were drawn. -/
   die : Die := .none
+  /-- The chains, sorted by `Chain.le`, one for each result, which is its
+  total; or none, if every chain is a single die, which is its result. -/
+  chains : List Chain := []
   deriving Repr, DecidableEq, Hashable, Inhabited
 
 namespace Record
@@ -487,6 +813,55 @@ saturates part way, which is why it must follow the Rust exactly.
 ```
 -/
 def sum (r : Record) : Int := r.kept.foldl add 0
+
+/--
+Answer the chains that survive the drops, as `kept` answers their totals.
+
+# Parameters
+- `r`: The record.
+
+# Returns
+The kept chains, sorted by `Chain.le`: the chains in the kept window, if `r`
+holds chains, or else the chain of each kept result, a single die. Empty if the
+drops cover every chain.
+
+# Examples
+```lean
+#guard ({ results := [2, 7], highest := 1
+          chains := [.live [] 2, .live [1] 6] } : Record).keptChains
+  == [.single 2]
+#guard ({ results := [1, 3], lowest := 1 } : Record).keptChains
+  == [.single 3]
+```
+-/
+def keptChains (r : Record) : List Chain :=
+  if r.chains.isEmpty then r.kept.map .single
+  else (r.chains.drop r.lowest).take (r.results.length - r.lowest - r.highest)
+
+/--
+Build a record of chains, without drops, as a reroll or an explode leaves its
+chains still kept.
+
+# Parameters
+- `die`: The die from which the dice of the chains were drawn.
+- `cs`: The chains, in any order.
+
+# Returns
+The record whose results are the totals of the chains, sorted by
+`Chain.le`, and which holds the chains, unless every chain is a single die.
+
+# Examples
+```lean
+#guard Record.ofChains .none [.single 3, .single 1]
+  == { results := [1, 3] }
+#guard Record.ofChains .none [.live [6] 2, .single 4]
+  == { results := [4, 8], chains := [.single 4, .live [6] 2] }
+```
+-/
+def ofChains (die : Die) (cs : List Chain) : Record :=
+  let cs := cs.mergeSort Chain.le
+  { results := cs.map Chain.total, die
+    chains := if cs.all Chain.isSingle then [] else cs }
 
 end Record
 

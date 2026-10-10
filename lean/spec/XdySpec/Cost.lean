@@ -11,7 +11,10 @@ space that it needs grows with them. The enumerating builder that it
 replaced walked one path for each sequence of draws (`XdySpec/Paths.lean`),
 and so do the paths here, but for an unlimited reroll, whose sequences of
 draws are unbounded: its paths follow its conditional law, one for each face
-that it can keep.
+that it can keep. An unlimited explode that grows a chain has infinitely many
+paths, and the forward pass refuses every function that may reach one
+(`BuildError::Unbounded`), so lemma 7 holds of the functions that are
+`Bounded`: that reach no such explode.
 At every program point, and after every step of the plan, the worlds of the
 pass number no more than the paths that reach that point, and so no more than
 the paths through the whole function (`worlds_le_paths`,
@@ -172,6 +175,65 @@ theorem map_fst_ghostPaths {s : State} {pc : Nat}
     rw [map_fst_foldl_performPaths, map_fst_execPaths]
     rfl
 
+/-! ## Bounded functions -/
+
+/--
+Whether running instructions from a state reaches, with positive probability,
+no instruction in a state in which it may explode without bound: the
+condition under which `propagate_worlds` in `xdy/src/distribution/
+propagation.rs` builds a function, which it decides from the bounds, and the
+oracle answers it.
+
+# Parameters
+- `is`: The instructions.
+- `s`: The state before them.
+
+# Returns
+The proposition that every state that the instructions before each can reach
+runs it boundedly.
+-/
+def Bounded (is : List Instruction) (s : State) : Prop :=
+  ∀ n (hn : n < is.length), ∀ t ∈ (exec (is.take n) (PMF.pure s)).support,
+    unbounded t is[n] = false
+
+/--
+A function whose every instruction is bounded in every state, as one that
+explodes nothing without limit is, is bounded from any state.
+
+# Parameters
+- `is`: The instructions.
+- `s`: The state before them.
+
+# Hypotheses
+- `h`: No instruction may explode without bound in any state.
+-/
+theorem bounded_of_forall {is : List Instruction} {s : State}
+    (h : ∀ i ∈ is, ∀ t, unbounded t i = false) : Bounded is s :=
+  fun _ hn t _ => h _ (List.getElem_mem hn) t
+
+/--
+In a bounded function, no instruction may explode without bound in any state
+that the ghost can reach before it.
+
+# Parameters
+- `s`: The initial state.
+- `pc`: The program counter of the instruction.
+
+# Hypotheses
+- `hb`: The function is bounded from `s`.
+- `hpc`: `pc` is an instruction of the function.
+-/
+theorem unbounded_of_mem_ghost {s : State} (hb : Bounded vs.instructions s)
+    {pc : Nat} (hpc : pc < vs.instructions.length) :
+    ∀ q ∈ (ghost vs s pc).support,
+      unbounded q.1 vs.instructions[pc] = false := by
+  intro q hq
+  have hq' : q.1 ∈ ((ghost vs s pc).map Prod.fst).support := by
+    rw [PMF.support_map]
+    exact ⟨q, hq, rfl⟩
+  rw [ghost_fst (Nat.le_of_lt hpc)] at hq'
+  exact hb pc hpc q.1 hq'
+
 /-! ## Every reachable ghost is on a path -/
 
 /--
@@ -184,17 +246,20 @@ outcomes, is at the end of some path, if every one before it is.
 - `E`: The state and the outcomes at the end of each path before it.
 
 # Hypotheses
+- `hb`: `i` may not explode without bound in any state that `γ` can reach.
 - `h`: Every state and outcomes that `γ` can reach is in `E`.
 -/
 theorem mem_execPaths {i : Instruction} {γ : PMF (State × Outcomes vs)}
-    {E : List (State × Outcomes vs)} (h : ∀ p ∈ γ.support, p ∈ E) :
+    {E : List (State × Outcomes vs)}
+    (hb : ∀ p ∈ γ.support, unbounded p.1 i = false)
+    (h : ∀ p ∈ γ.support, p ∈ E) :
     ∀ p ∈ (Ghost.exec i γ).support, p ∈ Ghost.execPaths i E := by
   intro p hp
   simp only [Ghost.exec, PMF.mem_support_bind_iff, PMF.support_map,
     Set.mem_image] at hp
   obtain ⟨q, hq, t, ht, rfl⟩ := hp
   exact List.mem_flatMap.mpr ⟨q, h q hq,
-    List.mem_map_of_mem (mem_forks_of_mem_support ht)⟩
+    List.mem_map_of_mem (mem_forks_of_mem_support (hb q hq) ht)⟩
 
 /--
 Every state and outcomes that the plan's steps can reach is at the end of
@@ -232,7 +297,7 @@ theorem mem_foldl_performPaths {pc : Nat} :
 
 /--
 Every state and outcomes that the ghost can reach before an instruction is at
-the end of some path that reaches it.
+the end of some path that reaches it, if the function is bounded.
 
 # Parameters
 - `s`: The initial state.
@@ -240,9 +305,10 @@ the end of some path that reaches it.
 - `p`: The state and outcomes.
 
 # Hypotheses
+- `hb`: The function is bounded from `s`.
 - `h`: The ghost can reach `p`.
 -/
-theorem mem_ghostPaths {s : State} :
+theorem mem_ghostPaths {s : State} (hb : Bounded vs.instructions s) :
     ∀ {pc : Nat} {p : State × Outcomes vs}, p ∈ (ghost vs s pc).support →
       p ∈ ghostPaths vs s pc
   | 0, _, h => by simpa [ghost, ghostPaths] using h
@@ -251,11 +317,13 @@ theorem mem_ghostPaths {s : State} :
     cases hi : vs.instructions[pc]? with
     | some i =>
       simp only [hi] at h ⊢
-      exact mem_foldl_performPaths (mem_execPaths fun _ hq =>
-        mem_ghostPaths hq) p h
+      obtain ⟨hlt, hget⟩ := List.getElem?_eq_some_iff.mp hi
+      exact mem_foldl_performPaths (mem_execPaths
+        (hget ▸ unbounded_of_mem_ghost hb hlt)
+        fun _ hq => mem_ghostPaths hb hq) p h
     | none =>
       simp only [hi] at h ⊢
-      exact mem_ghostPaths h
+      exact mem_ghostPaths hb h
 
 /-! ## Counting -/
 
@@ -316,16 +384,18 @@ the paths that reach it.
 # Hypotheses
 - `hvals`: Every operand of every instruction is a value.
 - `hhas`: The initial state has the destination of every instruction.
+- `hb`: The function is bounded from the initial state.
 - `hpc`: `pc` is at most the number of instructions.
 -/
 theorem worlds_le_paths_forward
     (hvals : ∀ i ∈ vs.instructions, i.operandsAreValues = true) {s : State}
-    (hhas : ∀ i ∈ vs.instructions, s.Has i.destination) {pc : Nat}
+    (hhas : ∀ i ∈ vs.instructions, s.Has i.destination)
+    (hb : Bounded vs.instructions s) {pc : Nat}
     (hpc : pc ≤ vs.instructions.length) :
     (splitOutcomes (forward vs s pc).K (vs.openSplits pc)).support.encard ≤
       (paths s (vs.instructions.take pc)).length := by
   rw [← ghost_snd hvals hhas hpc, ← map_fst_ghostPaths hpc, List.length_map]
-  exact encard_support_map_snd_le fun _ => mem_ghostPaths
+  exact encard_support_map_snd_le fun _ => mem_ghostPaths hb
 
 /--
 After each step of the plan that follows an instruction, the worlds of the
@@ -339,11 +409,13 @@ forward pass number no more than the paths that reach the instruction's end.
 # Hypotheses
 - `hvals`: Every operand of every instruction is a value.
 - `hhas`: The initial state has the destination of every instruction.
+- `hb`: The function is bounded from the initial state.
 - `hpc`: `pc` is an instruction of the function.
 -/
 theorem worlds_le_paths_steps
     (hvals : ∀ i ∈ vs.instructions, i.operandsAreValues = true) {s : State}
-    (hhas : ∀ i ∈ vs.instructions, s.Has i.destination) {pc : Nat}
+    (hhas : ∀ i ∈ vs.instructions, s.Has i.destination)
+    (hb : Bounded vs.instructions s) {pc : Nat}
     (hpc : pc < vs.instructions.length) (n : Nat) :
     let r := ((vs.steps pc).take n).foldl (Forward.perform pc)
       ((forward vs s pc).exec pc vs.instructions[pc], vs.openSplits pc)
@@ -361,7 +433,8 @@ theorem worlds_le_paths_steps
   rw [← map_fst_execPaths, ← map_fst_foldl_performPaths pc
     ((vs.steps pc).take n) _ (vs.openSplits pc), List.length_map]
   exact encard_support_map_snd_le
-    (mem_foldl_performPaths (mem_execPaths fun _ => mem_ghostPaths))
+    (mem_foldl_performPaths (mem_execPaths (unbounded_of_mem_ghost hb hpc)
+      fun _ => mem_ghostPaths hb))
 
 /--
 Lemma 7, before each instruction: for a well-formed function, the worlds of
@@ -377,17 +450,20 @@ the forward pass never outnumber the paths through the function.
 # Hypotheses
 - `hv`: The function is well formed.
 - `hs`: Its initial state is `s`.
+- `hb`: The function is bounded from `s`, as every function that the forward
+  pass builds is.
 - `hpc`: `pc` is at most the number of instructions.
 -/
 theorem worlds_le_paths {f : Function} {args : List Int}
     {externals : List (String × Int)} {s : Xdy.State}
     (hv : f.validate = .ok ()) (hs : f.initialState args externals = .ok s)
+    (hb : Bounded f.instructions.toList (.ofOracle s))
     {pc : Nat} (hpc : pc ≤ f.instructions.size) :
     (splitOutcomes (forward ⟨f.instructions.toList⟩ (.ofOracle s) pc).K
         ((Values.mk f.instructions.toList).openSplits pc)).support.encard ≤
       (paths (.ofOracle s) f.instructions.toList).length :=
   (worlds_le_paths_forward (operandsAreValues_of_validate hv)
-    (has_initialState hv hs) (by simpa using hpc)).trans
+    (has_initialState hv hs) hb (by simpa using hpc)).trans
       (by exact_mod_cast length_paths_take_le _ _ _)
 
 /--
@@ -407,11 +483,14 @@ number of the steps that follow any instruction, which is when
 # Hypotheses
 - `hv`: The function is well formed.
 - `hs`: Its initial state is `s`.
+- `hb`: The function is bounded from `s`, as every function that the forward
+  pass builds is.
 - `hpc`: `pc` is an instruction of the function.
 -/
 theorem worlds_le_paths_of_step {f : Function} {args : List Int}
     {externals : List (String × Int)} {s : Xdy.State}
     (hv : f.validate = .ok ()) (hs : f.initialState args externals = .ok s)
+    (hb : Bounded f.instructions.toList (.ofOracle s))
     {pc : Nat} (hpc : pc < f.instructions.toList.length) (n : Nat) :
     let vs : Values := ⟨f.instructions.toList⟩
     let r := ((vs.steps pc).take n).foldl (Forward.perform pc)
@@ -420,7 +499,7 @@ theorem worlds_le_paths_of_step {f : Function} {args : List Int}
     (splitOutcomes r.1.K r.2).support.encard ≤
       (paths (.ofOracle s) f.instructions.toList).length :=
   (worlds_le_paths_steps (vs := ⟨f.instructions.toList⟩)
-    (operandsAreValues_of_validate hv) (has_initialState hv hs) hpc n).trans
+    (operandsAreValues_of_validate hv) (has_initialState hv hs) hb hpc n).trans
       (by exact_mod_cast length_paths_take_le _ _ _)
 
 end Xdy.Spec

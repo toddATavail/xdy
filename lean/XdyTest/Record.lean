@@ -4,8 +4,8 @@ import Xdy.Record
 # Rolling record tests
 
 Sorting on arrival, drop accumulation and clamping, keeps, the kept window,
-and the ascending saturating fold, mirroring `RollingRecord` in
-`xdy/src/primitives.rs`.
+the ascending saturating fold, and chains, their totals and order, mirroring
+`RollingRecord` in `xdy/src/primitives.rs`.
 -/
 
 namespace Xdy.Test
@@ -132,6 +132,74 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 #guard (rec [i32Max, i32Max, i32Min]).sum == i32Max - 1
 #guard (rec [-1, i32Max, i32Max]).sum == i32Max
 
+/-! ## Saturated values -/
+
+-- The sign of the mean face, or `0` if that mean is `0`, as for a die without
+-- faces, an empty range, and a record never rolled.
+#guard (Die.range 1 1).saturatedValue == i32Max
+#guard (Die.range (-1) 1).saturatedValue == 0
+#guard (Die.range (-2) 1).saturatedValue == i32Min
+#guard (Die.range 3 2).saturatedValue == 0
+#guard (Die.ofFaces [-5, 1, 1, 1, 1]).saturatedValue == i32Min
+#guard (Die.ofFaces []).saturatedValue == 0
+#guard Die.none.saturatedValue == 0
+-- A range of any width answers at once.
+#guard (Die.range i32Min i32Max).saturatedValue == i32Min
+
+/-! ## Chains -/
+
+-- A chain's total folds its dice in ascending order, saturating, unless it
+-- has saturated, when it is its value.
+#guard (Chain.single 4).total == 4
+#guard (Chain.live [2, 3] 1).total == 6
+#guard (Chain.live [i32Max] 1).total == i32Max
+#guard (Chain.live [i32Min, i32Max] 1).total == 0
+#guard (Chain.saturated 0).total == 0
+-- Its dice are its body and its last, sorted.
+#guard (Chain.live [5] 2).dice == [2, 5]
+#guard (Chain.single 4).dice == [4]
+-- Chains are ordered by total, then by their dice, then by their last die.
+#guard (Chain.single 3).le (.single 4) && !(Chain.single 4).le (.single 3)
+#guard (Chain.live [3] 1).le (.live [2] 2)
+#guard !(Chain.live [2] 2).le (.live [3] 1)
+#guard (Chain.live [3] 1).le (.live [1] 3)
+#guard !(Chain.live [1] 3).le (.live [3] 1)
+#guard (Chain.live [6] 1).le (.live [6] 1)
+#guard (Chain.live [] i32Max).le (.saturated i32Max)
+#guard !(Chain.saturated i32Max).le (.live [] i32Max)
+-- Only a chain that may still grow grows, from its last die.
+#guard (Chain.single 6).grows (.within 6 6)
+#guard !(Chain.live [6] 2).grows (.within 6 6)
+#guard !(Chain.saturated 6).grows (.within 6 6)
+
+/-! ## Records of chains -/
+
+-- A record whose chains are all single dice holds none, and equals the record
+-- of their results.
+#guard Record.ofChains (.standard 6) [.single 5, .single 2]
+  == { results := [2, 5], die := .standard 6 }
+#guard Record.ofChains .none [] == {}
+-- Otherwise it holds them, sorted, and its results are their totals. Of
+-- chains of equal totals, `[2, 6]` precedes `[3, 5]`.
+#guard Record.ofChains .none [.live [5] 3, .live [6] 2, .single 9]
+  == { results := [8, 8, 9]
+       chains := [.live [6] 2, .live [5] 3, .single 9] }
+#guard Record.ofChains .none [.saturated i32Max, .saturated i32Max]
+  == { results := [i32Max, i32Max]
+       chains := [.saturated i32Max, .saturated i32Max] }
+-- Drops and keeps count chains, by their totals and then their dice, so the
+-- kept window is a window of the chains.
+#guard ((Record.ofChains .none [.live [6] 2, .live [5] 3, .single 9]
+  ).dropLowest 1).keptChains == [.live [5] 3, .single 9]
+#guard ((Record.ofChains .none [.live [6] 2, .live [5] 3, .single 9]
+  ).keepLowest 1).keptChains == [.live [6] 2]
+#guard ((Record.ofChains .none [.live [6] 2, .live [5] 3, .single 9]
+  ).dropHighest 2).sum == 8
+#guard (Record.ofChains .none [.live [6] 2, .single 9]).sum == 17
+-- A record without chains is a record of single dice.
+#guard ((rec [5, 1, 3]).dropHighest 1).keptChains == [.single 1, .single 3]
+#guard (rec []).keptChains == []
+
 /-! ## Docstring examples, verbatim -/
 
 #guard Die.standard 6 == .range 1 6
@@ -148,6 +216,26 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 #guard (Die.standard 3).facesWithin (.within 1 3)
 #guard !(Die.standard 3).facesWithin (.within 1 2)
 #guard (Die.standard 0).facesWithin (.among [0])
+#guard (Die.standard 6).saturatedValue == i32Max
+#guard (Die.range (-3) 2).saturatedValue == i32Min
+#guard (Die.ofFaces [-1, 1]).saturatedValue == 0
+#guard (Die.standard 0).saturatedValue == 0
+#guard (Chain.single 3).isSingle
+#guard !(Chain.live [1] 3).isSingle
+#guard !(Chain.saturated 0).isSingle
+#guard (Chain.live [2, 6] 1).dice == [1, 2, 6]
+#guard (Chain.saturated i32Max).dice == [i32Max]
+#guard (Chain.live [6] 2).total == 8
+#guard (Chain.live [i32Max, i32Max] i32Min).total == i32Max - 1
+#guard (Chain.saturated i32Min).total == i32Min
+#guard (Chain.live [6] 1).le (.live [5] 2)
+#guard !(Chain.live [5] 2).le (.live [6] 1)
+#guard (Chain.single 4).le (.live [6] 2)
+#guard (Chain.live [1] 6).grows (.within 6 6)
+#guard !(Chain.live [6] 1).grows (.within 6 6)
+#guard !(Chain.saturated i32Max).grows (.within i32Min i32Max)
+#guard (Chain.live [6] 6).saturate i32Max == .saturated i32Max
+#guard (Chain.saturated 0).saturate i32Max == .saturated 0
 #guard (({} : Record).push 3 |>.push 1 |>.push 2).results == [1, 2, 3]
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 2).lowest == 2
 #guard (({ results := [1, 2, 3] } : Record).dropLowest 5).lowest == 3
@@ -171,5 +259,14 @@ example : (rec [3, 1, 2]).results.Pairwise (· ≤ ·) :=
 #guard (({ results := [1, 2, 3] } : Record).keepHighest (-2)).kept == []
 #guard ({ results := [1, 2, 3], lowest := 1 } : Record).sum == 5
 #guard ({ results := [i32Min, i32Max, i32Max] } : Record).sum == i32Max - 1
+#guard ({ results := [2, 7], highest := 1
+          chains := [.live [] 2, .live [1] 6] } : Record).keptChains
+  == [.single 2]
+#guard ({ results := [1, 3], lowest := 1 } : Record).keptChains
+  == [.single 3]
+#guard Record.ofChains .none [.single 3, .single 1]
+  == { results := [1, 3] }
+#guard Record.ofChains .none [.live [6] 2, .single 4]
+  == { results := [4, 8], chains := [.single 4, .live [6] 2] }
 
 end Xdy.Test

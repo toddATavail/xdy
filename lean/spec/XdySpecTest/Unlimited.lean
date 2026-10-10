@@ -90,14 +90,14 @@ example : Tendsto (fun n => reroll { results := [1], die := .standard 2 }
       by_cases hx : x = 2 <;> simp [PMF.ofMultiset_apply, hx]
   have hnone : reroll { results := [1], die := .standard 2 } (.within 1 1)
       none = PMF.pure { results := [2], die := .standard 2 } := by
-    simp only [reroll,
+    simp only [reroll, rerollEach, List.isEmpty_nil, ↓reduceIte,
       kept_sorted (by decide : ([1] : List Int).Pairwise (· ≤ ·)), hw,
       Bool.false_eq_true, ↓reduceDIte, rerollKept]
     simp only [Criterion.matches, hf, List.foldl]
     simp [h2, PMF.pure_map]
     rfl
   have h := tendsto_reroll (r := { results := [1], die := .standard 2 })
-    (c := .within 1 1) (by simp [hw]) { results := [2], die := .standard 2 }
+    (c := .within 1 1) rfl (by simp [hw]) { results := [2], die := .standard 2 }
   simpa [hnone] using h
 
 /-! ## Every face matches -/
@@ -111,7 +111,7 @@ example (n : Nat) : limitedReplacement (.within 1 1) (customDie [1]) n =
 -- `2D1 reroll = 1 ∞ times` crosses out both dice, which sum to `0`.
 example : (reroll { results := [1, 1], die := .standard 1 } (.within 1 1)
     none).map Record.sum = PMF.pure 0 := by
-  rw [sum_reroll_crossOut (by decide),
+  rw [sum_reroll_crossOut rfl (by decide),
     kept_sorted (by decide : ([1, 1] : List Int).Pairwise (· ≤ ·))]
   rfl
 

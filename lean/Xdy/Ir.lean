@@ -12,7 +12,8 @@ A function is a straight-line list of instructions over a bank of registers,
 which hold integers, and a set of rolling records, which hold the results of
 ranges and dice. The first registers hold the function's parameters, in
 order, and the next hold its external variables, in order. Only `RollRange`,
-`RollStandardDice`, `RollCustomDice` and `Reroll` introduce randomness.
+`RollStandardDice`, `RollCustomDice`, `Reroll` and `Explode` introduce
+randomness.
 
 ## The JSON form
 
@@ -81,9 +82,9 @@ inductive BinaryOp where
   | «min»
   deriving Repr, BEq, Inhabited
 
-/-- The predicate of a reroll: the test that a die must pass to be rerolled,
-whose thresholds and endpoints are operands, read once, before the first
-reroll. Mirrors `Predicate` in `ir.rs`. -/
+/-- The predicate of a reroll or explode: the test that a die must pass to be
+rerolled or exploded, whose thresholds and endpoints are operands, read once,
+before the first reroll or explosion. Mirrors `Predicate` in `ir.rs`. -/
 inductive Predicate where
   /-- Matches a result equal to the threshold. -/
   | eq (threshold : AddressingMode)
@@ -109,14 +110,15 @@ inductive Predicate where
   | inRangeInclusive (start stop : AddressingMode)
   deriving Repr, BEq, Inhabited
 
-/-- The limit of a reroll: the number of times that each die may be rerolled.
-Mirrors `Limit` in `ir.rs`. -/
+/-- The limit of a reroll or explode: the number of times that each die may
+be rerolled or exploded. Mirrors `Limit` in `ir.rs`. -/
 inductive Limit where
-  /-- Reroll each die at most `count` times, or not at all if the count is
-  zero or less. -/
+  /-- Reroll or explode each die at most `count` times, or not at all if the
+  count is zero or less. -/
   | times (count : AddressingMode)
-  /-- Reroll each die until it no longer matches, or not at all if every face
-  of the die matches. -/
+  /-- Reroll or explode each die until it no longer matches. If every face of
+  the die matches, a reroll rerolls nothing, but crosses out every matching
+  die, and an explode saturates every chain. -/
   | unlimited
   deriving Repr, BEq, Inhabited
 
@@ -207,9 +209,9 @@ def operands : Limit → List AddressingMode
   | .unlimited => []
 
 /--
-Resolve a limit to the number of times that each die may be rerolled, given
-the value of its operand, as `evaluator.rs` and `reroll_within` in
-`primitives.rs` resolve it together.
+Resolve a limit to the number of times that each die may be rerolled or
+exploded, given the value of its operand, as `evaluator.rs` and
+`reroll_within` and `explode_within` in `primitives.rs` resolve it together.
 
 # Parameters
 - `l`: The limit.
@@ -274,6 +276,12 @@ inductive Instruction where
   matches and the limit allows. An unlimited reroll whose predicate matches
   every face of the die draws nothing, but crosses out every matching die. -/
   | reroll (dest : Nat) (predicate : Predicate) (limit : Limit)
+  /-- Explode the chains still kept in rolling record `dest` whose last dice
+  satisfy the predicate, each up to the limit of times: draw an extension of
+  the chain from the record's die, repeating while the extension matches and
+  the limit allows. An unlimited explode whose predicate matches every face
+  of the die draws nothing, but saturates every chain. -/
+  | explode (dest : Nat) (predicate : Predicate) (limit : Limit)
   /-- Write the sum of the kept results of rolling record `src` to register
   `dest`. -/
   | sumRollingRecord (dest src : Nat)
@@ -422,6 +430,9 @@ instance : FromJson Instruction where
     | "Reroll" =>
       return .reroll (← dest) (← p.getObjValAs? Predicate "predicate")
         (← p.getObjValAs? Limit "limit")
+    | "Explode" =>
+      return .explode (← dest) (← p.getObjValAs? Predicate "predicate")
+        (← p.getObjValAs? Limit "limit")
     | "SumRollingRecord" =>
       return .sumRollingRecord (← dest) (← p.getObjValAs? Nat "src")
     | "Neg" => return .neg (← dest) (← mode "op")
@@ -511,7 +522,7 @@ private def checkInstruction (f : Function) :
   | .rollCustomDice d c _ => do f.checkRecord d; f.checkValue c
   | .dropLowest d c | .dropHighest d c | .keepLowest d c | .keepHighest d c =>
     do f.checkRecord d; f.checkValue c
-  | .reroll d p l => do
+  | .reroll d p l | .explode d p l => do
     f.checkRecord d; (p.operands ++ l.operands).forM f.checkValue
   | .sumRollingRecord d s => do f.checkRegister d; f.checkRecord s
   | .binary _ d a b => do

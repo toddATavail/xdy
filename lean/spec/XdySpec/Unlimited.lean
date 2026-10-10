@@ -27,8 +27,8 @@ converge to the conditional law as `n` grows.
   die of the faces that do not match (`customDie_filter`), as the
   specification draws it (`tendsto_limitedReplacement_faces`). Rerolling a
   record's kept results is continuous in the law of the replacement
-  (`tendsto_rerollKept`), so the limited rerolls of a record converge to its
-  unlimited reroll (`tendsto_reroll`).
+  (`tendsto_rerollKept`), so the limited rerolls of a record that holds no
+  chains converge to its unlimited reroll (`tendsto_reroll`).
 - If every face matches, then `q = 1`, and no limit gives the loop a meaning:
   every limited reroll leaves the die's law alone
   (`limitedReplacement_of_matches`, `limitedReplacement_faces_of_facesWithin`)
@@ -479,21 +479,28 @@ reroll is the limit of limited ones, record by record, as
 - `R`: The record after the reroll.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `h`: The criterion does not match every face.
+
+# Notes
+A record that holds chains rerolls each die of each chain alone, by the same
+replacement, so its limited rerolls converge alike; this proves it of the
+records that the forward pass describes, which hold no chains.
 -/
-theorem tendsto_reroll {r : Record} {c : Criterion}
+theorem tendsto_reroll {r : Record} {c : Criterion} (hc : r.chains = [])
     (h : ¬r.die.facesWithin c = true) (R : Record) :
     Tendsto (fun n => reroll r c (some n) R) atTop
       (𝓝 (reroll r c none R)) := by
   have hlim : ∀ n, n ≠ 0 → reroll r c (some n) =
       rerollKept r.die r.kept c.matches
         (limitedReplacement c (customDie r.die.faces) n) := fun n hn => by
-    simp only [reroll]
+    simp only [reroll, rerollEach, hc, List.isEmpty_nil, ↓reduceIte]
     congr 1
     funext x
     simp [Nat.pos_of_ne_zero hn]
   rw [show reroll r c none = rerollKept r.die r.kept c.matches
-      (PMF.ofMultiset _ (unmatched_ne_zero h)) by simp [reroll, h]]
+      (PMF.ofMultiset _ (unmatched_ne_zero h)) by
+    simp [reroll, h, rerollEach, hc]]
   refine Tendsto.congr' ?_
     (tendsto_rerollKept r.die r.kept c.matches
       (tendsto_limitedReplacement_faces h) R)
@@ -571,13 +578,14 @@ kept, in ascending order, as `reroll` in `primitives.rs` does.
 - `c`: The criterion.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `h`: The criterion matches every face.
 -/
-theorem reroll_crossOut {r : Record} {c : Criterion}
+theorem reroll_crossOut {r : Record} {c : Criterion} (hc : r.chains = [])
     (h : r.die.facesWithin c = true) :
     reroll r c none = PMF.pure
       { results := r.kept.filter (!c.matches ·), die := r.die } := by
-  simp [reroll, h]
+  simp [reroll, h, hc]
 
 /--
 The record that an unlimited reroll crosses out keeps exactly the kept results
@@ -626,13 +634,14 @@ the record sums its kept results with each that matches replaced by `0`.
 - `c`: The criterion.
 
 # Hypotheses
+- `hc`: The record holds no chains.
 - `h`: The criterion matches every face.
 -/
-theorem sum_reroll_crossOut {r : Record} {c : Criterion}
+theorem sum_reroll_crossOut {r : Record} {c : Criterion} (hc : r.chains = [])
     (h : r.die.facesWithin c = true) :
     (reroll r c none).map Record.sum = PMF.pure
       ((r.kept.map fun x => if c.matches x then 0 else x).foldl add 0) := by
-  rw [reroll_crossOut h, PMF.pure_map, Record.sum, kept_crossOut,
+  rw [reroll_crossOut hc h, PMF.pure_map, Record.sum, kept_crossOut,
     foldl_add_map_crossOut c _ 0 (by decide)]
 
 end Xdy.Spec

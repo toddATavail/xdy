@@ -69,17 +69,24 @@ private def s₀ : State := .ofOracle nestedInitial
 #guard (ghostPaths vs s₀ 2).all fun p =>
   toInt? (vs.location 1) (p.2 1) == some (p.1.value (.register 0))
 
+/-- `nested` explodes nothing, so it is bounded. -/
+private theorem nested_bounded : Bounded nested.instructions.toList s₀ :=
+  bounded_of_forall fun i hi t => by
+    simp only [nested, List.mem_cons, List.not_mem_nil, or_false] at hi
+    rcases hi with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+      rfl
+
 -- Lemma 7, before each instruction and after each step.
 example (pc : Nat) (h : pc ≤ 10) :
     (splitOutcomes (forward vs s₀ pc).K (vs.openSplits pc)).support.encard ≤
       (paths s₀ nested.instructions.toList).length :=
-  worlds_le_paths nested_valid nested_initialState h
+  worlds_le_paths nested_valid nested_initialState nested_bounded h
 example (pc : Nat) (h : pc < 10) (n : Nat) :
     let r := ((vs.steps pc).take n).foldl (Forward.perform pc)
       ((forward vs s₀ pc).exec pc vs.instructions[pc], vs.openSplits pc)
     (splitOutcomes r.1.K r.2).support.encard ≤
       (paths s₀ nested.instructions.toList).length :=
-  worlds_le_paths_of_step nested_valid nested_initialState h n
+  worlds_le_paths_of_step nested_valid nested_initialState nested_bounded h n
 
 -- `nested` has four paths.
 #guard (paths s₀ nested.instructions.toList).length == 4

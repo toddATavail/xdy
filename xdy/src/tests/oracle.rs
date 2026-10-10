@@ -41,7 +41,11 @@
 //! test process that asked it, however that dies, rather than compute for
 //! hours with no one to read its answer. The [orphan
 //! test](test_oracle_dies_with_its_parent) kills a test process mid-request,
-//! and expects the oracle to exit at once.
+//! and expects the oracle to exit at once. The oracle computes naively, so a
+//! function that the pass answers at once, such as `1D{x}` with `{x}` bound to
+//! `i32::MAX`, whose die it lists face by face, may cost it gigabytes within a
+//! second. So [`ask_oracle`] watches the memory that it occupies, too, and
+//! kills it beyond [`ORACLE_MEMORY`], as it does beyond its deadline.
 
 #[cfg(unix)]
 use std::io::{BufRead as _, BufReader};
@@ -61,15 +65,15 @@ use proptest::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	Budget, BuildError, Distribution, Evaluator, Function, Instruction, Passes,
-	Unobserved, Weight, compile,
+	Budget, BuildError, Distribution, Evaluator, Function, Passes, Unobserved,
+	Weight, compile,
 	compiler::compile_unoptimized,
 	support::{
 		compile_valid, on_small_stack_within, optimize,
 		read_distribution_test_cases
 	},
 	tests::{
-		propagation::{resum, source_reroll},
+		propagation::{resum, source_explode, source_reroll},
 		property::{
 			NAMES, OPERATORS, agree, binding, check_within, extremum, variable,
 			with_parameters
@@ -106,6 +110,11 @@ const FIXTURES: &[(&str, &str)] = &[
 		"dynamic_keeps",
 		"{n}, {m}: 5D6 keep highest {n} drop lowest {m}"
 	),
+	("explode", "2D4 explode = 4"),
+	("explode_after_keep", "3D4 keep highest 2 explode = 4"),
+	("explode_limited", "1D4 explode = 4 3 times"),
+	("explode_saturate", "{x}: 2D6 explode ≥ {x} ∞ times"),
+	("explode_ties", "2D4 explode ≥ 3 drop lowest reroll = 2"),
 	("external", "1D6 + {y}"),
 	("extrema", "lowest(highest(1D4, 1D6), 1D8)"),
 	("keep_highest", "4D6 keep highest 3"),
@@ -113,6 +122,7 @@ const FIXTURES: &[(&str, &str)] = &[
 	("min", "{x}: lowest({x}, 3)"),
 	("range", "[1:6]"),
 	("reroll", "3D4 reroll = 1"),
+	("reroll_after_explode", "2D3 explode = 3 reroll = 1"),
 	("reroll_after_keep", "4D6 keep highest 3 reroll < 3 2 times"),
 	("reroll_cross_out", "{x}: 2D{x} reroll ≤ 6 ∞ times"),
 	("reroll_list", "2D[1, 3, 5] reroll in [1, 5]"),
@@ -256,7 +266,11 @@ enum Unanswered
 	Refused(String),
 
 	/// The oracle had not answered by the deadline, and was killed.
-	Late
+	Late,
+
+	/// The oracle occupied more than [`ORACLE_MEMORY`] before it answered, and
+	/// was killed.
+	Heavy
 }
 
 /// The [oracle](oracle_path), running on a lifeline: the guard holds the
@@ -344,9 +358,10 @@ impl Drop for RunningOracle
 }
 
 /// Ask the oracle for the exact distribution of a function's result, killing
-/// it if it has not answered by the specified deadline. The oracle runs [on a
-/// lifeline](RunningOracle), so it dies with the test process, even if that
-/// dies before the deadline passes.
+/// it if it has not answered by the specified deadline, or if it occupies more
+/// than [`ORACLE_MEMORY`], which it checks every [`ORACLE_SAMPLING`]. The
+/// oracle runs [on a lifeline](RunningOracle), so it dies with the test
+/// process, even if that dies before the deadline passes.
 ///
 /// # Parameters
 /// - `oracle`: The path of the oracle executable.
@@ -359,7 +374,8 @@ impl Drop for RunningOracle
 /// The distribution, in lowest terms.
 ///
 /// # Errors
-/// [`Unanswered`] if the oracle refuses the request, or misses the deadline.
+/// [`Unanswered`] if the oracle refuses the request, misses the deadline, or
+/// outgrows [`ORACLE_MEMORY`].
 ///
 /// # Panics
 /// If the oracle cannot be run, or its response is malformed, has no outcome,
@@ -384,6 +400,7 @@ fn ask_oracle(
 	let stdout = drain(Box::new(running.child.stdout.take().unwrap()));
 	let stderr = drain(Box::new(running.child.stderr.take().unwrap()));
 	let start = Instant::now();
+	let mut sampled = start;
 	let status = loop
 	{
 		if let Some(status) = running.child.try_wait().unwrap()
@@ -394,6 +411,16 @@ fn ask_oracle(
 		{
 			// Dropping the oracle kills it.
 			return Err(Unanswered::Late)
+		}
+		if sampled.elapsed() >= ORACLE_SAMPLING
+		{
+			sampled = Instant::now();
+			if resident(running.child.id())
+				.is_some_and(|bytes| bytes > ORACLE_MEMORY)
+			{
+				// Dropping the oracle kills it.
+				return Err(Unanswered::Heavy)
+			}
 		}
 		thread::sleep(Duration::from_millis(1));
 	};
@@ -421,21 +448,41 @@ fn ask_oracle(
 	Ok(distribution)
 }
 
-/// Answer whether the specified function explodes dice, which the oracle does
-/// not yet.
+/// Answer the memory that a running process occupies, its resident set size,
+/// as Linux reports it in `/proc`, or as `ps` reports it on other Unix
+/// systems, such as macOS.
 ///
 /// # Parameters
-/// - `function`: The function.
+/// - `pid`: The process identifier.
 ///
 /// # Returns
-/// `true` if some instruction of the function explodes dice, `false`
-/// otherwise.
-fn explodes(function: &Function) -> bool
+/// The resident set size, in bytes, or `None` if it cannot be read: always on
+/// Windows, and on Unix if the process has exited.
+fn resident(pid: u32) -> Option<u64>
 {
-	function
-		.instructions
-		.iter()
-		.any(|inst| matches!(inst, Instruction::Explode(_)))
+	if cfg!(target_os = "linux")
+	{
+		let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+		let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+		let kib = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+		Some(kib * 1024)
+	}
+	else if cfg!(unix)
+	{
+		let output = Command::new("ps")
+			.args(["-o", "rss=", "-p", &pid.to_string()])
+			.output()
+			.ok()?;
+		let kib = String::from_utf8_lossy(&output.stdout)
+			.trim()
+			.parse::<u64>()
+			.ok()?;
+		Some(kib * 1024)
+	}
+	else
+	{
+		None
+	}
 }
 
 /// Append a test case to a report in the format of the distribution corpus,
@@ -492,8 +539,6 @@ fn report_case(
 /// must agree with it exactly, as probabilities. Write the corpus, with the
 /// oracle's distribution in place of each case that disagrees, to
 /// `target/oracle/test_distributions.txt`, and list the cases that disagree.
-/// The oracle does not explode dice yet, so the test skips every case that
-/// does, and keeps it as it is.
 #[test]
 #[ignore = "oracle: run with just oracle"]
 fn test_oracle_distribution_corpus()
@@ -514,20 +559,6 @@ fn test_oracle_distribution_corpus()
 				.map(|&(outcome, count)| (outcome, Weight::from(count)))
 		)
 		.unwrap();
-		if explodes(&function)
-		{
-			// The oracle does not yet explode dice, so keep the case as it is.
-			report_case(
-				&mut report,
-				previous,
-				source,
-				args,
-				externs,
-				&expected
-			);
-			previous = Some(source);
-			continue
-		}
 		let actual =
 			ask_oracle(&oracle, &function, args, externs, Duration::MAX)
 				.unwrap_or_else(|e| panic!("{case}: unanswered: {e:?}"));
@@ -672,6 +703,19 @@ const ORACLE_BUDGET: Budget = Budget {
 /// that the enumerating builders admitted in under 130 ms.
 const ORACLE_DEADLINE: Duration = Duration::from_secs(2);
 
+/// The most memory, in bytes, that [`ask_oracle`] lets the oracle occupy, as
+/// its resident set size. The oracle lists every face of a die and every state
+/// of a roll, so a function that the pass answers at once may cost it more
+/// than `15 GiB` before its [deadline](ORACLE_DEADLINE) passes. An oracle that
+/// occupies more abstains, as a late one does. It occupies less than `50 MiB`
+/// on every case of the distribution corpus.
+const ORACLE_MEMORY: u64 = 2 << 30;
+
+/// How often [`ask_oracle`] samples the memory that the oracle occupies. The
+/// oracle may grow by about `8 GiB` per second, so it may exceed
+/// [`ORACLE_MEMORY`] by a few hundred megabytes before it is killed.
+const ORACLE_SAMPLING: Duration = Duration::from_millis(50);
+
 /// The time budget of [`test_oracle_random_programs`] and
 /// [`test_oracle_resummed_programs`], which is a safety net: it turns a hang
 /// into a failure.
@@ -774,10 +818,10 @@ fn test_oracle_resummed_programs()
 ///
 /// A source that does not compile, or whose distribution does not fit the
 /// budget, or that the pass refuses as [unbounded](BuildError::Unbounded), or
-/// that the oracle has not answered by [`ORACLE_DEADLINE`], abstains. The
-/// oracle does not explode dice yet, so a function that does is checked
-/// against its bounds alone. The oracle refuses only malformed requests, so
-/// its refusal fails.
+/// that the oracle has not answered by [`ORACLE_DEADLINE`], or within
+/// [`ORACLE_MEMORY`], abstains. The
+/// oracle refuses only malformed requests, and functions that may explode
+/// without bound, which the pass refuses first, so its refusal fails.
 ///
 /// # Parameters
 /// - `oracle`: The path of the oracle executable.
@@ -862,11 +906,6 @@ fn check_oracle(
 				function
 			);
 		}
-		if explodes(&function)
-		{
-			// The oracle does not explode dice yet.
-			continue
-		}
 		let answer = match ask_oracle(
 			oracle,
 			&function,
@@ -876,7 +915,7 @@ fn check_oracle(
 		)
 		{
 			Ok(answer) => answer,
-			Err(Unanswered::Late) => continue,
+			Err(Unanswered::Late | Unanswered::Heavy) => continue,
 			Err(Unanswered::Refused(e)) =>
 			{
 				return Err(TestCaseError::fail(format!(
@@ -958,10 +997,10 @@ fn small_expression() -> impl Strategy<Value = String>
 }
 
 /// Answer a strategy that generates small dice expressions, whose operands
-/// come from the specified strategy, with drop, keep, and reroll clauses. Any
-/// drop or keep clause may lack a drop expression, and any reroll clause its
-/// limit; a reroll's thresholds and endpoints are operands like a drop
-/// expression, but may begin with `-`.
+/// come from the specified strategy, with drop, keep, reroll, and explode
+/// clauses. Any drop or keep clause may lack a drop expression, and any reroll
+/// or explode clause its limit; the thresholds and endpoints of a reroll or
+/// explode are operands like a drop expression, but may begin with `-`.
 ///
 /// # Parameters
 /// - `inner`: The strategy for nested expressions.
@@ -1004,6 +1043,10 @@ fn small_dice(inner: BoxedStrategy<String>) -> impl Strategy<Value = String>
 	let clause = prop_oneof![
 		2 => clause,
 		1 => source_reroll(
+			small_atom(inner.clone(), small_constant()).boxed(),
+			drop.clone()
+		),
+		1 => source_explode(
 			small_atom(inner.clone(), small_constant()).boxed(),
 			drop
 		)

@@ -5,9 +5,11 @@ import XdySpec.Semantics
 # The oracle meets the specification
 
 The executable oracle, `Xdy.Function.run`, answers exactly the specification's
-law of a function's result: `run_eq` says that the oracle's weights over its
-total are the specification's probabilities, and that each fails, with the
-same message, exactly when the other does.
+law of a function's result wherever it answers: `run_eq` says that the
+oracle's weights over its total are the specification's probabilities, and
+that each fails, with the same message, exactly when the other does, unless
+the oracle refuses an explode that may draw without bound, whose law the
+specification gives, with infinitely many outcomes.
 
 The two differ in how they hold rolling records. The specification keeps
 results in the order rolled, as Rust does; the oracle sorts them as they
@@ -16,9 +18,12 @@ the proof relates each oracle distribution of states to the specification's
 law of states with every record sorted, read by `State.toOracle`. That
 relation holds of the initial state, whose records are empty; each
 instruction keeps it, since sorting commutes with rolling, dropping, keeping,
-rerolling and summing, by `hasLaw_step`; so it holds of the final states, by
-`hasLaw_foldl`; and the returned operand reads only registers, which sorting
-leaves alone.
+rerolling, exploding and summing, by `hasLaw_step`, wherever the oracle does
+not refuse it; so it holds of the final states, unless the oracle refuses, by
+`folds_foldlM`; and the returned operand reads only registers, which sorting
+leaves alone. A record that holds chains sorts its chains, as the oracle keeps
+them, and a reroll or explode reads them only through its kept chains, which
+sorting leaves alone (`Record.keptChains_toOracle`).
 
 Each instruction keeps the relation because `Dist.hasLaw_bind` needs the law
 of each step only at the sorted reading of a state, and the oracle's step
@@ -58,6 +63,23 @@ theorem record_toOracle (s : State) (r : Nat) :
   cases s.records[r]? <;> simp [Record.toOracle_empty]
 
 /--
+Sorting leaves alone whether an instruction may explode without bound, which
+reads a record only through its kept chains and its die.
+
+# Parameters
+- `s`: The state.
+- `i`: The instruction.
+-/
+theorem unbounded_toOracle (s : State) (i : Instruction) :
+    Xdy.unbounded s.toOracle i = unbounded s i := by
+  cases i <;> try rfl
+  case explode d p l =>
+    simp only [Xdy.unbounded, unbounded, record_toOracle,
+      Record.keptChains_toOracle,
+      show s.toOracle.value = s.value from funext (value_toOracle s)]
+    rfl
+
+/--
 Sorting commutes with replacing a record.
 
 # Parameters
@@ -94,10 +116,12 @@ records are sorted, as the oracle keeps them.
 - `s`: The oracle's state.
 
 # Hypotheses
-- `sorted`: The results of every record are sorted in ascending order.
+- `sorted`: The results of every record are sorted in ascending order, and its
+  chains by `Xdy.Chain.le`.
 -/
 theorem toOracle_ofOracle (s : Xdy.State)
-    (sorted : ∀ r ∈ s.records, r.results.Pairwise (· ≤ ·)) :
+    (sorted : ∀ r ∈ s.records, r.results.Pairwise (· ≤ ·) ∧
+      r.chains.Pairwise (fun a b => a.le b = true)) :
     (ofOracle s).toOracle = s := by
   cases s with
   | mk registers records =>
@@ -106,7 +130,8 @@ theorem toOracle_ofOracle (s : Xdy.State)
   · simp
   · intro i _ _
     simp only [Array.getElem_map]
-    exact Record.toOracle_ofOracle _ (sorted _ (Array.getElem_mem _))
+    exact Record.toOracle_ofOracle _ (sorted _ (Array.getElem_mem _)).1
+      (sorted _ (Array.getElem_mem _)).2
 
 end State
 
@@ -140,13 +165,15 @@ theorem hasLaw_rollRange (a b : Int) :
   unfold Xdy.rollRange rollRange
   by_cases h : b < a
   · simp only [h, ↓reduceIte, ↓reduceDIte, PMF.pure_map]
-    convert Dist.hasLaw_pure _ <;> simp [Record.toOracle, Record.sorted]
+    convert Dist.hasLaw_pure _ <;>
+      first | infer_instance | simp [Record.toOracle, Record.sorted]
   · simp only [h, ↓reduceIte, ↓reduceDIte, PMF.map_comp]
     have hne :
         ((List.range (b - a + 1).toNat).map fun (i : ℕ) => a + i) ≠ [] := by
       simp; omega
     convert Dist.hasLaw_map _ (Dist.hasLaw_uniform _ hne) using 2
     all_goals first
+      | infer_instance
       | (congr 1; exact icc_val a b)
       | (funext x; simp [Record.toOracle, Record.sorted])
 
@@ -344,6 +371,145 @@ theorem hasLaw_rerollKept (die : Die) (kept : List Int)
   exact Dist.hasLaw_pure _
 
 /--
+Binding has the law of binding, without transforming the outcomes: the plain
+law of `bind`.
+
+# Parameters
+- `d`: The oracle's first draw.
+- `k`: The oracle's continuation.
+- `p`: The specification's first draw.
+- `q`: The specification's continuation.
+
+# Hypotheses
+- `hd`: `d` has law `p`.
+- `hk`: For each possible outcome `a` of `p`, `k a` has law `q a`.
+-/
+private theorem hasLaw_bind_id {α β : Type} [BEq α] [LawfulBEq α]
+    [Hashable α] [BEq β] [LawfulBEq β] [Hashable β] {d : Dist α}
+    {k : α → Dist β} {p : PMF α} {q : α → PMF β} (hd : d.HasLaw p)
+    (hk : ∀ a ∈ p.support, (k a).HasLaw (q a)) :
+    (d.bind k).HasLaw (p.bind q) := by
+  have := Dist.hasLaw_bind (g := id) (h := id) (by rwa [PMF.map_id]) fun a ha =>
+    by rw [PMF.map_id]; exact hk a ha
+  rwa [PMF.map_id] at this
+
+/--
+A fold whose steps each keep a law keeps it: if the oracle's and the
+specification's steps have the same laws for each element, then so do their
+folds, from starts of the same law.
+
+# Parameters
+- `l`: The list folded.
+- `f`: The oracle's step.
+- `g`: The specification's step.
+- `d`: The oracle's start.
+- `p`: The specification's start.
+
+# Hypotheses
+- `hfg`: Each step, of an element of `l`, keeps the law.
+- `h`: The starts have the same law.
+-/
+private theorem hasLaw_foldl_id {γ β : Type} [BEq β] [LawfulBEq β]
+    [Hashable β]
+    (l : List γ) {f : Dist β → γ → Dist β} {g : PMF β → γ → PMF β}
+    (hfg : ∀ d p x, x ∈ l → d.HasLaw p → (f d x).HasLaw (g p x))
+    {d : Dist β} {p : PMF β} (h : d.HasLaw p) :
+    (l.foldl f d).HasLaw (l.foldl g p) := by
+  induction l generalizing d p with
+  | nil => exact h
+  | cons x l ih =>
+    exact ih (fun d p y hy => hfg d p y (List.mem_cons_of_mem x hy))
+      (hfg d p x List.mem_cons_self h)
+
+/--
+The oracle's reroll of the dice of a chain has the specification's law.
+
+# Parameters
+- `rerolled`: Whether the reroll rerolls a result.
+- `rep`: The oracle's replacement.
+- `prep`: The specification's replacement.
+- `c`: The chain.
+
+# Hypotheses
+- `hrep`: The oracle's replacement has the specification's law.
+-/
+theorem hasLaw_rerollChain (rerolled : Int → Bool) {rep : Thunk (Dist Int)}
+    {prep : PMF Int} (hrep : rep.get.HasLaw prep) (c : Chain) :
+    (Xdy.rerollChain rerolled rep c).HasLaw (rerollChain rerolled prep c) := by
+  have hdraw (x : Int) :
+      (if rerolled x then rep.get else Dist.pure x).HasLaw
+        (if rerolled x then prep else PMF.pure x) := by
+    split
+    · exact hrep
+    · exact Dist.hasLaw_pure x
+  cases c with
+  | saturated v => exact Dist.hasLaw_pure _
+  | live body last =>
+    simp only [Xdy.rerollChain, rerollChain]
+    apply hasLaw_bind_id (α := List Int) (β := Chain)
+    · apply hasLaw_foldl_id (β := List Int) body _ (Dist.hasLaw_pure _)
+      intro _ _ x _ h
+      apply hasLaw_bind_id (α := List Int) (β := List Int) h
+      intro _ _
+      exact Dist.hasLaw_map _ (hdraw x)
+    · intro _ _
+      exact Dist.hasLaw_map _ (hdraw last)
+
+/--
+The oracle's reroll of the kept chains of a record has the law of the
+specification's, sorted.
+
+# Parameters
+- `die`: The die of the record.
+- `kept`: The kept chains.
+- `rerolled`: Whether the reroll rerolls a result.
+- `rep`: The oracle's replacement.
+- `prep`: The specification's replacement.
+
+# Hypotheses
+- `hrep`: The oracle's replacement has the specification's law.
+-/
+theorem hasLaw_rerollChains (die : Die) (kept : List Chain)
+    (rerolled : Int → Bool) {rep : Thunk (Dist Int)} {prep : PMF Int}
+    (hrep : rep.get.HasLaw prep) :
+    (Xdy.rerollChains die kept rerolled rep).HasLaw
+      ((rerollChains die kept rerolled prep).map Record.toOracle) := by
+  unfold Xdy.rerollChains rerollChains
+  rw [PMF.map_comp, show Record.toOracle ∘ Record.ofChains die =
+    Xdy.Record.ofChains die from funext (Record.toOracle_ofChains die)]
+  apply Dist.hasLaw_map
+  apply hasLaw_foldl_id (β := List Chain) kept _ (Dist.hasLaw_pure _)
+  intro _ _ c _ h
+  apply hasLaw_bind_id (α := List Chain) (β := List Chain) h
+  intro _ _
+  exact Dist.hasLaw_map _ (hasLaw_rerollChain _ hrep c)
+
+/--
+The oracle's reroll of each kept die of the sorted record has the law of the
+specification's, sorted.
+
+# Parameters
+- `r`: The specification's record.
+- `rerolled`: Whether the reroll rerolls a result.
+- `rep`: The oracle's replacement.
+- `prep`: The specification's replacement.
+
+# Hypotheses
+- `hrep`: The oracle's replacement has the specification's law.
+-/
+theorem hasLaw_rerollEach (r : Record) (rerolled : Int → Bool)
+    {rep : Thunk (Dist Int)} {prep : PMF Int} (hrep : rep.get.HasLaw prep) :
+    (Xdy.rerollEach r.toOracle rerolled rep).HasLaw
+      ((rerollEach r rerolled prep).map Record.toOracle) := by
+  unfold Xdy.rerollEach rerollEach
+  rw [Record.chains_isEmpty_toOracle]
+  split
+  · rw [Record.kept_toOracle]
+    exact hasLaw_rerollKept _ _ _ hrep
+  · rw [Record.keptChains_toOracle]
+    exact hasLaw_rerollChains _ _ _ hrep
+
+/--
 The oracle's reroll of the sorted record has the law of the specification's,
 sorted.
 
@@ -360,24 +526,125 @@ theorem hasLaw_reroll (r : Record) (c : Criterion) (limit : Option Nat) :
   cases limit with
   | none =>
     unfold Xdy.reroll reroll
-    rw [hdie, Record.kept_toOracle]
+    rw [hdie]
     by_cases h : r.die.facesWithin c
-    · have hs : (r.kept.filter (!c.matches ·)).mergeSort
-            (fun a b => decide (a ≤ b)) = r.kept.filter (!c.matches ·) :=
-        List.mergeSort_of_pairwise
-          (by simpa using (Record.kept_pairwise r).filter _)
-      simp only [h, ↓reduceIte, ↓reduceDIte, PMF.pure_map, Record.toOracle,
-        Record.sorted, hs]
-      exact Dist.hasLaw_pure _
+    · simp only [h, ↓reduceIte, ↓reduceDIte, Record.chains_isEmpty_toOracle]
+      split
+      · have hs : (r.kept.filter (!c.matches ·)).mergeSort
+              (fun a b => decide (a ≤ b)) = r.kept.filter (!c.matches ·) :=
+          List.mergeSort_of_pairwise
+            (by simpa using (Record.kept_pairwise r).filter _)
+        rw [Record.kept_toOracle, PMF.pure_map]
+        simp only [Record.toOracle, Record.sorted, hs, List.mergeSort_nil]
+        exact Dist.hasLaw_pure _
+      · rw [Record.keptChains_toOracle, PMF.pure_map, Record.toOracle_ofChains]
+        exact Dist.hasLaw_pure _
     · simp only [h, Bool.false_eq_true, ↓reduceIte, ↓reduceDIte]
-      refine hasLaw_rerollKept _ _ _ ?_
+      refine hasLaw_rerollEach _ _ ?_
       exact Dist.hasLaw_uniform _ (by
         simpa using unmatched_ne_zero h)
   | some limit =>
     unfold Xdy.reroll reroll
-    rw [hdie, Record.kept_toOracle]
-    exact hasLaw_rerollKept _ _ _
+    rw [hdie]
+    exact hasLaw_rerollEach _ _
       (hasLaw_limitedReplacement c limit (hasLaw_customDie _))
+
+/--
+The oracle's extension of a chain has the specification's law, if the die
+does.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The oracle's die.
+- `pdie`: The specification's die.
+- `limit`: The number of times that each chain may be exploded.
+
+# Hypotheses
+- `hdie`: The oracle's die has the specification's law.
+-/
+theorem hasLaw_extension (c : Criterion) {die : Dist Int} {pdie : PMF Int}
+    (limit : Nat) (hdie : die.HasLaw pdie) :
+    (Xdy.extension c die limit).HasLaw (extension c pdie limit) := by
+  unfold Xdy.extension extension
+  induction limit - 1 with
+  | zero => exact Dist.hasLaw_map _ hdie
+  | succ n ih =>
+    refine hasLaw_bind_id ih fun ⟨drawn, x⟩ _ => ?_
+    by_cases hm : c.matches x
+    · simpa [hm] using Dist.hasLaw_map _ hdie
+    · simpa [hm] using Dist.hasLaw_pure (drawn, x)
+
+/--
+The oracle's explode of the kept chains of a record has the law of the
+specification's, sorted, if their extensions have the same law wherever some
+chain grows.
+
+# Parameters
+- `die`: The die of the record.
+- `kept`: The kept chains.
+- `grows`: Whether the explode grows a chain.
+- `ext`: The oracle's extension.
+- `pext`: The specification's extension.
+
+# Hypotheses
+- `hext`: If some kept chain grows, the oracle's extension has the
+  specification's law.
+-/
+theorem hasLaw_explodeChains (die : Die) (kept : List Chain)
+    (grows : Chain → Bool) {ext : Thunk (Dist (List Int × Int))}
+    {pext : PMF (List Int × Int)}
+    (hext : (∃ c ∈ kept, grows c = true) → ext.get.HasLaw pext) :
+    (Xdy.explodeChains die kept grows ext).HasLaw
+      ((explodeChains die kept grows pext).map Record.toOracle) := by
+  unfold Xdy.explodeChains explodeChains
+  rw [PMF.map_comp, show Record.toOracle ∘ Record.ofChains die =
+    Xdy.Record.ofChains die from funext (Record.toOracle_ofChains die)]
+  refine Dist.hasLaw_map _ (hasLaw_foldl_id kept (fun d p c hc h => ?_)
+    (Dist.hasLaw_pure _))
+  by_cases hg : grows c
+  · simp only [hg, ↓reduceIte]
+    exact hasLaw_bind_id h fun _ _ => Dist.hasLaw_map _ (hext ⟨c, hc, hg⟩)
+  · simp only [hg, Bool.false_eq_true, ↓reduceIte]
+    exact Dist.hasLaw_map _ h
+
+/--
+The oracle's explode of the sorted record has the law of the specification's,
+sorted, unless the explode may grow a chain without bound, which the oracle
+refuses.
+
+# Parameters
+- `r`: The specification's record.
+- `c`: The criterion.
+- `limit`: The number of times that each chain may be exploded, or `none` for
+  no limit.
+
+# Hypotheses
+- `hb`: If the explode is unlimited, and does not match every face of the
+  die, then it grows no kept chain.
+-/
+theorem hasLaw_explode (r : Record) (c : Criterion) (limit : Option Nat)
+    (hb : limit = none → ¬r.die.facesWithin c = true →
+      ∀ ch ∈ r.keptChains, ch.grows c = false) :
+    (Xdy.explode r.toOracle c limit).HasLaw
+      ((explode r c limit).map Record.toOracle) := by
+  have hdie : r.toOracle.die = r.die := rfl
+  cases limit with
+  | none =>
+    unfold Xdy.explode explode
+    rw [hdie, Record.keptChains_toOracle]
+    by_cases h : r.die.facesWithin c
+    · simp only [h, ↓reduceIte, ↓reduceDIte, PMF.pure_map,
+        Record.toOracle_ofChains]
+      exact Dist.hasLaw_pure _
+    · simp only [h, Bool.false_eq_true, ↓reduceIte, ↓reduceDIte]
+      rw [explodeChains_congr _ _ (grows' := fun _ => false)
+        fun ch hch => hb rfl h ch hch]
+      exact hasLaw_explodeChains _ _ _ fun ⟨_, _, hg⟩ => absurd hg (by simp)
+  | some limit =>
+    unfold Xdy.explode explode
+    rw [hdie, Record.keptChains_toOracle]
+    exact hasLaw_explodeChains _ _ _ fun _ =>
+      hasLaw_extension c limit (hasLaw_customDie _)
 
 /-! ## Instructions -/
 
@@ -414,13 +681,18 @@ private theorem hasLaw_roll (s : State) (d : Nat) (oracle : Dist Xdy.Record)
 
 /--
 The oracle's step from the sorted state has the law of the specification's
-step, sorted.
+step, sorted, unless the instruction is an explode that may draw without
+bound, whose law has infinitely many outcomes, and which the oracle refuses.
 
 # Parameters
 - `s`: The specification's state.
 - `i`: The instruction.
+
+# Hypotheses
+- `hb`: `i` may not explode without bound in `s`.
 -/
-theorem hasLaw_step (s : State) (i : Instruction) :
+theorem hasLaw_step (s : State) (i : Instruction)
+    (hb : unbounded s i = false) :
     (Xdy.step s.toOracle i).HasLaw ((step s i).map State.toOracle) := by
   cases i with
   | rollRange d a b =>
@@ -457,6 +729,14 @@ theorem hasLaw_step (s : State) (i : Instruction) :
     simp only [Xdy.step, step, State.record_toOracle,
       show s.toOracle.value = s.value from funext (State.value_toOracle s)]
     exact hasLaw_roll s d _ _ id id (fun _ => rfl) (hasLaw_reroll _ _ _)
+  | explode d p l =>
+    simp only [Xdy.step, step, State.record_toOracle,
+      show s.toOracle.value = s.value from funext (State.value_toOracle s)]
+    refine hasLaw_roll s d _ _ id id (fun _ => rfl) (hasLaw_explode _ _ _ ?_)
+    intro hl hf ch hch
+    simp only [unbounded, hl, beq_self_eq_true, hf, Bool.not_false,
+      Bool.true_and, List.any_eq_false] at hb
+    simpa using hb ch hch
   | sumRollingRecord d r =>
     simp only [Xdy.step, step, PMF.pure_map, State.setRegister_toOracle,
       State.record_toOracle, Record.sum_toOracle]
@@ -474,8 +754,22 @@ theorem hasLaw_step (s : State) (i : Instruction) :
     exact Dist.hasLaw_pure _
 
 /--
+How the oracle's run of instructions over a distribution of states agrees with
+the specification's law of states after them: it answers a distribution that
+has the law, sorted, or it refuses with `Xdy.unboundedMessage`.
+
+# Parameters
+- `e`: The oracle's run.
+- `q`: The specification's law of states.
+-/
+private def Folds : Except String (Dist Xdy.State) → PMF State → Prop
+  | .ok d, q => d.HasLaw (q.map State.toOracle)
+  | .error m, _ => m = Xdy.unboundedMessage
+
+/--
 Running instructions keeps the relation: if the oracle's states have the law
-of the specification's, sorted, then so do they after the instructions.
+of the specification's, sorted, then so do they after the instructions,
+unless the oracle refuses an explode that may draw without bound.
 
 # Parameters
 - `is`: The instructions.
@@ -485,14 +779,22 @@ of the specification's, sorted, then so do they after the instructions.
 # Hypotheses
 - `h`: `d` has the law of `p`, sorted.
 -/
-theorem hasLaw_foldl (is : List Instruction) (d : Dist Xdy.State)
+private theorem folds_foldlM (is : List Instruction) (d : Dist Xdy.State)
     (p : PMF State) (h : d.HasLaw (p.map State.toOracle)) :
-    (is.foldl (fun d i => d.bind (Xdy.step · i)) d).HasLaw
-      ((is.foldl (fun p i => p.bind (step · i)) p).map State.toOracle) := by
+    Folds (is.foldlM Xdy.stepAll d)
+      (is.foldl (fun p i => p.bind (step · i)) p) := by
   induction is generalizing d p with
   | nil => exact h
   | cons i is ih =>
-    exact ih _ _ (Dist.hasLaw_bind h fun s _ => hasLaw_step s i)
+    rw [List.foldlM_cons, List.foldl_cons]
+    unfold Xdy.stepAll
+    split
+    · rfl
+    · rename_i hany
+      refine ih _ _ (Dist.hasLaw_bind h fun t ht => hasLaw_step t i ?_)
+      rw [← State.unbounded_toOracle]
+      exact Dist.any_eq_false_of_hasLaw (P := (Xdy.unbounded · i)) h
+        (by simpa using hany) ht
 
 /-! ## Functions -/
 
@@ -557,14 +859,40 @@ theorem initialState_records {f : Function} {args : List Int}
   · cases h
 
 /--
+A well-formed function ends with a `return`, its only one.
+
+# Parameters
+- `f`: The function.
+
+# Hypotheses
+- `hv`: The function is well formed.
+-/
+theorem back?_of_validate {f : Function} (hv : f.validate = .ok ()) :
+    ∃ src, f.instructions.back? = some (.return src) := by
+  unfold Xdy.Function.validate at hv
+  simp only [bind, Except.bind] at hv
+  repeat' split at hv
+  all_goals first | (cases hv; done) | skip
+  all_goals
+    rename_i i hfind hlast
+    have hsize : i + 1 = f.instructions.size := by simpa using hlast
+    obtain ⟨hlt, hp, -⟩ := Array.findIdx?_eq_some_iff_getElem.mp hfind
+    rw [Array.back?_eq_getElem?, show f.instructions.size - 1 = i by omega,
+      Array.getElem?_eq_getElem hlt]
+    revert hp
+    cases f.instructions[i] <;> simp
+
+/--
 The oracle's run and the specification's agree: both fail with the same
 message, or both succeed, the oracle's distribution having the
-specification's law.
+specification's law, or the oracle refuses an explode that may draw without
+bound, whose law the specification answers.
 -/
 private def RunsAgree : Except String (Dist Int) → Except String (PMF Int) →
     Prop
   | .ok d, .ok p => d.HasLaw p
   | .error e, .error e' => e = e'
+  | .error e, .ok _ => e = Xdy.unboundedMessage
   | _, _ => False
 
 /--
@@ -582,29 +910,32 @@ private theorem runsAgree (f : Function) (args : List Int)
   simp only [bind, Except.bind]
   split
   · rfl
-  · split
+  · rename_i v hv
+    obtain ⟨src, hsrc⟩ := back?_of_validate (f := f) (by cases v; exact hv)
+    split
     · rfl
     · rename_i s hs
-      have sorted : ∀ r ∈ s.records, r.results.Pairwise (· ≤ ·) := by
+      have sorted : ∀ r ∈ s.records, r.results.Pairwise (· ≤ ·) ∧
+          r.chains.Pairwise (fun a b => a.le b = true) := by
         rw [initialState_records hs]
         intro r hr
         rw [(Array.mem_replicate.mp hr).2]
-        exact .nil
-      have hlaw := hasLaw_foldl f.instructions.toList (Dist.pure s)
+        exact ⟨.nil, .nil⟩
+      have hfold := folds_foldlM f.instructions.toList (Dist.pure s)
         (PMF.pure (.ofOracle s)) (by
           rw [PMF.pure_map, State.toOracle_ofOracle s sorted]
           exact Dist.hasLaw_pure s)
-      rw [Array.foldl_toList, Array.foldl_toList] at hlaw
-      cases hb : f.instructions.back? with
-      | none => rfl
-      | some i =>
-        cases i
-        case «return» src =>
-          have := Dist.hasLaw_map (·.value src) hlaw
-          rwa [PMF.map_comp, show (·.value src) ∘ State.toOracle =
-            (·.value src) from funext fun s => State.value_toOracle s src]
-            at this
-        all_goals rfl
+      rw [Array.foldlM_toList, Array.foldl_toList] at hfold
+      revert hfold
+      simp only [hsrc]
+      cases f.instructions.foldlM Xdy.stepAll (Dist.pure s) with
+      | error m => exact id
+      | ok final =>
+        intro hlaw
+        have := Dist.hasLaw_map (·.value src) hlaw
+        rwa [PMF.map_comp, show (·.value src) ∘ State.toOracle =
+          (·.value src) from funext fun s => State.value_toOracle s src]
+          at this
 
 /--
 If the oracle answers a distribution, then the specification answers a law,
@@ -630,23 +961,30 @@ theorem run_hasLaw {f : Function} {args : List Int}
   | ok p => rw [hr] at this; exact ⟨p, rfl, this⟩
 
 /--
-The oracle meets the specification: its weights over its total are the
-specification's probabilities, and it fails, with the same message, exactly
-when the specification does.
+The oracle meets the specification wherever it answers: its weights over its
+total are the specification's probabilities, and it fails, with the same
+message, exactly when the specification does, unless it refuses an explode
+that may draw without bound.
 
 # Parameters
 - `f`: The function.
 - `args`: The arguments.
 - `externals`: The external variables.
 
+# Hypotheses
+- `h`: The oracle does not refuse the function as unbounded.
+
 # Notes
 A `PMF` is determined by its probabilities, so this determines the
 specification's law from the oracle's distribution. `render` in
 `Xdy/Oracle.lean` reduces the weights to lowest terms, which leaves every
-probability unchanged.
+probability unchanged. The specification gives an unlimited explode that grows
+a chain a law of infinitely many outcomes, which the oracle refuses to
+enumerate, as the Rust forward pass refuses to build it.
 -/
 theorem run_eq (f : Function) (args : List Int)
-    (externals : List (String × Int)) :
+    (externals : List (String × Int))
+    (h : Xdy.Function.run f args externals ≠ .error Xdy.unboundedMessage) :
     (run f args externals).map (⇑) =
       (Xdy.Function.run f args externals).map Dist.prob := by
   have := runsAgree f args externals
@@ -654,7 +992,7 @@ theorem run_eq (f : Function) (args : List Int)
   | error e =>
     cases hr : run f args externals with
     | error e' => rw [ho, hr] at this; cases this; rfl
-    | ok p => rw [ho, hr] at this; cases this
+    | ok p => rw [ho, hr] at this; cases this; exact absurd ho h
   | ok d =>
     cases hr : run f args externals with
     | error e' => rw [ho, hr] at this; cases this

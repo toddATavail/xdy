@@ -193,6 +193,47 @@ example : (Location.register 0).dead (.register 0) [] = false := rfl
 #guard (Location.record 0).writtenBy (.reroll 0 (.in []) .unlimited)
 #guard (Instruction.reroll 2 (.in []) .unlimited).destination == .record 2
 
+/-! ## Explodes -/
+
+-- A rolling record that two sums read splits across an explode, which
+-- rewrites the record, as across a reroll. `test_plan_explodes` in
+-- `xdy/src/tests/propagation.rs` checks the same plans.
+#guard schedule [
+    dice 0 (imm 3) (imm 6),
+    .sumRollingRecord 0 0,
+    .explode 0 (.eq (imm 6)) (.times (imm 1)),
+    .sumRollingRecord 1 0,
+    .binary .sub 2 (reg 0) (reg 1),
+    .return (reg 2)] == [
+  (0, [.split (.record 0)]),
+  (4, [.merge 0 (some (.register 2))
+    [.register 0, .record 0, .register 1]])]
+
+-- A random threshold that an explode and a later instruction read splits.
+#guard schedule [
+    .rollRange 0 (imm 4) (imm 6),
+    .sumRollingRecord 0 0,
+    dice 1 (imm 2) (imm 6),
+    .explode 1 (.ge (reg 0)) .unlimited,
+    .sumRollingRecord 1 1,
+    .binary .add 0 (reg 0) (reg 1),
+    .return (reg 0)] == [
+  (1, [.split (.register 0)]),
+  (5, [.merge 0 (some (.register 0)) [.record 1, .register 1]])]
+
+-- An explode rolls, reads its record and every operand, and writes its
+-- record.
+#guard (Instruction.explode 0 (.inRange (reg 1) (imm 2)) (.times (reg 3))).rolls
+#guard (Instruction.explode 0 (.inRange (reg 1) (imm 2))
+    (.times (reg 3))).sources == [.record 0, .register 1, .register 3]
+#guard (Instruction.explode 0 (.in [1]) .unlimited).sources == [.record 0]
+#guard (Location.register 3).readBy
+  (.explode 0 (.eq (imm 1)) (.times (reg 3)))
+#guard !(Location.register 3).readBy (.explode 0 (.eq (imm 1)) .unlimited)
+#guard (Location.record 0).readBy (.explode 0 (.in []) .unlimited)
+#guard (Location.record 0).writtenBy (.explode 0 (.in []) .unlimited)
+#guard (Instruction.explode 2 (.in []) .unlimited).destination == .record 2
+
 /-! ## Nested splits -/
 
 -- A split merges beneath a later split that is independent of it. This is
