@@ -39,18 +39,18 @@ mixture's operations act on that law as the instructions do:
   (`weighted`). The laws of drops and keeps hold of even setups
   (`Setup.Even`), whose pools' multisets each hold as many results as the
   first, as `Roll::pool` makes them (`Roll.Even`). `XdySpec/Reroll.lean`
-  proves the laws of rerolls.
+  proves the laws of rerolls of setups without chains.
 - An explode leaves i.i.d. chains (`Roll.chains`), each an independent draw
   of the law of a chain, or stacks (`Roll.stacked`), a mixture over the
   multisets of the chains of each draws of what each chain has become
   (`chainDraws`, `stackDraws`), each multiset weighed by its weight times the
   branches that the laws of what its chains have become add to it
   (`stackWeight`), as `joined` in `propagation/chain.rs` multiplies them;
-  either fills a record of chains, whose results
-  are their totals (`Record.ofChains`). Every other roll holds no chains
-  (`Roll.Plain`, `Roll.chains_of_mem_support_law`), and the laws of splits and
-  rerolls ask that it hold none. `XdySpec/Explode.lean` proves the laws of
-  explodes.
+  either fills a record of chains, whose results are their totals
+  (`Record.ofChains`). Every other roll holds no chains (`Roll.Plain`,
+  `Roll.chains_of_mem_support_law`), and the laws of splits ask that it hold
+  none. `XdySpec/Explode.lean` and `XdySpec/Stacks.lean` prove the laws of
+  explodes, and of the rerolls of chains.
 - The sum of a mixture is the mixture of its setups' sums
   (`map_sum_mixtureLaw`), as `Mixture::sum` mixes them, and a setup without a
   roll sums to `0` (`Setup.map_sum_law_of_none`). The sums of ranges without

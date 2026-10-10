@@ -22,13 +22,14 @@
 //! `lean/spec/XdySpec/Mixture.lean` gives each setup the law of the record
 //! that it fills, and a mixture the mixture of its setups' laws, and proves
 //! that rolling, dropping, keeping and summing a mixture act on that law as the
-//! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` proves that
-//! rerolling does, as every later instruction views the record; and
+//! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` and
+//! `lean/spec/XdySpec/Stacks.lean` prove that rerolling does, as every later
+//! instruction views the record, on any roll but stacks, dropped or not; and
 //! `lean/spec/XdySpec/Explode.lean` and `lean/spec/XdySpec/Stacks.lean` prove
 //! that exploding does, when the explode does nothing, saturates every chain
 //! still kept, or extends the chains of any roll but stacks, dropped or not.
-//! Nothing yet proves that exploding the [chains](super::chain) of stacks none
-//! of which has been dropped does, nor that rerolling chains does. When those
+//! Nothing yet proves that rerolling or exploding the [chains](super::chain)
+//! of stacks none of which has been dropped does. When those
 //! operands are rolls with fixed operands, every path through them is equally
 //! likely, and the mixture weighs each outcome by the number of paths that
 //! reach it. When some path to a setup is likelier than another, the least
@@ -152,18 +153,23 @@ impl Setup
 	///
 	/// # Notes
 	/// `Setup.reroll`, in `lean/spec/XdySpec/Reroll.lean`, mirrors the reroll,
-	/// and `Setup.law_reroll` proves that, whether it does nothing, crosses
-	/// out, rewrites, or pools, the rerolled setup describes the
-	/// specification's reroll of the setup's records, as every later
-	/// instruction views them: their kept results and their die, which is all
-	/// that any reads. Only the view agrees, since a setup that the reroll
-	/// cannot change keeps its drops, and one that it crosses out drops every
-	/// die still kept, where the specification's record keeps only its kept
-	/// results. The proof asks that every result be a face of the die, as
-	/// `Setup.faithful_roll` and `Setup.reroll_invariants` prove of every roll
-	/// and every reroll, and that the setup hold no chains (`Setup.Plain`): the
-	/// specification does not yet model the rerolls of chains, so the proof
-	/// does not cover them.
+	/// and `Setup.law_reroll_plain` proves that, whether it does nothing,
+	/// crosses out, rewrites, or pools, the rerolled setup of a roll without
+	/// chains describes the specification's reroll of the setup's records, as
+	/// every later instruction views them: their kept results and their die,
+	/// which is all that any reads. Only the view agrees, since a setup that
+	/// the reroll cannot change keeps its drops, and one that it crosses out
+	/// drops every die still kept, where the specification's record keeps only
+	/// its kept results. `Setup.law_reroll`, in
+	/// `lean/spec/XdySpec/Stacks.lean`, lifts it to i.i.d. chains, dropped or
+	/// not, as a later reroll or explode reads their kept chains, and as every
+	/// other instruction reads their totals once [`Setup::collapse`] reduces
+	/// them. The proofs ask that the setup be grounded (`Setup.Grounded`):
+	/// every result a face of the die, which lies within the `i32` range,
+	/// and every chain normal, as `Setup.reroll_invariants` and
+	/// `Setup.burst_invariants` prove of every reroll and explode that
+	/// leaves no stacks; the rerolls of stacks none of whose chains has
+	/// been dropped have no proof yet.
 	fn reroll(
 		&self,
 		criterion: &Criterion,
@@ -610,10 +616,11 @@ impl Mixture
 	/// [`Halt`] if the reroll would exceed the budget or is cancelled.
 	///
 	/// # Notes
-	/// `mixtureLaw_reroll`, in `lean/spec/XdySpec/Reroll.lean`, proves that the
-	/// mixture then describes, as every later instruction views it, the
-	/// specification's reroll of the record's law, independent of the
-	/// resolutions' law, as `law_reroll` and `law_reroll_resolved` give it.
+	/// `mixtureLaw_reroll_whole` and `mixtureLaw_reroll_totals`, in
+	/// `lean/spec/XdySpec/Stacks.lean`, prove that the mixture then describes,
+	/// as every later instruction reads it, the specification's reroll of the
+	/// record's law, independent of the resolutions' law, as `law_reroll` and
+	/// `law_reroll_resolved` give it, wherever [`Setup::reroll`] does.
 	pub(super) fn reroll(
 		&mut self,
 		rerolls: &[(Criterion, Option<i32>, Weight)],

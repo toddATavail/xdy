@@ -5,9 +5,10 @@ import XdySpec.Reroll
 
 The effect of a reroll on a die, with its weights and padding against the Rust's
 closed form; the rewrite of alike dice, the survivors and pools of dice after a
-drop, and each branch of a setup's reroll; and the laws of a setup's and a
-mixture's reroll, pooled or not, as every later instruction views them, with
-the invariants that every reroll keeps.
+drop, and each branch of a setup's reroll; and the laws of a setup's reroll,
+pooled or not, as every later instruction views them, with the invariants
+that every reroll keeps. `XdySpecTest/Stacks.lean` tests the rerolls of chains
+and of mixtures.
 -/
 
 namespace Xdy.Spec.Test.Reroll
@@ -114,6 +115,12 @@ private def keepHigh : Setup := { roll := some (.standard 2 2), lowest := 1 }
 #guard ({ roll := some (.standard 2 6), lowest := 2 } : Setup).reroll
     (.within 1 1) (some 1) == { roll := some (.standard 2 6), lowest := 2 }
 #guard ({} : Setup).reroll (.within 1 1) none == {}
+-- A reroll that would cross out every die leaves alone chains that a saturated
+-- die decides.
+#guard ({ roll := some (.stacked [([(.saturated i32Max, 2)], 1)] []),
+          die := some (.standard 2) } : Setup).reroll (.within 1 2) none ==
+  { roll := some (.stacked [([(.saturated i32Max, 2)], 1)] []),
+    die := some (.standard 2) }
 
 /-! ## Laws -/
 
@@ -124,7 +131,7 @@ private def twoD6 : Setup := { roll := some (.standard 2 6) }
 they are alike and drop nothing. -/
 private theorem twoD6_rerolls (c : Criterion) (limit : Option Nat) :
     twoD6.Rerolls c limit :=
-  Setup.law_reroll c limit (fun _ h => by cases h; trivial)
+  Setup.law_reroll_plain c limit (fun _ h => by cases h; trivial)
     (Setup.faithful_roll rfl) (fun _ h => by cases h; trivial)
     (fun _ h => by cases h; trivial)
 
@@ -135,7 +142,7 @@ example : twoD6.Rerolls (.within 1 1) (some 1) := twoD6_rerolls _ _
 -- the specification's cross out, which leaves nothing kept.
 example : ({ roll := some (.standard 3 6), highest := 1 } : Setup).Rerolls
     (.within 1 6) none :=
-  Setup.law_reroll _ _ (fun _ h => by cases h; trivial)
+  Setup.law_reroll_plain _ _ (fun _ h => by cases h; trivial)
     (Setup.Faithful.of_eq (s := { roll := some (.standard 3 6) }) rfl rfl
       (Setup.faithful_roll rfl))
     (fun _ h => by cases h; trivial) (fun _ h => by cases h; trivial)
@@ -155,7 +162,7 @@ private theorem dropped_invariants (count faces : Int) (lowest highest : Nat) :
 example : ({ roll := some (.standard 3 6), lowest := 1 } : Setup).Rerolls
     (.within 1 1) (some 1) :=
   let ⟨hs, hf, hc, hp⟩ := dropped_invariants 3 6 1 0
-  Setup.law_reroll _ _ hs hf hc hp
+  Setup.law_reroll_plain _ _ hs hf hc hp
 
 -- A pool rerolls as specified too, as a second reroll after a drop does, since
 -- every reroll leaves its setup well formed, faithful, with faces, and without
@@ -164,41 +171,25 @@ example : (({ roll := some (.standard 3 6), lowest := 1 } : Setup).reroll
     (.within 1 1) (some 1)).Rerolls (.within 6 6) none :=
   let ⟨hs, hf, hc, hp⟩ := dropped_invariants 3 6 1 0
   let ⟨hs', hf', hc', hp'⟩ :=
-    Setup.reroll_invariants (.within 1 1) (some 1) hs hf hc hp
-  Setup.law_reroll _ _ hs' hf' hc' hp'
+    Setup.reroll_invariants_plain (.within 1 1) (some 1) hs hf hc hp
+  Setup.law_reroll_plain _ _ hs' hf' hc' hp'
 
 -- So does a reroll of the highest dice still kept by a list, without limit.
 example : ({ roll := some (.standard 4 6), highest := 2 } : Setup).Rerolls
     (.among [1, 2]) none :=
   let ⟨hs, hf, hc, hp⟩ := dropped_invariants 4 6 0 2
-  Setup.law_reroll _ _ hs hf hc hp
-
--- A mixture of two dice, rerolled by independent criteria and limits,
--- describes the specification's reroll of the dice.
-example (κ : PMF (Criterion × Option Nat)) :
-    (mixtureLaw (lift (fun s q => s.reroll q.1 q.2) (PMF.pure twoD6) κ)).map
-        Record.view =
-      ((lift Prod.mk ((rollDice 2 (standardDie 6)).map fun r =>
-          { r with die := .standard 6 }) κ).bind fun p =>
-        reroll p.1 p.2.1 p.2.2).map Record.view := by
-  rw [mixtureLaw_reroll (fun s hs => by
-      rw [PMF.support_pure, Set.mem_singleton_iff] at hs
-      subst hs
-      exact ⟨fun _ h => by cases h; trivial, Setup.faithful_roll rfl,
-        fun _ h => by cases h; trivial, fun _ h => by cases h; trivial⟩),
-    mixtureLaw_pure, twoD6, Setup.law_roll]
-  rfl
+  Setup.law_reroll_plain _ _ hs hf hc hp
 
 -- A rewrite leaves its setup ready for another reroll.
 example : (twoD6.reroll (.within 1 1) (some 1)).Faithful :=
-  (Setup.reroll_invariants _ _ (fun _ h => by cases h; trivial)
+  (Setup.reroll_invariants_plain _ _ (fun _ h => by cases h; trivial)
     (Setup.faithful_roll rfl) (fun _ h => by cases h; trivial)
     (fun _ h => by cases h; trivial)).2.1
 
 -- A pool is well formed: its multisets each hold the die still kept.
 example : (keepHigh.reroll (.within 1 1) (some 1)).WellFormed :=
   let ⟨hs, hf, hc, hp⟩ := dropped_invariants 2 2 1 0
-  (Setup.reroll_invariants _ _ hs hf hc hp).1
+  (Setup.reroll_invariants_plain _ _ hs hf hc hp).1
 
 -- A die of the weighted faces of a limited reroll's law is the limited
 -- replacement.

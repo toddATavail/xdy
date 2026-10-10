@@ -31,6 +31,15 @@ transform:
   as multisets of chains: the multisets of the law of i.i.d. chains, the
   joined stacks, or the outcomes of any other roll, each result the chain of
   one die.
+- `transformLaw` mirrors `transform_law`, which transforms the law of each of
+  i.i.d. chains none of which has been dropped, padding each to the most kept
+  dice of any; `rerolled` mirrors `rerolled`, which answers every chain that a
+  chain still kept may become after a reroll of its dice; and
+  `Roll.rerollChains` mirrors `Roll::reroll_chains`, which rerolls the law of
+  each of i.i.d. chains, or the chains still kept of each multiset of the
+  chains after a drop, into stacks. `Roll.isSaturated` mirrors
+  `Roll::is_saturated`, which tells whether a saturated die decides the chains
+  of stacks, which every reroll leaves alone.
 
 The Rust keeps the distinct values of each multiset in ascending order, which
 `slice` reads by position. A law of chains here need not ascend, so the
@@ -40,12 +49,13 @@ concatenation. The Rust merges the multisets that coincide, adding their
 weights; this lists them as they come, which weighs every multiset alike.
 
 `XdySpec/Stacks.lean` proves that these multisets are the laws of the chains
-still kept of the records that a roll fills.
+still kept of the records that a roll fills, and the laws of the explodes and
+rerolls that transform them.
 -/
 
 namespace Xdy.Spec
 
-open Xdy (Chain)
+open Xdy (Chain Criterion)
 
 /--
 Every multiset of `n` independent draws of a die, weighed by the number of
@@ -299,5 +309,165 @@ def Roll.stacks : Roll → List (List (Chain × Nat) × Nat)
   | .chains count law => multisets law count.toNat
   | .stacked ms laws => joined ms laws
   | ρ => ρ.outcomes.map fun e => (e.1.map fun p => (.single p.1, p.2), e.2)
+
+/--
+The law of each chain of independent and alike chains, none of which has been
+dropped, transformed by a law of what each becomes: each chain that it may be
+followed by each that it becomes, weighed by both, and padded to the most kept
+dice of any, so that every chain weighs the same in all. Mirrors
+`transform_law` in `propagation/chain.rs`.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `law`: The distinct chains that each may be, each with its weight.
+- `padding`: The branches that a reroll adds to each kept die, `G`, or one
+  for an explode.
+- `becomes`: What each chain becomes, each with its weight, and the number of
+  kept dice of the chain by which a reroll pads it, `d`, which pads it by
+  `G^(D − d)` for the most of any, `D`.
+
+# Returns
+What each chain becomes, each with its weight.
+
+# Notes
+The Rust merges what coincides, in ascending order; this lists it as it
+comes.
+
+# Examples
+```lean
+-- A chain of one die pads to the chain of two.
+#guard transformLaw [(.single 1, 1), (.live [1] 2, 1)] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) ==
+  [(.single 1, 3), (.live [1] 2, 1)]
+```
+-/
+def transformLaw {T : Type} (law : List (Chain × Nat)) (padding : Nat)
+    (becomes : Chain → List (T × Nat) × Nat) : List (T × Nat) :=
+  let most := (law.map fun e => (becomes e.1).2).foldl Max.max 0
+  law.flatMap fun e => (becomes e.1).1.map fun o =>
+    (o.1, e.2 * padding ^ (most - (becomes e.1).2) * o.2)
+
+/--
+Every chain that a chain still kept may become after a reroll, which rerolls
+each of its kept dice that the criterion matches alone, so that the
+replacement of its last die becomes its last die. Mirrors `rerolled` in
+`propagation/chain.rs`: the kept dice besides the last that the reroll does
+not match survive, and each multiset of the replacements of those that it
+matches joins them; each die that it does not match keeps its value along all
+`G` branches of its rerolls, so the chains weigh `Gᵈ` in all, for a chain of
+`d` kept dice, or one for a chain that a saturated die decides, which the
+reroll leaves alone.
+
+# Parameters
+- `c`: The criterion.
+- `padding`: The branches of the rerolls of each kept die, `G`.
+- `law`: The final results of a matched die, each with its branches, `g`.
+- `ch`: The chain.
+
+# Returns
+The chains, each with its branches, and the number of kept dice of the chain,
+`d`.
+
+# Notes
+The Rust merges the chains that coincide, in ascending order; this lists them
+as they come, the multisets of the replacements first, and then the last die.
+
+# Examples
+```lean
+-- A `1` and a `2`, then a last `1`, rerolling every `1` to a `1` or a `2`.
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [1, 2] 1) ==
+  ([(.live [1, 2] 1, 2), (.live [1, 2] 2, 2), (.live [2, 2] 1, 2),
+    (.live [2, 2] 2, 2)], 3)
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.saturated 7) ==
+  ([(.saturated 7, 1)], 0)
+```
+-/
+def rerolled (c : Criterion) (padding : Nat) (law : List (Int × Nat)) :
+    Chain → List (Chain × Nat) × Nat
+  | .live body last =>
+    let survivors := body.filter fun x => !c.matches x
+    let unmatched := survivors.length + if c.matches last then 0 else 1
+    let ends := if c.matches last then law else [(last, 1)]
+    ((multisets law (body.countP c.matches)).flatMap fun o => ends.map fun e =>
+        (.live (survivors ++ Roll.expand o.1).mergeSort e.1,
+          o.2 * padding ^ unmatched * e.2),
+      body.length + 1)
+  | ch => ([(ch, 1)], 0)
+
+namespace Roll
+
+/--
+Whether a saturated die decides the chains of a roll. Mirrors
+`Roll::is_saturated` in `propagation/chain.rs`.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+`true` if the roll is stacks of which some chain, or what it has become, has
+saturated; `false` otherwise.
+-/
+def isSaturated : Roll → Bool
+  | .stacked multisets laws => multisets.any fun e => e.1.any fun p =>
+    match laws.lookup p.1 with
+    | some law => law.any (·.1.saturates)
+    | none => p.1.saturates
+  | _ => false
+
+/--
+Reroll the chains still kept of a roll of i.i.d. chains or stacks, after its
+lowest `lowest` and its highest `highest` chains are dropped, by a redraw
+that pads each kept die by `padding` branches and weighs the final results of
+a matched die by `law`. Mirrors `Roll::reroll_chains` in
+`propagation/chain.rs`: if none has been dropped, the reroll transforms the
+law of each of i.i.d. chains (`transformLaw`); otherwise, it transforms each
+chain still kept of each multiset of the chains still kept, into stacks
+(`transformStacks`), each chain of whose pool has become what it rerolls to.
+
+# Parameters
+- `ρ`: The roll.
+- `lowest`, `highest`: The numbers of lowest and highest chains dropped.
+- `c`: The criterion.
+- `padding`: The branches of the rerolls of each kept die, `G`.
+- `law`: The final results of a matched die, each with its branches, `g`.
+
+# Returns
+The rerolled roll.
+
+# Notes
+The Rust rerolls stacks none of whose chains has been dropped by composing
+the law of what each chain of their pool has become with the reroll, which
+this does not yet model: it leaves such stacks alone, and the laws of
+rerolls ask that the setup hold no stacks (`Setup.Grounded`). The Rust
+rerolls no other roll as chains.
+-/
+def rerollChains (ρ : Roll) (lowest highest : Nat) (c : Criterion)
+    (padding : Nat) (law : List (Int × Nat)) : Roll :=
+  if lowest = 0 ∧ highest = 0 then
+    match ρ with
+    | .chains count cl =>
+      .chains count (transformLaw cl padding (rerolled c padding law))
+    | ρ => ρ
+  else
+    transformStacks (keptPool ρ.stacks lowest highest) padding
+      (rerolled c padding law)
+
+/--
+Whether a roll holds chains, which a reroll rerolls chain by chain: i.i.d.
+chains or stacks.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+`true` for chains or stacks, `false` otherwise.
+-/
+def chained : Roll → Bool
+  | .chains .. | .stacked .. => true
+  | _ => false
+
+end Roll
 
 end Xdy.Spec

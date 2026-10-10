@@ -63,10 +63,15 @@
 //! [`transform_pool`] draws what each chain still kept becomes independently
 //! (`weighted_transformPool`); and so the laws of [`Roll::explode`] on the
 //! chains of a roll after a drop, or of fixed results or a pool, into stacks
-//! or a pool of totals (`Setup.law_burst`). The explodes of stacks none of
-//! whose chains has been dropped, the deferred laws of stacks, and the rerolls
-//! of chains have no proof yet; the tests
-//! check every law against an independent enumeration.
+//! or a pool of totals (`Setup.law_burst`). It proves too that what
+//! [`rerolled`] makes of a chain, over its padding, is the specification's
+//! reroll of each of its dice (`weighted_rerolled`), and so the laws of
+//! [`Roll::reroll_chains`] on i.i.d. chains, dropped or not
+//! (`Setup.law_reroll`), whose stacks weigh each multiset by the branches of
+//! its deferred laws, as [`joined`] does (`stackWeight`). The rerolls and
+//! explodes of stacks none of whose chains has been dropped, which compose the
+//! deferred laws of stacks, have no proof yet; the tests check every law
+//! against an independent enumeration.
 
 use std::{
 	cmp::Ordering,
@@ -788,6 +793,12 @@ type Draws = HashMap<i32, Multisets<i32>>;
 ///
 /// # Errors
 /// [`Halt`] if the chains would exceed the budget or are cancelled.
+///
+/// # Notes
+/// `rerolled`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `weighted_rerolled` and `sum_rerolled`, in `lean/spec/XdySpec/Stacks.lean`,
+/// prove that the chains, over their weights, are the specification's reroll
+/// of the chain (`rerollChain`), and weigh `Gᵈ` in all.
 fn rerolled(
 	chain: &Chain,
 	redraw: &Redraw,
@@ -915,6 +926,13 @@ type Become<T> = (Vec<(T, Weight)>, u64);
 ///
 /// # Errors
 /// [`Halt`] if the transform would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `transformLaw`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `weighted_transformLaw_rerolled`, in `lean/spec/XdySpec/Stacks.lean`,
+/// proves that the law of each chain, rerolled and padded, is the reroll of
+/// the law of each; `Setup.law_burst_alike`, in
+/// `lean/spec/XdySpec/Explode.lean`, proves the same of an explode.
 fn transform_law<T: Element>(
 	law: &[(Chain, Weight)],
 	padding: &Weight,
@@ -1289,9 +1307,10 @@ fn compose<T: Element>(
 ///
 /// # Notes
 /// `transformStacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this on
-/// stacks without laws, such as [`kept_pool`] leaves, whose explodes
-/// `Setup.law_burst`, in `lean/spec/XdySpec/Stacks.lean`, proves; the
-/// composition of the laws of stacks has no proof yet.
+/// stacks without laws, such as [`kept_pool`] leaves, whose explodes and
+/// rerolls `Setup.law_burst` and `Setup.law_reroll`, in
+/// `lean/spec/XdySpec/Stacks.lean`, prove; the composition of the laws of
+/// stacks has no proof yet.
 fn transform_stacks(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1412,6 +1431,11 @@ fn kept_pool(
 ///
 /// # Errors
 /// [`Halt`] if the multisets would exceed the budget or are cancelled.
+///
+/// # Notes
+/// `joined`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and `Roll.law`,
+/// in `lean/spec/XdySpec/Mixture.lean`, weighs each multiset of stacks by its
+/// branches times those of the draws that this joins (`stackWeight`).
 fn joined(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1683,6 +1707,13 @@ impl Roll
 	///
 	/// # Panics
 	/// If the roll is neither i.i.d. chains nor stacks.
+	///
+	/// # Notes
+	/// `Roll.rerollChains`, in `lean/spec/XdySpec/Chains.lean`, mirrors this,
+	/// but leaves stacks none of whose chains has been dropped alone, and
+	/// `Setup.law_reroll`, in `lean/spec/XdySpec/Stacks.lean`, proves the laws
+	/// of the first and last arms on i.i.d. chains; the composition of the laws
+	/// of stacks has no proof yet.
 	pub(super) fn reroll_chains(
 		&self,
 		lowest: i32,
@@ -1772,6 +1803,9 @@ impl Roll
 	///
 	/// # Returns
 	/// `true` if the roll is stacks of saturated chains, `false` otherwise.
+	///
+	/// # Notes
+	/// `Roll.isSaturated`, in `lean/spec/XdySpec/Chains.lean`, mirrors this.
 	pub(super) fn is_saturated(&self) -> bool
 	{
 		match self

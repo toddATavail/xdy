@@ -222,6 +222,86 @@ example : twoChains.Bursts (.within 2 2) (some 1) false :=
   let ⟨hs, hg, hf⟩ := twoChains_invariants
   Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
 
+/-! ## Rerolls of chains -/
+
+-- Rerolling every `1` once leaves a chain of `2`s alone, along the two
+-- branches of each of its dice.
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [2] 2) ==
+  ([(.live [2] 2, 4)], 2)
+-- The `1` of its body draws anew.
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [1] 2) ==
+  ([(.live [1] 2, 2), (.live [2] 2, 2)], 2)
+
+-- What a chain becomes, over its weights, is the specification's reroll of
+-- the chain, and weighs the padding raised to its dice.
+example : weighted (.single 0)
+      (rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [1] 2)).1 =
+    rerollChain (Criterion.within 1 1).matches (weightedDie [(1, 1), (2, 1)])
+      (.live [1] 2) :=
+  weighted_rerolled (by decide) (by decide) _ _
+example : ((rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [1] 2)).1.map
+      (·.2)).sum = 2 ^ (rerolled (.within 1 1) 2 [(1, 1), (2, 1)]
+        (.live [1] 2)).2 :=
+  sum_rerolled (by decide) _
+
+/-- The two chains, none dropped. -/
+private def twoChainsWhole : Setup := { twoChains with lowest := 0 }
+
+/-- The two chains, none dropped, are well formed, grounded, and have
+faces. -/
+private theorem twoChainsWhole_invariants : twoChainsWhole.WellFormed ∧
+    twoChainsWhole.Grounded ∧ twoChainsWhole.Faced :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  ⟨hs, ⟨hg.1, fun _ h => by cases h; exact hg.2 _ rfl⟩, hf⟩
+
+-- Rerolling every `1` once, none dropped, transforms the law of each chain,
+-- padding the chain of one die to the chain of two.
+#guard twoChainsWhole.reroll (.within 1 1) (some 1) ==
+  { roll := some (.chains 2
+      [(.single 1, 2), (.single 2, 2), (.live [2] 2, 4)]),
+    die := some (.standard 2) }
+example : twoChainsWhole.RerollsAs (.within 1 1) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := twoChainsWhole_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : twoChainsWhole.RerollsAs (.within 1 1) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := twoChainsWhole_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+
+-- After the drop, the reroll leaves stacks of the kept pool, each multiset
+-- padded to the most kept dice of any, and the law of what each chain has
+-- become, whose weights the stacks multiply back in.
+#guard twoChains.reroll (.within 1 1) (some 1) ==
+  { roll := some (.stacked
+      [([(.single 1, 1)], 2), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
+      [(.single 1, [(.single 1, 1), (.single 2, 1)]),
+        (.live [2] 2, [(.live [2] 2, 4)])]),
+    die := some (.standard 2) }
+example : twoChains.RerollsAs (.within 1 1) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : twoChains.RerollsAs (.within 1 1) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+-- The stacks are well formed, and their totals too.
+example : (twoChains.rerollAs (.within 1 1) (some 1) true).WellFormed :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  (Setup.reroll_invariants _ _ _ hs hg hf).1
+example : (twoChains.rerollAs (.within 1 1) (some 1) false).WellFormed :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  (Setup.reroll_invariants _ _ _ hs hg hf).1
+
+-- An unlimited reroll of every face crosses out every chain still kept.
+#guard twoChains.reroll (.within 1 2) none ==
+  { twoChains with lowest := 2 }
+example : twoChains.RerollsAs (.within 1 2) none true :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+
+-- Dice after a drop reroll as a pool, as before.
+example : threeD2.RerollsAs (.within 1 1) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := threeD2_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+
 /-! ## Mixtures -/
 
 -- A mixture of three dice, the lowest dropped, exploded by independent
@@ -239,5 +319,19 @@ example (κ : PMF (Criterion × Option Nat))
     subst hs
     obtain ⟨hw, hg, hf⟩ := threeD2_invariants
     exact ⟨hw, hg, hf, fun q hq => explodes_of (hκ q hq)⟩
+
+
+-- A mixture of two chains, the lowest dropped, rerolled by independent
+-- criteria and limits, describes the specification's reroll of its law, as
+-- every later drop, keep, and sum reads it.
+example (κ : PMF (Criterion × Option Nat)) :
+    (mixtureLaw (lift (fun s q => s.rerollAs q.1 q.2 false)
+        (PMF.pure twoChains) κ)).map Record.view =
+      ((lift Prod.mk (mixtureLaw (PMF.pure twoChains)) κ).bind fun p =>
+        reroll p.1 p.2.1 p.2.2).map Record.view :=
+  mixtureLaw_reroll_totals fun s hs => by
+    rw [PMF.support_pure, Set.mem_singleton_iff] at hs
+    subst hs
+    exact twoChains_invariants
 
 end Xdy.Spec.Test.Stacks

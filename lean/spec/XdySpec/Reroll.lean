@@ -31,14 +31,18 @@ specification's reroll does:
   that a reroll leaves reaches anything later, and it does not depend on the
   order (`bagDraws_perm`), so independent dice, each rerolled, are the dice
   of the rerolled law (`bind_rollDice_bagDraws`).
-- A setup's reroll (`Setup.reroll`) describes the specification's reroll of
-  its records as every later instruction views them (`Record.view`, the kept
-  results and the die), whether it does nothing, crosses out, rewrites, or
-  pools (`Setup.law_reroll`); and so a mixture's reroll describes the reroll
-  of the mixture's law, independent of the operands' (`mixtureLaw_reroll`,
-  `law_reroll_resolved`). The view, not the record, since the Rust leaves a
-  setup that the reroll cannot change with its drops, and crosses out by
-  dropping, where the specification's record keeps only its kept results.
+- A setup's reroll (`Setup.reroll`) of a setup without chains describes the
+  specification's reroll of its records as every later instruction views
+  them (`Record.view`, the kept results and the die), whether it does
+  nothing, crosses out, rewrites, or pools (`Setup.law_reroll_plain`); the
+  operands' law is independent of the record's (`law_reroll_resolved`). The
+  view, not the record, since the Rust leaves a setup that the reroll cannot
+  change with its drops, and crosses out by dropping, where the
+  specification's record keeps only its kept results. A setup of chains
+  rerolls the dice of each chain still kept (`Roll.rerollChains`), whose laws
+  `XdySpec/Stacks.lean` proves, with those of every grounded setup and
+  mixture (`Setup.law_reroll`, `mixtureLaw_reroll_whole`,
+  `mixtureLaw_reroll_totals`).
 - Dice after a drop, or fixed results, are not alike, so the reroll pools the
   multisets of the dice still kept (`Roll.rerollPool`, `Roll::pool`). For
   each outcome of the roll, the specification rerolls the kept results that
@@ -50,9 +54,9 @@ specification's reroll does:
 - The proofs ask that every setup be well formed, that every result be a face
   of its die, and that every die have a face (`Setup.Faithful`,
   `Setup.Faced`), as every roll (`Setup.faithful_roll`), drop and keep
-  (`Setup.Faithful.of_eq`), and reroll (`Setup.reroll_invariants`) leaves
-  them; and that it hold no chains (`Setup.Plain`), since the Rust rerolls
-  chains chain by chain, which this does not yet model.
+  (`Setup.Faithful.of_eq`), and reroll (`Setup.reroll_invariants_plain`)
+  leaves them; and that it hold no chains (`Setup.Plain`), whose rerolls
+  `XdySpec/Stacks.lean` proves.
 
 ```mermaid
 flowchart TD
@@ -62,7 +66,9 @@ flowchart TD
     E -->|crossOut| X[every die still kept dropped]
     E -->|redraw G g| A{alike, no drops?}
     A -->|yes| R[Roll.rewrite: each die's law]
-    A -->|no| P[Roll.rerollPool: multisets kept]
+    A -->|no| C{chains or stacks?}
+    C -->|yes| H[Roll.rerollChains: each chain's dice]
+    C -->|no| P[Roll.rerollPool: multisets kept]
 ```
 -/
 
@@ -2001,6 +2007,25 @@ theorem Roll.wellFormed_rerollPool {ρ : Roll} {lowest highest : Nat}
     | cons e₀ es =>
       exact ((hmem e₀ List.mem_cons_self).2).symm
 
+/--
+A roll without chains holds neither i.i.d. chains nor stacks.
+
+# Hypotheses
+- `h`: The roll holds no chains.
+-/
+theorem Roll.chained_of_plain {ρ : Roll} (h : ρ.Plain) : ρ.chained = false := by
+  cases ρ <;> first | rfl | exact h.elim
+
+/--
+No saturated die decides the chains of a roll without chains.
+
+# Hypotheses
+- `h`: The roll holds no chains.
+-/
+theorem Roll.isSaturated_of_plain {ρ : Roll} (h : ρ.Plain) :
+    ρ.isSaturated = false := by
+  cases ρ <;> first | rfl | exact h.elim
+
 /-! ## Rerolling a setup -/
 
 namespace Setup
@@ -2010,13 +2035,13 @@ Reroll the dice still kept of a setup. Mirrors `Setup::reroll` in
 `propagation/mixture.rs`.
 
 A reroll that does nothing leaves the setup as it was, and one that crosses
-out every die still kept drops them all. Otherwise, if no result has been
+out every die still kept drops them all, unless a saturated die decides every
+chain still kept, which it leaves alone. Otherwise, if no result has been
 dropped and the roll's dice are alike, the reroll rewrites the law of each
-(`Roll.rewrite`); if not, it pools the multisets of the dice still kept
-(`Roll.rerollPool`). Either way, the setup keeps its die, and drops nothing.
-The Rust rerolls chains or stacks chain by chain (`Roll::reroll_chains`),
-which this does not yet model; the laws of rerolls ask that the setup hold
-no chains (`Setup.Plain`).
+(`Roll.rewrite`); a roll of chains or stacks rerolls the kept dice of each
+chain (`Roll.rerollChains`); and any other roll pools the multisets of the
+dice still kept (`Roll.rerollPool`). Either way, the setup keeps its die, and
+drops nothing.
 
 # Parameters
 - `s`: The setup.
@@ -2035,11 +2060,13 @@ def reroll (s : Setup) (c : Criterion) (limit : Option Nat) : Setup :=
     else
       match Effect.resolve s.replacement c limit with
       | .nothing => s
-      | .crossOut => { s with lowest := s.results }
+      | .crossOut => if ρ.isSaturated then s else { s with lowest := s.results }
       | .redraw padding law =>
         { roll := some
             (if ρ.alike ∧ s.lowest = 0 ∧ s.highest = 0 then
               ρ.rewrite c padding law
+            else if ρ.chained then
+              ρ.rerollChains s.lowest s.highest c padding law
             else ρ.rerollPool s.lowest s.highest c padding law)
           die := some s.replacement }
 
@@ -2221,9 +2248,14 @@ private theorem mem_draws (c : Criterion) (faces : List Int) {x : Int} :
     · rw [List.eq_of_mem_replicate hx]
       exact mem_draws c faces k hy
 
-/-- The final results of a die that a reroll may change are faces of the die,
-and weigh the padding, which is positive. -/
-private theorem redraw_law {d : Die} {c : Criterion} {limit : Option Nat}
+/--
+The final results of a die that a reroll may change are faces of the die,
+and weigh the padding, which is positive.
+
+# Hypotheses
+- `h`: The reroll may change the dice still kept.
+-/
+theorem redraw_law {d : Die} {c : Criterion} {limit : Option Nat}
     {padding : Nat} {law : List (Int × Nat)}
     (h : Effect.resolve d c limit = .redraw padding law) :
     (Roll.expand law).length = padding ∧ padding ≠ 0 ∧
@@ -2448,8 +2480,15 @@ theorem reroll_view_of_zero (r : Record) (c : Criterion) (hc : r.chains = []) :
     view_sorted (Record.kept_pairwise r)]
   rfl
 
-/-- Redrawing from a die of one face, from that face, leaves it. -/
-private theorem repeat_redraw_pure (c : Criterion) (y : Int) :
+/--
+Redrawing from a die of one face, from that face, leaves it.
+
+# Parameters
+- `c`: The criterion.
+- `y`: The face.
+- `k`: The number of redraws.
+-/
+theorem repeat_redraw_pure (c : Criterion) (y : Int) :
     ∀ k : Nat, k.repeat (redraw c (PMF.pure y)) (PMF.pure y) = PMF.pure y
   | 0 => rfl
   | k + 1 => by
@@ -2732,7 +2771,8 @@ theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
     have hk' : ¬s.results - s.lowest - s.highest = 0 := hk
     have he' : Effect.resolve s.replacement c limit = .redraw G g := he
     have hal' : ¬(ρ.alike = true ∧ s.lowest = 0 ∧ s.highest = 0) := hal
-    simp only [reroll, hρ, hk', he', hal', ↓reduceIte]
+    simp only [reroll, hρ, hk', he', hal', Roll.chained_of_plain hρp,
+      Bool.false_eq_true, ↓reduceIte]
     rfl
   -- Every outcome weighs `Gᴷ` in all.
   have hc : ∀ e ∈ ρ.outcomes, e.2 ≠ 0 →
@@ -2757,10 +2797,12 @@ theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
   simp [bagView, Record.sorted, sv]
 
 /--
-A reroll of a setup describes the specification's reroll of the records that
-it describes, as every later instruction views them, whether it does nothing,
-crosses out every die still kept, rewrites the dice, or pools them
-(`rerolls_of_pools`). Mirrors `Setup::reroll` in `propagation/mixture.rs`.
+A reroll of a setup without chains describes the specification's reroll of
+the records that it describes, as every later instruction views them, whether
+it does nothing, crosses out every die still kept, rewrites the dice, or pools
+them (`rerolls_of_pools`). Mirrors `Setup::reroll` in
+`propagation/mixture.rs`. `Setup.law_reroll`, in `XdySpec/Stacks.lean`, lifts
+it to every grounded setup, chains or not.
 
 # Parameters
 - `c`: The criterion.
@@ -2773,7 +2815,7 @@ crosses out every die still kept, rewrites the dice, or pools them
 - `hfaced`: Every die of the setup has a face.
 - `hp`: The setup holds no chains, which the Rust rerolls as chains.
 -/
-theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
+theorem law_reroll_plain {s : Setup} (c : Criterion) (limit : Option Nat)
     (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced)
     (hp : s.Plain) : s.Rerolls c limit := by
   have hev : s.Even := fun ρ h => (hs ρ h).even
@@ -2823,7 +2865,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         rw [Die.facesWithin, List.all_eq_true]
         exact List.countP_eq_length.mp hm
       have hs' : s.reroll c none = { s with lowest := s.results } := by
-        simp [reroll, hρ, hk, he]
+        simp [reroll, hρ, hk, he, Roll.isSaturated_of_plain (hp ρ hρ)]
       rw [Rerolls, hs', PMF.map_bind]
       rw [bind_congr_support fun r hr => (hdie r hr) ▸
         reroll_view_of_crossOut (Setup.chains_of_mem_support_law hp hr)
@@ -2895,42 +2937,6 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
 end Setup
 
 /-! ## Mixtures -/
-
-/--
-Rerolling every setup of a mixture by every resolution of the reroll's
-operands describes, as every later instruction views it, the specification's
-reroll of the mixture's law, independent of the resolutions, as
-`Mixture::reroll` in `propagation/mixture.rs` rerolls a record whose operands
-are independent of it (`law_reroll_resolved`).
-
-# Parameters
-- `μ`: The law of the setups.
-- `κ`: The law of the criterion and the limit, as the operands resolve them.
-
-# Hypotheses
-- `hμ`: Every setup is well formed, faithful to its die, has faces, and
-  holds no chains.
--/
-theorem mixtureLaw_reroll {μ : PMF Setup} {κ : PMF (Criterion × Option Nat)}
-    (hμ : ∀ s ∈ μ.support, s.WellFormed ∧ s.Faithful ∧ s.Faced ∧ s.Plain) :
-    (mixtureLaw (lift (fun s q => s.reroll q.1 q.2) μ κ)).map Record.view =
-      ((lift Prod.mk (mixtureLaw μ) κ).bind fun p =>
-        reroll p.1 p.2.1 p.2.2).map Record.view := by
-  simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map, PMF.map_bind,
-    Function.comp_def]
-  refine bind_congr_support fun s hs => ?_
-  obtain ⟨he, hf, hc, hp⟩ := hμ s hs
-  refine (bind_congr_support (p := κ)
-    (f := fun q : Criterion × Option Nat =>
-      (s.reroll q.1 q.2).law.map Record.view)
-    (g := fun q : Criterion × Option Nat =>
-      (s.law.bind fun r => reroll r q.1 q.2).map Record.view)
-    fun q hq => by
-      have h := Setup.law_reroll q.1 q.2 he hf hc hp
-      rw [Setup.Rerolls] at h
-      exact h).trans ?_
-  simp only [PMF.map_bind]
-  exact PMF.bind_comm _ _ _
 
 /--
 The law that `law_reroll` in `XdySpec/World.lean` gives a rerolled record is
@@ -3180,12 +3186,13 @@ private theorem faithful_rerollPool {s : Setup} {ρ : Roll} {c : Criterion}
     | cons e P => exact hfaces e List.mem_cons_self x hx
 
 /--
-A reroll leaves a setup well formed, faithful to its die, with faces, and
-without chains, so that the law of a later reroll holds of it too
-(`law_reroll`): a rewrite
-tallies the faces of its dice (`tally_wellFormed`), and a pool holds
-multisets of the results still kept (`Roll.wellFormed_rerollPool`), each a
-survivor or a final result of a matched die.
+A reroll leaves a setup without chains well formed, faithful to its die, with
+faces, and without chains, so that the law of a later reroll holds of it too
+(`law_reroll_plain`): a rewrite tallies the faces of its dice
+(`tally_wellFormed`), and a pool holds multisets of the results still kept
+(`Roll.wellFormed_rerollPool`), each a survivor or a final result of a matched
+die. `Setup.reroll_invariants`, in `XdySpec/Stacks.lean`, lifts it to every
+grounded setup.
 
 # Parameters
 - `c`: The criterion.
@@ -3198,7 +3205,7 @@ survivor or a final result of a matched die.
 - `hfaced`: Every die of the setup has a face.
 - `hp`: The setup holds no chains.
 -/
-theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
+theorem reroll_invariants_plain {s : Setup} (c : Criterion) (limit : Option Nat)
     (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced)
     (hp : s.Plain) :
     (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faithful ∧
@@ -3217,7 +3224,7 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
       exact ⟨hs, hfaith, hfaced, hp⟩
     | crossOut =>
       rw [show s.reroll c limit = { s with lowest := s.results } by
-        simp [reroll, hρ, hk, he]]
+        simp [reroll, hρ, hk, he, Roll.isSaturated_of_plain (hp ρ hρ)]]
       exact ⟨hs, Faithful.of_eq (s := s)
         (s' := { s with lowest := s.results }) rfl rfl hfaith, hfaced, hp⟩
     | redraw G g =>
@@ -3227,7 +3234,8 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
       · have hs' : s.reroll c limit =
             { roll := some (ρ.rerollPool s.lowest s.highest c G g),
               die := some s.replacement } := by
-          simp only [reroll, hρ, hk, he, hal, ↓reduceIte]
+          simp only [reroll, hρ, hk, he, hal, Roll.chained_of_plain (hp ρ hρ),
+            Bool.false_eq_true, ↓reduceIte]
         rw [hs']
         exact ⟨fun ρ' h => by
             cases h

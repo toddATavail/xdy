@@ -7,12 +7,13 @@ The multisets of draws of chains, as `multisets` in `propagation/record.rs`
 answers them; the slices of multisets of chains, which keep a window of the
 chains sorted by `Xdy.Chain.le`, their totals first, whatever the order in
 which they come; the kept pools, the transforms of pools and of stacks, and
-the joins of stacks; and the multisets of chains of every kind of roll.
+the joins of stacks; the multisets of chains of every kind of roll; and the
+transforms of laws and the rerolls of chains.
 -/
 
 namespace Xdy.Spec.Test.Chains
 
-open Xdy (Chain)
+open Xdy (Chain Criterion)
 
 /-! ## Multisets -/
 
@@ -88,6 +89,31 @@ open Xdy (Chain)
 -- No i.i.d. chains are the empty multiset.
 #guard (Roll.chains (-1) [(.single 1, 1)]).stacks == [([], 1)]
 
+/-! ## Rerolls -/
+
+/-- A law of a chain of one die and a chain of two. -/
+private def law : List (Chain × Nat) := [(.single 1, 1), (.live [2] 2, 1)]
+
+-- A transformed law pads each chain's law to the most kept dice of any.
+#guard transformLaw law 2 (rerolled (.within 1 1) 2 [(1, 1), (2, 1)]) ==
+  [(.single 1, 2), (.single 2, 2), (.live [2] 2, 4)]
+-- Without drops, a reroll of i.i.d. chains transforms the law of each.
+#guard (Roll.chains 2 law).rerollChains 0 0 (.within 1 1) 2 [(1, 1), (2, 1)] ==
+  .chains 2 [(.single 1, 2), (.single 2, 2), (.live [2] 2, 4)]
+-- After a drop, it defers the reroll of each chain of the kept pool.
+#guard (Roll.chains 2 law).rerollChains 1 0 (.within 1 1) 2 [(1, 1), (2, 1)] ==
+  .stacked
+    [([(.single 1, 1)], 2), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
+    [(.single 1, [(.single 1, 1), (.single 2, 1)]),
+      (.live [2] 2, [(.live [2] 2, 4)])]
+-- Stacks none of whose chains has been dropped are left to later proofs.
+#guard (Roll.stacked [([(.single 1, 1)], 1)] []).rerollChains 0 0
+    (.within 1 1) 2 [(1, 1), (2, 1)] ==
+  .stacked [([(.single 1, 1)], 1)] []
+#guard (Roll.chains 2 law).chained && !(Roll.standard 2 6).chained
+#guard (Roll.stacked [([(.saturated 7, 1)], 1)] []).isSaturated
+#guard !(Roll.chains 2 law).isSaturated
+
 /-! ## Docstring examples, verbatim -/
 
 #guard multisets [((1 : Int), 1), (2, 2)] 2 ==
@@ -120,5 +146,15 @@ open Xdy (Chain)
 #guard (Roll.range 1 2).stacks ==
   [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]
 #guard (Roll.chains 1 [(.live [6] 2, 1)]).stacks == [([(.live [6] 2, 1)], 1)]
+
+#guard transformLaw [(.single 1, 1), (.live [1] 2, 1)] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) ==
+  [(.single 1, 3), (.live [1] 2, 1)]
+
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.live [1, 2] 1) ==
+  ([(.live [1, 2] 1, 2), (.live [1, 2] 2, 2), (.live [2, 2] 1, 2),
+    (.live [2, 2] 2, 2)], 3)
+#guard rerolled (.within 1 1) 2 [(1, 1), (2, 1)] (.saturated 7) ==
+  ([(.saturated 7, 1)], 0)
 
 end Xdy.Spec.Test.Chains

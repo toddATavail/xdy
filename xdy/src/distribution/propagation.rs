@@ -2028,10 +2028,12 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 	{
 		// `law_reroll`, in `lean/spec/XdySpec/World.lean`, proves that the
 		// record has the law of the reroll over independent records and joint
-		// outcomes of the operands, and `law_reroll_resolved` and
-		// `mixtureLaw_reroll`, in `lean/spec/XdySpec/Reroll.lean`, that
+		// outcomes of the operands, and `law_reroll_resolved`, in
+		// `lean/spec/XdySpec/Reroll.lean`, and `mixtureLaw_reroll_whole` and
+		// `mixtureLaw_reroll_totals`, in `lean/spec/XdySpec/Stacks.lean`, that
 		// rerolling every setup by each resolution of the operands describes
-		// it, as every later instruction views the record.
+		// it, as every later instruction reads the record, for the rerolls
+		// that `Setup.law_reroll` covers.
 		let rerolls =
 			self.resolve(&inst.operands(), &inst.predicate, inst.limit)?;
 		let Self {

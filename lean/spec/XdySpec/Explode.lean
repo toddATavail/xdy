@@ -38,7 +38,8 @@ of the record as the specification's explode does:
   independent draws, one for each chain (`explodeChains_eq_bag`), and of
   independent and alike chains, independent draws of the law of each chain,
   exploded (`bind_rollDice_iidBag`, `chainDraws_bind_bagDraws`), as
-  `Roll::explode` transforms it (`transformLaw`).
+  `Roll::explode` transforms it (`transformLaw`, in `XdySpec/Chains.lean`,
+  without padding: `transformLaw_one`).
 - A setup's explode (`Setup.explode`, and `Setup.burst`, which reduces the
   chains to their totals unless they stay whole) describes the specification's
   explode of its records as every later instruction reads them, whether it
@@ -60,9 +61,10 @@ of the record as the specification's explode does:
   hypothesis that the explode extends alike chains (`Setup.ExtendsAlike`), and
   those of a mixture's explode, independent of its operands
   (`mixtureLaw_burst_whole`, `mixtureLaw_burst_totals`,
-  `law_explode_resolved`). The explodes of stacks none of whose chains has
-  been dropped, which compose the laws that they defer, and the rerolls of
-  chains are not yet modeled.
+  `law_explode_resolved`), and the laws of the rerolls of chains
+  (`Setup.law_reroll`). The explodes and rerolls of stacks none of whose
+  chains has been dropped, which compose the laws that they defer, are not yet
+  modeled.
 
 ```mermaid
 flowchart TD
@@ -1544,26 +1546,21 @@ theorem bagDraws_map {α β γ : Type} (f : α → PMF β) (g : γ → α)
 /-! ## Exploding a setup -/
 
 /--
-The law of each chain of independent and alike chains, transformed by a law
-of what each becomes: each chain that it may be followed by each that it
-becomes, weighed by both. Mirrors `transform_law` in `propagation/chain.rs`
-for an explode, whose padding is one.
+A law transformed without padding weighs what each chain becomes by the
+chain's weight alone, as an explode transforms it.
+
+# Type parameters
+- `T`: The type of what a chain becomes.
 
 # Parameters
 - `law`: The distinct chains that each may be, each with its weight.
-- `becomes`: What each chain becomes, each with its weight.
-
-# Returns
-What each chain becomes, each with its weight.
-
-# Notes
-The Rust merges what coincides, in ascending order; this lists it as it
-comes. The padding of a reroll of chains, which the Rust shares with this, is
-left to the rerolls of chains.
+- `h`: What each chain becomes, each with its weight.
 -/
-def transformLaw {T : Type} (law : List (Chain × Nat))
-    (becomes : Chain → List (T × Nat)) : List (T × Nat) :=
-  law.flatMap fun e => (becomes e.1).map fun o => (o.1, e.2 * o.2)
+theorem transformLaw_one {T : Type} (law : List (Chain × Nat))
+    (h : Chain → List (T × Nat)) :
+    transformLaw law 1 (fun ch => (h ch, 0)) =
+      law.flatMap fun e => (h e.1).map fun o => (o.1, e.2 * o.2) := by
+  simp [transformLaw]
 
 namespace Roll
 
@@ -1598,24 +1595,6 @@ weights, or no chains for fixed results, a pool, or stacks.
 def chainLaw : Roll → Int × List (Chain × Nat)
   | .chains count law => (count, law)
   | ρ => (ρ.dice.1, ρ.dice.2.map fun p => (.single p.1, p.2))
-
-/--
-Whether a saturated die decides the chains of a roll. Mirrors
-`Roll::is_saturated` in `propagation/chain.rs`.
-
-# Parameters
-- `ρ`: The roll.
-
-# Returns
-`true` if the roll is stacks of which some chain, or what it has become, has
-saturated; `false` otherwise.
--/
-def isSaturated : Roll → Bool
-  | .stacked multisets laws => multisets.any fun e => e.1.any fun p =>
-    match laws.lookup p.1 with
-    | some law => law.any (·.1.saturates)
-    | none => p.1.saturates
-  | _ => false
 
 /--
 Whether the end of some chain of a roll, kept or dropped, may show a result
@@ -1706,10 +1685,12 @@ def explode (ρ : Roll) (lowest highest : Nat) (b : Burst) (c : Criterion)
     (whole : Bool) : Roll :=
   if ρ.chainLike ∧ lowest = 0 ∧ highest = 0 then
     if whole then
-      .chains ρ.chainLaw.1 (transformLaw ρ.chainLaw.2 (b.chains c))
+      .chains ρ.chainLaw.1
+        (transformLaw ρ.chainLaw.2 1 fun ch => (b.chains c ch, 0))
     else
       .custom ρ.chainLaw.1
-        (tally (expand (transformLaw ρ.chainLaw.2 (b.totals c))))
+        (tally (expand
+          (transformLaw ρ.chainLaw.2 1 fun ch => (b.totals c ch, 0))))
   else
     match ρ with
     | .stacked .. =>
@@ -2908,9 +2889,16 @@ theorem chainDraws_bind_bagDraws {β : Type} (n : Nat) (P : PMF Chain)
 
 namespace Setup
 
-/-- A setup of i.i.d. chains, without drops, describes records of independent
-draws of them. -/
-private theorem law_chains (D : Die) (count : Int) (cl : List (Chain × Nat)) :
+/--
+A setup of i.i.d. chains, without drops, describes records of independent
+draws of them.
+
+# Parameters
+- `D`: The die of the setup.
+- `count`: The number of chains.
+- `cl`: The law of each chain.
+-/
+theorem law_chains (D : Die) (count : Int) (cl : List (Chain × Nat)) :
     ({ roll := some (.chains count cl), die := some D } : Setup).law =
       (chainDraws count.toNat (weighted (.single 0) cl)).map
         (Record.ofChains D) := by
@@ -2982,10 +2970,27 @@ private theorem bind_bagDraws_keptChains_alike {s : Setup} {ρ : Roll}
         (PMF.bind_map _ _ _).symm
     _ = _ := by rw [Roll.map_results_law halike, PMF.bind_map]; rfl
 
-/-- The kept chains of every record of a setup whose chains are independent and
+/--
+The kept chains of every record of a setup whose chains are independent and
 alike, none dropped, are independent draws of the law of each chain, each
-drawn anew. -/
-private theorem bind_bagDraws_keptChains {s : Setup} {ρ : Roll} {β : Type}
+drawn anew.
+
+# Type parameters
+- `β`: The type of what each chain is drawn anew as.
+
+# Parameters
+- `K`: The law of what each chain is drawn anew as.
+
+# Hypotheses
+- `hs`: The setup is well formed.
+- `hg`: The setup is grounded.
+- `hfaced`: Every die of the setup has a face.
+- `hρ`: The setup's roll is `ρ`.
+- `hlike`: Its chains are independent and alike.
+- `hl`, `hh`: It drops nothing.
+- `hk`: It keeps some chain.
+-/
+theorem bind_bagDraws_keptChains {s : Setup} {ρ : Roll} {β : Type}
     (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced)
     (hρ : s.roll = some ρ) (hlike : ρ.chainLike) (hl : s.lowest = 0)
     (hh : s.highest = 0) (hk : s.results - s.lowest - s.highest ≠ 0)
@@ -3149,8 +3154,9 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
   cases whole with
   | true =>
     have hP' : weighted (.single 0)
-        (transformLaw ρ.chainLaw.2
-          ((Burst.resolve s.replacement c (some (n + 1)) true).chains c)) =
+        (transformLaw ρ.chainLaw.2 1 fun ch =>
+          ((Burst.resolve s.replacement c (some (n + 1)) true).chains c ch,
+            0)) =
         P.bind K := by
       have h := weighted_flatMap (Chain.single 0) (Chain.single 0) id
         ρ.chainLaw.2
@@ -3160,7 +3166,7 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
         (pow_ne_zero _ (by simpa using hF)) hW
         (fun e _ _ => by rw [one_mul, Burst.sum_chains hm])
       simp only [mul_one, id] at h
-      rw [transformLaw, h]
+      rw [transformLaw_one, h]
       refine congrArg _ (funext fun ch => ?_)
       rw [show (fun o : Chain => o) = id from rfl, PMF.map_id,
         Burst.weighted_chains hm]
@@ -3188,8 +3194,10 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
             exact hKn' ch (hf.normal ch hch) (hf.faces ch hch) x hx
           rw [Function.comp_apply, hcv _ hn, Multiset.coe_toList]
   | false =>
-    have hW' : weightedDie (tally (Roll.expand (transformLaw ρ.chainLaw.2
-        ((Burst.resolve s.replacement c (some (n + 1)) false).totals c)))) =
+    have hW' : weightedDie (tally (Roll.expand (transformLaw ρ.chainLaw.2 1
+        fun ch =>
+          ((Burst.resolve s.replacement c (some (n + 1)) false).totals c ch,
+            0)))) =
         (P.bind K).map Chain.total := by
       have h := weighted_flatMap (0 : Int) (Chain.single 0) Chain.total
         ρ.chainLaw.2
@@ -3200,7 +3208,7 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
         (fun e _ _ => by rw [one_mul, Burst.sum_totals hm])
       simp only [mul_one] at h
       rw [weightedDie_tally, ← weightedDie_eq_customDie_expand,
-        weightedDie_eq_weighted, transformLaw, h, PMF.map_bind]
+        weightedDie_eq_weighted, transformLaw_one, h, PMF.map_bind]
       refine congrArg _ (funext fun ch => ?_)
       rw [show (fun o : Int => o) = id from rfl, PMF.map_id,
         Burst.weighted_totals hm]
@@ -3833,8 +3841,10 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
         have htrans : ∀ {T : Type} (h : Chain → List (T × Nat)),
             (∀ ch ∈ (weighted (.single 0) ρ.chainLaw.2).support, h ch ≠ [] ∧
               ∀ o ∈ h ch, 0 < o.2) →
-            transformLaw ρ.chainLaw.2 h ≠ [] ∧
-              ∀ e ∈ transformLaw ρ.chainLaw.2 h, 0 < e.2 := fun h hh' => by
+            transformLaw ρ.chainLaw.2 1 (fun ch => (h ch, 0)) ≠ [] ∧
+              ∀ e ∈ transformLaw ρ.chainLaw.2 1 (fun ch => (h ch, 0)),
+                0 < e.2 := fun h hh' => by
+          rw [transformLaw_one]
           have hsup : ∀ e ∈ ρ.chainLaw.2,
               e.1 ∈ (weighted (.single 0) ρ.chainLaw.2).support :=
             fun e he => mem_support_weighted_of_mem he (hpos e he).ne'
@@ -3842,7 +3852,7 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
           · obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ hlne
             have := List.flatMap_eq_nil_iff.mp h0 e he
             exact (hh' e.1 (hsup e he)).1 (List.map_eq_nil_iff.mp this)
-          · simp only [transformLaw, List.mem_flatMap, List.mem_map] at he
+          · simp only [List.mem_flatMap, List.mem_map] at he
             obtain ⟨e₀, he₀, o, ho, rfl⟩ := he
             exact Nat.mul_pos (hpos e₀ he₀) ((hh' e₀.1 (hsup e₀ he₀)).2 o ho)
         cases whole with
@@ -3894,7 +3904,7 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
             simp only [Option.mem_def, Option.some.injEq] at h
             subst h
             refine ⟨rfl, fun e he => ?_⟩
-            simp only [transformLaw, List.mem_flatMap, List.mem_map] at he
+            simp only [transformLaw_one, List.mem_flatMap, List.mem_map] at he
             obtain ⟨e₀, he₀, o, ho, rfl⟩ := he
             have hsup := mem_support_weighted_of_mem (d := Chain.single 0) he₀
               (hpos e₀ he₀).ne'
@@ -3931,9 +3941,9 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
             subst h
             refine .inr fun h0 => ?_
             obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ hne'
-            have hx : e.1 ∈ Roll.expand (transformLaw ρ.chainLaw.2
-                ((Burst.resolve s.replacement c (some (n + 1)) false).totals
-                  c)) :=
+            have hx : e.1 ∈ Roll.expand (transformLaw ρ.chainLaw.2 1
+                fun ch => ((Burst.resolve s.replacement c (some (n + 1))
+                  false).totals c ch, 0)) :=
               List.mem_flatMap.mpr ⟨e, he,
                 List.mem_replicate.mpr ⟨(hpos' e he).ne', rfl⟩⟩
             have := (expand_tally_perm _).mem_iff.mpr hx
