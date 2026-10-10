@@ -6,8 +6,8 @@ import XdySpec.Chains
 The multisets of draws of chains, as `multisets` in `propagation/record.rs`
 answers them; the slices of multisets of chains, which keep a window of the
 chains sorted by `Xdy.Chain.le`, their totals first, whatever the order in
-which they come; the kept pools, the transforms of pools and the joins of
-stacks; and the multisets of chains of every kind of roll.
+which they come; the kept pools, the transforms of pools and of stacks, and
+the joins of stacks; and the multisets of chains of every kind of roll.
 -/
 
 namespace Xdy.Spec.Test.Chains
@@ -58,6 +58,21 @@ open Xdy (Chain)
   [([(.single 2, 2)], 1), ([(.single 2, 1), (.live [6] 2, 1)], 2),
     ([(.live [6] 2, 2)], 1)]
 
+/-! ## Stacks -/
+
+-- Stacks keep their pool, and hold the law of what each distinct chain of it
+-- becomes, once.
+#guard transformStacks [([(.single 2, 2)], 1), ([(.single 1, 1),
+    (.single 2, 1)], 2)] 1 (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
+  .stacked [([(.single 2, 2)], 1), ([(.single 1, 1), (.single 2, 1)], 2)]
+    [(.single 1, [(.single 1, 1), (.live [6] 1, 1)]),
+      (.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
+-- A multiset whose chains hold fewer kept dice is padded to the most of any.
+#guard transformStacks [([(.single 1, 1)], 1), ([(.live [1] 1, 1)], 1)] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) ==
+  .stacked [([(.single 1, 1)], 3), ([(.live [1] 1, 1)], 1)]
+    [(.single 1, [(.single 1, 1)]), (.live [1] 1, [(.live [1] 1, 1)])]
+
 /-! ## Rolls -/
 
 -- Dice become the chains of one die of their outcomes.
@@ -91,6 +106,11 @@ open Xdy (Chain)
 #guard transformPool [([(.single 1, 1), (.single 2, 1)], 1)] 1 0 1
     (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
   [([(.single 2, 1)], 1), ([(.live [6] 2, 1)], 1)]
+
+#guard transformStacks [([(.single 2, 1)], 3)] 1
+    (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
+  .stacked [([(.single 2, 1)], 3)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
 
 #guard joined [([(.single 2, 1)], 3)] [] == [([(.single 2, 1)], 3)]
 #guard joined [([(.single 2, 1)], 3)]

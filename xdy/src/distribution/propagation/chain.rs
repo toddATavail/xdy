@@ -57,11 +57,15 @@
 //! grown chains do (`Burst.weighted_totals`); of [`Roll::explode`] on a range,
 //! dice, or i.i.d. chains none of which has been dropped; of
 //! [`Roll::saturate`]; and of [`Roll::collapse`] of i.i.d. chains
-//! (`Setup.law_burst`). `lean/spec/XdySpec/Stacks.lean` proves that the
+//! (`Setup.law_burst_alike`). `lean/spec/XdySpec/Stacks.lean` proves that the
 //! multisets of the chains still kept after a drop, which [`kept_pool`] keeps,
-//! are the law of those chains (`Setup.map_keptChains_law`). The explodes of
-//! chains after a drop, or of fixed results, a pool, or stacks, the deferred
-//! laws of stacks, and the rerolls of chains have no proof yet; the tests
+//! are the law of those chains (`Setup.map_keptChains_law`); that
+//! [`transform_pool`] draws what each chain still kept becomes independently
+//! (`weighted_transformPool`); and so the laws of [`Roll::explode`] on the
+//! chains of a roll after a drop, or of fixed results or a pool, into stacks
+//! or a pool of totals (`Setup.law_burst`). The explodes of stacks none of
+//! whose chains has been dropped, the deferred laws of stacks, and the rerolls
+//! of chains have no proof yet; the tests
 //! check every law against an independent enumeration.
 
 use std::{
@@ -975,6 +979,13 @@ fn transform_law<T: Element>(
 ///
 /// # Errors
 /// [`Halt`] if the transform would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `transformPool`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `weighted_transformPool`, in `lean/spec/XdySpec/Stacks.lean`, proves that
+/// the new multisets, over their weights, are each multiset of the chains
+/// sliced, each copy of each chain still kept drawn independently from the law
+/// of what it becomes, if every multiset weighs alike after its padding.
 fn transform_pool<T: Element>(
 	outcomes: &Multisets<Chain>,
 	lowest: i32,
@@ -1275,6 +1286,12 @@ fn compose<T: Element>(
 ///
 /// # Errors
 /// [`Halt`] if the transform would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `transformStacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this on
+/// stacks without laws, such as [`kept_pool`] leaves, whose explodes
+/// `Setup.law_burst`, in `lean/spec/XdySpec/Stacks.lean`, proves; the
+/// composition of the laws of stacks has no proof yet.
 fn transform_stacks(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1516,6 +1533,13 @@ impl Roll
 	///
 	/// # Errors
 	/// [`Halt`] if the explode would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `Roll.explode`, in `lean/spec/XdySpec/Explode.lean`, mirrors this, and
+	/// `Roll.explodeMultisets` its last arm. `Setup.law_burst_alike` proves the
+	/// law of the first arm, and `Setup.law_burst`, in
+	/// `lean/spec/XdySpec/Stacks.lean`, that of the last on every roll but
+	/// stacks; the explodes of stacks have no proof yet.
 	pub(super) fn explode(
 		&self,
 		lowest: i32,

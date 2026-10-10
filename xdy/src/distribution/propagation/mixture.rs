@@ -24,12 +24,11 @@
 //! that rolling, dropping, keeping and summing a mixture act on that law as the
 //! instructions do on the record; `lean/spec/XdySpec/Reroll.lean` proves that
 //! rerolling does, as every later instruction views the record; and
-//! `lean/spec/XdySpec/Explode.lean` proves that exploding does, when the
-//! explode does nothing, saturates every chain still kept, or extends the
-//! chains of a range, dice, or i.i.d. chains none of which has been dropped.
-//! Nothing yet proves that exploding the [chains](super::chain) of a roll
-//! after a drop, or of fixed results, a pool, or stacks, does, nor that
-//! rerolling chains does. When those
+//! `lean/spec/XdySpec/Explode.lean` and `lean/spec/XdySpec/Stacks.lean` prove
+//! that exploding does, when the explode does nothing, saturates every chain
+//! still kept, or extends the chains of any roll but stacks, dropped or not.
+//! Nothing yet proves that exploding the [chains](super::chain) of stacks none
+//! of which has been dropped does, nor that rerolling chains does. When those
 //! operands are rolls with fixed operands, every path through them is equally
 //! likely, and the mixture weighs each outcome by the number of paths that
 //! reach it. When some path to a setup is likelier than another, the least
@@ -259,20 +258,21 @@ impl Setup
 	///
 	/// # Notes
 	/// `Setup.explode`, in `lean/spec/XdySpec/Explode.lean`, mirrors the
-	/// explode, and `Burst.resolve` mirrors [`burst`];
-	/// `Setup.law_burst` proves that, whether the explode does nothing,
-	/// saturates every chain still kept, or extends the independent and alike
-	/// chains of a range, dice, or i.i.d. chains none of which has been
-	/// dropped, the exploded setup, reduced to its totals unless `whole`,
-	/// describes the specification's explode of the setup's records, as every
-	/// later instruction reads them: their kept chains and their die if
-	/// `whole`, which a later reroll or explode reads, and their kept results
-	/// and their die otherwise. The proof asks that every face of the die lie
-	/// within the `i32` range, and that every chain be normal and hold only
-	/// faces of the die (`Setup.Grounded`), as `Setup.burst_invariants` proves
-	/// of every explode that keeps its chains whole without saturating them.
-	/// Nothing yet proves the explodes of chains after a drop, or of fixed
-	/// results, a pool, or stacks.
+	/// explode, and `Burst.resolve` mirrors [`burst`]; `Setup.law_burst`, in
+	/// `lean/spec/XdySpec/Stacks.lean`, proves that, whether the explode does
+	/// nothing, saturates every chain still kept, extends the independent and
+	/// alike chains of a range, dice, or i.i.d. chains none of which has been
+	/// dropped, or extends the chains still kept of each multiset of the
+	/// chains of any other roll but stacks, the exploded setup, reduced to its
+	/// totals unless `whole`, describes the specification's explode of the
+	/// setup's records, as every later instruction reads them: their kept
+	/// chains and their die if `whole`, which a later reroll or explode reads,
+	/// and their kept results and their die otherwise. The proof asks that
+	/// every face of the die lie within the `i32` range, and that every chain
+	/// be normal and hold only faces of the die, and the setup hold no stacks
+	/// (`Setup.Grounded`), as `Setup.burst_invariants` proves of every explode
+	/// that keeps its chains whole and leaves no stacks. Nothing yet proves the
+	/// explodes of stacks.
 	fn explode(
 		&self,
 		criterion: &Criterion,
@@ -657,7 +657,7 @@ impl Mixture
 	///
 	/// # Notes
 	/// `mixtureLaw_burst_whole` and `mixtureLaw_burst_totals`, in
-	/// `lean/spec/XdySpec/Explode.lean`, prove that exploding every setup by
+	/// `lean/spec/XdySpec/Stacks.lean`, prove that exploding every setup by
 	/// every resolution of the explode's operands describes the
 	/// specification's explode of the mixture's law, as every later
 	/// instruction reads it, wherever [`Setup::explode`] does.

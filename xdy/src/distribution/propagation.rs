@@ -39,9 +39,10 @@
 //! saturates every chain, rolling nothing. Any other explode without limit may
 //! roll without bound, so the pass refuses every function in which one may
 //! extend a chain, before it begins. The Lean specification proves the laws of
-//! explodes that do nothing, saturate every chain, or extend chains none of
-//! which has been dropped, as cited below; nothing yet proves the explodes of
-//! chains after a drop, or the rerolls of chains.
+//! explodes that do nothing, saturate every chain, or extend the chains of any
+//! roll but stacks, dropped or not, as cited below; nothing yet proves the
+//! explodes of stacks none of whose chains has been dropped, or the rerolls of
+//! chains.
 //!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of
@@ -2051,7 +2052,7 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 		// record has the law of the explode over independent records and joint
 		// outcomes of the operands, and `law_explode_resolved`,
 		// `mixtureLaw_burst_whole`, and `mixtureLaw_burst_totals`, in
-		// `lean/spec/XdySpec/Explode.lean`, that exploding every setup by each
+		// `lean/spec/XdySpec/Stacks.lean`, that exploding every setup by each
 		// resolution of the operands describes it, as every later instruction
 		// reads the record, for the explodes that `Setup.law_burst` covers.
 		let explodes =

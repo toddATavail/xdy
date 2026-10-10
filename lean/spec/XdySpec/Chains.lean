@@ -22,9 +22,11 @@ transform:
   `keptPool` mirrors `kept_pool`, which slices every multiset of a pool.
 - `transformPool` mirrors `transform_pool`, which slices every multiset of a
   pool and draws each copy of each chain still kept from the law of what it
-  becomes, padding each multiset to the most kept dice of any; `joined`
-  mirrors `joined`, which draws each copy of each chain of stacks from the law
-  of what it has become.
+  becomes, padding each multiset to the most kept dice of any;
+  `transformStacks` mirrors `transform_stacks` on stacks whose chains are still
+  themselves, which defers the law of what each chain becomes instead; and
+  `joined` mirrors `joined`, which draws each copy of each chain of stacks from
+  the law of what it has become.
 - `Roll.stacks` mirrors `Roll::stacks`, which answers every outcome of a roll
   as multisets of chains: the multisets of the law of i.i.d. chains, the
   joined stacks, or the outcomes of any other roll, each result the chain of
@@ -200,6 +202,46 @@ def transformPool {T : Type} (outcomes : List (List (Chain × Nat) × Nat))
       (fun soFar g => soFar.flatMap fun e =>
         (multisets (becomes g.1).1 g.2).map fun o => (e.1 ++ o.1, e.2 * o.2))
       [([], k.2.2 * padding ^ (most - k.2.1))]
+
+/--
+Transform stacks whose chains are still themselves by the law of what each
+chain becomes, chain by chain, without joining them, into stacks that hold
+the law of what each distinct chain of the pool has become. Mirrors
+`transform_stacks` in `propagation/chain.rs` on stacks without laws, such as
+`kept_pool` leaves: a multiset whose chains hold `d` kept dice in all is
+padded to the most of any, `D`, by `G^(D − d)`.
+
+# Parameters
+- `pool`: The multisets of the stacks, each with its branches.
+- `padding`: The branches that a reroll adds to each kept die, `G`, or one
+  for an explode.
+- `becomes`: The law of what a chain becomes, each chain with its branches,
+  and the number of kept dice of the chain by which a reroll pads it.
+
+# Returns
+The new stacks.
+
+# Notes
+The Rust keeps the laws in a map ordered by chain; this lists each distinct
+chain of the pool once. The stacks of a pool whose chains have already become
+something are left to later proofs.
+
+# Examples
+```lean
+#guard transformStacks [([(.single 2, 1)], 3)] 1
+    (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
+  .stacked [([(.single 2, 1)], 3)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
+```
+-/
+def transformStacks (pool : List (List (Chain × Nat) × Nat)) (padding : Nat)
+    (becomes : Chain → List (Chain × Nat) × Nat) : Roll :=
+  let dice := fun (chains : List (Chain × Nat)) =>
+    (chains.map fun g => (becomes g.1).2 * g.2).sum
+  let most := (pool.map (dice ·.1)).foldl Max.max 0
+  .stacked (pool.map fun e => (e.1, e.2 * padding ^ (most - dice e.1)))
+    ((pool.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
+      (ch, (becomes ch).1))
 
 /--
 Join stacks: each multiset of the chains that they hold, with its branches,

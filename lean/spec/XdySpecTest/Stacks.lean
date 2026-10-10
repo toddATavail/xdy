@@ -5,12 +5,15 @@ import XdySpec.Stacks
 
 The laws of the kept chains of setups after drops and keeps, as the kept pool
 of their roll's multisets of chains weighs them: of dice, whose chains are of
-one die, and of i.i.d. chains that an explode grew.
+one die, and of i.i.d. chains that an explode grew. The explodes of dice and
+chains after a drop, and of fixed results and pools, which transform the
+multisets of their chains still kept, and their laws, whole or reduced to
+totals, and of a mixture.
 -/
 
 namespace Xdy.Spec.Test.Stacks
 
-open Xdy (Chain)
+open Xdy (Chain Criterion)
 
 /-! ## Dice -/
 
@@ -65,5 +68,176 @@ example : twoChains.law.map (fun r => (r.keptChains : Multiset Chain)) =
     (weighted [] (keptPool (Roll.chains 2 law).stacks 1 0)).map
       (fun ms => (Roll.expand ms : Multiset Chain)) :=
   Setup.map_keptChains_law rfl ⟨by decide, by decide⟩ law_normal trivial
+
+/-! ## Explodes of multisets of chains -/
+
+/-- An explode that may not draw without bound is not one that the pass
+refuses. -/
+private theorem explodes_of {s : Setup} {c : Criterion} {limit : Option Nat}
+    (hu : Burst.resolve s.replacement c limit true ≠ .unbounded) :
+    s.Explodes c limit := by
+  intro ρ hρ _
+  generalize Burst.resolve s.replacement c limit true = b at hu ⊢
+  cases b <;> trivial
+
+/-- Three two-sided dice, the lowest dropped, are well formed, grounded, and
+have faces. -/
+private theorem threeD2_invariants :
+    threeD2.WellFormed ∧ threeD2.Grounded ∧ threeD2.Faced := by
+  refine ⟨fun _ h => by cases h; trivial, ⟨by decide, fun ρ h => ?_⟩,
+    fun _ h => by cases h; trivial⟩
+  cases h
+  intro r hr x hx
+  simp only [Setup.law, PMF.support_map, Set.mem_image] at hr
+  obtain ⟨r', hr', rfl⟩ := hr
+  exact Setup.faithful_roll (ρ := .standard 3 2) rfl r'
+    (by rw [Setup.law_roll]; exact hr') x hx
+
+-- Dropping the lowest of three two-sided dice and exploding the others on `2`
+-- once keeps the kept pool, as stacks whose chains have become their
+-- explodes.
+#guard threeD2.burst (.within 2 2) (some 1) true ==
+  { roll := some (.stacked
+      [([(.single 1, 2)], 1), ([(.single 1, 1), (.single 2, 1)], 3),
+        ([(.single 2, 2)], 3), ([(.single 2, 2)], 1)]
+      [(.single 1, [(.single 1, 2)]),
+        (.single 2, [(.live [2] 1, 1), (.live [2] 2, 1)])]),
+    die := some (.standard 2) }
+-- Reduced to their totals, they leave the pool of the multisets of the totals
+-- of the chains still kept, each multiset padded by the explode.
+#guard threeD2.burst (.within 2 2) (some 1) false ==
+  { roll := some (.pool
+      [([(1, 2)], 4), ([(1, 1), (3, 1)], 6), ([(1, 1), (4, 1)], 6),
+        ([(3, 2)], 3), ([(3, 1), (4, 1)], 6), ([(4, 2)], 3), ([(3, 2)], 1),
+        ([(3, 1), (4, 1)], 2), ([(4, 2)], 1)]),
+    die := some (.standard 2) }
+
+-- Both describe the specification's explode, as every later instruction
+-- reads it.
+example : threeD2.Bursts (.within 2 2) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := threeD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : threeD2.Bursts (.within 2 2) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := threeD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+
+-- The pool that they leave is well formed.
+example : (threeD2.burst (.within 2 2) (some 1) false).WellFormed :=
+  let ⟨hs, hg, hf⟩ := threeD2_invariants
+  (Setup.burst_invariants _ _ _ hs hg hf).1
+
+/-- Fixed results of a two-sided die. -/
+private def fixedD2 : Setup :=
+  { roll := some (.fixed [(1, 1), (2, 1)]), die := some (.standard 2) }
+
+/-- Fixed results of faces of their die are well formed, grounded, and have
+faces. -/
+private theorem fixedD2_invariants :
+    fixedD2.WellFormed ∧ fixedD2.Grounded ∧ fixedD2.Faced := by
+  refine ⟨fun _ h => by cases h; exact ⟨by decide, by decide⟩,
+    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+  cases h
+  intro r hr x hx
+  rw [show fixedD2.replacement.faces = [1, 2] by decide]
+  simp only [fixedD2, Setup.law, Option.map_some, Option.getD_some, Roll.law,
+    PMF.pure_map, PMF.mem_support_pure_iff] at hr
+  subst hr
+  revert x
+  decide
+
+-- The `2` grows into a `3` or a `4`; the `1` stays, along both branches.
+#guard fixedD2.burst (.within 2 2) (some 1) false ==
+  { roll := some (.pool [([(1, 1), (3, 1)], 2), ([(1, 1), (4, 1)], 2)]),
+    die := some (.standard 2) }
+example : fixedD2.Bursts (.within 2 2) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := fixedD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+
+/-- A pool of results of a two-sided die. -/
+private def poolD2 : Setup :=
+  { roll := some (.pool [([(1, 2)], 1), ([(1, 1), (2, 1)], 2)]),
+    die := some (.standard 2) }
+
+/-- A pool of faces of its die is well formed, grounded, and has faces. -/
+private theorem poolD2_invariants :
+    poolD2.WellFormed ∧ poolD2.Grounded ∧ poolD2.Faced := by
+  refine ⟨fun _ h => by
+      cases h
+      refine ⟨by decide, by decide, fun e he => ?_⟩
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+      rcases he with rfl | rfl <;> rfl,
+    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+  cases h
+  intro r hr x hx
+  rw [show poolD2.replacement.faces = [1, 2] by decide]
+  simp only [poolD2, Setup.law, Option.map_some, Option.getD_some, Roll.law,
+    PMF.map_comp, PMF.support_map, Set.mem_image] at hr
+  obtain ⟨rs, hrs, rfl⟩ := hr
+  simp only [Function.comp_apply] at hx
+  rcases mem_support_weighted hrs with ⟨e, he, rfl⟩ | rfl
+  · simp only [List.mem_cons, List.not_mem_nil, or_false] at he
+    rcases he with rfl | rfl <;> revert x <;> decide
+  · revert x
+    decide
+
+#guard poolD2.burst (.within 2 2) (some 1) false ==
+  { roll := some (.pool [([(1, 2)], 4), ([(1, 1), (3, 1)], 4),
+      ([(1, 1), (4, 1)], 4)]),
+    die := some (.standard 2) }
+example : poolD2.Bursts (.within 2 2) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := poolD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : poolD2.Bursts (.within 2 2) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := poolD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+
+/-- The two chains, the lowest dropped, are well formed, grounded, and have
+faces. -/
+private theorem twoChains_invariants :
+    twoChains.WellFormed ∧ twoChains.Grounded ∧ twoChains.Faced := by
+  refine ⟨fun _ h => by cases h; exact ⟨by decide, by decide⟩,
+    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+  cases h
+  refine ⟨rfl, fun e he => ⟨law_normal e he, ?_⟩⟩
+  rw [show twoChains.replacement.faces = [1, 2] by decide]
+  -- Each chain's dice, sorted, are faces.
+  have hd : ∀ (body : List Int) (last : Int), (∀ x ∈ last :: body, x ∈ [1, 2]) →
+      ∀ x ∈ (Chain.live body last).dice, x ∈ [1, 2] := fun body last h x hx =>
+    h x ((List.mergeSort_perm _ _).mem_iff.mp hx)
+  simp only [law, List.mem_cons, List.not_mem_nil, or_false] at he
+  rcases he with rfl | rfl
+  · exact ⟨rfl, hd _ _ (by decide)⟩
+  · exact ⟨rfl, hd _ _ (by decide)⟩
+
+-- Exploding the higher chain again, after the drop, extends a chain of two
+-- dice into a chain of three.
+#guard twoChains.burst (.within 2 2) (some 1) false ==
+  { roll := some (.pool [([(1, 1)], 2), ([(5, 1)], 2), ([(6, 1)], 2),
+      ([(5, 1)], 1), ([(6, 1)], 1)]),
+    die := some (.standard 2) }
+example : twoChains.Bursts (.within 2 2) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : twoChains.Bursts (.within 2 2) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := twoChains_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+
+/-! ## Mixtures -/
+
+-- A mixture of three dice, the lowest dropped, exploded by independent
+-- criteria and limits that do not draw without bound, describes the
+-- specification's explode of its law.
+example (κ : PMF (Criterion × Option Nat))
+    (hκ : ∀ q ∈ κ.support,
+      Burst.resolve (.standard 2) q.1 q.2 true ≠ .unbounded) :
+    (mixtureLaw (lift (fun s q => s.burst q.1 q.2 true) (PMF.pure threeD2)
+        κ)).map Record.chainView =
+      ((lift Prod.mk (mixtureLaw (PMF.pure threeD2)) κ).bind fun p =>
+        explode p.1 p.2.1 p.2.2).map Record.chainView :=
+  mixtureLaw_burst_whole fun s hs => by
+    rw [PMF.support_pure, Set.mem_singleton_iff] at hs
+    subst hs
+    obtain ⟨hw, hg, hf⟩ := threeD2_invariants
+    exact ⟨hw, hg, hf, fun q hq => explodes_of (hκ q hq)⟩
 
 end Xdy.Spec.Test.Stacks

@@ -7,9 +7,9 @@ The ways in which an explode grows a chain, with their weights and padding,
 against the Rust's extensions; the folds of their totals; the burst of an
 explode against a die, and what it makes of each chain; the explode of a
 setup, which does nothing, saturates, or extends independent chains; and the
-laws of a setup's and a mixture's explode, whole or reduced to totals, as
-every later instruction reads them, with the invariants that every explode
-keeps.
+laws of a setup's explode of alike chains, whole or reduced to totals, as
+every later instruction reads them, with the invariants that every such
+explode keeps.
 -/
 
 namespace Xdy.Spec.Test.Explode
@@ -110,18 +110,24 @@ private theorem twoD2_invariants :
       exact Setup.faithful_roll rfl⟩,
     fun _ h => by cases h; trivial⟩
 
-/-- An explode that may not draw without bound, of a setup whose chains are
-independent and alike, none dropped, is one that the laws describe. -/
+/-- An explode that may not draw without bound is not one that the pass
+refuses. -/
 private theorem explodes_of {s : Setup} {c : Criterion} {limit : Option Nat}
-    (hu : Burst.resolve s.replacement c limit true ≠ .unbounded)
-    (hlike : ∀ ρ ∈ s.roll, ρ.chainLike ∧ s.lowest = 0 ∧ s.highest = 0) :
+    (hu : Burst.resolve s.replacement c limit true ≠ .unbounded) :
     s.Explodes c limit := by
   intro ρ hρ _
   generalize Burst.resolve s.replacement c limit true = b at hu ⊢
-  cases b with
-  | nothing | saturate => trivial
-  | unbounded => exact absurd rfl hu
-  | extend => exact hlike ρ hρ
+  cases b <;> trivial
+
+/-- An explode of a setup whose chains are independent and alike, none
+dropped, extends only alike chains. -/
+private theorem extendsAlike_of {s : Setup} {c : Criterion}
+    {limit : Option Nat}
+    (hlike : ∀ ρ ∈ s.roll, ρ.chainLike ∧ s.lowest = 0 ∧ s.highest = 0) :
+    s.ExtendsAlike c limit := by
+  intro ρ hρ _
+  generalize Burst.resolve s.replacement c limit true = b
+  cases b <;> first | trivial | exact hlike ρ hρ
 
 /-- Two two-sided dice are alike, and drop nothing. -/
 private theorem twoD2_alike : ∀ ρ ∈ twoD2.roll,
@@ -132,48 +138,33 @@ private theorem twoD2_alike : ∀ ρ ∈ twoD2.roll,
 -- specification's explode as a later reroll or explode reads it.
 example : twoD2.Bursts (.within 2 2) (some 1) true :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
-  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide) twoD2_alike)
+  Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
+    (extendsAlike_of twoD2_alike)
 
 -- Reducing them to their totals describes it as a later sum reads it.
 example : twoD2.Bursts (.within 2 2) (some 3) false :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
-  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide) twoD2_alike)
+  Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
+    (extendsAlike_of twoD2_alike)
 
 -- Saturating describes it too.
 example : twoD2.Bursts (.within 1 2) none true :=
   let ⟨hs, hg, hf⟩ := twoD2_invariants
-  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide) twoD2_alike)
+  Setup.law_burst_alike _ _ _ hs hg hf (explodes_of (by decide))
+    (extendsAlike_of twoD2_alike)
 
 -- An explode of the chains that an explode left describes the
--- specification's, as every explode of chains that stay whole leaves them
--- grounded.
+-- specification's, as every explode of chains that stay whole, and leave no
+-- stacks, leaves them grounded.
 example : (twoD2.burst (.within 2 2) (some 1) true).Bursts (.within 1 1)
     (some 2) false := by
   obtain ⟨hs, hg, hf⟩ := twoD2_invariants
-  obtain ⟨hs', hf', hg'⟩ := Setup.burst_invariants (.within 2 2) (some 1) true
-    hs hg hf (explodes_of (by decide) twoD2_alike)
-  refine Setup.law_burst _ _ _ hs' (hg' rfl fun v h => by
-    simp only [Burst.resolve] at h
-    split at h <;> cases h) hf' (explodes_of (by decide) fun ρ h => ?_)
-  cases h
-  exact ⟨rfl, rfl, rfl⟩
-
--- A mixture of two dice, exploded by independent criteria and limits that do
--- not draw without bound, describes the specification's explode of the dice.
-example (κ : PMF (Criterion × Option Nat))
-    (hκ : ∀ q ∈ κ.support,
-      Burst.resolve (.standard 2) q.1 q.2 true ≠ .unbounded) :
-    (mixtureLaw (lift (fun s q => s.burst q.1 q.2 true) (PMF.pure twoD2)
-        κ)).map Record.chainView =
-      ((lift Prod.mk ((rollDice 2 (standardDie 2)).map fun r =>
-          { r with die := .standard 2 }) κ).bind fun p =>
-        explode p.1 p.2.1 p.2.2).map Record.chainView := by
-  rw [mixtureLaw_burst_whole (fun s hs => by
-      rw [PMF.support_pure, Set.mem_singleton_iff] at hs
-      subst hs
-      obtain ⟨hw, hg, hf⟩ := twoD2_invariants
-      exact ⟨hw, hg, hf, fun q hq => explodes_of (hκ q hq) twoD2_alike⟩),
-    mixtureLaw_pure, twoD2, Setup.law_roll]
-  rfl
+  obtain ⟨hs', hf', hg'⟩ := Setup.burst_invariants_alike (.within 2 2)
+    (some 1) true hs hg hf (extendsAlike_of twoD2_alike)
+  refine Setup.law_burst_alike _ _ _ hs' (hg' rfl fun ms ls h => ?_) hf'
+    (explodes_of (by decide)) (extendsAlike_of fun ρ h => ?_)
+  · cases h
+  · cases h
+    exact ⟨rfl, rfl, rfl⟩
 
 end Xdy.Spec.Test.Explode
