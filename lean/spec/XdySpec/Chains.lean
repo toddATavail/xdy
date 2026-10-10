@@ -22,25 +22,27 @@ transform:
   `keptPool` mirrors `kept_pool`, which slices every multiset of a pool.
 - `transformPool` mirrors `transform_pool`, which slices every multiset of a
   pool and draws each copy of each chain still kept from the law of what it
-  becomes, padding each multiset to the most kept dice of any;
-  `transformStacks` mirrors `transform_stacks` on stacks whose chains are still
-  themselves, which defers the law of what each chain becomes instead; and
-  `joined` mirrors `joined`, which draws each copy of each chain of stacks from
-  the law of what it has become, and `joinedTotals` mirrors `joined_totals`,
-  which draws its total instead.
+  becomes, padding each multiset to the most kept dice of any.
+- `transformLaw` mirrors `transform_law`, which transforms the law of each of
+  i.i.d. chains none of which has been dropped, padding each to the most kept
+  dice of any; `compose` mirrors `compose`, which so transforms the law of
+  what a chain of stacks has become; and `transformStacks` mirrors
+  `transform_stacks`, which composes the law of what each chain of stacks has
+  become with what it becomes, deferring the join. `joined` mirrors `joined`,
+  which draws each copy of each chain of stacks from the law of what it has
+  become, and `joinedTotals` mirrors `joined_totals`, which draws its total
+  instead.
 - `Roll.stacks` mirrors `Roll::stacks`, which answers every outcome of a roll
   as multisets of chains: the multisets of the law of i.i.d. chains, the
   joined stacks, or the outcomes of any other roll, each result the chain of
   one die.
-- `transformLaw` mirrors `transform_law`, which transforms the law of each of
-  i.i.d. chains none of which has been dropped, padding each to the most kept
-  dice of any; `rerolled` mirrors `rerolled`, which answers every chain that a
-  chain still kept may become after a reroll of its dice; and
-  `Roll.rerollChains` mirrors `Roll::reroll_chains`, which rerolls the law of
-  each of i.i.d. chains, or the chains still kept of each multiset of the
-  chains after a drop, into stacks. `Roll.isSaturated` mirrors
-  `Roll::is_saturated`, which tells whether a saturated die decides the chains
-  of stacks, which every reroll leaves alone.
+- `rerolled` mirrors `rerolled`, which answers every chain that a chain still
+  kept may become after a reroll of its dice; and `Roll.rerollChains` mirrors
+  `Roll::reroll_chains`, which rerolls the law of each of i.i.d. chains, the
+  law of what each chain of stacks has become, or the chains still kept of
+  each multiset of the chains after a drop, into stacks. `Roll.isSaturated`
+  mirrors `Roll::is_saturated`, which tells whether a saturated die decides
+  the chains of stacks, which every reroll leaves alone.
 
 The Rust keeps the distinct values of each multiset in ascending order, which
 `slice` reads by position. A law of chains here need not ascend, so the
@@ -215,15 +217,104 @@ def transformPool {T : Type} (outcomes : List (List (Chain × Nat) × Nat))
       [([], k.2.2 * padding ^ (most - k.2.1))]
 
 /--
-Transform stacks whose chains are still themselves by the law of what each
-chain becomes, chain by chain, without joining them, into stacks that hold
-the law of what each distinct chain of the pool has become. Mirrors
-`transform_stacks` in `propagation/chain.rs` on stacks without laws, such as
-`kept_pool` leaves: a multiset whose chains hold `d` kept dice in all is
-padded to the most of any, `D`, by `G^(D − d)`.
+The law of each chain of independent and alike chains, none of which has been
+dropped, transformed by a law of what each becomes: each chain that it may be
+followed by each that it becomes, weighed by both, and padded to the most kept
+dice of any, so that every chain weighs the same in all. Mirrors
+`transform_law` in `propagation/chain.rs`.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `law`: The distinct chains that each may be, each with its weight.
+- `padding`: The branches that a reroll adds to each kept die, `G`, or one
+  for an explode.
+- `becomes`: What each chain becomes, each with its weight, and the number of
+  kept dice of the chain by which a reroll pads it, `d`, which pads it by
+  `G^(D − d)` for the most of any, `D`.
+
+# Returns
+What each chain becomes, each with its weight.
+
+# Notes
+The Rust merges what coincides, in ascending order; this lists it as it
+comes.
+
+# Examples
+```lean
+-- A chain of one die pads to the chain of two.
+#guard transformLaw [(.single 1, 1), (.live [1] 2, 1)] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) ==
+  [(.single 1, 3), (.live [1] 2, 1)]
+```
+-/
+def transformLaw {T : Type} (law : List (Chain × Nat)) (padding : Nat)
+    (becomes : Chain → List (T × Nat) × Nat) : List (T × Nat) :=
+  let most := (law.map fun e => (becomes e.1).2).foldl Max.max 0
+  law.flatMap fun e => (becomes e.1).1.map fun o =>
+    (o.1, e.2 * padding ^ (most - (becomes e.1).2) * o.2)
+
+/--
+The law of what a chain of stacks has become, composed with a law of what
+each chain becomes after a reroll or an explode: each chain that it may have
+become becomes what `becomes` answers, padded to the most kept dice of any
+(`transformLaw`), so that the composed law weighs the same whichever it had
+become. Mirrors `compose` in `propagation/chain.rs`.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `laws`: The law of what each distinct chain of the pool has become, or none
+  for a chain that is still itself.
+- `padding`: The branches that a reroll adds to each kept die, `G`, or one
+  for an explode.
+- `becomes`: What each chain becomes, each with its weight, and the number of
+  kept dice of the chain by which a reroll pads it.
+- `ch`: The chain of the pool.
+
+# Returns
+The composed law, and the most kept dice of any chain that `ch` may have
+become, by which a reroll pads the multisets that hold it.
+
+# Notes
+The Rust composes a chain that is still itself as the law of one chain of
+weight one, padded to its own kept dice, which is what `becomes` answers of
+it; this answers that directly, so that `compose [] padding becomes` is
+`becomes`.
+
+# Examples
+```lean
+-- A chain of one die that may have become a chain of two pads to it.
+#guard compose [(.single 1, [(.single 1, 1), (.live [1] 1, 1)])] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) (.single 1) ==
+  ([(.single 1, 3), (.live [1] 1, 1)], 2)
+#guard compose [] 3 (fun ch => ([(ch, 1)], ch.dice.length)) (.single 1) ==
+  ([(.single 1, 1)], 1)
+```
+-/
+def compose {T : Type} (laws : List (Chain × List (Chain × Nat)))
+    (padding : Nat) (becomes : Chain → List (T × Nat) × Nat) (ch : Chain) :
+    List (T × Nat) × Nat :=
+  match laws.lookup ch with
+  | some law =>
+    (transformLaw law padding becomes,
+      (law.map fun e => (becomes e.1).2).foldl Max.max 0)
+  | none => becomes ch
+
+/--
+Transform stacks by the law of what each chain becomes, chain by chain,
+without joining them, into stacks that hold the law of what each distinct
+chain of the pool has become: the law of what it had become, composed with
+what each becomes (`compose`). Mirrors `transform_stacks` in
+`propagation/chain.rs`: a multiset whose chains may have become chains of at
+most `d` kept dice in all is padded to the most of any, `D`, by `G^(D − d)`.
 
 # Parameters
 - `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become, or none
+  for a chain that is still itself, such as `kept_pool` leaves.
 - `padding`: The branches that a reroll adds to each kept die, `G`, or one
   for an explode.
 - `becomes`: The law of what a chain becomes, each chain with its branches,
@@ -234,25 +325,26 @@ The new stacks.
 
 # Notes
 The Rust keeps the laws in a map ordered by chain; this lists each distinct
-chain of the pool once. The stacks of a pool whose chains have already become
-something are left to later proofs.
+chain of the pool once.
 
 # Examples
 ```lean
-#guard transformStacks [([(.single 2, 1)], 3)] 1
+#guard transformStacks [([(.single 2, 1)], 3)] [] 1
     (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
   .stacked [([(.single 2, 1)], 3)]
     [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
 ```
 -/
-def transformStacks (pool : List (List (Chain × Nat) × Nat)) (padding : Nat)
+def transformStacks (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat))) (padding : Nat)
     (becomes : Chain → List (Chain × Nat) × Nat) : Roll :=
+  let composed := compose laws padding becomes
   let dice := fun (chains : List (Chain × Nat)) =>
-    (chains.map fun g => (becomes g.1).2 * g.2).sum
+    (chains.map fun g => (composed g.1).2 * g.2).sum
   let most := (pool.map (dice ·.1)).foldl Max.max 0
   .stacked (pool.map fun e => (e.1, e.2 * padding ^ (most - dice e.1)))
     ((pool.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
-      (ch, (becomes ch).1))
+      (ch, (composed ch).1))
 
 /--
 Join stacks: each multiset of the chains that they hold, with its branches,
@@ -342,45 +434,6 @@ def Roll.stacks : Roll → List (List (Chain × Nat) × Nat)
   | ρ => ρ.outcomes.map fun e => (e.1.map fun p => (.single p.1, p.2), e.2)
 
 /--
-The law of each chain of independent and alike chains, none of which has been
-dropped, transformed by a law of what each becomes: each chain that it may be
-followed by each that it becomes, weighed by both, and padded to the most kept
-dice of any, so that every chain weighs the same in all. Mirrors
-`transform_law` in `propagation/chain.rs`.
-
-# Type parameters
-- `T`: The type of what a chain becomes: a chain, or a total.
-
-# Parameters
-- `law`: The distinct chains that each may be, each with its weight.
-- `padding`: The branches that a reroll adds to each kept die, `G`, or one
-  for an explode.
-- `becomes`: What each chain becomes, each with its weight, and the number of
-  kept dice of the chain by which a reroll pads it, `d`, which pads it by
-  `G^(D − d)` for the most of any, `D`.
-
-# Returns
-What each chain becomes, each with its weight.
-
-# Notes
-The Rust merges what coincides, in ascending order; this lists it as it
-comes.
-
-# Examples
-```lean
--- A chain of one die pads to the chain of two.
-#guard transformLaw [(.single 1, 1), (.live [1] 2, 1)] 3
-    (fun ch => ([(ch, 1)], ch.dice.length)) ==
-  [(.single 1, 3), (.live [1] 2, 1)]
-```
--/
-def transformLaw {T : Type} (law : List (Chain × Nat)) (padding : Nat)
-    (becomes : Chain → List (T × Nat) × Nat) : List (T × Nat) :=
-  let most := (law.map fun e => (becomes e.1).2).foldl Max.max 0
-  law.flatMap fun e => (becomes e.1).1.map fun o =>
-    (o.1, e.2 * padding ^ (most - (becomes e.1).2) * o.2)
-
-/--
 Every chain that a chain still kept may become after a reroll, which rerolls
 each of its kept dice that the criterion matches alone, so that the
 replacement of its last die becomes its last die. Mirrors `rerolled` in
@@ -453,9 +506,11 @@ lowest `lowest` and its highest `highest` chains are dropped, by a redraw
 that pads each kept die by `padding` branches and weighs the final results of
 a matched die by `law`. Mirrors `Roll::reroll_chains` in
 `propagation/chain.rs`: if none has been dropped, the reroll transforms the
-law of each of i.i.d. chains (`transformLaw`); otherwise, it transforms each
-chain still kept of each multiset of the chains still kept, into stacks
-(`transformStacks`), each chain of whose pool has become what it rerolls to.
+law of each of i.i.d. chains (`transformLaw`), or composes the law of what
+each chain of stacks has become with what it rerolls to, without joining
+them (`transformStacks`); otherwise, it transforms each chain still kept of
+each multiset of the chains still kept, into stacks (`transformStacks`), each
+chain of whose pool has become what it rerolls to.
 
 # Parameters
 - `ρ`: The roll.
@@ -468,11 +523,7 @@ chain still kept of each multiset of the chains still kept, into stacks
 The rerolled roll.
 
 # Notes
-The Rust rerolls stacks none of whose chains has been dropped by composing
-the law of what each chain of their pool has become with the reroll, which
-this does not yet model: it leaves such stacks alone, and the laws of
-rerolls ask that the setup hold no stacks (`Setup.Grounded`). The Rust
-rerolls no other roll as chains.
+The Rust rerolls no other roll as chains; this leaves it alone.
 -/
 def rerollChains (ρ : Roll) (lowest highest : Nat) (c : Criterion)
     (padding : Nat) (law : List (Int × Nat)) : Roll :=
@@ -480,9 +531,11 @@ def rerollChains (ρ : Roll) (lowest highest : Nat) (c : Criterion)
     match ρ with
     | .chains count cl =>
       .chains count (transformLaw cl padding (rerolled c padding law))
+    | .stacked ms laws =>
+      transformStacks ms laws padding (rerolled c padding law)
     | ρ => ρ
   else
-    transformStacks (keptPool ρ.stacks lowest highest) padding
+    transformStacks (keptPool ρ.stacks lowest highest) [] padding
       (rerolled c padding law)
 
 /--

@@ -62,9 +62,9 @@ of the record as the specification's explode does:
   those of a mixture's explode, independent of its operands
   (`mixtureLaw_burst_whole`, `mixtureLaw_burst_totals`,
   `law_explode_resolved`), and the laws of the rerolls of chains
-  (`Setup.law_reroll`). The explodes and rerolls of stacks none of whose
-  chains has been dropped, which compose the laws that they defer, are not yet
-  modeled.
+  (`Setup.law_reroll`). It explodes stacks none of whose chains has been
+  dropped by composing the laws that they defer with the explode, which
+  `Roll.explodeStacks` mirrors; their laws are left to later proofs.
 
 ```mermaid
 flowchart TD
@@ -1647,11 +1647,45 @@ them, which sorts them and merges those that coincide.
 def explodeMultisets (ρ : Roll) (lowest highest : Nat) (b : Burst)
     (c : Criterion) (whole : Bool) : Roll :=
   if whole then
-    transformStacks (keptPool ρ.stacks lowest highest) 1
+    transformStacks (keptPool ρ.stacks lowest highest) [] 1
       fun ch => (b.chains c ch, 0)
   else
     .pool ((transformPool ρ.stacks lowest highest 1
       fun ch => (b.totals c ch, 0)).map fun e => (tally (expand e.1), e.2))
+
+/--
+Explode stacks none of whose chains has been dropped, as the burst directs,
+without joining them. Mirrors the second arm of `Roll::explode` in
+`propagation/chain.rs`: if `whole`, into stacks that compose the law of what
+each chain of the pool has become with its explode (`transformStacks`); and
+otherwise into a pool of the multisets of the totals of what each copy of
+each chain of the pool becomes, each drawn from the law of what it had
+become composed with the totals of its explode (`compose`).
+
+# Parameters
+- `ms`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become, or none
+  for a chain that is still itself.
+- `b`: The burst.
+- `c`: The criterion.
+- `whole`: Whether the chains stay whole, for a later reroll or explode, or
+  reduce to their totals.
+
+# Returns
+The exploded roll: stacks if `whole`, and a pool otherwise.
+
+# Notes
+The Rust joins the totals of each multiset as a sorted map; this tallies
+them, which sorts them and merges those that coincide.
+-/
+def explodeStacks (ms : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat))) (b : Burst) (c : Criterion)
+    (whole : Bool) : Roll :=
+  if whole then transformStacks ms laws 1 fun ch => (b.chains c ch, 0)
+  else
+    .pool ((transformPool ms 0 0 1
+      (compose laws 1 fun ch => (b.totals c ch, 0))).map fun e =>
+        (tally (expand e.1), e.2))
 
 /--
 Explode the chains still kept of a roll, after its lowest `lowest` and its
@@ -1659,9 +1693,11 @@ highest `highest` chains are dropped, as the burst directs, which neither
 does nothing nor saturates. Mirrors `Roll::explode` in
 `propagation/chain.rs`: if none has been dropped and the roll's chains are
 independent and alike, the explode transforms the law of each, into i.i.d.
-chains if `whole`, and into custom dice of their totals otherwise; and if the
-roll is fixed results, a pool, or stacks after a drop, or its chains have been
-dropped, it transforms each multiset of the chains still kept
+chains if `whole`, and into custom dice of their totals otherwise; if the
+roll is stacks none of whose chains has been dropped, it composes the law of
+what each chain of their pool has become with its explode
+(`explodeStacks`); and if the roll is fixed results or a pool, or its chains
+have been dropped, it transforms each multiset of the chains still kept
 (`explodeMultisets`).
 
 # Parameters
@@ -1674,12 +1710,6 @@ dropped, it transforms each multiset of the chains still kept
 
 # Returns
 The exploded roll.
-
-# Notes
-The Rust explodes stacks none of whose chains has been dropped by composing
-the law of what each chain of their pool has become with the burst, which
-this does not yet model: it leaves such stacks alone, and the laws here ask
-that the setup hold no stacks (`Setup.Grounded`).
 -/
 def explode (ρ : Roll) (lowest highest : Nat) (b : Burst) (c : Criterion)
     (whole : Bool) : Roll :=
@@ -1693,8 +1723,8 @@ def explode (ρ : Roll) (lowest highest : Nat) (b : Burst) (c : Criterion)
           (transformLaw ρ.chainLaw.2 1 fun ch => (b.totals c ch, 0))))
   else
     match ρ with
-    | .stacked .. =>
-      if lowest = 0 ∧ highest = 0 then ρ
+    | .stacked ms laws =>
+      if lowest = 0 ∧ highest = 0 then explodeStacks ms laws b c whole
       else ρ.explodeMultisets lowest highest b c whole
     | _ => ρ.explodeMultisets lowest highest b c whole
 

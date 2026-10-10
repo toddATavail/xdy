@@ -1908,10 +1908,10 @@ private theorem explode_multisets {s : Setup} {c : Criterion} {ρ : Roll}
 hold the law of what each distinct chain of it becomes. -/
 private theorem transformStacks_one (pool : List (List (Chain × Nat) × Nat))
     (f : Chain → List (Chain × Nat) × Nat) :
-    transformStacks pool 1 f = .stacked pool
+    transformStacks pool [] 1 f = .stacked pool
       ((pool.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
         (ch, (f ch).1)) := by
-  simp [transformStacks]
+  simp [transformStacks, compose]
 
 /-- Exploding a setup whose chains are not independent and alike, or have
 been dropped, by a limited explode that matches some face of its die,

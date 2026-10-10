@@ -8,9 +8,10 @@ of their roll's multisets of chains weighs them: of dice, whose chains are of
 one die, and of i.i.d. chains that an explode grew. The explodes of dice and
 chains after a drop, and of fixed results and pools, which transform the
 multisets of their chains still kept, and their laws, whole or reduced to
-totals, and of a mixture; and the joins of stacks whose chains have become
-others, under laws that weigh unlike, which a drop needs, and the totals to
-which they collapse.
+totals, and of a mixture; the explodes and rerolls of stacks none of whose
+chains has been dropped, which compose the laws that they defer; and the
+joins of stacks whose chains have become others, under laws that weigh
+unlike, which a drop needs, and the totals to which they collapse.
 -/
 
 namespace Xdy.Spec.Test.Stacks
@@ -112,6 +113,29 @@ private theorem threeD2_invariants :
       [([(1, 2)], 4), ([(1, 1), (3, 1)], 6), ([(1, 1), (4, 1)], 6),
         ([(3, 2)], 3), ([(3, 1), (4, 1)], 6), ([(4, 2)], 3), ([(3, 2)], 1),
         ([(3, 1), (4, 1)], 2), ([(4, 2)], 1)]),
+    die := some (.standard 2) }
+
+-- Exploding those stacks again composes the law of what each chain has
+-- become with its explode: a `1` keeps its dice along both branches, and only
+-- the chain that ends in a `2` grows.
+#guard (threeD2.burst (.within 2 2) (some 1) true).burst (.within 2 2)
+    (some 1) true ==
+  { roll := some (.stacked
+      [([(.single 1, 2)], 1), ([(.single 1, 1), (.single 2, 1)], 3),
+        ([(.single 2, 2)], 3), ([(.single 2, 2)], 1)]
+      [(.single 1, [(.single 1, 4)]),
+        (.single 2, [(.live [2] 1, 2), (.live [2, 2] 1, 1),
+          (.live [2, 2] 2, 1)])]),
+    die := some (.standard 2) }
+-- Rerolling every `1` of them once pads each multiset to the most kept dice
+-- that its chains may have become, four, by `2` for each that it lacks.
+#guard (threeD2.burst (.within 2 2) (some 1) true).reroll (.within 1 1)
+    (some 1) ==
+  { roll := some (.stacked
+      [([(.single 1, 2)], 4), ([(.single 1, 1), (.single 2, 1)], 6),
+        ([(.single 2, 2)], 3), ([(.single 2, 2)], 1)]
+      [(.single 1, [(.single 1, 2), (.single 2, 2)]),
+        (.single 2, [(.live [2] 1, 2), (.live [2] 2, 2), (.live [2] 2, 4)])]),
     die := some (.standard 2) }
 
 -- Both describe the specification's explode, as every later instruction

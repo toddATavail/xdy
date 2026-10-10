@@ -6,10 +6,10 @@ import XdySpec.Explode
 The ways in which an explode grows a chain, with their weights and padding,
 against the Rust's extensions; the folds of their totals; the burst of an
 explode against a die, and what it makes of each chain; the explode of a
-setup, which does nothing, saturates, or extends independent chains; and the
-laws of a setup's explode of alike chains, whole or reduced to totals, as
-every later instruction reads them, with the invariants that every such
-explode keeps.
+setup, which does nothing, saturates, extends independent chains, or composes
+the laws of stacks with its explode; and the laws of a setup's explode of
+alike chains, whole or reduced to totals, as every later instruction reads
+them, with the invariants that every such explode keeps.
 -/
 
 namespace Xdy.Spec.Test.Explode
@@ -98,6 +98,27 @@ private def twoD2 : Setup := { roll := some (.standard 2 2) }
 -- An explode that matches no face, or is limited to no times, does nothing.
 #guard twoD2.burst (.within 3 3) (some 2) true == twoD2
 #guard twoD2.burst (.within 2 2) (some 0) true == twoD2
+
+/-- One two-sided die, kept as stacks, which may have become a chain of a `2`
+and a `1`. -/
+private def stackedD2 : Setup :=
+  { roll := some (.stacked [([(.single 2, 1)], 1)]
+      [(.single 2, [(.single 2, 1), (.live [2] 1, 1)])]),
+    die := some (.standard 2) }
+
+-- Exploding stacks none of whose chains has been dropped composes the law of
+-- what each chain has become with its explode, without joining them: the `2`
+-- that is still itself grows, and the chain that ends in a `1` keeps its dice
+-- along both branches.
+#guard stackedD2.burst (.within 2 2) (some 1) true ==
+  { roll := some (.stacked [([(.single 2, 1)], 1)]
+      [(.single 2, [(.live [2] 1, 1), (.live [2] 2, 1), (.live [2] 1, 2)])]),
+    die := some (.standard 2) }
+-- Reduced to their totals, each copy of each chain draws the totals of the
+-- composed law.
+#guard stackedD2.burst (.within 2 2) (some 1) false ==
+  { roll := some (.pool [([(3, 1)], 1), ([(4, 1)], 1), ([(3, 1)], 2)]),
+    die := some (.standard 2) }
 
 /-! ## Laws -/
 

@@ -1220,6 +1220,11 @@ fn current<'a>(
 ///
 /// # Errors
 /// [`Halt`] if the composition would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `compose`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, answering what
+/// `becomes` answers of a chain that is still itself; the composition of the
+/// laws of stacks has no proof yet.
 fn compose<T: Element>(
 	chain: &Chain,
 	laws: &Laws,
@@ -1310,10 +1315,10 @@ fn compose<T: Element>(
 /// [`Halt`] if the transform would exceed the budget or is cancelled.
 ///
 /// # Notes
-/// `transformStacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this on
-/// stacks without laws, such as [`kept_pool`] leaves, whose explodes and
-/// rerolls `Setup.law_burst` and `Setup.law_reroll`, in
-/// `lean/spec/XdySpec/Stacks.lean`, prove; the composition of the laws of
+/// `transformStacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this.
+/// `Setup.law_burst` and `Setup.law_reroll`, in
+/// `lean/spec/XdySpec/Stacks.lean`, prove the explodes and rerolls of stacks
+/// without laws, such as [`kept_pool`] leaves; the composition of the laws of
 /// stacks has no proof yet.
 fn transform_stacks(
 	pool: &Multisets<Chain>,
@@ -1572,11 +1577,11 @@ impl Roll
 	/// [`Halt`] if the explode would exceed the budget or is cancelled.
 	///
 	/// # Notes
-	/// `Roll.explode`, in `lean/spec/XdySpec/Explode.lean`, mirrors this, and
-	/// `Roll.explodeMultisets` its last arm. `Setup.law_burst_alike` proves the
-	/// law of the first arm, and `Setup.law_burst`, in
-	/// `lean/spec/XdySpec/Stacks.lean`, that of the last on every roll but
-	/// stacks; the explodes of stacks have no proof yet.
+	/// `Roll.explode`, in `lean/spec/XdySpec/Explode.lean`, mirrors this,
+	/// `Roll.explodeStacks` its second arm, and `Roll.explodeMultisets` its
+	/// last. `Setup.law_burst_alike` proves the law of the first arm, and
+	/// `Setup.law_burst`, in `lean/spec/XdySpec/Stacks.lean`, that of the last
+	/// on every roll but stacks; the explodes of stacks have no proof yet.
 	pub(super) fn explode(
 		&self,
 		lowest: i32,
@@ -1723,10 +1728,9 @@ impl Roll
 	///
 	/// # Notes
 	/// `Roll.rerollChains`, in `lean/spec/XdySpec/Chains.lean`, mirrors this,
-	/// but leaves stacks none of whose chains has been dropped alone, and
-	/// `Setup.law_reroll`, in `lean/spec/XdySpec/Stacks.lean`, proves the laws
-	/// of the first and last arms on i.i.d. chains; the composition of the laws
-	/// of stacks has no proof yet.
+	/// and `Setup.law_reroll`, in `lean/spec/XdySpec/Stacks.lean`, proves the
+	/// laws of the first and last arms on i.i.d. chains; the composition of the
+	/// laws of stacks has no proof yet.
 	pub(super) fn reroll_chains(
 		&self,
 		lowest: i32,

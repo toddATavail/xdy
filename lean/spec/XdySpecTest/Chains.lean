@@ -7,8 +7,9 @@ The multisets of draws of chains, as `multisets` in `propagation/record.rs`
 answers them; the slices of multisets of chains, which keep a window of the
 chains sorted by `Xdy.Chain.le`, their totals first, whatever the order in
 which they come; the kept pools, the transforms of pools and of stacks, and
-the joins of stacks and of their totals; the multisets of chains of every
-kind of roll; and the transforms of laws and the rerolls of chains.
+the compositions of the laws of stacks, and the joins of stacks and of their
+totals; the multisets of chains of every kind of roll; and the transforms of
+laws and the rerolls of chains and of stacks.
 -/
 
 namespace Xdy.Spec.Test.Chains
@@ -64,15 +65,46 @@ open Xdy (Chain Criterion)
 -- Stacks keep their pool, and hold the law of what each distinct chain of it
 -- becomes, once.
 #guard transformStacks [([(.single 2, 2)], 1), ([(.single 1, 1),
-    (.single 2, 1)], 2)] 1 (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
+    (.single 2, 1)], 2)] [] 1
+    (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
   .stacked [([(.single 2, 2)], 1), ([(.single 1, 1), (.single 2, 1)], 2)]
     [(.single 1, [(.single 1, 1), (.live [6] 1, 1)]),
       (.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
 -- A multiset whose chains hold fewer kept dice is padded to the most of any.
-#guard transformStacks [([(.single 1, 1)], 1), ([(.live [1] 1, 1)], 1)] 3
+#guard transformStacks [([(.single 1, 1)], 1), ([(.live [1] 1, 1)], 1)] [] 3
     (fun ch => ([(ch, 1)], ch.dice.length)) ==
   .stacked [([(.single 1, 1)], 3), ([(.live [1] 1, 1)], 1)]
     [(.single 1, [(.single 1, 1)]), (.live [1] 1, [(.live [1] 1, 1)])]
+
+/-- A reroll-like law of what a chain becomes: itself, along one branch, with
+its kept dice. -/
+private def itself (ch : Chain) : List (Chain × Nat) × Nat :=
+  ([(ch, 1)], ch.dice.length)
+
+-- Composing the law of what a chain has become pads each chain that it may
+-- have become to the most kept dice of any, and weighs it by its weight.
+#guard compose [(.single 1, [(.single 1, 2), (.live [1] 1, 1)])] 3 itself
+    (.single 1) ==
+  ([(.single 1, 6), (.live [1] 1, 1)], 2)
+-- A chain that is still itself becomes what it becomes.
+#guard compose [(.single 1, [(.live [1] 1, 1)])] 3 itself (.single 2) ==
+  itself (.single 2)
+-- The composed law of each chain becomes its law in the stacks, and each
+-- multiset is padded by the most kept dice that its chains may have become:
+-- here the chain of one die may have become a chain of two.
+#guard transformStacks [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]
+    [(.single 1, [(.single 1, 1), (.live [1] 1, 1)])] 3 itself ==
+  .stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 3)]
+    [(.single 1, [(.single 1, 3), (.live [1] 1, 1)]),
+      (.single 2, [(.single 2, 1)])]
+-- Explodes compose without padding: each chain that a chain may have become
+-- becomes each that it explodes to, weighed by both.
+#guard transformStacks [([(.single 2, 2)], 1)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 2)])] 1
+    (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
+  .stacked [([(.single 2, 2)], 1)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 1), (.live [6] 2, 2),
+      (.live [6] 2, 2)])]
 
 /-! ## Rolls -/
 
@@ -106,10 +138,20 @@ private def law : List (Chain × Nat) := [(.single 1, 1), (.live [2] 2, 1)]
     [([(.single 1, 1)], 2), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
     [(.single 1, [(.single 1, 1), (.single 2, 1)]),
       (.live [2] 2, [(.live [2] 2, 4)])]
--- Stacks none of whose chains has been dropped are left to later proofs.
+-- Without drops, a reroll of stacks composes the law of what each chain of
+-- the pool has become with its reroll, padding each multiset to the most kept
+-- dice that its chains may have become.
+#guard (Roll.stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 2)]
+    [(.single 1, [(.single 1, 1), (.live [2] 2, 1)])]).rerollChains 0 0
+    (.within 1 1) 2 [(1, 1), (2, 1)] ==
+  .stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 4)]
+    [(.single 1, [(.single 1, 2), (.single 2, 2), (.live [2] 2, 4)]),
+      (.single 2, [(.single 2, 2)])]
+-- Stacks whose chains are still themselves reroll each chain.
 #guard (Roll.stacked [([(.single 1, 1)], 1)] []).rerollChains 0 0
     (.within 1 1) 2 [(1, 1), (2, 1)] ==
-  .stacked [([(.single 1, 1)], 1)] []
+  .stacked [([(.single 1, 1)], 1)]
+    [(.single 1, [(.single 1, 1), (.single 2, 1)])]
 #guard (Roll.chains 2 law).chained && !(Roll.standard 2 6).chained
 #guard (Roll.stacked [([(.saturated 7, 1)], 1)] []).isSaturated
 #guard !(Roll.chains 2 law).isSaturated
@@ -133,7 +175,14 @@ private def law : List (Chain × Nat) := [(.single 1, 1), (.live [2] 2, 1)]
     (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
   [([(.single 2, 1)], 1), ([(.live [6] 2, 1)], 1)]
 
-#guard transformStacks [([(.single 2, 1)], 3)] 1
+-- A chain of one die that may have become a chain of two pads to it.
+#guard compose [(.single 1, [(.single 1, 1), (.live [1] 1, 1)])] 3
+    (fun ch => ([(ch, 1)], ch.dice.length)) (.single 1) ==
+  ([(.single 1, 3), (.live [1] 1, 1)], 2)
+#guard compose [] 3 (fun ch => ([(ch, 1)], ch.dice.length)) (.single 1) ==
+  ([(.single 1, 1)], 1)
+
+#guard transformStacks [([(.single 2, 1)], 3)] [] 1
     (fun ch => ([(ch, 1), (.live [6] ch.last, 1)], 0)) ==
   .stacked [([(.single 2, 1)], 3)]
     [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])]
