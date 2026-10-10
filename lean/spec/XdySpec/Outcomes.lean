@@ -21,6 +21,12 @@ on one, changes nothing that any later instruction can tell:
   the weighed rolls read through the kept window, these states are the weighed
   rolls read whole (`integral_outcomeStates`), by the same peeling of the
   greatest face (`words_peel`).
+- The program is `multisets` in `propagation/record.rs`, which the chains of
+  `propagation/chain.rs` share, and its faces may be of any type: its states,
+  integrated against any function of each multiset, are the weighed draws of
+  the die (`integral_outcomeStates_bag`), since a multiset needs no order to
+  peel its last face (`bagWords_peel`); so its multisets, over their weights,
+  are the multiset of independent draws (`weighted_outcomeStates`).
 - So every roll's outcomes (`Roll.outcomes`), over its total (`Roll.total`),
   are the law of the record that it fills, sorted
   (`Roll.tsum_law_sorted`, `Roll.map_sorted_law`), and each outcome is fixed
@@ -75,13 +81,16 @@ namespace Outcomes
 /-! ## The program -/
 
 /--
-Place copies of a face after a multiset, as `Roll::outcomes` pushes them only
-if there are any.
+Place copies of a face after a multiset, as `multisets` in `record.rs` pushes
+them only if there are any.
+
+# Type parameters
+- `α`: The type of the faces: results, or chains.
 
 # Parameters
-- `rs`: The multiset: each distinct result, in ascending order, with its
+- `rs`: The multiset: each distinct face, in the order placed, with its
   copies.
-- `v`: The face, greater than every result of `rs`.
+- `v`: The face, which `rs` does not hold.
 - `m`: The copies.
 
 # Returns
@@ -93,7 +102,8 @@ The multiset with `m` copies of `v` after its results, or `rs` if `m = 0`.
 #guard Outcomes.grow [(1, 2)] 3 2 == [(1, 2), (3, 2)]
 ```
 -/
-def grow (rs : List (Int × Nat)) (v : Int) (m : Nat) : List (Int × Nat) :=
+def grow {α : Type} (rs : List (α × Nat)) (v : α) (m : Nat) :
+    List (α × Nat) :=
   if m = 0 then rs else rs ++ [(v, m)]
 
 /--
@@ -104,17 +114,20 @@ Growing a multiset by copies of a face appends them to its results.
 - `v`: The face.
 - `m`: The copies.
 -/
-theorem expand_grow (rs : List (Int × Nat)) (v : Int) (m : Nat) :
+theorem expand_grow {α : Type} (rs : List (α × Nat)) (v : α) (m : Nat) :
     Roll.expand (grow rs v m) = Roll.expand rs ++ List.replicate m v := by
   unfold grow
   split <;> simp_all [Roll.expand]
 
 /--
 Place every number of copies of one face, of value `v` and weight `w`. Mirrors
-the loop over the faces of `Roll::outcomes` in `record.rs`: the state of `J`
+the loop over the faces of `multisets` in `record.rs`: the state of `J`
 results gathers, for each number `m` of copies, the multisets of `J - m`
 results, each grown by the copies and weighed by `C(J, m) · wᵐ`, which is the
 Rust's `C(j + m, m) · wᵐ` with `j = J - m`.
+
+# Type parameters
+- `α`: The type of the faces.
 
 # Parameters
 - `states`: The states before the face: for each number of results, the
@@ -124,18 +137,23 @@ Rust's `C(j + m, m) · wᵐ` with `j = J - m`.
 # Returns
 The states after the face.
 -/
-def outcomeStep (states : Nat → List (List (Int × Nat) × Nat))
-    (face : Int × Nat) : Nat → List (List (Int × Nat) × Nat) :=
+def outcomeStep {α : Type} (states : Nat → List (List (α × Nat) × Nat))
+    (face : α × Nat) : Nat → List (List (α × Nat) × Nat) :=
   fun J => (List.range (J + 1)).flatMap fun m =>
     (states (J - m)).map fun e =>
       (grow e.1 face.1 m, J.choose m * face.2 ^ m * e.2)
 
 /-- The states before any face: no results, the empty multiset once. -/
-def initial : Nat → List (List (Int × Nat) × Nat) :=
+def initial {α : Type} : Nat → List (List (α × Nat) × Nat) :=
   fun j => if j = 0 then [([], 1)] else []
 
 /--
-The states of the program after every face of a die, in order.
+The states of the program after every face of a die, in order. Mirrors
+`multisets` in `record.rs`, which `Roll::outcomes` calls for dice, and
+`propagation/chain.rs` for chains.
+
+# Type parameters
+- `α`: The type of the faces.
 
 # Parameters
 - `die`: The distinct faces, in ascending order, each with its weight.
@@ -152,8 +170,8 @@ weights.
   [([(1, 2)], 1), ([(1, 1), (2, 1)], 4), ([(2, 2)], 4)]
 ```
 -/
-def outcomeStates (die : List (Int × Nat)) :
-    Nat → List (List (Int × Nat) × Nat) :=
+def outcomeStates {α : Type} (die : List (α × Nat)) :
+    Nat → List (List (α × Nat) × Nat) :=
   die.foldl outcomeStep initial
 
 /--
@@ -163,7 +181,8 @@ One more face takes one more step.
 - `die`: The faces before it.
 - `face`: The face.
 -/
-theorem outcomeStates_append (die : List (Int × Nat)) (face : Int × Nat) :
+theorem outcomeStates_append {α : Type} (die : List (α × Nat))
+    (face : α × Nat) :
     outcomeStates (die ++ [face]) = outcomeStep (outcomeStates die) face := by
   simp [outcomeStates, List.foldl_append]
 
@@ -675,6 +694,269 @@ theorem map_apply_eq_tsum {α β : Type} [DecidableEq β] (p : PMF α)
   rw [PMF.map_apply]
   refine tsum_congr fun a => ?_
   by_cases h : f a = v <;> simp [h, Ne.symm]
+
+/-! ## Multisets of any faces -/
+
+/--
+The weighed draws of a die of faces of any type: the sum, over every sequence
+of `J` draws, of the product of their faces' weights times `ψ` of the multiset
+of the draws, as `OrderStatistics.words` weighs the rolls of a die of results
+by `φ` of the roll sorted.
+
+# Type parameters
+- `α`: The type of the faces.
+
+# Parameters
+- `die`: The faces of the die, each with its weight.
+- `J`: The number of draws.
+- `ψ`: The function of the multiset of the draws.
+
+# Returns
+The weighed sum.
+
+# Examples
+```lean
+#guard Outcomes.bagWords [((1 : Int), 1), (2, 3)] 2
+  (fun M => (M.map Int.toNat).sum) == 56
+```
+-/
+def bagWords {α : Type} (die : List (α × Nat)) :
+    Nat → (Multiset α → Nat) → Nat
+  | 0, ψ => ψ 0
+  | J + 1, ψ =>
+    (die.map fun p => p.2 * bagWords die J (fun M => ψ (p.1 ::ₘ M))).sum
+
+/--
+No draws weigh the empty multiset once.
+
+# Parameters
+- `die`: The die.
+- `ψ`: The function of the multiset.
+-/
+theorem bagWords_zero {α : Type} (die : List (α × Nat))
+    (ψ : Multiset α → Nat) : bagWords die 0 ψ = ψ 0 := rfl
+
+/--
+One more draw shows each face beside the others.
+
+# Parameters
+- `die`: The die.
+- `J`: The number of draws before it.
+- `ψ`: The function of the multiset.
+-/
+theorem bagWords_succ {α : Type} (die : List (α × Nat)) (J : Nat)
+    (ψ : Multiset α → Nat) :
+    bagWords die (J + 1) ψ =
+      (die.map fun p => p.2 * bagWords die J (fun M => ψ (p.1 ::ₘ M))).sum :=
+  rfl
+
+/--
+The draws of a die weigh its total weight raised to their number in all.
+
+# Parameters
+- `die`: The die.
+- `J`: The number of draws.
+-/
+theorem bagWords_one {α : Type} (die : List (α × Nat)) :
+    ∀ J : Nat, bagWords die J (fun _ => 1) = (die.map (·.2)).sum ^ J
+  | 0 => rfl
+  | J + 1 => by
+    rw [bagWords_succ, pow_succ, mul_comm, ← List.sum_map_mul_right]
+    simp only [bagWords_one die J]
+
+/--
+Peeling the last face: drawing from a die whose last face is `v`, of weight
+`w`, draws `m` copies of `v` at `C(J, m) · wᵐ` ways, and the rest from the
+other faces. This is the step of the program, from the faces before `v` to
+`v`, as `OrderStatistics.words_peel` is for results; a multiset needs no order,
+so `v` may be any face.
+
+# Parameters
+- `w`: The weight of the last face.
+- `J`: The number of draws.
+- `ψ`: The function of the multiset.
+-/
+theorem bagWords_peel {α : Type} (die : List (α × Nat)) (v : α) (w : Nat) :
+    ∀ (J : Nat) (ψ : Multiset α → Nat),
+      bagWords (die ++ [(v, w)]) J ψ =
+        ∑ m ∈ Finset.range (J + 1), J.choose m * w ^ m *
+          bagWords die (J - m) (fun M => ψ (M + Multiset.replicate m v))
+  | 0, ψ => by simp [bagWords_zero]
+  | J + 1, ψ => by
+    -- Each other face draws beside the copies of `v`, and `v` joins them.
+    have hlow : ∀ p ∈ die, bagWords (die ++ [(v, w)]) J
+        (fun M => ψ (p.1 ::ₘ M)) =
+        ∑ m ∈ Finset.range (J + 1), J.choose m * w ^ m *
+          bagWords die (J - m)
+            (fun M => ψ (p.1 ::ₘ M + Multiset.replicate m v)) := by
+      intro p _
+      rw [bagWords_peel die v w J]
+      refine Finset.sum_congr rfl fun m _ => ?_
+      simp only [Multiset.cons_add]
+    have htop : bagWords (die ++ [(v, w)]) J (fun M => ψ (v ::ₘ M)) =
+        ∑ m ∈ Finset.range (J + 1), J.choose m * w ^ m *
+          bagWords die (J - m)
+            (fun M => ψ (M + Multiset.replicate (m + 1) v)) := by
+      rw [bagWords_peel die v w J]
+      refine Finset.sum_congr rfl fun m _ => ?_
+      simp only [Multiset.replicate_succ, Multiset.add_cons]
+    rw [bagWords_succ, List.map_append, List.sum_append, List.map_singleton,
+      List.sum_singleton, htop]
+    rw [List.map_congr_left fun p hp => congrArg (p.2 * ·) (hlow p hp)]
+    simp only [Finset.mul_sum]
+    rw [OrderStatistics.list_sum_finset_sum]
+    -- The other faces fold back into the draws of one more.
+    have hfold : ∀ i ∈ Finset.range (J + 1),
+        (die.map fun p => p.2 * (J.choose i * w ^ i *
+          bagWords die (J - i) fun M =>
+            ψ (p.1 ::ₘ M + Multiset.replicate i v))).sum
+        = J.choose i * w ^ i * bagWords die (J + 1 - i)
+            (fun M => ψ (M + Multiset.replicate i v)) := by
+      intro i hi
+      have hi : i ≤ J := Nat.lt_succ_iff.mp (Finset.mem_range.mp hi)
+      rw [show J + 1 - i = (J - i) + 1 by omega, bagWords_succ,
+        ← List.sum_map_mul_left]
+      refine congrArg List.sum (List.map_congr_left fun p _ => ?_)
+      ring
+    rw [Finset.sum_congr rfl hfold]
+    have hshift : ∀ i ∈ Finset.range (J + 1),
+        w * (J.choose i * w ^ i * bagWords die (J - i)
+          fun M => ψ (M + Multiset.replicate (i + 1) v))
+        = J.choose i * w ^ (i + 1) * bagWords die (J + 1 - (i + 1))
+            (fun M => ψ (M + Multiset.replicate (i + 1) v)) := by
+      intro i _
+      rw [show J + 1 - (i + 1) = J - i by omega]
+      ring
+    rw [Finset.sum_congr rfl hshift]
+    exact OrderStatistics.pascal_sum w J fun m =>
+      bagWords die (J + 1 - m) (fun M => ψ (M + Multiset.replicate m v))
+
+/--
+The program's state of `J` draws, integrated against `ψ` of each multiset, is
+the weighed draws of `J` faces of the die, for faces of any type, as
+`integral_outcomeStates` finds of results read sorted.
+
+# Type parameters
+- `α`: The type of the faces.
+
+# Parameters
+- `die`: The faces, each with its weight.
+- `J`: The number of draws.
+- `ψ`: The function of the multiset.
+-/
+theorem integral_outcomeStates_bag {α : Type} (die : List (α × Nat))
+    (J : Nat) (ψ : Multiset α → Nat) :
+    integral (outcomeStates die J) (fun rs => ψ (Roll.expand rs)) =
+      bagWords die J ψ := by
+  induction die using List.reverseRecOn generalizing J ψ with
+  | nil =>
+    cases J with
+    | zero => simp [outcomeStates, initial, integral, bagWords_zero, Roll.expand]
+    | succ J => simp [outcomeStates, initial, integral, bagWords_succ]
+  | append_singleton die face ih =>
+    obtain ⟨v, w⟩ := face
+    rw [outcomeStates_append, bagWords_peel]
+    simp only [outcomeStep, integral_flatMap, list_range_sum]
+    refine Finset.sum_congr rfl fun m _ => ?_
+    rw [integral_map _ (fun rs => grow rs v m)]
+    simp only [expand_grow, ← Multiset.coe_add, Multiset.coe_replicate]
+    exact congrArg _ (ih (J - m) fun M => ψ (M + Multiset.replicate m v))
+
+/--
+One more independent draw is a draw beside the others.
+
+# Parameters
+- `n`: The number of draws before it.
+- `P`: The law of each.
+-/
+theorem iidBag_succ {β : Type} (n : Nat) (P : PMF β) :
+    iidBag (n + 1) P = P.bind fun x => (iidBag n P).map (x ::ₘ ·) := by
+  show (iidBag n P).bind (fun M => P.map (· ::ₘ M)) = _
+  simp only [← PMF.bind_pure_comp]
+  exact PMF.bind_comm _ _ _
+
+/--
+Independent draws of weighted faces weigh each multiset by the weighed draws
+that reach it, over the total weight raised to their number.
+
+# Type parameters
+- `α`: The type of the faces.
+
+# Parameters
+- `d`: The face if no weight were positive.
+- `die`: The faces, each with its weight.
+- `J`: The number of draws.
+- `ψ`: The function of the multiset.
+
+# Hypotheses
+- `hW`: The total weight is positive.
+-/
+theorem tsum_iidBag {α : Type} (d : α) (die : List (α × Nat))
+    (hW : (die.map (·.2)).sum ≠ 0) :
+    ∀ (J : Nat) (ψ : Multiset α → Nat),
+      ∑' M, iidBag J (weighted d die) M * (ψ M : ℝ≥0∞) =
+        (bagWords die J ψ : ℝ≥0∞) / (((die.map (·.2)).sum : Nat) : ℝ≥0∞) ^ J
+  | 0, ψ => by
+    rw [show iidBag 0 (weighted d die) = PMF.pure 0 from rfl, tsum_pure_mul]
+    simp [bagWords_zero]
+  | J + 1, ψ => by
+    set W := (die.map (·.2)).sum
+    have hW' : (W : ℝ≥0∞) ≠ 0 := by exact_mod_cast hW
+    rw [iidBag_succ, OrderStatistics.tsum_bind_mul, tsum_weighted d die hW]
+    simp only [tsum_map_mul, tsum_iidBag d die hW J, bagWords_succ,
+      Nat.cast_list_sum, List.map_map, Function.comp_def, Nat.cast_mul,
+      div_eq_mul_inv, ← List.sum_map_mul_right]
+    refine congrArg List.sum (List.map_congr_left fun p _ => ?_)
+    have hc : (die.map fun x => (x.2 : ℝ≥0∞)).sum = (W : ℝ≥0∞) := by
+      simp [W, Nat.cast_list_sum, Function.comp_def]
+    rw [hc, pow_succ, ENNReal.mul_inv (a := (W : ℝ≥0∞) ^ J) (b := W)
+      (.inr (ENNReal.natCast_ne_top _)) (.inr hW')]
+    ring
+
+/--
+The multisets of `n` draws of weighted faces of any type, over their weights,
+are the multiset of `n` independent draws of the faces, as `multisets` in
+`record.rs` weighs them, so that each holds the multinomial coefficient of
+its copies times the product of their weights.
+
+# Type parameters
+- `α`: The type of the faces: results, or chains.
+
+# Parameters
+- `d`: The face if no weight were positive.
+- `d₀`: The multiset if no weight were positive.
+- `die`: The faces, each with its weight.
+- `n`: The number of draws.
+
+# Hypotheses
+- `hW`: The total weight of the faces is positive.
+-/
+theorem weighted_outcomeStates {α : Type} [DecidableEq α] (d : α)
+    (d₀ : List (α × Nat)) (die : List (α × Nat))
+    (hW : (die.map (·.2)).sum ≠ 0) (n : Nat) :
+    (weighted d₀ (outcomeStates die n)).map
+        (fun rs => (Roll.expand rs : Multiset α)) =
+      iidBag n (weighted d die) := by
+  -- The multisets weigh the total weight raised to `n` in all.
+  have htot : ((outcomeStates die n).map (·.2)).sum =
+      (die.map (·.2)).sum ^ n := by
+    have := integral_outcomeStates_bag die n fun _ => 1
+    rw [bagWords_one] at this
+    simpa [integral] using this
+  have hT : ((outcomeStates die n).map (·.2)).sum ≠ 0 := by
+    rw [htot]
+    exact pow_ne_zero _ hW
+  ext M
+  rw [map_apply_eq_tsum, tsum_weighted _ _ hT]
+  have hrhs : iidBag n (weighted d die) M =
+      ∑' M', iidBag n (weighted d die) M' *
+        ((if M' = M then 1 else 0 : Nat) : ℝ≥0∞) := by
+    rw [tsum_eq_single M fun M' h => by simp [h]]
+    simp
+  rw [hrhs, tsum_iidBag d die hW, ← integral_outcomeStates_bag, htot,
+    Nat.cast_pow]
+  congr 1
+  simp [integral, Function.comp_def]
 
 end Outcomes
 

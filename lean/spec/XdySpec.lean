@@ -1,3 +1,4 @@
+import XdySpec.Chains
 import XdySpec.Conditioning
 import XdySpec.Convolution
 import XdySpec.Cost
@@ -14,6 +15,7 @@ import XdySpec.Paths
 import XdySpec.Record
 import XdySpec.Reroll
 import XdySpec.Semantics
+import XdySpec.Stacks
 import XdySpec.Unlimited
 import XdySpec.World
 

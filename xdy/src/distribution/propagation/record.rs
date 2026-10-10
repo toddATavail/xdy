@@ -742,6 +742,12 @@ pub(super) type Multisets<T> = Vec<(Vec<(T, i32)>, Weight)>;
 ///
 /// # Errors
 /// [`Halt`] if the enumeration would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `Outcomes.outcomeStates`, in `lean/spec/XdySpec/Outcomes.lean`, mirrors the
+/// enumeration for faces of any type, and `Outcomes.weighted_outcomeStates`
+/// proves that its multisets, over their weights, are the multiset of `n`
+/// independent draws of the die.
 pub(super) fn multisets<T: Element>(
 	die: &[(T, Weight)],
 	n: usize,

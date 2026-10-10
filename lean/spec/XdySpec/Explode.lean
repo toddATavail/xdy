@@ -1206,8 +1206,13 @@ theorem normalChain_antisymm {a b : Chain} (ha : NormalChain a)
       simp only [Chain.last] at l1
       rw [l1]
 
-/-- Chains sorted by `Xdy.Chain.le` are sorted. -/
-private theorem pairwise_mergeSort_chains (l : List Chain) :
+/--
+Chains sorted by `Xdy.Chain.le` are sorted.
+
+# Parameters
+- `l`: The chains.
+-/
+theorem pairwise_mergeSort_chains (l : List Chain) :
     (l.mergeSort Chain.le).Pairwise (fun a b => a.le b = true) :=
   List.pairwise_mergeSort (le := Chain.le) (fun _ _ _ => Chain.le_trans)
     (fun a b => by simpa only [Bool.or_eq_true] using Chain.le_total a b) l
@@ -1248,8 +1253,13 @@ theorem ofChains_perm (die : Die) {l l' : List Chain} (hp : l.Perm l')
     Record.ofChains die l = Record.ofChains die l' := by
   simp only [Record.ofChains, Xdy.Record.ofChains, mergeSort_chains_perm hp hn]
 
-/-- A chain of one die within the `i32` range totals its die. -/
-private theorem total_single {x : Int} (h : i32Min ≤ x ∧ x ≤ i32Max) :
+/--
+A chain of one die within the `i32` range totals its die.
+
+# Hypotheses
+- `h`: The die lies within the `i32` range.
+-/
+theorem total_single {x : Int} (h : i32Min ≤ x ∧ x ≤ i32Max) :
     (Chain.single x).total = x := by
   simp only [Chain.single, Chain.total, Chain.dice, List.mergeSort_singleton,
     List.foldl_cons, List.foldl_nil, Xdy.add, clamp]
@@ -1465,25 +1475,6 @@ theorem explodeChains_eq_bag (die : Die) {kept : List Chain}
 /-! ## Independent draws -/
 
 /--
-The multiset of `n` independent draws of a law.
-
-# Parameters
-- `n`: The number of draws.
-- `P`: The law of each.
-
-# Returns
-The law of the multiset of the draws.
-
-# Examples
-```lean
-example (P : PMF Int) : iidBag 0 P = PMF.pure 0 := rfl
-```
--/
-noncomputable def iidBag {β : Type} (n : Nat) (P : PMF β) :
-    PMF (Multiset β) :=
-  n.repeat (fun q => q.bind fun M => P.map (· ::ₘ M)) (PMF.pure 0)
-
-/--
 Independent results, each drawn anew, are independent draws of the law of the
 results drawn anew, as `bind_rollDice_bagDraws` in `XdySpec/Reroll.lean`
 finds of rerolls, here of draws of any kind, such as chains.
@@ -1520,44 +1511,6 @@ theorem bind_rollDice_iidBag {β : Type} (n : Int) (die : PMF Int)
             fun M => (die.bind step).map (· ::ₘ M)
           simp only [← PMF.bind_pure_comp]
           exact PMF.bind_comm _ _ _
-
-/--
-Independent draws of chains, as a multiset, are independent draws.
-
-# Parameters
-- `n`: The number of draws.
-- `P`: The law of each chain.
--/
-theorem map_coe_chainDraws (n : Nat) (P : PMF Chain) :
-    (chainDraws n P).map (Multiset.ofList : List Chain → Multiset Chain) =
-      iidBag n P := by
-  induction n with
-  | zero => simp [chainDraws, iidBag, Nat.repeat, PMF.pure_map]
-  | succ n ih =>
-    simp only [chainDraws, iidBag, Nat.repeat] at ih ⊢
-    rw [← ih, PMF.map_bind, PMF.bind_map]
-    refine congrArg _ (funext fun cs => ?_)
-    simp only [Function.comp_apply, PMF.map_comp]
-    rfl
-
-/--
-Independent draws, each mapped, are independent draws of the mapped law.
-
-# Parameters
-- `n`: The number of draws.
-- `P`: The law of each.
-- `f`: The map.
--/
-theorem iidBag_map {β γ : Type} (n : Nat) (P : PMF β) (f : β → γ) :
-    (iidBag n P).map (Multiset.map f) = iidBag n (P.map f) := by
-  induction n with
-  | zero => simp [iidBag, Nat.repeat, PMF.pure_map]
-  | succ n ih =>
-    simp only [iidBag, Nat.repeat] at ih ⊢
-    rw [PMF.map_bind, ← ih, PMF.bind_map]
-    refine congrArg _ (funext fun M => ?_)
-    simp only [Function.comp_apply, PMF.map_comp]
-    exact congrArg (PMF.map · P) (funext fun x => by simp)
 
 /--
 Results drawn from a list, each by a law of what it becomes, are those drawn

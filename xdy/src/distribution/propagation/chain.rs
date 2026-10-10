@@ -57,10 +57,12 @@
 //! grown chains do (`Burst.weighted_totals`); of [`Roll::explode`] on a range,
 //! dice, or i.i.d. chains none of which has been dropped; of
 //! [`Roll::saturate`]; and of [`Roll::collapse`] of i.i.d. chains
-//! (`Setup.law_burst`). The explodes of chains after a drop, or of fixed
-//! results, a pool, or stacks, the deferred laws of stacks, and the rerolls of
-//! chains have no proof yet; the tests check every law against an independent
-//! enumeration.
+//! (`Setup.law_burst`). `lean/spec/XdySpec/Stacks.lean` proves that the
+//! multisets of the chains still kept after a drop, which [`kept_pool`] keeps,
+//! are the law of those chains (`Setup.map_keptChains_law`). The explodes of
+//! chains after a drop, or of fixed results, a pool, or stacks, the deferred
+//! laws of stacks, and the rerolls of chains have no proof yet; the tests
+//! check every law against an independent enumeration.
 
 use std::{
 	cmp::Ordering,
@@ -1082,6 +1084,12 @@ fn transform_pool<T: Element>(
 /// # Returns
 /// The distinct chains still kept, in ascending order, each with its positive
 /// number of copies.
+///
+/// # Notes
+/// `slice`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `coe_window_slice`, in `lean/spec/XdySpec/Stacks.lean`, proves that it
+/// keeps the window of the chains sorted by their totals and then their dice,
+/// as every drop and keep orders them, which depends only on their multiset.
 fn slice(
 	chains: &[(Chain, i32)],
 	lowest: i32,
@@ -1344,6 +1352,13 @@ fn transform_stacks(
 ///
 /// # Errors
 /// [`Halt`] if the multisets would exceed the budget or are cancelled.
+///
+/// # Notes
+/// `keptPool`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `Setup.map_keptChains_law`, in `lean/spec/XdySpec/Stacks.lean`, proves that
+/// the kept pool of a roll's [stacks](Roll::stacks), after a setup's drops and
+/// keeps, is the law of the chains still kept of the records that the setup
+/// describes.
 fn kept_pool(
 	outcomes: &Multisets<Chain>,
 	lowest: i32,
@@ -1895,6 +1910,13 @@ impl Roll
 	///
 	/// # Errors
 	/// [`Halt`] if the multisets would exceed the budget or are cancelled.
+	///
+	/// # Notes
+	/// `Roll.stacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+	/// `Roll.map_keptChains_law`, in `lean/spec/XdySpec/Stacks.lean`, proves
+	/// that, over their weights, the multisets are the law of the chains of
+	/// the records that the roll fills, for every roll but stacks whose chains
+	/// have become others since they were last joined.
 	fn stacks(&self, meter: &mut Meter) -> Result<Multisets<Chain>, Halt>
 	{
 		match self

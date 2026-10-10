@@ -13,7 +13,7 @@ namespace Xdy.Spec.Test.Mixture
 
 /-! ## Rolls and setups -/
 
-#guard Roll.expand [(1, 2), (4, 1)] == [1, 1, 4]
+#guard Roll.expand [((1 : Int), 2), (4, 1)] == [1, 1, 4]
 
 #guard (Roll.custom 2 [(1, 2), (4, 1)]).replacement == .custom [1, 1, 4]
 #guard (Roll.fixed [(1, 2)]).replacement == .none
@@ -243,7 +243,7 @@ example : weighted 7 ([] : List (Int × Nat)) = PMF.pure 7 := by simp [weighted]
 
 example : weightedDie [] = PMF.pure 0 := by simp [weightedDie, customDie]
 
-#guard Roll.expand [(1, 2), (4, 1)] == [1, 1, 4]
+#guard Roll.expand [((1 : Int), 2), (4, 1)] == [1, 1, 4]
 
 #guard (Roll.custom 2 [(1, 2), (4, 1)]).replacement == .custom [1, 1, 4]
 #guard (Roll.fixed [(1, 2)]).replacement == .none

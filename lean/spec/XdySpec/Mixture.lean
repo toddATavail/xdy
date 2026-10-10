@@ -194,6 +194,63 @@ noncomputable def chainDraws (n : Nat) (law : PMF Chain) : PMF (List Chain) :=
   n.repeat (fun p => p.bind fun cs => law.map (· :: cs)) (PMF.pure [])
 
 /--
+The multiset of `n` independent draws of a law.
+
+# Parameters
+- `n`: The number of draws.
+- `P`: The law of each.
+
+# Returns
+The law of the multiset of the draws.
+
+# Examples
+```lean
+example (P : PMF Int) : iidBag 0 P = PMF.pure 0 := rfl
+```
+-/
+noncomputable def iidBag {β : Type} (n : Nat) (P : PMF β) :
+    PMF (Multiset β) :=
+  n.repeat (fun q => q.bind fun M => P.map (· ::ₘ M)) (PMF.pure 0)
+
+/--
+Independent draws of chains, as a multiset, are independent draws.
+
+# Parameters
+- `n`: The number of draws.
+- `P`: The law of each chain.
+-/
+theorem map_coe_chainDraws (n : Nat) (P : PMF Chain) :
+    (chainDraws n P).map (Multiset.ofList : List Chain → Multiset Chain) =
+      iidBag n P := by
+  induction n with
+  | zero => simp [chainDraws, iidBag, Nat.repeat, PMF.pure_map]
+  | succ n ih =>
+    simp only [chainDraws, iidBag, Nat.repeat] at ih ⊢
+    rw [← ih, PMF.map_bind, PMF.bind_map]
+    refine congrArg _ (funext fun cs => ?_)
+    simp only [Function.comp_apply, PMF.map_comp]
+    rfl
+
+/--
+Independent draws, each mapped, are independent draws of the mapped law.
+
+# Parameters
+- `n`: The number of draws.
+- `P`: The law of each.
+- `f`: The map.
+-/
+theorem iidBag_map {β γ : Type} (n : Nat) (P : PMF β) (f : β → γ) :
+    (iidBag n P).map (Multiset.map f) = iidBag n (P.map f) := by
+  induction n with
+  | zero => simp [iidBag, Nat.repeat, PMF.pure_map]
+  | succ n ih =>
+    simp only [iidBag, Nat.repeat] at ih ⊢
+    rw [PMF.map_bind, ← ih, PMF.bind_map]
+    refine congrArg _ (funext fun M => ?_)
+    simp only [Function.comp_apply, PMF.map_comp]
+    exact congrArg (PMF.map · P) (funext fun x => by simp)
+
+/--
 The law of what a chain of stacks has become since its multisets were last
 joined: the law that the stacks hold for it, or the chain itself, if they hold
 none. Mirrors the lookup of `laws` in `propagation/chain.rs`.
@@ -359,20 +416,24 @@ inductive Roll where
 namespace Roll
 
 /--
-Repeat each result as many times as its copies.
+Repeat each value as many times as its copies: the results of a multiset of
+results, or the chains of a multiset of chains.
+
+# Type parameters
+- `α`: The type of the values.
 
 # Parameters
-- `results`: The results, each with its number of copies.
+- `results`: The values, each with its number of copies.
 
 # Returns
-The results, repeated, in order.
+The values, repeated, in order.
 
 # Examples
 ```lean
-#guard Roll.expand [(1, 2), (4, 1)] == [1, 1, 4]
+#guard Roll.expand [((1 : Int), 2), (4, 1)] == [1, 1, 4]
 ```
 -/
-def expand (results : List (Int × Nat)) : List Int :=
+def expand {α : Type} (results : List (α × Nat)) : List α :=
   results.flatMap fun p => List.replicate p.2 p.1
 
 /--

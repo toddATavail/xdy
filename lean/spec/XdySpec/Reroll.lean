@@ -1,4 +1,4 @@
-import XdySpec.Outcomes
+import XdySpec.Chains
 
 /-!
 # Rerolls in the forward pass
@@ -100,7 +100,7 @@ the weights of its entries.
 - `l`: The values, each with its weight.
 - `v`: The value.
 -/
-theorem count_expand (l : List (Int × Nat)) (v : Int) :
+theorem count_expand {α : Type} [DecidableEq α] (l : List (α × Nat)) (v : α) :
     (Roll.expand l).count v = ((l.filter (·.1 = v)).map (·.2)).sum := by
   induction l with
   | nil => rfl

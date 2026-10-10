@@ -101,6 +101,19 @@ example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
     show (Roll.custom 2 [(1, 1), (2, 2)]).total = 9 by decide]
   norm_num
 
+/-! ## Multisets of any faces -/
+
+-- The program's multisets of chains, integrated against a function of each
+-- multiset, are the weighed draws of the chains, as for results.
+#guard (List.range 4).all fun n =>
+  OrderStatistics.integral
+      (Outcomes.outcomeStates [(Xdy.Chain.single 1, 2), (.live [6] 2, 3)] n)
+      (fun rs => (((Roll.expand rs).map Xdy.Chain.total).sum.toNat)) ==
+    Outcomes.bagWords [(Xdy.Chain.single 1, 2), (.live [6] 2, 3)] n
+      (fun M => (M.map Xdy.Chain.total).sum.toNat)
+-- The weighed draws weigh the total weight raised to their number.
+#guard Outcomes.bagWords [((1 : Int), 2), (5, 3)] 3 (fun _ => 1) == 125
+
 /-! ## Docstring examples, verbatim -/
 
 #guard Outcomes.grow [(1, 2)] 3 0 == [(1, 2)]
@@ -110,6 +123,9 @@ example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
 -- `{2, 2}` four ways.
 #guard Outcomes.outcomeStates [(1, 1), (2, 2)] 2 ==
   [([(1, 2)], 1), ([(1, 1), (2, 1)], 4), ([(2, 2)], 4)]
+
+#guard Outcomes.bagWords [((1 : Int), 1), (2, 3)] 2
+  (fun M => (M.map Int.toNat).sum) == 56
 
 #guard (Roll.standard 3 6).total == 216
 #guard (Roll.custom 2 [(1, 1), (2, 2)]).total == 9
