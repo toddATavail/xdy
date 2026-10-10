@@ -2732,7 +2732,8 @@ private theorem bursts_of_saturate {s : Setup} {c : Criterion} {ρ : Roll}
         rw [(fits_of_grounded hs hg hr).saturates v |>.1,
           length_keptChains hs hg hr], PMF.bind_const]
     simp only [law, Option.map_some, Option.getD_some, Roll.saturate,
-      ↓reduceIte, Roll.law, weighted_single _ _ hT, PMF.pure_bind, stackDraws,
+      ↓reduceIte, Roll.law, List.map_cons, List.map_nil, stackWeight_nil,
+      mul_one, weighted_single _ _ hT, PMF.pure_bind, stackDraws,
       became, List.lookup_nil, chainDraws_pure, PMF.pure_map]
     simp only [List.append_nil, replacement, Option.getD_some]
     rw [ofChains_with]

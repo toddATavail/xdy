@@ -71,6 +71,9 @@ private def agrees (die : List (Int × Nat)) (n : Nat) : Bool :=
 #guard (Roll.standard 3 0).outcomes == [([(0, 3)], 1)]
 #guard (Roll.standard 3 0).total == 1
 #guard (Roll.fixed [(1, 2), (4, 1)]).outcomes == [([(1, 2), (4, 1)], 1)]
+-- Stacks weigh each multiset by the branches of what its chains have become.
+#guard (Roll.stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]
+    [(.single 2, [(.single 2, 1), (.single 3, 1)])]).total == 3
 
 -- A setup's outcomes keep its die and its drops, and a setup without a roll
 -- is its own.

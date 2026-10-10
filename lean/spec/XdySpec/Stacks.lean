@@ -90,6 +90,45 @@ theorem weighted_map_of {α β : Type} [DecidableEq β] (d : α)
     simp only [hz l hl, hz _ hl', ↓reduceDIte, PMF.pure_map]
   · exact weighted_map d l f hl
 
+/--
+Weighted values whose weights all scale alike, by a positive factor, are the
+values with their own weights.
+
+# Parameters
+- `d`: The value if no weight is positive.
+- `l`: The values, each with its weight.
+- `f`: The factor by which each value's weight scales.
+
+# Hypotheses
+- `hk`: The common factor is positive.
+- `hf`: Every value's weight scales by the common factor.
+-/
+theorem weighted_scale {α : Type} [DecidableEq α] (d : α)
+    (l : List (α × Nat)) (f : α → Nat) {k : Nat} (hk : k ≠ 0)
+    (hf : ∀ e ∈ l, f e.1 = k) :
+    weighted d (l.map fun e => (e.1, e.2 * f e.1)) = weighted d l := by
+  by_cases hl : (l.map (·.2)).sum = 0
+  · have hz : ∀ {γ : Type} (m : List (γ × Nat)), (m.map (·.2)).sum = 0 →
+        (m.flatMap fun p => List.replicate p.2 p.1) = [] := fun m hm => by
+      refine List.flatMap_eq_nil_iff.mpr fun p hp => ?_
+      have := List.sum_eq_zero_iff.mp hm p.2 (List.mem_map_of_mem hp)
+      simp [this]
+    have hl' : ((l.map fun e => (e.1, e.2 * f e.1)).map (·.2)).sum = 0 := by
+      refine List.sum_eq_zero_iff.mpr fun x hx => ?_
+      simp only [List.map_map, Function.comp_def, List.mem_map] at hx
+      obtain ⟨e, he, rfl⟩ := hx
+      rw [List.sum_eq_zero_iff.mp hl e.2 (List.mem_map_of_mem he), zero_mul]
+    unfold weighted
+    simp only [hz l hl, hz _ hl', ↓reduceDIte]
+  · have h := weighted_flatMap d d (fun _ => ()) l (fun _ => [((), 1)]) f
+      (fun a _ => a) k hk hl fun e he _ => by simp [hf e he]
+    simp only [List.map_cons, List.map_nil, mul_one] at h
+    rw [← List.map_eq_flatMap] at h
+    have hc : ∀ a : α, (weighted () [((), 1)]).map (fun _ => a) = PMF.pure a :=
+      fun a => PMF.map_const _ a
+    rw [h]
+    simp only [hc, PMF.bind_pure]
+
 /-! ## Multisets of any faces -/
 
 /--
@@ -704,6 +743,29 @@ private theorem lookup_graph {β : Type} (f : Chain → β) :
       exact lookup_graph f l x hx
 
 /--
+A multiset of stacks, each of whose chains has become what a law of the same
+total weight gives it, gains that weight for each of its chains.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become.
+- `ms`: The multiset, each distinct chain with its copies.
+- `w`: The common total weight.
+
+# Hypotheses
+- `h`: The law of what every chain of the multiset has become weighs `w`.
+-/
+theorem stackWeight_of_const {laws : List (Chain × List (Chain × Nat))}
+    {w : Nat} : ∀ {ms : List (Chain × Nat)},
+      (∀ p ∈ ms, (((laws.lookup p.1).map fun l => (l.map (·.2)).sum).getD 1) =
+        w) →
+      stackWeight laws ms = w ^ (ms.map (·.2)).sum
+  | [], _ => rfl
+  | p :: ms, h => by
+    have ih := stackWeight_of_const (ms := ms) fun q hq => h q (by simp [hq])
+    simp only [stackWeight, List.map_cons, List.prod_cons, List.sum_cons] at ih ⊢
+    rw [ih, h p List.mem_cons_self, pow_add]
+
+/--
 The kept pool of multisets, over its weights, is the slice of each multiset.
 
 # Parameters
@@ -887,7 +949,8 @@ theorem map_keptChains_law {ρ : Roll} (hρ : ρ.WellFormed) (hn : ρ.Normal)
       simp only [List.map_cons, List.sum_cons]
       omega
     simp only [law, Roll.stacks, joined, List.isEmpty_nil, ↓reduceIte,
-      stackDraws_nil, PMF.pure_map, PMF.map_bind]
+      stackDraws_nil, PMF.pure_map, PMF.map_bind, stackWeight_nil, mul_one,
+      List.map_id']
     rw [weighted_congr_default _ [] hW, ← PMF.bind_pure_comp]
     refine bind_congr_support fun m hm => ?_
     rw [Function.comp_apply]
@@ -1341,7 +1404,23 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
       simp only [burst, ↓reduceIte, hexp, Roll.explodeMultisets,
         transformStacks_one]
       simp only [law, Option.map_some, Option.getD_some, Roll.law, hrep]
-      rw [weighted_congr_default _ [] hW]
+      -- Every multiset keeps as many chains, each of whose explodes weighs
+      -- alike, so that every multiset gains as many branches.
+      have hFn : s.replacement.faces.length ^ (n + 1) ≠ 0 :=
+        pow_ne_zero _ (by simpa using hF)
+      rw [weighted_scale _ kp (stackWeight laws) (pow_ne_zero
+          (ρ.results - s.lowest - s.highest) hFn) fun e he => by
+        refine (stackWeight_of_const (w := s.replacement.faces.length ^ (n + 1))
+          fun p hp => ?_).trans ?_
+        · have hin : p.1 ∈ (kp.flatMap fun e => e.1.map (·.1)).dedup :=
+            List.mem_dedup.mpr
+              (List.mem_flatMap.mpr ⟨e, he, List.mem_map_of_mem hp⟩)
+          simp only [laws, lookup_graph bc _ p.1 hin, Option.map_some,
+            Option.getD_some, bc, Burst.sum_chains hm]
+        · simp only [hkp, keptPool, List.mem_map] at he
+          obtain ⟨e', he', rfl⟩ := he
+          rw [count_slice, (Roll.stacks_props hw hns he').1],
+        weighted_congr_default _ [] hW]
     simp only [↓reduceIte]
     rw [hlaw, hspec' Record.chainView (fun M => (M, s.replacement))
       fun M hM => by

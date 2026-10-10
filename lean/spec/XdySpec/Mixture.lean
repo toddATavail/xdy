@@ -43,7 +43,10 @@ mixture's operations act on that law as the instructions do:
 - An explode leaves i.i.d. chains (`Roll.chains`), each an independent draw
   of the law of a chain, or stacks (`Roll.stacked`), a mixture over the
   multisets of the chains of each draws of what each chain has become
-  (`chainDraws`, `stackDraws`); either fills a record of chains, whose results
+  (`chainDraws`, `stackDraws`), each multiset weighed by its weight times the
+  branches that the laws of what its chains have become add to it
+  (`stackWeight`), as `joined` in `propagation/chain.rs` multiplies them;
+  either fills a record of chains, whose results
   are their totals (`Record.ofChains`). Every other roll holds no chains
   (`Roll.Plain`, `Roll.chains_of_mem_support_law`), and the laws of splits and
   rerolls ask that it hold none. `XdySpec/Explode.lean` proves the laws of
@@ -297,6 +300,42 @@ noncomputable def stackDraws (laws : List (Chain × List (Chain × Nat))) :
     (stackDraws laws ms).map (cs ++ ·)
 
 /--
+The branches that the laws of what the chains of one multiset of stacks have
+become add to it: the total weight of the law of each copy of each chain, or
+one for a chain that is still itself, multiplied. `joined` in
+`propagation/chain.rs` multiplies the weight of each multiset by the weights
+of the draws that it joins, which sum to these branches.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become.
+- `ms`: The multiset, each distinct chain with its copies.
+
+# Returns
+The branches.
+
+# Examples
+```lean
+#guard stackWeight [(.single 1, [(.single 1, 2), (.live [1] 1, 1)])]
+  [(.single 1, 2), (.single 2, 1)] == 9
+```
+-/
+def stackWeight (laws : List (Chain × List (Chain × Nat)))
+    (ms : List (Chain × Nat)) : Nat :=
+  (ms.map fun p =>
+    (((laws.lookup p.1).map fun l => (l.map (·.2)).sum).getD 1) ^ p.2).prod
+
+/--
+A multiset of stacks whose chains are all still themselves gains no
+branches.
+
+# Parameters
+- `ms`: The multiset.
+-/
+@[simp] theorem stackWeight_nil (ms : List (Chain × Nat)) :
+    stackWeight [] ms = 1 := by
+  simp [stackWeight]
+
+/--
 Every possible draw of chains holds as many chains as it draws, each a
 possible chain of the law.
 
@@ -448,7 +487,9 @@ the roll shows, a certain record of the fixed results, in ascending order,
 without a die, or a mixture of such records, one for each multiset of a pool,
 weighed by its weight. Chains fill a record of chains, without a die: `count`
 independent draws of the law of each, or, for stacks, a mixture over their
-multisets, weighed by their weights, of each copy of each chain drawn from
+multisets, each weighed by its weight times the branches that the laws of
+what its chains have become add to it (`stackWeight`), as `joined` in
+`propagation/chain.rs` weighs them, of each copy of each chain drawn from
 what it has become.
 -/
 noncomputable def law : Roll → PMF Record
@@ -467,7 +508,8 @@ noncomputable def law : Roll → PMF Record
     (chainDraws count.toNat (weighted (.single 0) law)).map
       (Record.ofChains .none)
   | .stacked multisets laws =>
-    (weighted ((multisets.head?.map (·.1)).getD []) multisets).bind fun ms =>
+    (weighted ((multisets.head?.map (·.1)).getD [])
+      (multisets.map fun e => (e.1, e.2 * stackWeight laws e.1))).bind fun ms =>
       (stackDraws laws ms).map (Record.ofChains .none)
 
 /--
@@ -712,7 +754,8 @@ theorem mem_support_law {ρ : Roll} {r : Record} (hρ : ρ.Even)
     refine ⟨?_, hl, hh, hd⟩
     rw [hlen, (mem_support_stackDraws hcs).1]
     rcases mem_support_weighted hms with ⟨e, he, rfl⟩ | rfl
-    · exact hρ e he
+    · obtain ⟨e', he', rfl⟩ := List.mem_map.mp he
+      exact hρ e' he'
     · cases multisets with
       | nil => rfl
       | cons e _ => rfl

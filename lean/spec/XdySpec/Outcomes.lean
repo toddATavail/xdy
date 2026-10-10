@@ -344,8 +344,8 @@ The width of a range, or the total weight of the die raised to the number of
 dice, or `1` for an empty range, no dice, dice without faces, and fixed
 results, or the total weight of the multisets of a pool, or the total weight
 of the law of a chain raised to the number of chains, or the weight of each
-multiset of stacks, times the total weight of the law of what each of its
-chains has become raised to its copies, summed.
+multiset of stacks, times the branches that the laws of what its chains have
+become add to it (`stackWeight`), summed.
 
 # Examples
 ```lean
@@ -366,9 +366,7 @@ def total : Roll → Nat
   | .chains count law =>
     if 0 < count ∧ law ≠ [] then (law.map (·.2)).sum ^ count.toNat else 1
   | .stacked multisets laws =>
-    (multisets.map fun e => e.2 * (e.1.map fun p =>
-      (((laws.lookup p.1).map fun l => (l.map (·.2)).sum).getD 1) ^
-        p.2).prod).sum
+    (multisets.map fun e => e.2 * stackWeight laws e.1).sum
 
 /--
 The outcomes of `n` dice of a die: the multisets of the program, unless there

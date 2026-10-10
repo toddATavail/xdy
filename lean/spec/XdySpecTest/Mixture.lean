@@ -234,6 +234,24 @@ example {r : Record} (h : r ∈ pool.law.support) :
     r.results.length = 2 :=
   (Roll.mem_support_law (by simp [pool, Roll.Even, Roll.results]) h).1
 
+/-! ## Stacks -/
+
+/-- Stacks of two multisets of one chain each, alike in weight; the chain of
+a `2` has become a `2` or a `3`, and the chain of a `1` is still itself. -/
+private def twoStacks : Roll :=
+  .stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]
+    [(.single 2, [(.single 2, 1), (.single 3, 1)])]
+
+-- The multiset whose chain has become one of two chains gains two branches,
+-- so the stacks fill a record from it twice as often, as `joined` weighs it.
+example : twoStacks.law =
+    (weighted [(.single 1, 1)]
+      [([(.single 1, 1)], 1), ([(.single 2, 1)], 2)]).bind fun ms =>
+      (stackDraws [(.single 2, [(.single 2, 1), (.single 3, 1)])] ms).map
+        (Record.ofChains .none) := by
+  simp only [twoStacks, Roll.law]
+  congr 2
+
 /-! ## Docstring examples, verbatim -/
 
 #guard keptSum [(1, 2), (4, 1)] 1 0 == 5
@@ -242,6 +260,9 @@ example {r : Record} (h : r ∈ pool.law.support) :
 example : weighted 7 ([] : List (Int × Nat)) = PMF.pure 7 := by simp [weighted]
 
 example : weightedDie [] = PMF.pure 0 := by simp [weightedDie, customDie]
+
+#guard stackWeight [(.single 1, [(.single 1, 2), (.live [1] 1, 1)])]
+  [(.single 1, 2), (.single 2, 1)] == 9
 
 #guard Roll.expand [((1 : Int), 2), (4, 1)] == [1, 1, 4]
 
