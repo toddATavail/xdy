@@ -39,6 +39,15 @@ laws of the explodes that transform them:
   joins them, if each chain's law weighs alike but for the padding of its kept
   dice, and every multiset keeps as many chains; and the chains of stacks are
   independent draws of what each has become (`map_coe_stackDraws`).
+- The composed law of what a chain of stacks has become (`compose`), over its
+  weights, is what it has become followed by what that becomes
+  (`weighted_compose`), and stacks transformed by what each chain becomes
+  (`transformStacks`) weigh each multiset as the stacks that they transform
+  did, the padding making up what its composed laws lack
+  (`law_transformStacks`), and draw each chain from what it had become and
+  then from what that becomes (`map_coe_stackDraws_composed`, by
+  `bagDraws_bind`); their totals, without joining them, are those draws too
+  (`weighted_transformPool_compose`).
 - So an explode of the chains still kept of each multiset, which
   `Roll::explode` makes of a roll after a drop, or of fixed results or a pool,
   into stacks of the kept pool (`transformStacks`) or a pool of totals
@@ -1853,6 +1862,420 @@ theorem map_keptChains_law {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
   · rw [Multiset.coe_eq_coe.mpr (List.mergeSort_perm _ _), Multiset.coe_toList]
 
 end Setup
+
+/-! ## Compositions of deferred laws -/
+
+/--
+Independent draws of the law of what each value becomes, each drawn anew,
+are independent draws of each value's law followed by independent draws of
+what each value drawn becomes anew.
+
+# Type parameters
+- `α`: The type of the values.
+- `β`: The type of what each value becomes first.
+- `γ`: The type of what each becomes anew.
+
+# Parameters
+- `P`: The law of what each value becomes first.
+- `K`: The law of what each becomes anew.
+- `xs`: The values.
+-/
+theorem bagDraws_bind {α β γ : Type} (P : α → PMF β) (K : β → PMF γ) :
+    ∀ xs : List α, bagDraws (fun x => (P x).bind K) xs =
+      (bagDraws P xs).bind fun M => bagDraws K M.toList
+  | [] => by simp [bagDraws]
+  | x :: xs => by
+    have hc : ∀ (b : β) (N : Multiset β),
+        bagDraws K (b ::ₘ N).toList = bagDraws K (b :: N.toList) := fun b N =>
+      bagDraws_perm K (Multiset.coe_eq_coe.mp (by
+        rw [Multiset.coe_toList, ← Multiset.cons_coe, Multiset.coe_toList]))
+    simp only [bagDraws, lift, PMF.bind_bind, PMF.bind_map, Function.comp_def,
+      hc, bagDraws_bind P K xs]
+    refine congrArg _ (funext fun b => ?_)
+    rw [PMF.bind_comm]
+    refine congrArg _ (funext fun c => ?_)
+    rw [PMF.map_bind]
+
+/--
+A law of chains, transformed by what each becomes and padded, weighs the
+common weight of what each becomes, times the padding raised to the most kept
+dice of any, times the law's own weight.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `law`: The chains, each with its weight.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+
+# Hypotheses
+- `hf`: What each chain of the law becomes weighs `Q` times the padding
+  raised to its kept dice.
+-/
+theorem sum_transformLaw {T : Type} (law : List (Chain × Nat)) (G : Nat)
+    (f : Chain → List (T × Nat) × Nat) {Q : Nat}
+    (hf : ∀ e ∈ law, ((f e.1).1.map (·.2)).sum = Q * G ^ (f e.1).2) :
+    ((transformLaw law G f).map (·.2)).sum =
+      Q * G ^ ((law.map fun e => (f e.1).2).foldl Max.max 0) *
+        (law.map (·.2)).sum := by
+  rw [transformLaw, List.map_flatMap, sum_flatMap_nat, ← List.sum_map_mul_left]
+  refine congrArg List.sum (List.map_congr_left fun e he => ?_)
+  simp only [List.map_map, Function.comp_def]
+  rw [List.sum_map_mul_left, hf e he]
+  have hle := le_foldl_max _ 0 _ (List.mem_map_of_mem (f := fun e =>
+    (f e.1).2) he)
+  calc e.2 * G ^ (_ - (f e.1).2) * (Q * G ^ (f e.1).2)
+      = Q * (G ^ (_ - (f e.1).2) * G ^ (f e.1).2) * e.2 := by ring
+    _ = _ := by rw [← pow_add, Nat.sub_add_cancel hle]
+
+/--
+A law of chains, transformed by what each becomes and padded, over its
+weights, is the law followed by what each chain drawn becomes, if what each
+becomes weighs alike but for the padding of its kept dice, as `transform_law`
+and `compose` in `propagation/chain.rs` pad them.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `d`, `d₀`: The values if no weight were positive.
+- `dc`: What a chain becomes if no weight of its law were positive.
+- `law`: The chains, each with its weight.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+
+# Hypotheses
+- `hQ`: The common weight is positive.
+- `hG`: The padding is positive.
+- `hW`: The law weighs something.
+- `hf`: What each chain of the law becomes weighs `Q` times the padding
+  raised to its kept dice.
+-/
+theorem weighted_transformLaw {T : Type} [DecidableEq T] (d : T) (d₀ : Chain)
+    (dc : Chain → T) (law : List (Chain × Nat)) (G : Nat)
+    (f : Chain → List (T × Nat) × Nat) {Q : Nat} (hQ : Q ≠ 0) (hG : G ≠ 0)
+    (hW : (law.map (·.2)).sum ≠ 0)
+    (hf : ∀ e ∈ law, ((f e.1).1.map (·.2)).sum = Q * G ^ (f e.1).2) :
+    weighted d (transformLaw law G f) =
+      (weighted d₀ law).bind fun ch => weighted (dc ch) (f ch).1 := by
+  set most := (law.map fun e => (f e.1).2).foldl Max.max 0
+  have h := weighted_flatMap d d₀ dc law (fun ch => (f ch).1)
+    (fun ch => G ^ (most - (f ch).2)) (fun _ o => o) (Q * G ^ most)
+    (mul_ne_zero hQ (pow_ne_zero _ hG)) hW fun e he _ => by
+      rw [hf e he, mul_left_comm, ← pow_add, Nat.sub_add_cancel
+        (le_foldl_max _ 0 _ (List.mem_map_of_mem (f := fun e =>
+          (f e.1).2) he))]
+  rw [transformLaw, h]
+  refine congrArg _ (funext fun ch => ?_)
+  rw [show (fun o : T => o) = id from rfl, PMF.map_id]
+
+/--
+The composed law of what a chain of stacks has become weighs the common
+weight of what each chain becomes, times the padding raised to the most kept
+dice of any chain that it may have become, times the weight of the law of
+what it has become, or one if it is still itself.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+- `ch`: The chain.
+
+# Hypotheses
+- `hf`: What each chain becomes weighs `Q` times the padding raised to its
+  kept dice.
+-/
+theorem sum_compose {T : Type} (laws : List (Chain × List (Chain × Nat)))
+    (G : Nat) (f : Chain → List (T × Nat) × Nat) {Q : Nat}
+    (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2) (ch : Chain) :
+    ((compose laws G f ch).1.map (·.2)).sum =
+      Q * G ^ (compose laws G f ch).2 *
+        (((laws.lookup ch).map fun l => (l.map (·.2)).sum).getD 1) := by
+  unfold compose
+  cases laws.lookup ch with
+  | none => simp [hf]
+  | some law =>
+    simp only [Option.map_some, Option.getD_some]
+    exact sum_transformLaw law G f fun e _ => hf e.1
+
+/--
+The composed law of what a chain of stacks has become, over its weights, is
+what it has become followed by what that becomes, as `compose` in
+`propagation/chain.rs` composes them.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `d`: The value if no weight were positive.
+- `dc`: What a chain becomes if no weight of its law were positive.
+- `laws`: The law of what each distinct chain has become.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+- `ch`: The chain.
+
+# Hypotheses
+- `hQ`: The common weight is positive.
+- `hG`: The padding is positive.
+- `hf`: What each chain becomes weighs `Q` times the padding raised to its
+  kept dice.
+- `hW`: The law of what each chain has become weighs something.
+-/
+theorem weighted_compose {T : Type} [DecidableEq T] (d : T) (dc : Chain → T)
+    (laws : List (Chain × List (Chain × Nat))) (G : Nat)
+    (f : Chain → List (T × Nat) × Nat) {Q : Nat} (hQ : Q ≠ 0) (hG : G ≠ 0)
+    (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2)
+    (hW : ∀ e ∈ laws, (e.2.map (·.2)).sum ≠ 0) (ch : Chain) :
+    weighted d (compose laws G f ch).1 =
+      (became laws ch).bind fun x => weighted (dc x) (f x).1 := by
+  unfold compose became
+  cases hl : laws.lookup ch with
+  | none =>
+    simp only [PMF.pure_bind]
+    exact weighted_congr_default _ _ (by
+      rw [hf]; exact mul_ne_zero hQ (pow_ne_zero _ hG))
+  | some law =>
+    exact weighted_transformLaw d ch dc law G f hQ hG
+      (hW _ (mem_of_lookup hl)) fun e _ => hf e.1
+
+/--
+A multiset of stacks whose chains have become their composed laws gains the
+common weight of what each chain becomes for each of its chains, and the
+padding raised to the most kept dice that each copy of each chain may have
+become, beside the branches that the laws of what they had become add to it.
+
+# Parameters
+- `laws`: The law of what each distinct chain had become.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+- `keys`: The distinct chains whose laws are composed.
+- `m`: The multiset, each distinct chain with its copies.
+
+# Hypotheses
+- `hf`: What each chain becomes weighs `Q` times the padding raised to its
+  kept dice.
+- Every chain of the multiset is among the keys.
+-/
+theorem stackWeight_composed {laws : List (Chain × List (Chain × Nat))}
+    {G : Nat} {f : Chain → List (Chain × Nat) × Nat} {Q : Nat}
+    (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2)
+    (keys : List Chain) :
+    ∀ {m : List (Chain × Nat)}, (∀ p ∈ m, p.1 ∈ keys) →
+      stackWeight (keys.map fun ch => (ch, (compose laws G f ch).1)) m =
+        Q ^ (m.map (·.2)).sum *
+          G ^ (m.map fun p => (compose laws G f p.1).2 * p.2).sum *
+            stackWeight laws m
+  | [], _ => by simp [stackWeight]
+  | p :: m, h => by
+    have ih := stackWeight_composed (laws := laws) hf keys (m := m) fun q hq =>
+      h q (List.mem_cons_of_mem _ hq)
+    simp only [stackWeight, List.map_cons, List.prod_cons,
+      List.sum_cons] at ih ⊢
+    rw [ih, lookup_graph (fun ch => (compose laws G f ch).1) keys p.1
+      (h p List.mem_cons_self), Option.map_some, Option.getD_some,
+      sum_compose laws G f hf]
+    ring
+
+/--
+Stacks transformed by what each chain becomes are the stacks of the same
+pool, each multiset weighed by its weight times the branches that the laws of
+what its chains had become add to it, whose chains have become the composed
+laws: the padding by which `transform_stacks` in `propagation/chain.rs` pads
+each multiset makes up the kept dice that its composed laws lack, so that
+every multiset gains as many branches.
+
+# Parameters
+- `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+
+# Hypotheses
+- `hQ`: The common weight is positive.
+- `hG`: The padding is positive.
+- `hf`: What each chain becomes weighs `Q` times the padding raised to its
+  kept dice.
+- `hn`: Every multiset holds `n` chains.
+-/
+theorem law_transformStacks (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat))) (G : Nat)
+    (f : Chain → List (Chain × Nat) × Nat) {Q n : Nat} (hQ : Q ≠ 0)
+    (hG : G ≠ 0) (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2)
+    (hn : ∀ e ∈ pool, (e.1.map (·.2)).sum = n) :
+    (transformStacks pool laws G f).law =
+      (weighted ((pool.head?.map (·.1)).getD [])
+        (pool.map fun e => (e.1, e.2 * stackWeight laws e.1))).bind fun m =>
+        (stackDraws ((pool.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
+          (ch, (compose laws G f ch).1)) m).map (Record.ofChains .none) := by
+  simp only [transformStacks, Roll.law]
+  obtain ⟨most, hmost⟩ : ∃ k, k = (pool.map fun x =>
+      (x.1.map fun g => (compose laws G f g.1).2 * g.2).sum).foldl Max.max 0 :=
+    ⟨_, rfl⟩
+  rw [← hmost]
+  have hk : Q ^ n * G ^ most ≠ 0 :=
+    mul_ne_zero (pow_ne_zero _ hQ) (pow_ne_zero _ hG)
+  congr 1
+  rw [← weighted_scale ((pool.head?.map (·.1)).getD [])
+    (pool.map fun e => (e.1, e.2 * stackWeight laws e.1))
+    (fun _ => Q ^ n * G ^ most) hk fun _ _ => rfl]
+  congr 1
+  · simp [List.head?_map, Option.map_map, Function.comp_def]
+  · simp only [List.map_map]
+    refine List.map_congr_left fun e he => ?_
+    simp only [Function.comp_apply, Prod.mk.injEq, true_and]
+    -- Each multiset is padded by what its composed laws lack of the most.
+    set dice := (e.1.map fun g => (compose laws G f g.1).2 * g.2).sum
+    have hle : dice ≤ most := by
+      rw [hmost]
+      exact le_foldl_max _ 0 _ (List.mem_map_of_mem (f := fun x =>
+        (x.1.map fun g => (compose laws G f g.1).2 * g.2).sum) he)
+    rw [stackWeight_composed (laws := laws) hf _ fun p hp =>
+        List.mem_dedup.mpr
+          (List.mem_flatMap.mpr ⟨e, he, List.mem_map_of_mem hp⟩),
+      hn e he]
+    calc e.2 * G ^ (most - dice) * (Q ^ n * G ^ dice * stackWeight laws e.1)
+        = e.2 * stackWeight laws e.1 *
+          (Q ^ n * (G ^ (most - dice) * G ^ dice)) := by ring
+      _ = _ := by rw [← pow_add, Nat.sub_add_cancel hle]
+
+/--
+The chains of one multiset of stacks whose chains have become their composed
+laws, as a multiset, are independent draws of what each copy of each chain
+had become, followed by independent draws of what each chain drawn becomes:
+the deferred laws that `transform_stacks` in `propagation/chain.rs` composes
+are the eager draws of what each chain becomes.
+
+# Parameters
+- `laws`: The law of what each distinct chain had become.
+- `G`: The padding.
+- `f`: What each chain becomes, and its kept dice.
+- `keys`: The distinct chains whose laws are composed.
+- `m`: The multiset, each distinct chain with its copies.
+
+# Hypotheses
+- `hQ`: The common weight is positive.
+- `hG`: The padding is positive.
+- `hf`: What each chain becomes weighs `Q` times the padding raised to its
+  kept dice.
+- `hW`: The law of what each chain had become weighs something.
+- `hm`: Every chain of the multiset is among the keys.
+-/
+theorem map_coe_stackDraws_composed {laws : List (Chain × List (Chain × Nat))}
+    {G : Nat} {f : Chain → List (Chain × Nat) × Nat} {Q : Nat} (hQ : Q ≠ 0)
+    (hG : G ≠ 0) (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2)
+    (hW : ∀ e ∈ laws, (e.2.map (·.2)).sum ≠ 0) (keys : List Chain)
+    {m : List (Chain × Nat)} (hm : ∀ p ∈ m, p.1 ∈ keys) :
+    (stackDraws (keys.map fun ch => (ch, (compose laws G f ch).1)) m).map
+        (Multiset.ofList : List Chain → Multiset Chain) =
+      (bagDraws (became laws) (Roll.expand m)).bind fun M =>
+        bagDraws (fun ch => weighted ch (f ch).1) M.toList := by
+  rw [map_coe_stackDraws, ← bagDraws_bind]
+  refine bagDraws_congr fun ch hch => ?_
+  obtain ⟨p, hp, hpx⟩ := List.mem_flatMap.mp hch
+  rw [List.eq_of_mem_replicate hpx]
+  simp only [became, lookup_graph (fun ch => (compose laws G f ch).1) keys p.1
+    (hm p hp)]
+  exact weighted_compose p.1 id laws G f hQ hG hf hW p.1
+
+/--
+The branches of the draws of a multiset of stacks from the composed laws of
+what its chains had become, without padding, are the common weight of what
+each chain becomes for each of its chains, times the branches that the laws
+of what they had become add to it.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `laws`: The law of what each distinct chain had become.
+- `f`: What each chain becomes.
+- `m`: The multiset, each distinct chain with its copies.
+
+# Hypotheses
+- `hf`: What each chain becomes weighs `Q`.
+-/
+theorem drawWeight_compose_one {T : Type}
+    {laws : List (Chain × List (Chain × Nat))}
+    {f : Chain → List (T × Nat) × Nat} {Q : Nat}
+    (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q) :
+    ∀ m : List (Chain × Nat), drawWeight (compose laws 1 f) m =
+      Q ^ (m.map (·.2)).sum * stackWeight laws m
+  | [] => by simp [drawWeight, stackWeight]
+  | p :: m => by
+    have ih := drawWeight_compose_one (laws := laws) hf m
+    simp only [drawWeight, stackWeight, List.map_cons, List.prod_cons,
+      List.sum_cons] at ih ⊢
+    rw [ih, sum_compose laws 1 f (Q := Q) (fun ch => by simp [hf]) p.1]
+    simp only [one_pow, mul_one]
+    ring
+
+/--
+Stacks reduced, without joining them, to the totals of what each chain of
+the pool becomes from what it has become, over their weights, are each
+multiset of the pool, weighed by its weight times the branches that the laws
+of what its chains have become add to it (`stackWeight`), each copy of each
+chain drawn independently from what it has become, and then from what that
+becomes: as `Roll::explode` in `propagation/chain.rs` reduces stacks by
+`transform_pool` and `compose`, and as their joins would.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a total.
+
+# Parameters
+- `d`, `d₀`: The multisets if no weight were positive.
+- `dc`: What a chain becomes if no weight of its law were positive.
+- `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become.
+- `f`: What each chain becomes, without padding.
+
+# Hypotheses
+- `hQ`: The common weight is positive.
+- `hf`: What each chain becomes weighs `Q`.
+- `hW`: The law of what each chain has become weighs something.
+- `hn`: Every multiset holds `n` chains.
+- `hl`: The multisets, weighed as the stacks weigh them, weigh something.
+-/
+theorem weighted_transformPool_compose {T : Type} [DecidableEq T]
+    (d : List (T × Nat)) (d₀ : List (Chain × Nat)) (dc : Chain → T)
+    (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat)))
+    (f : Chain → List (T × Nat) × Nat) {Q n : Nat} (hQ : Q ≠ 0)
+    (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q)
+    (hW : ∀ e ∈ laws, (e.2.map (·.2)).sum ≠ 0)
+    (hn : ∀ e ∈ pool, (e.1.map (·.2)).sum = n)
+    (hl : ((pool.map fun e => (e.1, e.2 * stackWeight laws e.1)).map
+      (·.2)).sum ≠ 0) :
+    (weighted d (transformPool pool 0 0 1 (compose laws 1 f))).map
+        (fun ms => (Roll.expand ms : Multiset T)) =
+      (weighted d₀ (pool.map fun e => (e.1, e.2 * stackWeight laws e.1))).bind
+        fun m => bagDraws (fun ch => (became laws ch).bind fun x =>
+          weighted (dc x) (f x).1) (Roll.expand m) := by
+  have hQn : Q ^ n ≠ 0 := pow_ne_zero _ hQ
+  -- Each multiset gains the common weight for each of its chains.
+  have hlist : (pool.map fun e =>
+      (e.1, e.2 * drawWeight (compose laws 1 f) e.1)) =
+      (pool.map fun e => (e.1, e.2 * stackWeight laws e.1)).map fun e =>
+        (e.1, e.2 * Q ^ n) := by
+    simp only [List.map_map]
+    refine List.map_congr_left fun e he => ?_
+    simp only [Function.comp_apply, Prod.mk.injEq, true_and]
+    rw [drawWeight_compose_one hf, hn e he]
+    ring
+  have hl' : ((pool.map fun e =>
+      (e.1, e.2 * drawWeight (compose laws 1 f) e.1)).map (·.2)).sum ≠ 0 := by
+    rw [hlist, List.map_map]
+    simp only [Function.comp_def]
+    rw [List.sum_map_mul_right]
+    exact mul_ne_zero (by simpa [Function.comp_def] using hl) hQn
+  rw [weighted_transformPool_one d d₀ dc pool _ hl', hlist,
+    weighted_scale d₀ _ (fun _ => Q ^ n) hQn fun _ _ => rfl]
+  refine congrArg _ (funext fun m => bagDraws_congr fun ch _ => ?_)
+  exact weighted_compose (dc ch) dc laws 1 f hQ one_ne_zero
+    (fun ch => by simp [hf]) hW ch
 
 /-! ## Explodes of multisets of chains -/
 

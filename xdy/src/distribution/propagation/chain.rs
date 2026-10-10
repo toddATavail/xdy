@@ -1223,8 +1223,11 @@ fn current<'a>(
 ///
 /// # Notes
 /// `compose`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, answering what
-/// `becomes` answers of a chain that is still itself; the composition of the
-/// laws of stacks has no proof yet.
+/// `becomes` answers of a chain that is still itself, and `weighted_compose`,
+/// in `lean/spec/XdySpec/Stacks.lean`, proves that the composed law, over its
+/// weights, is what the chain has become followed by what that becomes;
+/// `weighted_transformPool_compose` proves that the totals that
+/// [`Roll::explode`] draws from the composed laws of stacks are those draws.
 fn compose<T: Element>(
 	chain: &Chain,
 	laws: &Laws,
@@ -1316,10 +1319,13 @@ fn compose<T: Element>(
 ///
 /// # Notes
 /// `transformStacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this.
-/// `Setup.law_burst` and `Setup.law_reroll`, in
-/// `lean/spec/XdySpec/Stacks.lean`, prove the explodes and rerolls of stacks
-/// without laws, such as [`kept_pool`] leaves; the composition of the laws of
-/// stacks has no proof yet.
+/// `law_transformStacks`, in `lean/spec/XdySpec/Stacks.lean`, proves that the
+/// padding makes up what the composed laws of each multiset lack, so that the
+/// new stacks weigh each multiset as the old did, and
+/// `map_coe_stackDraws_composed` that they draw each chain from what it had
+/// become and then from what that becomes. `Setup.law_burst` and
+/// `Setup.law_reroll` prove the explodes and rerolls of stacks without laws,
+/// such as [`kept_pool`] leaves; those of stacks with laws have no proof yet.
 fn transform_stacks(
 	pool: &Multisets<Chain>,
 	laws: &Laws,

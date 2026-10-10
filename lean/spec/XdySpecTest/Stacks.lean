@@ -11,7 +11,9 @@ multisets of their chains still kept, and their laws, whole or reduced to
 totals, and of a mixture; the explodes and rerolls of stacks none of whose
 chains has been dropped, which compose the laws that they defer; and the
 joins of stacks whose chains have become others, under laws that weigh
-unlike, which a drop needs, and the totals to which they collapse.
+unlike, which a drop needs, and the totals to which they collapse; and the
+compositions of the laws of stacks with what each chain becomes, and their
+weights.
 -/
 
 namespace Xdy.Spec.Test.Stacks
@@ -407,6 +409,62 @@ example : explodedStacks.law.map (fun r => (r.keptChains : Multiset Chain)) =
       1 0)).map (fun ms => (Roll.expand ms : Multiset Chain)) :=
   let ⟨hw, hn⟩ := explodedStacks_props _ rfl
   Setup.map_keptChains_law rfl hw hn
+
+/-! ## Composed laws -/
+
+/-- What rerolling every `1` of a chain of two-sided dice once makes of it. -/
+private def rerollOnes : Chain → List (Chain × Nat) × Nat :=
+  rerolled (.within 1 1) 2 [(1, 1), (2, 1)]
+
+/-- The laws of what the chains of `rerolledStacks` have become. -/
+private def rerolledLaws : List (Chain × List (Chain × Nat)) :=
+  [(.single 1, [(.single 1, 1), (.single 2, 1)]),
+    (.live [2] 2, [(.live [2] 2, 4)])]
+
+/-- What rerolling every `1` once makes of a chain weighs `2` raised to its
+kept dice. -/
+private theorem sum_rerollOnes (ch : Chain) :
+    ((rerollOnes ch).1.map (·.2)).sum = 1 * 2 ^ (rerollOnes ch).2 := by
+  rw [one_mul]
+  exact sum_rerolled (c := .within 1 1) (G := 2) (g := [(1, 1), (2, 1)])
+    (by decide) ch
+
+-- Rerolling them again composes the law of each chain: the chain of one die
+-- that may have become a `2` weighs `2` raised to its kept dice, times the
+-- `2` branches of what it had become.
+#guard compose rerolledLaws 2 rerollOnes (.single 1) ==
+  ([(.single 1, 1), (.single 2, 1), (.single 2, 2)], 1)
+#guard compose rerolledLaws 2 rerollOnes (.live [2] 2) ==
+  ([(.live [2] 2, 16)], 2)
+-- A multiset of both chains gains `2` raised to their kept dice, three, from
+-- the composed laws, beside the branches of the laws that they had become.
+#guard stackWeight ([Chain.single 1, .live [2] 2].map fun ch =>
+      (ch, (compose rerolledLaws 2 rerollOnes ch).1))
+    [(.single 1, 1), (.live [2] 2, 1)] ==
+  2 ^ 3 * stackWeight rerolledLaws [(.single 1, 1), (.live [2] 2, 1)]
+-- Composed without padding with what weighs `2`, each copy of each chain
+-- gains `2` branches.
+#guard drawWeight (compose rerolledLaws 1 fun ch =>
+      ([(ch.total, 1), (ch.total + 2, 1)], 0)) [(.single 1, 2)] ==
+  2 ^ 2 * stackWeight rerolledLaws [(.single 1, 2)]
+
+-- The composed law of what each chain has become is what it had become,
+-- followed by its reroll.
+example (ch : Chain) : weighted ch (compose rerolledLaws 2 rerollOnes ch).1 =
+    (became rerolledLaws ch).bind fun x => weighted x (rerollOnes x).1 :=
+  weighted_compose ch id _ 2 _ one_ne_zero two_ne_zero sum_rerollOnes
+    (by decide) ch
+
+-- Rerolling the stacks pads each multiset to make up what its composed laws
+-- lack, so that the stacks weigh each multiset as the laws that they had
+-- become did, and draw each chain from its composed law.
+example := law_transformStacks
+  [([(.single 1, 1)], 2), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
+  rerolledLaws 2 rerollOnes one_ne_zero two_ne_zero sum_rerollOnes (n := 1)
+  (by decide)
+example := map_coe_stackDraws_composed one_ne_zero two_ne_zero sum_rerollOnes
+  (laws := rerolledLaws) (by decide) [.single 1, .live [2] 2]
+  (m := [(.single 1, 1)]) (by decide)
 
 /-! ## Mixtures -/
 
