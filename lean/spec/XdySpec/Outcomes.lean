@@ -26,7 +26,9 @@ on one, changes nothing that any later instruction can tell:
   (`Roll.tsum_law_sorted`, `Roll.map_sorted_law`), and each outcome is fixed
   results in ascending order (`Roll.wellFormed_of_mem_outcomes`). A pool's
   outcomes are its multisets, whose weights are its law
-  (`Outcomes.tsum_weighted`).
+  (`Outcomes.tsum_weighted`). The Rust splits chains on the multisets of the
+  chains, which this does not yet model, so these laws ask that the roll hold
+  no chains (`Roll.Plain`).
 - A setup's outcomes keep its die and its drops, and are the law of its record
   read as the oracle reads it, sorted (`Setup.tsum_law_toOracle`,
   `Setup.map_toOracle_law`); each describes a certain record, already sorted
@@ -268,7 +270,11 @@ A roll as `propagation/record.rs` keeps it: a custom die's distinct faces, as
 `distinct_faces` counts them, and fixed results, as `Roll::outcomes` fixes
 them, ascend strictly, each at least once; and a pool, as `Roll::pool` makes
 it, holds at least one multiset, each of fixed results so formed, of positive
-weight, and each of as many results.
+weight, and each of as many results. The law of i.i.d. chains holds at least
+one chain, each of positive weight; stacks, as `propagation/chain.rs` makes
+them, hold at least one multiset, each of positive weight and of as many
+chains, each at least once, and the law of what each chain has become holds
+at least one chain, each of positive weight.
 
 # Parameters
 - `ρ`: The roll.
@@ -284,6 +290,12 @@ def WellFormed : Roll → Prop
       (∀ e ∈ outcomes, (e.1.Pairwise (fun a b => a.1 < b.1) ∧
         ∀ p ∈ e.1, 0 < p.2) ∧ 0 < e.2) ∧
       (Roll.pool outcomes).Even
+  | .chains _ law => law ≠ [] ∧ ∀ p ∈ law, 0 < p.2
+  | .stacked multisets laws =>
+    multisets ≠ [] ∧
+      (∀ e ∈ multisets, (∀ p ∈ e.1, 0 < p.2) ∧ 0 < e.2) ∧
+      (Roll.stacked multisets laws).Even ∧
+      ∀ e ∈ laws, e.2 ≠ [] ∧ ∀ p ∈ e.2, 0 < p.2
   | _ => True
 
 /--
@@ -298,6 +310,7 @@ A well-formed roll is even.
 theorem WellFormed.even {ρ : Roll} (hρ : ρ.WellFormed) : ρ.Even := by
   cases ρ with
   | pool outcomes => exact hρ.2.2
+  | stacked multisets laws => exact hρ.2.2.1
   | _ => trivial
 
 /--
@@ -310,7 +323,10 @@ The total weight of a roll: the number of its branches. Mirrors `total` in
 # Returns
 The width of a range, or the total weight of the die raised to the number of
 dice, or `1` for an empty range, no dice, dice without faces, and fixed
-results, or the total weight of the multisets of a pool.
+results, or the total weight of the multisets of a pool, or the total weight
+of the law of a chain raised to the number of chains, or the weight of each
+multiset of stacks, times the total weight of the law of what each of its
+chains has become raised to its copies, summed.
 
 # Examples
 ```lean
@@ -328,6 +344,12 @@ def total : Roll → Nat
     else 1
   | .fixed _ => 1
   | .pool outcomes => (outcomes.map (·.2)).sum
+  | .chains count law =>
+    if 0 < count ∧ law ≠ [] then (law.map (·.2)).sum ^ count.toNat else 1
+  | .stacked multisets laws =>
+    (multisets.map fun e => e.2 * (e.1.map fun p =>
+      (((laws.lookup p.1).map fun l => (l.map (·.2)).sum).getD 1) ^
+        p.2).prod).sum
 
 /--
 The outcomes of `n` dice of a die: the multisets of the program, unless there
@@ -357,7 +379,13 @@ with the number of branches of the roll that reach it. Mirrors `outcomes` in
 
 # Returns
 The multisets, each with its weight, whose weights sum to the
-[total](Roll.total).
+[total](Roll.total), or none for chains or stacks.
+
+# Notes
+The Rust splits chains or stacks on the multisets of their chains, as stacks
+of one multiset each (`chain_outcomes` in `propagation/chain.rs`), not on the
+multisets of their results; this does not yet model them, and every proof
+about outcomes asks that the roll hold no chains (`Roll.Plain`).
 
 # Examples
 ```lean
@@ -375,6 +403,7 @@ def outcomes : Roll → List (List (Int × Nat) × Nat)
   | .custom count faces => diceOutcomes count.toNat faces
   | .fixed results => [(results, 1)]
   | .pool outcomes => outcomes
+  | .chains .. | .stacked .. => []
 
 /--
 The results of a multiset that ascends strictly are sorted.
@@ -435,6 +464,7 @@ theorem wellFormed_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
     subst he
     exact hρ
   | pool outcomes => exact (hρ.2.1 e he).1
+  | chains | stacked => simp [outcomes] at he
 
 end Roll
 
@@ -661,8 +691,10 @@ integral of `ψ` of their results, over the total.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
+- `hp`: The roll holds no chains.
 -/
-theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (ψ : List Int → Nat) :
+theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (hp : ρ.Plain)
+    (ψ : List Int → Nat) :
     ∑' r, ρ.law r * (ψ r.sorted : ℝ≥0∞) =
       (OrderStatistics.integral ρ.outcomes (fun rs => ψ (expand rs)) : ℝ≥0∞) /
         (ρ.total : ℝ≥0∞) := by
@@ -709,6 +741,7 @@ theorem tsum_law_sorted (ρ : Roll) (hρ : ρ.WellFormed) (ψ : List Int → Nat
     refine congrArg List.sum (List.map_congr_left fun e he => ?_)
     simp [Outcomes.sorted_of_pairwise (r := { results := expand e.1 })
       (expand_pairwise (hmem e he).1.1)]
+  | chains | stacked => exact hp.elim
 
 /--
 The law of the results of the record that a roll fills, sorted, gives each
@@ -721,14 +754,16 @@ total, as `Roll::outcomes` weighs them.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
+- `hp`: The roll holds no chains.
 -/
-theorem map_sorted_law (ρ : Roll) (hρ : ρ.WellFormed) (ys : List Int) :
+theorem map_sorted_law (ρ : Roll) (hρ : ρ.WellFormed) (hp : ρ.Plain)
+    (ys : List Int) :
     (ρ.law.map Record.sorted) ys =
       (OrderStatistics.integral ρ.outcomes
           (fun rs => if expand rs = ys then 1 else 0) : ℝ≥0∞) /
         (ρ.total : ℝ≥0∞) := by
   rw [Outcomes.map_apply_eq_tsum]
-  exact ρ.tsum_law_sorted hρ fun xs => if xs = ys then 1 else 0
+  exact ρ.tsum_law_sorted hρ hp fun xs => if xs = ys then 1 else 0
 
 end Roll
 
@@ -832,8 +867,9 @@ they hold, over the total.
 
 # Hypotheses
 - `hs`: The setup is well formed.
+- `hp`: The setup holds no chains.
 -/
-theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed)
+theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed) (hp : s.Plain)
     (ψ : Xdy.Record → Nat) :
     ∑' r, s.law r * (ψ r.toOracle : ℝ≥0∞) =
       (OrderStatistics.integral s.outcomes (fun o => ψ o.held) : ℝ≥0∞) /
@@ -842,13 +878,13 @@ theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed)
   · simp only [law, Option.map_none, Option.getD_none, PMF.pure_map,
       Outcomes.tsum_pure_mul, outcomes, total]
     simp [OrderStatistics.integral, held, Record.toOracle, Record.sorted]
-  · have h := ρ.tsum_law_sorted (hs ρ rfl)
+  · have h := ρ.tsum_law_sorted (hs ρ rfl) (hp ρ rfl)
       fun ys => ψ ⟨ys, lowest, highest, die.getD ρ.replacement, []⟩
     simp only [law, Option.map_some, Option.getD_some, tsum_map_mul]
     refine (tsum_congr fun r => ?_).trans (h.trans ?_)
     · by_cases hr : r ∈ ρ.law.support
-      · simp [Roll.chains_of_mem_support_law hr, Record.toOracle, Record.sorted,
-          replacement]
+      · simp [Roll.chains_of_mem_support_law (hp ρ rfl) hr, Record.toOracle,
+          Record.sorted, replacement]
       · rw [PMF.mem_support_iff, not_not] at hr
         simp [hr]
     · simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def,
@@ -865,14 +901,16 @@ the total, as `Mixture::outcomes` weighs them.
 
 # Hypotheses
 - `hs`: The setup is well formed.
+- `hp`: The setup holds no chains.
 -/
-theorem map_toOracle_law (s : Setup) (hs : s.WellFormed) (v : Xdy.Record) :
+theorem map_toOracle_law (s : Setup) (hs : s.WellFormed) (hp : s.Plain)
+    (v : Xdy.Record) :
     (s.law.map Record.toOracle) v =
       (OrderStatistics.integral s.outcomes
           (fun o => if o.held = v then 1 else 0) : ℝ≥0∞) /
         (s.total : ℝ≥0∞) := by
   rw [Outcomes.map_apply_eq_tsum]
-  exact s.tsum_law_toOracle hs fun r => if r = v then 1 else 0
+  exact s.tsum_law_toOracle hs hp fun r => if r = v then 1 else 0
 
 /--
 Every outcome of a well-formed setup describes a certain record, the one that

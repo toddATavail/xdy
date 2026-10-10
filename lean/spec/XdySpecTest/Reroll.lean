@@ -126,6 +126,7 @@ private theorem twoD6_rerolls (c : Criterion) (limit : Option Nat) :
     twoD6.Rerolls c limit :=
   Setup.law_reroll c limit (fun _ h => by cases h; trivial)
     (Setup.faithful_roll rfl) (fun _ h => by cases h; trivial)
+    (fun _ h => by cases h; trivial)
 
 -- Rerolling two dice once on `1` describes the specification's reroll.
 example : twoD6.Rerolls (.within 1 1) (some 1) := twoD6_rerolls _ _
@@ -137,38 +138,40 @@ example : ({ roll := some (.standard 3 6), highest := 1 } : Setup).Rerolls
   Setup.law_reroll _ _ (fun _ h => by cases h; trivial)
     (Setup.Faithful.of_eq (s := { roll := some (.standard 3 6) }) rfl rfl
       (Setup.faithful_roll rfl))
-    (fun _ h => by cases h; trivial)
+    (fun _ h => by cases h; trivial) (fun _ h => by cases h; trivial)
 
-/-- Every setup of dice with a drop is well formed, faithful to its die, and
-has faces. -/
+/-- Every setup of dice with a drop is well formed, faithful to its die, has
+faces, and holds no chains. -/
 private theorem dropped_invariants (count faces : Int) (lowest highest : Nat) :
     let s : Setup := { roll := some (.standard count faces), lowest, highest }
-    s.WellFormed ∧ s.Faithful ∧ s.Faced :=
+    s.WellFormed ∧ s.Faithful ∧ s.Faced ∧ s.Plain :=
   ⟨fun _ h => by cases h; trivial,
     Setup.Faithful.of_eq (s := { roll := some (.standard count faces) }) rfl rfl
       (Setup.faithful_roll rfl),
-    fun _ h => by cases h; trivial⟩
+    fun _ h => by cases h; trivial, fun _ h => by cases h; trivial⟩
 
 -- Rerolling three dice once on `1`, after the lowest is dropped, pools the
 -- dice still kept, and describes the specification's reroll of the kept dice.
 example : ({ roll := some (.standard 3 6), lowest := 1 } : Setup).Rerolls
     (.within 1 1) (some 1) :=
-  let ⟨hs, hf, hc⟩ := dropped_invariants 3 6 1 0
-  Setup.law_reroll _ _ hs hf hc
+  let ⟨hs, hf, hc, hp⟩ := dropped_invariants 3 6 1 0
+  Setup.law_reroll _ _ hs hf hc hp
 
 -- A pool rerolls as specified too, as a second reroll after a drop does, since
--- every reroll leaves its setup well formed, faithful, and with faces.
+-- every reroll leaves its setup well formed, faithful, with faces, and without
+-- chains.
 example : (({ roll := some (.standard 3 6), lowest := 1 } : Setup).reroll
     (.within 1 1) (some 1)).Rerolls (.within 6 6) none :=
-  let ⟨hs, hf, hc⟩ := dropped_invariants 3 6 1 0
-  let ⟨hs', hf', hc'⟩ := Setup.reroll_invariants (.within 1 1) (some 1) hs hf hc
-  Setup.law_reroll _ _ hs' hf' hc'
+  let ⟨hs, hf, hc, hp⟩ := dropped_invariants 3 6 1 0
+  let ⟨hs', hf', hc', hp'⟩ :=
+    Setup.reroll_invariants (.within 1 1) (some 1) hs hf hc hp
+  Setup.law_reroll _ _ hs' hf' hc' hp'
 
 -- So does a reroll of the highest dice still kept by a list, without limit.
 example : ({ roll := some (.standard 4 6), highest := 2 } : Setup).Rerolls
     (.among [1, 2]) none :=
-  let ⟨hs, hf, hc⟩ := dropped_invariants 4 6 0 2
-  Setup.law_reroll _ _ hs hf hc
+  let ⟨hs, hf, hc, hp⟩ := dropped_invariants 4 6 0 2
+  Setup.law_reroll _ _ hs hf hc hp
 
 -- A mixture of two dice, rerolled by independent criteria and limits,
 -- describes the specification's reroll of the dice.
@@ -182,19 +185,20 @@ example (κ : PMF (Criterion × Option Nat)) :
       rw [PMF.support_pure, Set.mem_singleton_iff] at hs
       subst hs
       exact ⟨fun _ h => by cases h; trivial, Setup.faithful_roll rfl,
-        fun _ h => by cases h; trivial⟩),
+        fun _ h => by cases h; trivial, fun _ h => by cases h; trivial⟩),
     mixtureLaw_pure, twoD6, Setup.law_roll]
   rfl
 
 -- A rewrite leaves its setup ready for another reroll.
 example : (twoD6.reroll (.within 1 1) (some 1)).Faithful :=
   (Setup.reroll_invariants _ _ (fun _ h => by cases h; trivial)
-    (Setup.faithful_roll rfl) (fun _ h => by cases h; trivial)).2.1
+    (Setup.faithful_roll rfl) (fun _ h => by cases h; trivial)
+    (fun _ h => by cases h; trivial)).2.1
 
 -- A pool is well formed: its multisets each hold the die still kept.
 example : (keepHigh.reroll (.within 1 1) (some 1)).WellFormed :=
-  let ⟨hs, hf, hc⟩ := dropped_invariants 2 2 1 0
-  (Setup.reroll_invariants _ _ hs hf hc).1
+  let ⟨hs, hf, hc, hp⟩ := dropped_invariants 2 2 1 0
+  (Setup.reroll_invariants _ _ hs hf hc hp).1
 
 -- A die of the weighted faces of a limited reroll's law is the limited
 -- replacement.

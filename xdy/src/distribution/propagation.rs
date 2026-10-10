@@ -38,8 +38,10 @@
 //! limited reroll does, and one without limit that matches every face
 //! saturates every chain, rolling nothing. Any other explode without limit may
 //! roll without bound, so the pass refuses every function in which one may
-//! extend a chain, before it begins. The Lean specification does not yet model
-//! explosion, so the proofs cited below do not cover it.
+//! extend a chain, before it begins. The Lean specification proves the laws of
+//! explodes that do nothing, saturate every chain, or extend chains none of
+//! which has been dropped, as cited below; nothing yet proves the explodes of
+//! chains after a drop, or the rerolls of chains.
 //!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of
@@ -2045,9 +2047,13 @@ impl InstructionVisitor<Halt> for Execution<'_, '_>
 
 	fn visit_explode(&mut self, inst: &Explode) -> Result<(), Halt>
 	{
-		// The Lean specification does not yet model explosion, so this has no
-		// proof; the explode mirrors the reroll, resolving every setup of its
-		// record by each joint outcome of its operands.
+		// `law_explode`, in `lean/spec/XdySpec/World.lean`, proves that the
+		// record has the law of the explode over independent records and joint
+		// outcomes of the operands, and `law_explode_resolved`,
+		// `mixtureLaw_burst_whole`, and `mixtureLaw_burst_totals`, in
+		// `lean/spec/XdySpec/Explode.lean`, that exploding every setup by each
+		// resolution of the operands describes it, as every later instruction
+		// reads the record, for the explodes that `Setup.law_burst` covers.
 		let explodes =
 			self.resolve(&inst.operands(), &inst.predicate, inst.limit)?;
 		let Self {

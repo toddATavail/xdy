@@ -40,6 +40,14 @@ mixture's operations act on that law as the instructions do:
   (`Setup.Even`), whose pools' multisets each hold as many results as the
   first, as `Roll::pool` makes them (`Roll.Even`). `XdySpec/Reroll.lean`
   proves the laws of rerolls.
+- An explode leaves i.i.d. chains (`Roll.chains`), each an independent draw
+  of the law of a chain, or stacks (`Roll.stacked`), a mixture over the
+  multisets of the chains of each draws of what each chain has become
+  (`chainDraws`, `stackDraws`); either fills a record of chains, whose results
+  are their totals (`Record.ofChains`). Every other roll holds no chains
+  (`Roll.Plain`, `Roll.chains_of_mem_support_law`), and the laws of splits and
+  rerolls ask that it hold none. `XdySpec/Explode.lean` proves the laws of
+  explodes.
 - The sum of a mixture is the mixture of its setups' sums
   (`map_sum_mixtureLaw`), as `Mixture::sum` mixes them, and a setup without a
   roll sums to `0` (`Setup.map_sum_law_of_none`). The sums of ranges without
@@ -164,6 +172,154 @@ theorem weightedDie_eq_customDie {ws : List (Int × Nat)} {faces : List Int}
     congr 1
     exact Quot.sound h
 
+/-! ## Draws of chains -/
+
+/--
+Independent draws of a law of chains, in the order drawn, as the dice of a
+roll are drawn.
+
+# Parameters
+- `n`: The number of draws.
+- `law`: The law of each chain.
+
+# Returns
+The law of the chains drawn, the last drawn first.
+
+# Examples
+```lean
+example (law : PMF Chain) : chainDraws 0 law = PMF.pure [] := rfl
+```
+-/
+noncomputable def chainDraws (n : Nat) (law : PMF Chain) : PMF (List Chain) :=
+  n.repeat (fun p => p.bind fun cs => law.map (· :: cs)) (PMF.pure [])
+
+/--
+The law of what a chain of stacks has become since its multisets were last
+joined: the law that the stacks hold for it, or the chain itself, if they hold
+none. Mirrors the lookup of `laws` in `propagation/chain.rs`.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become, each chain that it
+  may be with its weight.
+- `ch`: The chain.
+
+# Returns
+The law of what `ch` has become.
+
+# Examples
+```lean
+example : became [] (.single 3) = PMF.pure (.single 3) := rfl
+```
+-/
+noncomputable def became (laws : List (Chain × List (Chain × Nat)))
+    (ch : Chain) : PMF Chain :=
+  match laws.lookup ch with
+  | some law => weighted ch law
+  | none => PMF.pure ch
+
+/--
+The chains of one multiset of stacks, drawn: each copy of each distinct chain
+an independent draw of what it has become.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become.
+- `ms`: The multiset, each distinct chain with its copies.
+
+# Returns
+The law of the chains drawn.
+
+# Examples
+```lean
+example : stackDraws [] [] = PMF.pure [] := rfl
+```
+-/
+noncomputable def stackDraws (laws : List (Chain × List (Chain × Nat))) :
+    List (Chain × Nat) → PMF (List Chain)
+  | [] => PMF.pure []
+  | (ch, k) :: ms => (chainDraws k (became laws ch)).bind fun cs =>
+    (stackDraws laws ms).map (cs ++ ·)
+
+/--
+Every possible draw of chains holds as many chains as it draws, each a
+possible chain of the law.
+
+# Parameters
+- `n`: The number of draws.
+- `law`: The law of each chain.
+- `cs`: The chains drawn.
+
+# Hypotheses
+- `h`: The draw is possible.
+-/
+theorem mem_support_chainDraws {n : Nat} {law : PMF Chain} {cs : List Chain}
+    (h : cs ∈ (chainDraws n law).support) :
+    cs.length = n ∧ ∀ c ∈ cs, c ∈ law.support := by
+  induction n generalizing cs with
+  | zero =>
+    simp only [chainDraws, Nat.repeat, PMF.mem_support_pure_iff] at h
+    subst h
+    simp
+  | succ n ih =>
+    simp only [chainDraws, Nat.repeat, PMF.mem_support_bind_iff,
+      PMF.mem_support_map_iff] at h
+    obtain ⟨cs', hcs', c, hc, rfl⟩ := h
+    obtain ⟨hlen, hmem⟩ := ih hcs'
+    refine ⟨by simp [hlen], fun x hx => ?_⟩
+    rcases List.mem_cons.mp hx with rfl | hx
+    · exact hc
+    · exact hmem x hx
+
+/--
+Every possible draw of a multiset of stacks holds as many chains as the
+multiset, each a possible chain of what one of them has become.
+
+# Parameters
+- `laws`: The law of what each distinct chain has become.
+- `ms`: The multiset.
+- `cs`: The chains drawn.
+
+# Hypotheses
+- `h`: The draw is possible.
+-/
+theorem mem_support_stackDraws {laws : List (Chain × List (Chain × Nat))}
+    {ms : List (Chain × Nat)} {cs : List Chain}
+    (h : cs ∈ (stackDraws laws ms).support) :
+    cs.length = (ms.map (·.2)).sum ∧
+      ∀ c ∈ cs, ∃ e ∈ ms, c ∈ (became laws e.1).support := by
+  induction ms generalizing cs with
+  | nil =>
+    simp only [stackDraws, PMF.mem_support_pure_iff] at h
+    subst h
+    simp
+  | cons e ms ih =>
+    obtain ⟨ch, k⟩ := e
+    simp only [stackDraws, PMF.mem_support_bind_iff,
+      PMF.mem_support_map_iff] at h
+    obtain ⟨ds, hds, es, hes, rfl⟩ := h
+    obtain ⟨hlen, hmem⟩ := mem_support_chainDraws hds
+    obtain ⟨hlen', hmem'⟩ := ih hes
+    refine ⟨by simp [hlen, hlen'], fun x hx => ?_⟩
+    rcases List.mem_append.mp hx with hx | hx
+    · exact ⟨(ch, k), List.mem_cons_self, hmem x hx⟩
+    · obtain ⟨e, he, hx⟩ := hmem' x hx
+      exact ⟨e, List.mem_cons_of_mem _ he, hx⟩
+
+/--
+A record of chains holds one result for each chain, drops none, and holds the
+die.
+
+# Parameters
+- `die`: The die.
+- `cs`: The chains.
+-/
+theorem Record.ofChains_fields (die : Die) (cs : List Chain) :
+    (Record.ofChains die cs).results.length = cs.length ∧
+      (Record.ofChains die cs).lowest = 0 ∧
+      (Record.ofChains die cs).highest = 0 ∧
+      (Record.ofChains die cs).die = die := by
+  simp [Record.ofChains, Record.ofOracle, Xdy.Record.ofChains,
+    List.length_mergeSort]
+
 /-! ## Rolls -/
 
 /-- A roll that fills a rolling record, with its operands resolved to values.
@@ -184,6 +340,20 @@ inductive Roll where
   order of multiset. Every multiset holds the same number of results
   (`Roll.Even`). -/
   | pool (outcomes : List (List (Int × Nat) × Nat))
+  /-- The chains of `count` dice that an explode extended, before any drop,
+  which are independent and alike, as dice are, and which a later reroll or
+  explode reads: each distinct chain that each may be, with its weight. The
+  Rust lists them in ascending order, merged; the laws here do not need it. -/
+  | chains (count : Int) (law : List (Chain × Nat))
+  /-- The chains of a record that a drop, or a split, has made unlike, and
+  which a later reroll or explode reads: each multiset of the chains as they
+  stood when last joined, each distinct chain with its copies, with its
+  weight, as `pool` holds the multisets of results; and the law of what each
+  distinct chain of them has become since, or none for a chain that is still
+  itself. Every multiset holds the same number of chains (`Roll.Even`).
+  Mirrors `Roll::Stacks`, whose name Mathlib reserves as a keyword. -/
+  | stacked (pool : List (List (Chain × Nat) × Nat))
+      (laws : List (Chain × List (Chain × Nat)))
   deriving DecidableEq, Repr
 
 namespace Roll
@@ -215,7 +385,10 @@ The law of the record that a roll fills.
 The law of the range or of the dice, as `step` rolls them, with the die that
 the roll shows, a certain record of the fixed results, in ascending order,
 without a die, or a mixture of such records, one for each multiset of a pool,
-weighed by its weight.
+weighed by its weight. Chains fill a record of chains, without a die: `count`
+independent draws of the law of each, or, for stacks, a mixture over their
+multisets, weighed by their weights, of each copy of each chain drawn from
+what it has become.
 -/
 noncomputable def law : Roll → PMF Record
   | .range start stop => rollRange start stop
@@ -229,6 +402,12 @@ noncomputable def law : Roll → PMF Record
   | .pool outcomes =>
     (weighted ((outcomes.head?.map (·.1)).getD []) outcomes).map fun rs =>
       { results := expand rs }
+  | .chains count law =>
+    (chainDraws count.toNat (weighted (.single 0) law)).map
+      (Record.ofChains .none)
+  | .stacked multisets laws =>
+    (weighted ((multisets.head?.map (·.1)).getD []) multisets).bind fun ms =>
+      (stackDraws laws ms).map (Record.ofChains .none)
 
 /--
 The number of results in the record that a roll fills. Mirrors `results` in
@@ -238,9 +417,9 @@ The number of results in the record that a roll fills. Mirrors `results` in
 - `ρ`: The roll.
 
 # Returns
-One for a range, even an empty one, the number of dice, which is `0` if it is
-negative, the number of fixed results, or the number in the first multiset of
-a pool, or `0` if it has none.
+One for a range, even an empty one, the number of dice or chains, which is
+`0` if it is negative, the number of fixed results, or the number in the first
+multiset of a pool or stacks, or `0` if it has none.
 
 # Examples
 ```lean
@@ -254,11 +433,15 @@ def results : Roll → Nat
   | .fixed results => (results.map (·.2)).sum
   | .pool [] => 0
   | .pool ((rs, _) :: _) => (rs.map (·.2)).sum
+  | .chains count _ => count.toNat
+  | .stacked [] _ => 0
+  | .stacked ((ms, _) :: _) _ => (ms.map (·.2)).sum
 
 /--
-Whether every multiset of a pool holds its number of results, as
-`Roll::pool` in `propagation/record.rs` makes them, so that every record that
-the roll fills holds them (`Roll.mem_support_law`). Every other roll is even.
+Whether every multiset of a pool or of stacks holds its number of results, as
+`Roll::pool` and `kept_pool` in `propagation/record.rs` and
+`propagation/chain.rs` make them, so that every record that the roll fills
+holds them (`Roll.mem_support_law`). Every other roll is even.
 
 # Parameters
 - `ρ`: The roll.
@@ -269,6 +452,8 @@ Whether the roll is even.
 def Even : Roll → Prop
   | .pool outcomes =>
     ∀ e ∈ outcomes, (e.1.map (·.2)).sum = (pool outcomes).results
+  | .stacked multisets laws =>
+    ∀ e ∈ multisets, (e.1.map (·.2)).sum = (stacked multisets laws).results
   | _ => True
 
 /--
@@ -280,8 +465,8 @@ the roll shows it. Mirrors `replacement` in `propagation/record.rs`.
 
 # Returns
 The range, the standard die, or the custom die's faces, repeated as many times
-as their weights, or no die for fixed results or a pool, which no longer show
-the die that rolled them.
+as their weights, or no die for fixed results, a pool, chains, or stacks,
+which no longer show the die that rolled them.
 
 # Examples
 ```lean
@@ -293,7 +478,21 @@ def replacement : Roll → Die
   | .range start stop => .range start stop
   | .standard _ faces => .standard faces
   | .custom _ faces => .ofFaces (expand faces)
-  | .fixed _ | .pool _ => .none
+  | .fixed _ | .pool _ | .chains .. | .stacked .. => .none
+
+/--
+Whether a roll holds no chains: whether it is neither chains nor stacks, as
+every roll is until an explode grows a chain.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+Whether the roll holds no chains.
+-/
+def Plain : Roll → Prop
+  | .chains .. | .stacked .. => False
+  | _ => True
 
 /--
 Every record that a roll can fill drops none of its results, and holds the
@@ -337,19 +536,30 @@ theorem mem_support_law_die {ρ : Roll} {r : Record}
     simp only [law, PMF.support_map, Set.mem_image] at h
     obtain ⟨_, _, rfl⟩ := h
     simp [replacement]
+  | chains count weights =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨cs, _, rfl⟩ := h
+    obtain ⟨_, hl, hh, hd⟩ := Record.ofChains_fields .none cs
+    exact ⟨hl, hh, hd⟩
+  | stacked multisets laws =>
+    simp only [law, PMF.mem_support_bind_iff, PMF.mem_support_map_iff] at h
+    obtain ⟨_, _, cs, _, rfl⟩ := h
+    obtain ⟨_, hl, hh, hd⟩ := Record.ofChains_fields .none cs
+    exact ⟨hl, hh, hd⟩
 
 /--
-Every record that a roll can fill holds no chains, since only an explode grows
-one.
+Every record that a roll without chains can fill holds no chains, since only
+an explode grows one.
 
 # Parameters
 - `ρ`: The roll.
 - `r`: The record.
 
 # Hypotheses
+- `hρ`: The roll holds no chains.
 - `h`: The roll can fill `r`.
 -/
-theorem chains_of_mem_support_law {ρ : Roll} {r : Record}
+theorem chains_of_mem_support_law {ρ : Roll} {r : Record} (hρ : ρ.Plain)
     (h : r ∈ ρ.law.support) : r.chains = [] := by
   cases ρ with
   | range start stop =>
@@ -377,6 +587,7 @@ theorem chains_of_mem_support_law {ρ : Roll} {r : Record}
     simp only [law, PMF.support_map, Set.mem_image] at h
     obtain ⟨_, _, rfl⟩ := h
     rfl
+  | chains | stacked => exact hρ.elim
 
 /--
 Every record that an even roll can fill holds its number of results, drops
@@ -426,6 +637,22 @@ theorem mem_support_law {ρ : Roll} {r : Record} (hρ : ρ.Even)
     rcases mem_support_weighted hrs with ⟨e, he, rfl⟩ | rfl
     · exact hρ e he
     · cases outcomes with
+      | nil => rfl
+      | cons e _ => rfl
+  | chains count weights =>
+    simp only [law, PMF.support_map, Set.mem_image] at h
+    obtain ⟨cs, hcs, rfl⟩ := h
+    obtain ⟨hlen, hl, hh, hd⟩ := Record.ofChains_fields .none cs
+    exact ⟨hlen.trans (mem_support_chainDraws hcs).1, hl, hh, hd⟩
+  | stacked multisets laws =>
+    simp only [law, PMF.mem_support_bind_iff, PMF.mem_support_map_iff] at h
+    obtain ⟨ms, hms, cs, hcs, rfl⟩ := h
+    obtain ⟨hlen, hl, hh, hd⟩ := Record.ofChains_fields .none cs
+    refine ⟨?_, hl, hh, hd⟩
+    rw [hlen, (mem_support_stackDraws hcs).1]
+    rcases mem_support_weighted hms with ⟨e, he, rfl⟩ | rfl
+    · exact hρ e he
+    · cases multisets with
       | nil => rfl
       | cons e _ => rfl
 
@@ -685,17 +912,29 @@ theorem law_keepHighest {s : Setup} (hs : s.Even) (count : Int) :
   simp only [Record.keepHighest, hlen, hlow, hhigh]
 
 /--
-Every record that a setup describes holds no chains, since only an explode
-grows one.
+Whether a setup's roll, if any, holds no chains (`Roll.Plain`).
+
+# Parameters
+- `s`: The setup.
+
+# Returns
+Whether the setup holds no chains.
+-/
+def Plain (s : Setup) : Prop := ∀ ρ ∈ s.roll, ρ.Plain
+
+/--
+Every record that a setup without chains describes holds no chains, since
+only an explode grows one.
 
 # Parameters
 - `s`: The setup.
 - `r`: The record.
 
 # Hypotheses
+- `hs`: The setup holds no chains.
 - `h`: The setup describes `r`.
 -/
-theorem chains_of_mem_support_law {s : Setup} {r : Record}
+theorem chains_of_mem_support_law {s : Setup} {r : Record} (hs : s.Plain)
     (h : r ∈ s.law.support) : r.chains = [] := by
   simp only [law, PMF.support_map, Set.mem_image] at h
   obtain ⟨r', hr', rfl⟩ := h
@@ -707,7 +946,7 @@ theorem chains_of_mem_support_law {s : Setup} {r : Record}
     rfl
   | some ρ =>
     simp only [hρ, Option.map_some, Option.getD_some] at hr'
-    exact (Roll.chains_of_mem_support_law hr' : r'.chains = [])
+    exact (Roll.chains_of_mem_support_law (hs ρ hρ) hr' : r'.chains = [])
 
 /--
 A setup of a roll without drops describes the roll's law, as

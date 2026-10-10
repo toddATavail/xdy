@@ -51,7 +51,8 @@ specification's reroll does:
   of its die, and that every die have a face (`Setup.Faithful`,
   `Setup.Faced`), as every roll (`Setup.faithful_roll`), drop and keep
   (`Setup.Faithful.of_eq`), and reroll (`Setup.reroll_invariants`) leaves
-  them.
+  them; and that it hold no chains (`Setup.Plain`), since the Rust rerolls
+  chains chain by chain, which this does not yet model.
 
 ```mermaid
 flowchart TD
@@ -784,11 +785,12 @@ rewrites them.
 - `ρ`: The roll.
 
 # Returns
-`true` for a range or dice, `false` for fixed results or a pool.
+`true` for a range or dice, `false` for fixed results, a pool, chains, or
+stacks.
 -/
 def alike : Roll → Bool
   | .range .. | .standard .. | .custom .. => true
-  | .fixed _ | .pool _ => false
+  | .fixed _ | .pool _ | .chains .. | .stacked .. => false
 
 /--
 The dice of a roll whose dice are alike, as `Roll::rewrite` in
@@ -800,7 +802,8 @@ each, with their weights.
 
 # Returns
 One die of the range's faces; the standard dice of the standard die's faces;
-the custom dice of their faces; or no dice for fixed results or a pool.
+the custom dice of their faces; or no dice for fixed results, a pool, chains,
+or stacks.
 
 # Examples
 ```lean
@@ -812,7 +815,7 @@ def dice : Roll → Int × List (Int × Nat)
   | .range start stop => (1, tally (Die.range start stop).faces)
   | .standard count faces => (count, tally (Die.standard faces).faces)
   | .custom count faces => (count, faces)
-  | .fixed _ | .pool _ => (0, [])
+  | .fixed _ | .pool _ | .chains .. | .stacked .. => (0, [])
 
 /--
 Whether every die of a roll has a face, as every roll of `propagation/record.rs`
@@ -946,8 +949,13 @@ private theorem customDie_range {start stop : Int} (h : ¬stop < start) :
   rw [icc_val]
   simp [Die.faces, h]
 
-/-- A die of the tally of some faces is the custom die of the faces. -/
-private theorem weightedDie_tally (xs : List Int) :
+/--
+A die of the tally of some faces is the custom die of the faces.
+
+# Parameters
+- `xs`: The faces.
+-/
+theorem weightedDie_tally (xs : List Int) :
     weightedDie (tally xs) = customDie xs :=
   customDie_perm (expand_tally_perm xs)
 
@@ -995,14 +1003,14 @@ theorem Roll.map_results_law {ρ : Roll} (h : ρ.alike) :
   | custom count faces =>
     simp only [law, dice, PMF.map_comp]
     rfl
-  | fixed => simp [alike] at h
-  | pool => simp [alike] at h
+  | fixed | pool | chains | stacked => simp [alike] at h
 
 /-! ## Rerolling a bag of results -/
 
 /--
 The law of the results that a reroll leaves, as a multiset, from independent
-results: each `x` replaced by a draw of `step x`.
+results: each `x` replaced by a draw of `step x`. The results may be chains,
+as an explode leaves them.
 
 # Parameters
 - `step`: The law of the result that each result leaves.
@@ -1011,8 +1019,8 @@ results: each `x` replaced by a draw of `step x`.
 # Returns
 The law of the multiset of the results left.
 -/
-noncomputable def bagDraws (step : Int → PMF Int) :
-    List Int → PMF (Multiset Int)
+noncomputable def bagDraws {α β : Type} (step : α → PMF β) :
+    List α → PMF (Multiset β)
   | [] => PMF.pure 0
   | x :: xs => lift (· ::ₘ ·) (step x) (bagDraws step xs)
 
@@ -1026,7 +1034,7 @@ in which it rerolls them.
 # Hypotheses
 - `h`: The results are the same, in some order.
 -/
-theorem bagDraws_perm (step : Int → PMF Int) {xs ys : List Int}
+theorem bagDraws_perm {α β : Type} (step : α → PMF β) {xs ys : List α}
     (h : xs.Perm ys) : bagDraws step xs = bagDraws step ys := by
   induction h with
   | nil => rfl
@@ -1397,10 +1405,11 @@ positive.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
+- `hp`: The roll holds no chains.
 -/
-theorem sum_outcomes (ρ : Roll) (hρ : ρ.WellFormed) :
+theorem sum_outcomes (ρ : Roll) (hρ : ρ.WellFormed) (hp : ρ.Plain) :
     (ρ.outcomes.map (·.2)).sum = ρ.total ∧ ρ.total ≠ 0 := by
-  have h := ρ.tsum_law_sorted hρ fun _ => 1
+  have h := ρ.tsum_law_sorted hρ hp fun _ => 1
   simp only [Nat.cast_one, mul_one, PMF.tsum_coe] at h
   have hi : OrderStatistics.integral ρ.outcomes
       (fun rs => (fun _ => 1) (expand rs)) =
@@ -1429,12 +1438,13 @@ weighed and expanded.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
+- `hp`: The roll holds no chains.
 -/
-theorem map_sorted_law_weighted (ρ : Roll) (hρ : ρ.WellFormed) :
+theorem map_sorted_law_weighted (ρ : Roll) (hρ : ρ.WellFormed) (hp : ρ.Plain) :
     ρ.law.map Record.sorted = (weighted [] ρ.outcomes).map expand := by
-  obtain ⟨hS, hT⟩ := ρ.sum_outcomes hρ
+  obtain ⟨hS, hT⟩ := ρ.sum_outcomes hρ hp
   ext ys
-  rw [map_sorted_law ρ hρ, Outcomes.map_apply_eq_tsum,
+  rw [map_sorted_law ρ hρ hp, Outcomes.map_apply_eq_tsum,
     Outcomes.tsum_weighted _ _ (hS ▸ hT), hS]
   congr 1
   simp only [OrderStatistics.integral, Nat.cast_list_sum, List.map_map]
@@ -1508,6 +1518,24 @@ theorem weight_pos_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
     subst he
     exact Nat.one_pos
   | pool outcomes => exact (hρ.2.1 e he).2
+  | chains | stacked => simp [outcomes] at he
+
+/--
+A roll that has an outcome holds no chains, since this does not yet model the
+outcomes of chains.
+
+# Parameters
+- `ρ`: The roll.
+- `e`: An outcome with its weight.
+
+# Hypotheses
+- `he`: `e` is an outcome of the roll.
+-/
+theorem plain_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
+    (he : e ∈ ρ.outcomes) : ρ.Plain := by
+  cases ρ with
+  | chains | stacked => simp [outcomes] at he
+  | _ => trivial
 
 /--
 Every outcome of a well-formed roll holds the sorted results of a record that
@@ -1525,7 +1553,8 @@ theorem exists_sorted_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
     (hρ : ρ.WellFormed) (he : e ∈ ρ.outcomes) :
     ∃ r ∈ ρ.law.support, r.sorted = expand e.1 := by
   have hm : expand e.1 ∈ (ρ.law.map Record.sorted).support := by
-    rw [ρ.map_sorted_law_weighted hρ, PMF.support_map]
+    rw [ρ.map_sorted_law_weighted hρ (plain_of_mem_outcomes he),
+      PMF.support_map]
     exact ⟨e.1, mem_support_weighted_of_mem he
       (weight_pos_of_mem_outcomes hρ he).ne', rfl⟩
   rw [PMF.support_map] at hm
@@ -1687,7 +1716,7 @@ it leaves of each, independently.
 - `step`: The law of the result that each result leaves.
 - `xs`, `ys`: The results.
 -/
-theorem bagDraws_append (step : Int → PMF Int) (xs ys : List Int) :
+theorem bagDraws_append {α β : Type} (step : α → PMF β) (xs ys : List α) :
     bagDraws step (xs ++ ys) =
       lift (· + ·) (bagDraws step xs) (bagDraws step ys) := by
   induction xs with
@@ -1708,7 +1737,7 @@ it leaves of the results present.
 # Hypotheses
 - `h`: The laws agree on every result present.
 -/
-theorem bagDraws_congr {step step' : Int → PMF Int} {xs : List Int}
+theorem bagDraws_congr {α β : Type} {step step' : α → PMF β} {xs : List α}
     (h : ∀ x ∈ xs, step x = step' x) :
     bagDraws step xs = bagDraws step' xs := by
   induction xs with
@@ -1723,9 +1752,9 @@ A reroll that leaves every result as it was leaves them.
 # Hypotheses
 - `h`: Every result leaves itself.
 -/
-theorem bagDraws_pure {step : Int → PMF Int} {xs : List Int}
+theorem bagDraws_pure {α : Type} {step : α → PMF α} {xs : List α}
     (h : ∀ x ∈ xs, step x = PMF.pure x) :
-    bagDraws step xs = PMF.pure (xs : Multiset Int) := by
+    bagDraws step xs = PMF.pure (xs : Multiset α) := by
   rw [bagDraws_congr h]
   induction xs with
   | nil => rfl
@@ -1776,7 +1805,7 @@ theorem map_bag_rollDice_weighted (k : Int) {g : List (Int × Nat)}
       (weighted [] (Roll.custom k g).outcomes).map
         fun o => (Roll.expand o : Multiset Int) := by
   have h := congrArg (PMF.map (fun xs : List Int => (xs : Multiset Int)))
-    (Roll.map_sorted_law_weighted _ hg)
+    (Roll.map_sorted_law_weighted _ hg trivial)
   simp only [PMF.map_comp, Roll.law] at h
   refine Eq.trans ?_ (h.trans (congrArg (PMF.map · _) rfl))
   refine map_congr_support fun r _ => ?_
@@ -1896,7 +1925,7 @@ private theorem sum_replacements {g : List (Int × Nat)} {G : Nat}
   have htot : OrderStatistics.total g = G := by
     rw [← hglen, OrderStatistics.total]
     simp [Roll.expand, List.length_flatMap]
-  rw [(Roll.sum_outcomes _ (hgw _)).1, Roll.total]
+  rw [(Roll.sum_outcomes _ (hgw _) trivial).1, Roll.total]
   by_cases hk0 : k = 0
   · simp [hk0]
   · split_ifs with hpos
@@ -1921,19 +1950,21 @@ holds the results still kept.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
+- `hp`: The roll holds no chains.
 - `hG`: The padding is positive.
 - `hgw`: Every custom roll of dice of the final results is well formed.
 -/
 theorem Roll.wellFormed_rerollPool {ρ : Roll} {lowest highest : Nat}
     {c : Criterion} {G : Nat} {g : List (Int × Nat)} (hρ : ρ.WellFormed)
-    (hG : G ≠ 0)
+    (hp : ρ.Plain) (hG : G ≠ 0)
     (hgw : ∀ k : Int, (Roll.custom k g).WellFormed) :
     (ρ.rerollPool lowest highest c G g).WellFormed := by
   set K := ρ.results - lowest - highest
   let sv : List (Int × Nat) → List (Int × Nat) × Nat := fun rs =>
     survivors rs lowest highest c
-  have hne : ∀ τ : Roll, τ.WellFormed → τ.outcomes ≠ [] := fun τ hτ h => by
-    have := τ.sum_outcomes hτ
+  have hne : ∀ τ : Roll, τ.WellFormed → τ.Plain → τ.outcomes ≠ [] :=
+      fun τ hτ hτp h => by
+    have := τ.sum_outcomes hτ hτp
     rw [h] at this
     exact this.2 this.1.symm
   -- Every multiset of the pool is well formed and holds the dice still kept.
@@ -1955,9 +1986,9 @@ theorem Roll.wellFormed_rerollPool {ρ : Roll} {lowest highest : Nat}
     simp only [Roll.results, Int.toNat_natCast]
     exact hcount
   refine ⟨?_, fun x hx => (hmem x hx).1, ?_⟩
-  · obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ (hne ρ hρ)
+  · obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ (hne ρ hρ hp)
     obtain ⟨o, ho⟩ := List.exists_mem_of_ne_nil _
-      (hne _ (hgw ((sv e.1).2 : Int)))
+      (hne _ (hgw ((sv e.1).2 : Int)) trivial)
     exact List.ne_nil_of_mem (List.mem_flatMap.mpr ⟨e, he,
       List.mem_map.mpr ⟨o, ho, rfl⟩⟩)
   · intro x hx
@@ -1983,6 +2014,9 @@ out every die still kept drops them all. Otherwise, if no result has been
 dropped and the roll's dice are alike, the reroll rewrites the law of each
 (`Roll.rewrite`); if not, it pools the multisets of the dice still kept
 (`Roll.rerollPool`). Either way, the setup keeps its die, and drops nothing.
+The Rust rerolls chains or stacks chain by chain (`Roll::reroll_chains`),
+which this does not yet model; the laws of rerolls ask that the setup hold
+no chains (`Setup.Plain`).
 
 # Parameters
 - `s`: The setup.
@@ -2565,8 +2599,15 @@ private theorem faces_range_ne_nil (start stop : Int) :
   · simp only [ne_eq, List.map_eq_nil_iff, List.range_eq_nil]
     omega
 
-/-- A setup of alike dice that keeps some result has dice. -/
-private theorem dice_pos {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
+/--
+A setup of alike dice that keeps some result has dice.
+
+# Hypotheses
+- `hρ`: The setup's roll is `ρ`.
+- `halike`: Its dice are alike.
+- `hk`: It keeps some result.
+-/
+theorem dice_pos {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
     (halike : ρ.alike) (hk : ¬s.results - s.lowest - s.highest = 0) :
     0 < ρ.dice.1 := by
   simp only [results, hρ, Option.map_some, Option.getD_some] at hk
@@ -2580,11 +2621,17 @@ private theorem dice_pos {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
     simp only [Roll.results] at hk
     simp only [Roll.dice]
     omega
-  | fixed => simp [Roll.alike] at halike
-  | pool => simp [Roll.alike] at halike
+  | fixed | pool | chains | stacked => simp [Roll.alike] at halike
 
-/-- Alike dice, if there are any, have faces. -/
-private theorem expand_dice_ne_nil {ρ : Roll} (halike : ρ.alike)
+/--
+Alike dice, if there are any, have faces.
+
+# Hypotheses
+- `halike`: The roll's dice are alike.
+- `hfaced`: Every die of the roll has a face.
+- `hn`: The roll has dice.
+-/
+theorem expand_dice_ne_nil {ρ : Roll} (halike : ρ.alike)
     (hfaced : ρ.Faced) (hn : 0 < ρ.dice.1) :
     Roll.expand ρ.dice.2 ≠ [] := by
   cases ρ with
@@ -2595,8 +2642,7 @@ private theorem expand_dice_ne_nil {ρ : Roll} (halike : ρ.alike)
     · simp only [Roll.dice] at hn
       omega
     · exact h
-  | fixed => simp [Roll.alike] at halike
-  | pool => simp [Roll.alike] at halike
+  | fixed | pool | chains | stacked => simp [Roll.alike] at halike
 
 /--
 If a reroll may change the dice still kept of a setup, the specification
@@ -2604,10 +2650,12 @@ rerolls each record that it describes by the final results of a matched die.
 
 # Hypotheses
 - `he`: The reroll may change the dice still kept.
+- `hp`: The setup holds no chains.
 -/
 theorem reroll_of_redraw {s : Setup} {c : Criterion} {limit : Option Nat}
     {G : Nat} {g : List (Int × Nat)}
-    (he : Effect.resolve s.replacement c limit = .redraw G g) :
+    (he : Effect.resolve s.replacement c limit = .redraw G g)
+    (hp : s.Plain) :
     ∀ r ∈ s.law.support, Spec.reroll r c limit =
       rerollKept r.die r.kept c.matches (weightedDie g) := by
   obtain ⟨hm, hcase⟩ := Effect.resolve_redraw he
@@ -2615,12 +2663,12 @@ theorem reroll_of_redraw {s : Setup} {c : Criterion} {limit : Option Nat}
   intro r hr
   have hdie := (mem_support_law_die hr).1
   rcases hcase with ⟨n, rfl, hn, rfl, rfl⟩ | ⟨rfl, hmF, rfl, rfl⟩
-  · rw [reroll_some c (Setup.chains_of_mem_support_law hr) hn
+  · rw [reroll_some c (Setup.chains_of_mem_support_law hp hr) hn
       (by rw [hdie]; exact hF), hdie]
   · have hw : ¬r.die.facesWithin c = true := by
       rw [hdie, Die.facesWithin, List.all_eq_true]
       exact fun h => hmF (List.countP_eq_length.mpr h)
-    rw [reroll_none (Setup.chains_of_mem_support_law hr) hw, hdie]
+    rw [reroll_none (Setup.chains_of_mem_support_law hp hr) hw, hdie]
 
 /--
 A reroll that pools a well-formed setup describes the specification's reroll
@@ -2633,12 +2681,15 @@ every outcome weighs `Gᴷ` in all.
 
 # Hypotheses
 - `hs`: The setup is well formed.
+- `hplain`: The setup holds no chains.
 - `hp`: The reroll pools the setup.
 -/
 theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
-    (hs : s.WellFormed) (hp : s.Pools c limit) : s.Rerolls c limit := by
+    (hs : s.WellFormed) (hplain : s.Plain) (hp : s.Pools c limit) :
+    s.Rerolls c limit := by
   obtain ⟨ρ, G, g, hρ, hk, he, hal⟩ := hp
   have hρw := hs ρ hρ
+  have hρp := hplain ρ hρ
   obtain ⟨hglen, hG, _⟩ := redraw_law he
   have hgw := wellFormed_of_redraw he
   set D := s.replacement with hD
@@ -2654,7 +2705,7 @@ theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
       (weighted [] ρ.outcomes).bind fun rs => F (Roll.expand rs) := by
     rw [PMF.map_bind, bind_congr_support (g := fun r =>
       (bagDraws step r.kept).map (bagView D)) fun r hr => by
-        rw [reroll_of_redraw he r hr, map_view_rerollKept,
+        rw [reroll_of_redraw he hplain r hr, map_view_rerollKept,
           (mem_support_law_die hr).1]]
     have hlaw : s.law = ρ.law.map fun r =>
         { r with lowest := L, highest := H, die := D } := by
@@ -2668,7 +2719,7 @@ theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
     rw [show (ρ.law.bind fun r => F r.sorted) =
         (ρ.law.map Record.sorted).bind F from
           (PMF.bind_map ρ.law Record.sorted F).symm,
-      ρ.map_sorted_law_weighted hρw, PMF.bind_map]
+      ρ.map_sorted_law_weighted hρw hρp, PMF.bind_map]
     rfl
   -- The pool, as `weighted_flatMap` reads it.
   let sv : List (Int × Nat) → List (Int × Nat) × Nat := fun rs =>
@@ -2696,7 +2747,7 @@ theorem rerolls_of_pools {s : Setup} {c : Criterion} {limit : Option Nat}
   rw [weighted_flatMap _ [] (fun _ => []) ρ.outcomes hh
       (fun a => G ^ (K - (sv a).2)) (fun a o => join (sv a).1 o) (G ^ K)
       (pow_ne_zero _ hG)
-      ((ρ.sum_outcomes hρw).1 ▸ (ρ.sum_outcomes hρw).2) hc,
+      ((ρ.sum_outcomes hρw hρp).1 ▸ (ρ.sum_outcomes hρw hρp).2) hc,
     PMF.map_bind]
   refine congrArg _ (funext fun rs => ?_)
   simp only [F, step, bagDraws_kept rs L H c hgw, PMF.map_comp]
@@ -2720,10 +2771,11 @@ crosses out every die still kept, rewrites the dice, or pools them
 - `hs`: The setup is well formed.
 - `hfaith`: Every result of the setup is a face of its die.
 - `hfaced`: Every die of the setup has a face.
+- `hp`: The setup holds no chains, which the Rust rerolls as chains.
 -/
 theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced) :
-    s.Rerolls c limit := by
+    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced)
+    (hp : s.Plain) : s.Rerolls c limit := by
   have hev : s.Even := fun ρ h => (hs ρ h).even
   have hkf : ∀ r ∈ s.law.support, ∀ x ∈ r.kept,
       x ∈ s.replacement.faces :=
@@ -2741,14 +2793,14 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
   | none =>
     have hk : s.results - s.lowest - s.highest = 0 := by simp [results, hρ]
     exact rerolls_of_stays (by simp [reroll, hρ]) fun r hr =>
-      reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hr)
+      reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hp hr)
         fun x hx => by
         rw [hempty hk r hr] at hx
         cases hx
   | some ρ =>
     by_cases hk : s.results - s.lowest - s.highest = 0
     · exact rerolls_of_stays (by simp [reroll, hρ, hk]) fun r hr =>
-        reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hr)
+        reroll_view_of_unmatched limit (Setup.chains_of_mem_support_law hp hr)
           fun x hx => by
           rw [hempty hk r hr] at hx
           cases hx
@@ -2757,12 +2809,12 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
       refine rerolls_of_stays (by simp [reroll, hρ, hk, he]) fun r hr => ?_
       rcases Effect.resolve_nothing he with hm | rfl | ⟨n, rfl, hF⟩
       · exact reroll_view_of_unmatched limit
-          (Setup.chains_of_mem_support_law hr) fun x hx => by
+          (Setup.chains_of_mem_support_law hp hr) fun x hx => by
             have := List.countP_eq_zero.mp hm x (hkf r hr x hx)
             simpa using this
-      · exact reroll_view_of_zero r c (Setup.chains_of_mem_support_law hr)
+      · exact reroll_view_of_zero r c (Setup.chains_of_mem_support_law hp hr)
       · obtain ⟨y, hy⟩ := List.length_eq_one_iff.mp hF
-        exact reroll_view_of_one_face n (Setup.chains_of_mem_support_law hr)
+        exact reroll_view_of_one_face n (Setup.chains_of_mem_support_law hp hr)
           (by rw [hdie r hr, hy])
           fun x hx => by rw [hdie r hr]; exact hkf r hr x hx
     | crossOut =>
@@ -2774,7 +2826,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         simp [reroll, hρ, hk, he]
       rw [Rerolls, hs', PMF.map_bind]
       rw [bind_congr_support fun r hr => (hdie r hr) ▸
-        reroll_view_of_crossOut (Setup.chains_of_mem_support_law hr)
+        reroll_view_of_crossOut (Setup.chains_of_mem_support_law hp hr)
           ((hdie r hr) ▸ hw)
           fun x hx => (hdie r hr) ▸ hkf r hr x hx]
       rw [PMF.bind_const, map_congr_support (g := fun _ => ([], s.replacement))
@@ -2794,7 +2846,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         -- The law of a matched die, its padding, and the specification's
         -- reroll of each record by it.
         obtain ⟨hglen, hG, _⟩ := redraw_law he
-        have hreroll := reroll_of_redraw he
+        have hreroll := reroll_of_redraw he hp
         set D := s.replacement with hD
         let step : Int → PMF Int := fun x =>
           if c.matches x then weightedDie g else PMF.pure x
@@ -2838,7 +2890,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
         simp only [Function.comp_apply]
         rw [Record.view_of_undropped rfl rfl]
         simp [bagView, Record.sorted]
-      · exact rerolls_of_pools hs ⟨ρ, G, g, hρ, hk, he, hal⟩
+      · exact rerolls_of_pools hs hp ⟨ρ, G, g, hρ, hk, he, hal⟩
 
 end Setup
 
@@ -2856,24 +2908,25 @@ are independent of it (`law_reroll_resolved`).
 - `κ`: The law of the criterion and the limit, as the operands resolve them.
 
 # Hypotheses
-- `hμ`: Every setup is well formed, faithful to its die, and has faces.
+- `hμ`: Every setup is well formed, faithful to its die, has faces, and
+  holds no chains.
 -/
 theorem mixtureLaw_reroll {μ : PMF Setup} {κ : PMF (Criterion × Option Nat)}
-    (hμ : ∀ s ∈ μ.support, s.WellFormed ∧ s.Faithful ∧ s.Faced) :
+    (hμ : ∀ s ∈ μ.support, s.WellFormed ∧ s.Faithful ∧ s.Faced ∧ s.Plain) :
     (mixtureLaw (lift (fun s q => s.reroll q.1 q.2) μ κ)).map Record.view =
       ((lift Prod.mk (mixtureLaw μ) κ).bind fun p =>
         reroll p.1 p.2.1 p.2.2).map Record.view := by
   simp only [mixtureLaw, lift, PMF.bind_bind, PMF.bind_map, PMF.map_bind,
     Function.comp_def]
   refine bind_congr_support fun s hs => ?_
-  obtain ⟨he, hf, hc⟩ := hμ s hs
+  obtain ⟨he, hf, hc, hp⟩ := hμ s hs
   refine (bind_congr_support (p := κ)
     (f := fun q : Criterion × Option Nat =>
       (s.reroll q.1 q.2).law.map Record.view)
     (g := fun q : Criterion × Option Nat =>
       (s.law.bind fun r => reroll r q.1 q.2).map Record.view)
     fun q hq => by
-      have h := Setup.law_reroll q.1 q.2 he hf hc
+      have h := Setup.law_reroll q.1 q.2 he hf hc hp
       rw [Setup.Rerolls] at h
       exact h).trans ?_
   simp only [PMF.map_bind]
@@ -2967,9 +3020,19 @@ private theorem mem_results_alike {ρ : Roll} (h : ρ.alike) {r : Record}
   have := (mem_support_rollDice hr').2.2.2 x (he' ▸ hx)
   exact mem_of_mem_support_customDie this
 
-/-- Every face of the dice of a roll whose dice are alike, if there are any,
-is a result of some record that the roll fills. -/
-private theorem exists_results_alike {ρ : Roll} (h : ρ.alike)
+/--
+Every face of the dice of a roll whose dice are alike, if there are any, is a
+result of some record that the roll fills.
+
+# Parameters
+- `x`: The face.
+
+# Hypotheses
+- `h`: The roll's dice are alike.
+- `hn`: The roll has dice.
+- `hx`: `x` is a face of the dice.
+-/
+theorem exists_results_alike {ρ : Roll} (h : ρ.alike)
     (hn : 0 < ρ.dice.1) {x : Int} (hx : x ∈ Roll.expand ρ.dice.2) :
     ∃ r ∈ ρ.law.support, x ∈ r.results := by
   have hm := replicate_mem_support_rollDice
@@ -3039,8 +3102,7 @@ theorem faithful_roll {ρ : Roll} (h : ρ.alike) :
       simp only [Roll.replacement, Die.ofFaces]
       rw [faces_custom hne]
       exact (List.mergeSort_perm _ _).mem_iff.mpr hm
-    | fixed => simp [Roll.alike] at h
-    | pool => simp [Roll.alike] at h
+    | fixed | pool | chains | stacked => simp [Roll.alike] at h
   · cases ρ with
     | range start stop =>
       exact absurd he (expand_tally_ne_nil (faces_range_ne_nil _ _))
@@ -3049,8 +3111,7 @@ theorem faithful_roll {ρ : Roll} (h : ρ.alike) :
     | custom count faces =>
       simp only [Roll.dice] at he
       simp [Roll.replacement, Die.ofFaces, Die.faces, he]
-    | fixed => simp [Roll.alike] at h
-    | pool => simp [Roll.alike] at h
+    | fixed | pool | chains | stacked => simp [Roll.alike] at h
 
 end Setup
 
@@ -3119,8 +3180,9 @@ private theorem faithful_rerollPool {s : Setup} {ρ : Roll} {c : Criterion}
     | cons e P => exact hfaces e List.mem_cons_self x hx
 
 /--
-A reroll leaves a setup well formed, faithful to its die, and with faces, so
-that the law of a later reroll holds of it too (`law_reroll`): a rewrite
+A reroll leaves a setup well formed, faithful to its die, with faces, and
+without chains, so that the law of a later reroll holds of it too
+(`law_reroll`): a rewrite
 tallies the faces of its dice (`tally_wellFormed`), and a pool holds
 multisets of the results still kept (`Roll.wellFormed_rerollPool`), each a
 survivor or a final result of a matched die.
@@ -3134,28 +3196,30 @@ survivor or a final result of a matched die.
 - `hs`: The setup is well formed.
 - `hfaith`: Every result of the setup is a face of its die.
 - `hfaced`: Every die of the setup has a face.
+- `hp`: The setup holds no chains.
 -/
 theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced) :
+    (hs : s.WellFormed) (hfaith : s.Faithful) (hfaced : s.Faced)
+    (hp : s.Plain) :
     (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faithful ∧
-      (s.reroll c limit).Faced := by
+      (s.reroll c limit).Faced ∧ (s.reroll c limit).Plain := by
   cases hρ : s.roll with
   | none =>
     rw [show s.reroll c limit = s by simp [reroll, hρ]]
-    exact ⟨hs, hfaith, hfaced⟩
+    exact ⟨hs, hfaith, hfaced, hp⟩
   | some ρ =>
     by_cases hk : s.results - s.lowest - s.highest = 0
     · rw [show s.reroll c limit = s by simp [reroll, hρ, hk]]
-      exact ⟨hs, hfaith, hfaced⟩
+      exact ⟨hs, hfaith, hfaced, hp⟩
     cases he : Effect.resolve s.replacement c limit with
     | nothing =>
       rw [show s.reroll c limit = s by simp [reroll, hρ, hk, he]]
-      exact ⟨hs, hfaith, hfaced⟩
+      exact ⟨hs, hfaith, hfaced, hp⟩
     | crossOut =>
       rw [show s.reroll c limit = { s with lowest := s.results } by
         simp [reroll, hρ, hk, he]]
       exact ⟨hs, Faithful.of_eq (s := s)
-        (s' := { s with lowest := s.results }) rfl rfl hfaith, hfaced⟩
+        (s' := { s with lowest := s.results }) rfl rfl hfaith, hfaced, hp⟩
     | redraw G g =>
       obtain ⟨hglen, hG, hgf⟩ := redraw_law he
       by_cases hal : ρ.alike ∧ s.lowest = 0 ∧ s.highest = 0
@@ -3167,9 +3231,10 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
         rw [hs']
         exact ⟨fun ρ' h => by
             cases h
-            exact Roll.wellFormed_rerollPool (hs ρ hρ) hG
+            exact Roll.wellFormed_rerollPool (hs ρ hρ) (hp ρ hρ) hG
               (wellFormed_of_redraw he),
-          faithful_rerollPool hρ hs hfaith he, fun ρ' h => by cases h; trivial⟩
+          faithful_rerollPool hρ hs hfaith he,
+          fun ρ' h => by cases h; trivial, fun ρ' h => by cases h; trivial⟩
       obtain ⟨halike, hl0, hh0⟩ := hal
       have hs' : s.reroll c limit =
           { roll := some (ρ.rewrite c G g), die := some s.replacement } := by
@@ -3208,7 +3273,7 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
           (List.mem_flatMap.mpr ⟨y, hy, hz⟩))
       rw [hs']
       refine ⟨fun ρ' h => by cases h; exact tally_wellFormed _, ?_,
-        fun ρ' h => ?_⟩
+        fun ρ' h => ?_, fun ρ' h => by cases h; trivial⟩
       · intro r hr x hx
         simp only [law, Option.map_some, Option.getD_some, Roll.rewrite,
           Roll.law, PMF.map_comp, PMF.support_map, Set.mem_image] at hr

@@ -95,7 +95,7 @@ private def agrees (die : List (Int × Nat)) (n : Nat) : Bool :=
 example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
     4 / 9 := by
   rw [Roll.map_sorted_law (.custom 2 [(1, 1), (2, 2)])
-      (show _ ∧ _ from ⟨by decide, by decide⟩),
+      (show _ ∧ _ from ⟨by decide, by decide⟩) trivial,
     show OrderStatistics.integral (Roll.custom 2 [(1, 1), (2, 2)]).outcomes
       (fun rs => if Roll.expand rs = [1, 2] then 1 else 0) = 4 by decide,
     show (Roll.custom 2 [(1, 1), (2, 2)]).total = 9 by decide]

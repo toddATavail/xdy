@@ -551,7 +551,7 @@ private theorem results_K (o : Outcomes vs) :
 -- `[1, 2]` weighs two of the four rolls: `[1, 2]` and `[2, 1]`.
 example (o : Outcomes vs) : (((F 1).K 0 o).map Record.results) [1, 2] =
     2 / 4 := by
-  rw [results_K, Roll.map_sorted_law (.standard 2 2) trivial,
+  rw [results_K, Roll.map_sorted_law (.standard 2 2) trivial trivial,
     show OrderStatistics.integral (Roll.standard 2 2).outcomes
       (fun rs => if Roll.expand rs = [1, 2] then 1 else 0) = 2 by decide,
     show (Roll.standard 2 2).total = 4 by decide]
@@ -559,7 +559,7 @@ example (o : Outcomes vs) : (((F 1).K 0 o).map Record.results) [1, 2] =
 
 -- `[2, 1]` is no world.
 example (o : Outcomes vs) : (((F 1).K 0 o).map Record.results) [2, 1] = 0 := by
-  rw [results_K, Roll.map_sorted_law (.standard 2 2) trivial,
+  rw [results_K, Roll.map_sorted_law (.standard 2 2) trivial trivial,
     show OrderStatistics.integral (Roll.standard 2 2).outcomes
       (fun rs => if Roll.expand rs = [2, 1] then 1 else 0) = 0 by decide]
   simp

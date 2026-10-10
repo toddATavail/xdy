@@ -57,7 +57,8 @@ the pass's operations act on it:
   `bind_value_product_joint`). So a reroll binds the record's law,
   independent of its operands', to the reroll at each record and reading of
   the operands (`law_reroll`), as `visit_reroll` rerolls every setup by each
-  joint outcome.
+  joint outcome, and an explode binds it to the explode (`law_explode`), as
+  `visit_explode` explodes every setup by each.
 
 That the plan's analysis keeps the law of states such a world, in each world
 of its open splits, is the invariant that these laws serve, proved in
@@ -2310,6 +2311,54 @@ theorem law_reroll {d : Nat} {p : Predicate} {l : Limit}
     State.resolve_set_limit (fun op _ => hrec op)]
   rw [show (s.set (.record d) r).record d = r from State.get_set_self hs' r]
   conv_rhs => rw [← PMF.map_id (reroll r _ _)]
+  refine congrArg (PMF.map · _) (funext fun x => ?_)
+  exact State.get_set_self (ℓ := .record d)
+    ((State.has_set _ _ _ _).mpr hs') x
+
+/--
+An explode writes its record's law, bound independently to the joint law of
+its operands, to the explode at each record and each reading of its operands,
+as `visit_explode` in `propagation.rs` reads them with `read_joint`, resolves
+each joint outcome to a criterion and a limit, and explodes every setup of the
+record by each.
+
+# Parameters
+- `d`: The rolling record.
+- `p`: The predicate.
+- `l`: The limit.
+
+# Hypotheses
+- `hd`: The base has the rolling record.
+- `hops`: The base has the operands' registers.
+-/
+theorem law_explode {d : Nat} {p : Predicate} {l : Limit}
+    (hd : base.Has (.record d))
+    (hops : ∀ ℓ ∈ jointLocations (p.operands ++ l.operands),
+      base.Has ℓ) :
+    ((product base (.record d :: jointLocations (p.operands ++ l.operands))
+        laws).bind (step · (.explode d p l))).map (·.get (.record d)) =
+      (lift Prod.mk (laws (.record d))
+          (jointLaw laws (p.operands ++ l.operands))).bind
+        fun q => explode q.1 (p.resolve q.2) (l.resolve q.2) := by
+  rw [PMF.map_bind, product_cons]
+  simp only [lift, PMF.bind_bind, PMF.bind_map, Function.comp_def]
+  refine congrArg _ (funext fun r => ?_)
+  have hrec : ∀ op : AddressingMode,
+      (Location.record d).isOperand op = false :=
+    fun op => by cases op <;> rfl
+  rw [← bind_value_product_joint (k := fun v => explode r (p.resolve v)
+    (l.resolve v)) (fun v w h => by
+      rw [Predicate.resolve_congr fun op hop =>
+          h op (List.mem_append_left _ hop),
+        Limit.resolve_congr fun op hop =>
+          h op (List.mem_append_right _ hop)]) hops]
+  refine bind_congr_support fun s hs => ?_
+  have hs' : s.Has (.record d) := (has_of_mem_support_product hs _).mpr hd
+  simp only [step, PMF.map_comp,
+    State.resolve_set (fun op _ => hrec op),
+    State.resolve_set_limit (fun op _ => hrec op)]
+  rw [show (s.set (.record d) r).record d = r from State.get_set_self hs' r]
+  conv_rhs => rw [← PMF.map_id (explode r _ _)]
   refine congrArg (PMF.map · _) (funext fun x => ?_)
   exact State.get_set_self (ℓ := .record d)
     ((State.has_set _ _ _ _).mpr hs') x

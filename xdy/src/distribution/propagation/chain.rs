@@ -51,8 +51,16 @@
 //! to the most that any holds, so that every path through the record weighs
 //! the same.
 //!
-//! The Lean specification does not yet model explosion, so nothing here has a
-//! proof; the tests check every law against an independent enumeration.
+//! `lean/spec/XdySpec/Explode.lean` proves the laws of [`burst`], whose tails,
+//! over their padding, are the specification's extension of a chain whose end
+//! an explode matches (`Burst.weighted_chains`), and whose folds total as the
+//! grown chains do (`Burst.weighted_totals`); of [`Roll::explode`] on a range,
+//! dice, or i.i.d. chains none of which has been dropped; of
+//! [`Roll::saturate`]; and of [`Roll::collapse`] of i.i.d. chains
+//! (`Setup.law_burst`). The explodes of chains after a drop, or of fixed
+//! results, a pool, or stacks, the deferred laws of stacks, and the rerolls of
+//! chains have no proof yet; the tests check every law against an independent
+//! enumeration.
 
 use std::{
 	cmp::Ordering,
@@ -79,6 +87,11 @@ use crate::{Criterion, Weight};
 /// next, from there, and so saturates at most once, at `i32::MAX`. The parts
 /// of a union of values are the sums of their parts, clamped, so folds form a
 /// monoid, and the total of the union never needs the values themselves.
+///
+/// # Notes
+/// `Fold.add_ofList`, in `lean/spec/XdySpec/Explode.lean`, proves that the
+/// fold of a union is the union of the folds, and `Fold.total_ofList` that the
+/// total of a fold is the saturating sum of its values in ascending order.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct Fold
 {
@@ -512,6 +525,13 @@ pub(super) fn burst<'c>(
 ///
 /// # Errors
 /// [`Halt`] if the program would exceed the budget or is cancelled.
+///
+/// # Notes
+/// `growths`, in `lean/spec/XdySpec/Explode.lean`, mirrors the program,
+/// depth first rather than stage by stage; `sum_growths` proves that the ways
+/// weigh `Fⁿ` in all, and `weighted_growths` and `extension_eq_growthLaw`
+/// that, over their weights, they are the specification's extension of a
+/// chain. `growthLaw_folds` proves that the folds are those of the tails.
 #[allow(clippy::too_many_arguments)]
 fn extensions<S, K>(
 	faces: &[(i32, Weight)],

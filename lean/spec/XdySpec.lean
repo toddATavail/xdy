@@ -1,6 +1,7 @@
 import XdySpec.Conditioning
 import XdySpec.Convolution
 import XdySpec.Cost
+import XdySpec.Explode
 import XdySpec.Forward
 import XdySpec.Ghost
 import XdySpec.Invariant
