@@ -16,9 +16,16 @@ laws of the explodes that transform them:
 - The kept chains of every record that a roll fills, as a multiset, have the
   law of the roll's multisets of chains (`Roll.stacks`), over their weights
   (`Roll.map_keptChains_law`): of i.i.d. chains, independent draws of the law
-  of each (`Outcomes.weighted_outcomeStates`); of stacks whose chains are
-  still themselves, their pool; and of any other roll, its outcomes, each
-  result the chain of one die.
+  of each (`Outcomes.weighted_outcomeStates`); of stacks, their joins, which
+  draw each copy of each chain of each multiset of the pool from what it has
+  become, weighing each multiset by the branches of those draws
+  (`weighted_joined`), so that the joins that `joined` defers until a drop
+  or a split needs them are the eager ones; and of any other roll, its
+  outcomes, each result the chain of one die.
+- Stacks reduced to their totals (`joinedTotals`), as `Roll::collapse` reduces
+  them, leave the results of the records that they fill, as a multiset
+  (`Roll.map_results_collapse`), and so the records of a setup as every later
+  drop, keep, and sum views them.
 - Dropping chains from a record that drops none keeps the window of its kept
   chains (`Record.keptChains_drops`, in `XdySpec/Explode.lean`), and the window
   of normal chains sorted by `Xdy.Chain.le` depends only on their multiset,
@@ -62,10 +69,10 @@ laws of the explodes that transform them:
   a well-formed setup with faces, grounded if it keeps its chains whole and
   leaves no stacks (`Setup.reroll_invariants`).
 - The proofs ask that the roll be well formed, that its chains be normal, and
-  its results lie within the `i32` range (`Roll.Normal`), and that stacks hold
-  no law of what their chains have become (`Roll.Joined`), which the deferred
-  laws of stacks are left to later proofs to lift; the explodes and rerolls
-  ask that the setup be grounded (`Setup.Grounded`), and so hold no stacks.
+  its results lie within the `i32` range (`Roll.Normal`); the explodes and
+  rerolls ask that the setup be grounded (`Setup.Grounded`), and so hold no
+  stacks: the rerolls and explodes of stacks none of whose chains has been
+  dropped, which compose the laws that they defer, are left to later proofs.
 
 ```mermaid
 flowchart TD
@@ -150,6 +157,75 @@ theorem weighted_scale {α : Type} [DecidableEq α] (d : α)
       fun a => PMF.map_const _ a
     rw [h]
     simp only [hc, PMF.bind_pure]
+
+/--
+Weighted values that list, for each outer value, the inner values that it
+leads to, each weighed by the outer value's weight and its own, are the outer
+values, each weighed by its weight times the total of its inner values,
+followed by the inner: the law of joined stacks, whose multisets `joined` in
+`propagation/chain.rs` weighs by their branches times those of the draws of
+their chains, which need not weigh alike.
+
+# Type parameters
+- `α`: The type of the outer values.
+- `β`: The type of the inner values.
+- `γ`: The type of the values that they lead to.
+
+# Parameters
+- `d`, `d₀`, `dh`: The defaults of the flattened, outer, and inner values.
+- `l`: The outer values, each with its weight.
+- `h`: The inner values of each outer value, each with its weight.
+- `f`: The value that each outer and inner value lead to.
+
+# Hypotheses
+- `hl`: The outer values, each weighed by its weight times the total of its
+  inner values, weigh something.
+-/
+theorem weighted_flatMap_sum {α β γ : Type} [DecidableEq γ] (d : γ) (d₀ : α)
+    (dh : α → β) (l : List (α × Nat)) (h : α → List (β × Nat))
+    (f : α → β → γ)
+    (hl : ((l.map fun e => (e.1, e.2 * ((h e.1).map (·.2)).sum)).map
+      (·.2)).sum ≠ 0) :
+    weighted d (l.flatMap fun e =>
+        (h e.1).map fun o => (f e.1 o.1, e.2 * o.2)) =
+      (weighted d₀ (l.map fun e => (e.1, e.2 * ((h e.1).map (·.2)).sum))).bind
+        fun a => (weighted (dh a) (h a)).map (f a) := by
+  have hsum : ∀ {δ M : Type} [AddMonoid M] (l : List δ) (g : δ → List M),
+      (l.flatMap g).sum = (l.map fun e => (g e).sum).sum := by
+    intro δ M _ l g
+    induction l with
+    | nil => rfl
+    | cons a l ih => simp [List.flatMap_cons, ih]
+  -- The total of the flattened weights.
+  have htot : ((l.flatMap fun e =>
+      (h e.1).map fun o => (f e.1 o.1, e.2 * o.2)).map (·.2)).sum =
+        ((l.map fun e => (e.1, e.2 * ((h e.1).map (·.2)).sum)).map
+          (·.2)).sum := by
+    rw [List.map_flatMap, hsum]
+    simp only [List.map_map, Function.comp_def]
+    refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+    exact List.sum_map_mul_left _ _ _
+  ext z
+  rw [weighted_apply d _ (htot ▸ hl), htot, PMF.bind_apply,
+    Outcomes.tsum_weighted d₀ _ hl]
+  congr 1
+  rw [List.map_flatMap, hsum]
+  simp only [List.map_map, Function.comp_def]
+  refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+  -- Each outer value's share.
+  by_cases hS : ((h e.1).map (·.2)).sum = 0
+  · have hz : ∀ o ∈ h e.1, o.2 = 0 := fun o ho =>
+      List.sum_eq_zero_iff.mp hS o.2 (List.mem_map_of_mem ho)
+    rw [hS, mul_zero, Nat.cast_zero, zero_mul]
+    refine List.sum_eq_zero fun x hx => ?_
+    obtain ⟨o, ho, rfl⟩ := List.mem_map.mp hx
+    simp [hz o ho]
+  rw [Outcomes.map_apply_eq_tsum, Outcomes.tsum_weighted _ _ hS, Nat.cast_mul,
+    mul_assoc, ENNReal.mul_div_cancel (Nat.cast_ne_zero.mpr hS)
+      (ENNReal.natCast_ne_top _), ← List.sum_map_mul_left]
+  refine congrArg List.sum (List.map_congr_left fun o _ => ?_)
+  push_cast
+  split_ifs <;> ring
 
 /-! ## Multisets of any faces -/
 
@@ -749,6 +825,182 @@ theorem mem_slice {ms : List (Chain × Nat)} {lowest highest : Nat}
   exact ⟨hx', List.count_pos_iff.mpr hx⟩
 
 /--
+The branches of the draws that a multiset of chains joins, each copy of each
+chain drawn from the law of what it becomes: the total weight of the law of
+each copy, multiplied, as `transform_pool` in `propagation/chain.rs`
+multiplies the weights of the draws that it joins.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `becomes`: The law of what a chain becomes, and its kept dice.
+- `ms`: The multiset, each distinct chain with its copies.
+
+# Returns
+The branches.
+
+# Examples
+```lean
+#guard drawWeight (fun _ => ([((0 : Int), 2), (1, 1)], 0))
+  [(.single 1, 2), (.single 2, 1)] == 27
+```
+-/
+def drawWeight {T : Type} (becomes : Chain → List (T × Nat) × Nat)
+    (ms : List (Chain × Nat)) : Nat :=
+  (ms.map fun g => (((becomes g.1).1.map (·.2)).sum) ^ g.2).prod
+
+/-- The branches of the draws of a multiset are those of each of its chains,
+copied. -/
+private theorem drawWeight_eq_prod {T : Type}
+    (becomes : Chain → List (T × Nat) × Nat) :
+    ∀ ms : List (Chain × Nat), drawWeight becomes ms =
+      ((Roll.expand ms).map fun ch => ((becomes ch).1.map (·.2)).sum).prod
+  | [] => rfl
+  | g :: ms => by
+    have ih := drawWeight_eq_prod becomes ms
+    simp only [drawWeight, Roll.expand, List.map_cons, List.prod_cons,
+      List.flatMap_cons, List.map_append, List.prod_append, List.map_replicate,
+      List.prod_replicate] at ih ⊢
+    rw [ih]
+
+/-- The branches of the draws of a multiset do not depend on the order of its
+chains. -/
+private theorem drawWeight_perm {T : Type}
+    (becomes : Chain → List (T × Nat) × Nat) {ms ms' : List (Chain × Nat)}
+    (h : (Roll.expand ms).Perm (Roll.expand ms')) :
+    drawWeight becomes ms = drawWeight becomes ms' := by
+  rw [drawWeight_eq_prod, drawWeight_eq_prod]
+  exact (h.map _).prod_eq
+
+/-- A slice that drops nothing keeps every chain. -/
+private theorem expand_slice_zero (ms : List (Chain × Nat)) :
+    (Roll.expand (slice ms 0 0)).Perm (Roll.expand ms) := by
+  simp only [slice, List.drop_zero, Nat.sub_zero]
+  rw [List.take_of_length_le (by rw [List.length_mergeSort])]
+  exact (expand_group_perm _).trans (List.mergeSort_perm _ _)
+
+/-- The multisets of joined groups weigh those so far times the branches of
+the draws of the groups. -/
+private theorem sum_joinGroups_draws {T : Type}
+    (becomes : Chain → List (T × Nat) × Nat) :
+    ∀ (groups : List (Chain × Nat)) (init : List (List (T × Nat) × Nat)),
+      ((joinGroups becomes groups init).map (·.2)).sum =
+        (init.map (·.2)).sum * drawWeight becomes groups
+  | [], init => by simp [joinGroups, drawWeight]
+  | g :: groups, init => by
+    rw [joinGroups_cons, sum_joinGroups_draws becomes groups]
+    have hstep : ((init.flatMap fun e =>
+        (multisets (becomes g.1).1 g.2).map fun o =>
+          (e.1 ++ o.1, e.2 * o.2)).map (·.2)).sum =
+        (init.map (·.2)).sum * ((becomes g.1).1.map (·.2)).sum ^ g.2 := by
+      rw [← sum_multisets, List.map_flatMap, sum_flatMap_nat,
+        ← List.sum_map_mul_right]
+      refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+      simp only [List.map_map, Function.comp_def]
+      exact List.sum_map_mul_left _ _ _
+    rw [hstep]
+    simp only [drawWeight, List.map_cons, List.prod_cons]
+    ring
+
+/--
+A pool transformed without drops or padding, over its weights, is each
+multiset of the pool, weighed by its weight times the branches of the draws
+of its chains (`drawWeight`), each copy of each chain drawn independently from
+the law of what it becomes, as `transform_pool` in `propagation/chain.rs`
+joins them for `joined` and `joined_totals`, whose laws need not weigh alike.
+
+# Type parameters
+- `T`: The type of what a chain becomes: a chain, or a total.
+
+# Parameters
+- `d`, `d₀`: The multisets if no weight were positive.
+- `dc`: What a chain becomes if no weight of its law were positive.
+- `outcomes`: The multisets of the chains, each with its branches.
+- `becomes`: The law of what a chain becomes, and its kept dice.
+
+# Hypotheses
+- `hl`: The multisets, so weighed, weigh something.
+-/
+theorem weighted_transformPool_one {T : Type} [DecidableEq T]
+    (d : List (T × Nat)) (d₀ : List (Chain × Nat)) (dc : Chain → T)
+    (outcomes : List (List (Chain × Nat) × Nat))
+    (becomes : Chain → List (T × Nat) × Nat)
+    (hl : ((outcomes.map fun e => (e.1, e.2 * drawWeight becomes e.1)).map
+      (·.2)).sum ≠ 0) :
+    (weighted d (transformPool outcomes 0 0 1 becomes)).map
+        (fun ms => (Roll.expand ms : Multiset T)) =
+      (weighted d₀ (outcomes.map fun e =>
+          (e.1, e.2 * drawWeight becomes e.1))).bind fun ms =>
+        bagDraws (fun ch => weighted (dc ch) (becomes ch).1)
+          (Roll.expand ms) := by
+  let J : List (Chain × Nat) → List (List (T × Nat) × Nat) := fun ms =>
+    joinGroups becomes (slice ms 0 0) [([], 1)]
+  have hJ : ∀ ms, ((J ms).map (·.2)).sum = drawWeight becomes ms := fun ms => by
+    show ((joinGroups becomes (slice ms 0 0) [([], 1)]).map (·.2)).sum = _
+    simp only [sum_joinGroups_draws, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil, add_zero, one_mul]
+    exact drawWeight_perm becomes (expand_slice_zero ms)
+  have hout : (outcomes.map fun e => (e.1, e.2 * ((J e.1).map (·.2)).sum)) =
+      outcomes.map fun e => (e.1, e.2 * drawWeight becomes e.1) :=
+    List.map_congr_left fun e _ => by rw [hJ]
+  have h := weighted_flatMap_sum d d₀ (fun _ => []) outcomes J (fun _ o => o)
+    (hout ▸ hl)
+  rw [hout] at h
+  rw [transformPool_eq]
+  simp only [one_pow, mul_one]
+  rw [show (outcomes.flatMap fun e =>
+      (joinGroups becomes (slice e.1 0 0) [([], 1)]).map fun o =>
+        (o.1, e.2 * o.2)) = outcomes.flatMap fun e =>
+      (J e.1).map fun o => ((fun _ o => o) e.1 o.1, e.2 * o.2) from rfl,
+    h, PMF.map_bind]
+  refine bind_congr_support fun ms hms => ?_
+  obtain ⟨e', he', rfl, he0⟩ := exists_pos_of_mem_support_weighted hl hms
+  obtain ⟨e, _, rfl⟩ := List.mem_map.mp he'
+  have hW : drawWeight becomes e.1 ≠ 0 := fun h0 => he0 (by simp [h0])
+  rw [drawWeight_eq_prod] at hW
+  rw [show (fun o : List (T × Nat) => o) = id from rfl, PMF.map_id,
+    weighted_joinGroups becomes dc _ _ _ [] (by simp) fun g hg h0 => by
+      obtain ⟨hg1, _⟩ := mem_slice hg
+      exact hW (List.prod_eq_zero (List.mem_map.mpr
+        ⟨g.1, hg1, h0⟩)),
+    weighted_single [] [] one_ne_zero, PMF.pure_bind]
+  simp only [Roll.expand, List.flatMap_nil, Multiset.coe_nil, zero_add]
+  exact (PMF.map_id _).trans (bagDraws_perm _ (expand_slice_zero e.1))
+
+/-- A pool transformed without drops or padding weighs each multiset of the
+pool by its weight times the branches of the draws of its chains. -/
+private theorem sum_transformPool_one {T : Type}
+    (outcomes : List (List (Chain × Nat) × Nat))
+    (becomes : Chain → List (T × Nat) × Nat) :
+    ((transformPool outcomes 0 0 1 becomes).map (·.2)).sum =
+      ((outcomes.map fun e => (e.1, e.2 * drawWeight becomes e.1)).map
+        (·.2)).sum := by
+  rw [transformPool_eq]
+  simp only [one_pow, mul_one, List.map_flatMap, sum_flatMap_nat, List.map_map,
+    Function.comp_def]
+  refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+  rw [List.sum_map_mul_left, sum_joinGroups_draws,
+    drawWeight_perm _ (expand_slice_zero e.1)]
+  simp
+
+/-- Every multiset of a pool transformed without drops or padding, by laws
+each of whose values weighs something, holds as many values as some multiset
+of the pool holds chains, and weighs something if that multiset does. -/
+private theorem transformPool_one_props {T : Type}
+    {outcomes : List (List (Chain × Nat) × Nat)}
+    {becomes : Chain → List (T × Nat) × Nat} {o : List (T × Nat) × Nat}
+    (hpos : ∀ ch, ∀ v ∈ (becomes ch).1, 0 < v.2)
+    (ho : o ∈ transformPool outcomes 0 0 1 becomes) :
+    ∃ e ∈ outcomes, (o.1.map (·.2)).sum = (e.1.map (·.2)).sum ∧
+      (0 < e.2 → 0 < o.2) := by
+  obtain ⟨e, he, o', ho', h1, m, h2⟩ := mem_transformPool ho
+  obtain ⟨hc, hp⟩ := joinGroups_props becomes 0 _ [([], 1)] (by simp)
+    (fun g _ => hpos g.1) o' ho'
+  rw [h1, h2, one_pow, mul_one, hc, count_slice]
+  exact ⟨e, he, by simp, fun h => Nat.mul_pos h hp⟩
+
+/--
 Draws of what each value becomes, each mapped, are draws of the mapped laws.
 
 # Parameters
@@ -874,6 +1126,303 @@ theorem map_coe_stackDraws (laws : List (Chain × List (Chain × Nat))) :
     simp only [lift, PMF.bind_map, PMF.map_comp, Function.comp_def,
       ← Multiset.coe_add]
 
+/-- The branches that the laws of stacks add to a multiset are those of the
+draws that `joined` joins. -/
+private theorem stackWeight_eq_drawWeight
+    (laws : List (Chain × List (Chain × Nat))) (ms : List (Chain × Nat)) :
+    stackWeight laws ms =
+      drawWeight (fun ch => ((laws.lookup ch).getD [(ch, 1)], 0)) ms := by
+  simp only [stackWeight, drawWeight]
+  refine congrArg List.prod (List.map_congr_left fun p _ => ?_)
+  cases laws.lookup p.1 <;> simp
+
+/--
+Joined stacks, over their weights, are the law of the chains of the stacks,
+as a multiset: each multiset of the pool, weighed by its weight times the
+branches that the laws of what its chains have become add to it
+(`stackWeight`), each copy of each chain drawn independently from what it has
+become (`became`). So the deferred joins of stacks, which `joined` in
+`propagation/chain.rs` performs only when a drop or a split needs them, are
+the eager ones.
+
+# Parameters
+- `d₀`: The multiset if no weight were positive.
+- `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become.
+
+# Hypotheses
+- `hl`: The multisets, so weighed, weigh something.
+-/
+theorem weighted_joined (d₀ : List (Chain × Nat))
+    (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat)))
+    (hl : ((pool.map fun e => (e.1, e.2 * stackWeight laws e.1)).map
+      (·.2)).sum ≠ 0) :
+    (weighted [] (joined pool laws)).map
+        (fun ms => (Roll.expand ms : Multiset Chain)) =
+      (weighted d₀ (pool.map fun e => (e.1, e.2 * stackWeight laws e.1))).bind
+        fun ms => bagDraws (became laws) (Roll.expand ms) := by
+  unfold joined
+  split
+  · rename_i he
+    have hnil : laws = [] := List.isEmpty_iff.mp he
+    subst hnil
+    simp only [stackWeight_nil, mul_one] at hl ⊢
+    have hp : (pool.map fun e => (e.1, e.2)) = pool := by simp
+    rw [hp] at hl ⊢
+    rw [weighted_congr_default d₀ [] hl, ← PMF.bind_pure_comp]
+    refine congrArg _ (funext fun ms => ?_)
+    exact (bagDraws_pure fun x _ => rfl).symm
+  · simp only [stackWeight_eq_drawWeight] at hl ⊢
+    rw [weighted_transformPool_one [] d₀ id pool _ hl]
+    refine congrArg _ (funext fun ms => bagDraws_congr fun ch _ => ?_)
+    simp only [became, id]
+    cases laws.lookup ch with
+    | some law => rfl
+    | none => exact weighted_single ch ch one_ne_zero
+
+/-- A key that a list of keys, each with its value, gives a value is among
+them, with that value. -/
+private theorem mem_of_lookup {β : Type} :
+    ∀ {l : List (Chain × β)} {x : Chain} {v : β}, l.lookup x = some v →
+      (x, v) ∈ l
+  | [], _, _, h => by cases h
+  | (y, w) :: l, x, v, h => by
+    by_cases hxy : x = y
+    · subst hxy
+      simp only [List.lookup, beq_self_eq_true, Option.some.injEq] at h
+      subst h
+      exact List.mem_cons_self
+    · have hb : (x == y) = false := by simpa using hxy
+      simp only [List.lookup, hb] at h
+      exact List.mem_cons_of_mem _ (mem_of_lookup h)
+
+/-- A multiset of stacks whose laws each hold a chain, each of positive
+weight, gains some branches from them. -/
+theorem stackWeight_ne_zero {laws : List (Chain × List (Chain × Nat))}
+    (hlaws : ∀ e ∈ laws, e.2 ≠ [] ∧ ∀ p ∈ e.2, 0 < p.2)
+    (ms : List (Chain × Nat)) : stackWeight laws ms ≠ 0 := by
+  rw [stackWeight_eq_drawWeight, drawWeight, Ne, List.prod_eq_zero_iff]
+  simp only [List.mem_map, not_exists, not_and]
+  intro p _ h0
+  have hb := pow_eq_zero_iff'.mp h0 |>.1
+  cases hl : laws.lookup p.1 with
+  | none => simp [hl] at hb
+  | some law =>
+    simp only [hl, Option.getD_some] at hb
+    obtain ⟨hne, hpos⟩ := hlaws _ (mem_of_lookup hl)
+    obtain ⟨q, hq⟩ := List.exists_mem_of_ne_nil _ hne
+    have := List.sum_eq_zero_iff.mp hb q.2 (List.mem_map_of_mem hq)
+    exact (hpos q hq).ne' this
+
+/-- The multisets of well-formed stacks, each weighed by its weight times the
+branches that their laws add to it, weigh something. -/
+private theorem sum_stackWeights_ne_zero
+    {ms : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))}
+    (hρ : (Roll.stacked ms laws).WellFormed) :
+    ((ms.map fun e => (e.1, e.2 * stackWeight laws e.1)).map (·.2)).sum ≠ 0 := by
+  obtain ⟨hne, hpos, _, hlaws⟩ := hρ
+  obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ hne
+  intro h0
+  have := List.sum_eq_zero_iff.mp h0 (e.2 * stackWeight laws e.1)
+    (List.mem_map.mpr ⟨_, List.mem_map.mpr ⟨e, he, rfl⟩, rfl⟩)
+  exact mul_ne_zero (hpos e he).2.ne' (stackWeight_ne_zero hlaws e.1) this
+
+/-- Joined stacks weigh their multisets, each weighed by its weight times the
+branches that their laws add to it. -/
+private theorem sum_joined (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat))) :
+    ((joined pool laws).map (·.2)).sum =
+      ((pool.map fun e => (e.1, e.2 * stackWeight laws e.1)).map (·.2)).sum := by
+  unfold joined
+  split
+  · rename_i he
+    rw [List.isEmpty_iff.mp he]
+    simp
+  · rw [transformPool_eq]
+    simp only [one_pow, mul_one, List.map_flatMap, sum_flatMap_nat, List.map_map,
+      Function.comp_def]
+    refine congrArg List.sum (List.map_congr_left fun e _ => ?_)
+    rw [List.sum_map_mul_left, sum_joinGroups_draws, stackWeight_eq_drawWeight,
+      drawWeight_perm _ (expand_slice_zero e.1)]
+    simp
+
+/-- Every value of every multiset of joined groups is one of the multisets so
+far, or what some chain of the groups may become. -/
+private theorem joinGroups_mem {T : Type}
+    (becomes : Chain → List (T × Nat) × Nat) (P : T → Prop) :
+    ∀ (groups : List (Chain × Nat)) (init : List (List (T × Nat) × Nat)),
+      (∀ e ∈ init, ∀ p ∈ e.1, P p.1) →
+      (∀ g ∈ groups, ∀ q ∈ (becomes g.1).1, P q.1) →
+      ∀ o ∈ joinGroups becomes groups init, ∀ p ∈ o.1, P p.1
+  | [], init, hi, _, o, ho => hi o ho
+  | g :: groups, init, hi, hg, o, ho => by
+    rw [joinGroups_cons] at ho
+    refine joinGroups_mem becomes P groups _ (fun e he p hp => ?_)
+      (fun g' hg' => hg g' (List.mem_cons_of_mem _ hg')) o ho
+    simp only [List.mem_flatMap, List.mem_map] at he
+    obtain ⟨e', he', o', ho', rfl⟩ := he
+    rcases List.mem_append.mp hp with hp | hp
+    · exact hi e' he' p hp
+    · obtain ⟨q, hq, hqp⟩ := mem_multisets _ _ _ ho' p hp
+      exact hqp ▸ hg g List.mem_cons_self q hq
+
+/--
+Every multiset of joined stacks joins draws of what the chains of some
+multiset of the pool have become: each of its chains is a chain of the law of
+what some chain of the multiset has become, and, if every chain of every law
+weighs something, it holds as many chains as the multiset, and weighs
+something if the multiset does.
+
+# Parameters
+- `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become.
+- `e`: A multiset of the joined stacks, with its branches.
+
+# Hypotheses
+- `he`: `e` is a multiset of the joined stacks.
+-/
+theorem mem_joined {pool : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))} {e : List (Chain × Nat) × Nat}
+    (he : e ∈ joined pool laws) :
+    ∃ e' ∈ pool, (∀ p ∈ e.1, ∃ q ∈ e'.1,
+        ∃ r ∈ (laws.lookup q.1).getD [(q.1, 1)], r.1 = p.1) ∧
+      ((∀ l ∈ laws, ∀ r ∈ l.2, 0 < r.2) →
+        (e.1.map (·.2)).sum = (e'.1.map (·.2)).sum ∧ (0 < e'.2 → 0 < e.2)) := by
+  unfold joined at he
+  split at he
+  · rename_i hl
+    rw [List.isEmpty_iff.mp hl]
+    exact ⟨e, he, fun p hp => ⟨p, hp, (p.1, 1), by simp, rfl⟩,
+      fun _ => ⟨rfl, id⟩⟩
+  · obtain ⟨e', he', o', ho', h1, m, h2⟩ := mem_transformPool he
+    let J : Chain → List (Chain × Nat) × Nat := fun ch =>
+      ((laws.lookup ch).getD [(ch, 1)], 0)
+    have hJ : ∀ (hl : ∀ l ∈ laws, ∀ r ∈ l.2, 0 < r.2),
+        ∀ g ∈ slice e'.1 0 0, ∀ o ∈ (J g.1).1, 0 < o.2 := fun hl g _ o ho => by
+      cases hg : laws.lookup g.1 with
+      | none =>
+        simp only [J, hg, Option.getD_none, List.mem_singleton] at ho
+        subst ho
+        exact Nat.one_pos
+      | some l =>
+        simp only [J, hg, Option.getD_some] at ho
+        exact hl _ (mem_of_lookup hg) o ho
+    refine ⟨e', he', fun p hp => ?_, fun hl => ?_⟩
+    · rw [h1] at hp
+      refine joinGroups_mem J (fun x => ∃ q ∈ e'.1,
+        ∃ r ∈ (laws.lookup q.1).getD [(q.1, 1)], r.1 = x) _ _ (by simp)
+        (fun g hg r hr => ?_) o' ho' p hp
+      obtain ⟨hg1, _⟩ := mem_slice hg
+      obtain ⟨q, hq, hqg⟩ := List.mem_flatMap.mp hg1
+      have hr' : r ∈ (laws.lookup g.1).getD [(g.1, 1)] := hr
+      rw [List.eq_of_mem_replicate hqg] at hr'
+      exact ⟨q, hq, r, hr', rfl⟩
+    · obtain ⟨hc, hpos⟩ := joinGroups_props J 0 _ [([], 1)] (by simp)
+        (hJ hl) o' ho'
+      rw [h1, h2, one_pow, mul_one, hc, count_slice]
+      exact ⟨by simp, fun hp => Nat.mul_pos hp hpos⟩
+
+/-- The results of a record of chains, as a multiset, are their totals. -/
+private theorem results_ofChains (die : Die) (cs : List Chain) :
+    ((Record.ofChains die cs).results : Multiset Int) = cs.map Chain.total := by
+  obtain ⟨_, hl, hh, _⟩ := Record.ofChains_fields die cs
+  rw [← kept_ofChains die cs, Record.kept, hl, hh, List.drop_zero,
+    Nat.sub_zero, Nat.sub_zero, show (Record.ofChains die cs).results.length =
+      (Record.ofChains die cs).sorted.length from
+        (List.length_mergeSort _).symm, List.take_length]
+  exact Multiset.coe_eq_coe.mpr (List.mergeSort_perm _ _).symm
+
+/-- The multisets of the totals of well-formed stacks weigh something, and
+each holds as many totals as the stacks hold chains, and weighs something. -/
+private theorem joinedTotals_props {ms : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))}
+    (hρ : (Roll.stacked ms laws).WellFormed) :
+    ((joinedTotals ms laws).map (·.2)).sum ≠ 0 ∧
+      ∀ o ∈ joinedTotals ms laws,
+        (o.1.map (·.2)).sum = (Roll.stacked ms laws).results ∧ 0 < o.2 := by
+  have hW := sum_stackWeights_ne_zero hρ
+  obtain ⟨_, hpos, heven, hlaws⟩ := hρ
+  refine ⟨?_, fun o ho => ?_⟩
+  · rw [joinedTotals, sum_transformPool_one]
+    refine ne_of_eq_of_ne (congrArg List.sum
+      (congrArg (List.map fun e : List (Chain × Nat) × Nat => e.2)
+        (List.map_congr_left fun e _ => ?_))) hW
+    rw [stackWeight_eq_drawWeight]
+    simp [drawWeight, Function.comp_def]
+  · obtain ⟨e, he, hc, hp⟩ := transformPool_one_props (fun ch v hv => by
+      obtain ⟨r, hr, rfl⟩ := List.mem_map.mp hv
+      cases hl : laws.lookup ch with
+      | none =>
+        simp only [hl, Option.getD_none, List.mem_singleton] at hr
+        subst hr
+        exact Nat.one_pos
+      | some law =>
+        simp only [hl, Option.getD_some] at hr
+        exact (hlaws _ (mem_of_lookup hl)).2 r hr) ho
+    exact ⟨hc.trans (heven e he), hp (hpos e he).2⟩
+
+/--
+Reducing stacks to a pool of the multisets of their totals, as
+`Roll::collapse` in `propagation/chain.rs` reduces them by `joined_totals`,
+leaves the results of the records that they fill, as a multiset: each draws
+the total of what each copy of each chain of each multiset of the pool has
+become, as the chains themselves draw what each has become.
+
+# Parameters
+- `ms`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become.
+
+# Hypotheses
+- `hρ`: The stacks are well formed.
+-/
+theorem Roll.map_results_collapse {ms : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))}
+    (hρ : (Roll.stacked ms laws).WellFormed) :
+    (Roll.stacked ms laws).collapse.law.map
+        (fun r => (r.results : Multiset Int)) =
+      (Roll.stacked ms laws).law.map fun r => (r.results : Multiset Int) := by
+  let JT : Chain → List (Int × Nat) × Nat := fun ch =>
+    (((laws.lookup ch).getD [(ch, 1)]).map fun e => (e.1.total, e.2), 0)
+  have hdw : ∀ m, drawWeight JT m = stackWeight laws m := fun m => by
+    rw [stackWeight_eq_drawWeight]
+    simp only [drawWeight, JT, List.map_map, Function.comp_def]
+  have hout : (ms.map fun e => (e.1, e.2 * drawWeight JT e.1)) =
+      ms.map fun e => (e.1, e.2 * stackWeight laws e.1) :=
+    List.map_congr_left fun e _ => by rw [hdw]
+  have hW := sum_stackWeights_ne_zero hρ
+  have hJT := (joinedTotals_props hρ).1
+  have hP := weighted_transformPool_one [] ((ms.head?.map (·.1)).getD [])
+    Chain.total ms JT (by rw [hout]; exact hW)
+  rw [hout] at hP
+  -- What each chain totals is the total of what it has become.
+  have hbt : ∀ ch, weighted ch.total (JT ch).1 = (became laws ch).map
+      Chain.total := fun ch => by
+    simp only [JT, became]
+    rw [weighted_map_of]
+    cases laws.lookup ch with
+    | some law => rfl
+    | none => rw [Option.getD_none, weighted_single ch ch one_ne_zero]
+  simp only [Roll.collapse, Roll.law, PMF.map_comp, PMF.map_bind]
+  rw [weighted_congr_default _ (tally (Roll.expand ([] : List (Int × Nat))))
+      (by simpa [Function.comp_def] using hJT),
+    weighted_map ([] : List (Int × Nat)) _ (fun rs => tally (Roll.expand rs))
+      hJT, PMF.map_comp]
+  have hc : (((fun r : Record => (r.results : Multiset Int)) ∘
+      (fun rs => ({ results := Roll.expand rs } : Record))) ∘
+        fun rs => tally (Roll.expand rs)) =
+      fun rs : List (Int × Nat) => (Roll.expand rs : Multiset Int) :=
+    funext fun rs => Multiset.coe_eq_coe.mpr (expand_tally_perm _)
+  rw [hc]
+  change (weighted [] (transformPool ms 0 0 1 JT)).map _ = _
+  rw [hP]
+  refine bind_congr_support fun m _ => ?_
+  rw [bagDraws_congr fun ch _ => hbt ch, ← bagDraws_map_map,
+    ← map_coe_stackDraws, PMF.map_comp]
+  refine congrArg (PMF.map · _) (funext fun cs => ?_)
+  simp only [Function.comp_apply, results_ofChains, Multiset.map_coe]
+
 /-! ## The chains of a roll -/
 
 namespace Roll
@@ -897,20 +1446,36 @@ def Normal : Roll → Prop
     ∀ e ∈ laws, ∀ p ∈ e.2, NormalChain p.1
   | ρ => ∀ r ∈ ρ.law.support, ∀ x ∈ r.results, i32Min ≤ x ∧ x ≤ i32Max
 
-/--
-Whether every chain of a roll's stacks is still itself, as `kept_pool` leaves
-them; every other roll is joined. The deferred laws of stacks are left to
-later proofs.
+/-- Every chain of the law of what a chain of normal stacks has become is
+normal. -/
+private theorem normal_of_mem_lawOf {ms : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))} {e : List (Chain × Nat) × Nat}
+    {q r : Chain × Nat} (hn : (Roll.stacked ms laws).Normal) (he : e ∈ ms)
+    (hq : q ∈ e.1) (hr : r ∈ (laws.lookup q.1).getD [(q.1, 1)]) :
+    NormalChain r.1 := by
+  cases hl : laws.lookup q.1 with
+  | none =>
+    simp only [hl, Option.getD_none, List.mem_singleton] at hr
+    subst hr
+    exact hn.1 e he q hq
+  | some law =>
+    simp only [hl, Option.getD_some] at hr
+    exact hn.2 _ (mem_of_lookup hl) r hr
 
-# Parameters
-- `ρ`: The roll.
-
-# Returns
-Whether the roll is joined.
--/
-def Joined : Roll → Prop
-  | .stacked _ laws => laws = []
-  | _ => True
+/-- Every chain that a normal chain of stacks may have become is normal, if
+every chain of their laws is. -/
+private theorem normal_of_mem_support_became
+    {laws : List (Chain × List (Chain × Nat))} {ch x : Chain}
+    (hl : ∀ e ∈ laws, ∀ p ∈ e.2, NormalChain p.1) (hch : NormalChain ch)
+    (hx : x ∈ (became laws ch).support) : NormalChain x := by
+  unfold became at hx
+  split at hx
+  · rename_i law heq
+    rcases mem_support_weighted hx with ⟨q, hq, rfl⟩ | rfl
+    · exact hl _ (mem_of_lookup heq) q hq
+    · exact hch
+  · rw [PMF.mem_support_pure_iff] at hx
+    exact hx ▸ hch
 
 /-- Draws of one chain each time are copies of it. -/
 private theorem chainDraws_pure' (x : Chain) :
@@ -950,9 +1515,9 @@ private theorem keptChains_plain {r : Record} (hc : r.chains = [])
 /--
 The kept chains of every record that a roll fills, as a multiset, have the law
 of the roll's multisets of chains, over their weights, as `Roll::stacks`
-weighs them: independent draws of the law of each of i.i.d. chains, the pool
-of stacks whose chains are still themselves, or the outcomes of any other
-roll, each result the chain of one die.
+weighs them: independent draws of the law of each of i.i.d. chains, the
+joined stacks, whose deferred joins are the eager ones (`weighted_joined`), or
+the outcomes of any other roll, each result the chain of one die.
 
 # Parameters
 - `ρ`: The roll.
@@ -960,10 +1525,8 @@ roll, each result the chain of one die.
 # Hypotheses
 - `hρ`: The roll is well formed.
 - `hn`: The roll is normal.
-- `hj`: The roll is joined.
 -/
-theorem map_keptChains_law {ρ : Roll} (hρ : ρ.WellFormed) (hn : ρ.Normal)
-    (hj : ρ.Joined) :
+theorem map_keptChains_law {ρ : Roll} (hρ : ρ.WellFormed) (hn : ρ.Normal) :
     ρ.law.map (fun r => (r.keptChains : Multiset Chain)) =
       (weighted [] ρ.stacks).map
         (fun ms => (Roll.expand ms : Multiset Chain)) := by
@@ -1014,30 +1577,28 @@ theorem map_keptChains_law {ρ : Roll} (hρ : ρ.WellFormed) (hn : ρ.Normal)
     · exact hn e he
     · exact ⟨.nil, by simp [i32Min, i32Max]⟩
   | stacked ms laws =>
-    have hl : laws = [] := hj
-    subst hl
-    obtain ⟨hne, hpos, _⟩ := hρ
-    have hW : (ms.map (·.2)).sum ≠ 0 := by
-      obtain ⟨e, es, rfl⟩ := List.exists_cons_of_ne_nil hne
-      have := (hpos e (by simp)).2
-      simp only [List.map_cons, List.sum_cons]
-      omega
-    simp only [law, Roll.stacks, joined, List.isEmpty_nil, ↓reduceIte,
-      stackDraws_nil, PMF.pure_map, PMF.map_bind, stackWeight_nil, mul_one,
-      List.map_id']
-    rw [weighted_congr_default _ [] hW, ← PMF.bind_pure_comp]
+    have hW := sum_stackWeights_ne_zero hρ
+    simp only [law, Roll.stacks, PMF.map_bind]
+    rw [weighted_joined ((ms.head?.map (·.1)).getD []) ms laws hW]
     refine bind_congr_support fun m hm => ?_
-    rw [Function.comp_apply]
-    refine congrArg PMF.pure (keptChains_ofChains _ fun x hx => ?_)
-    obtain ⟨p, hp, hpx⟩ := List.mem_flatMap.mp hx
-    rw [List.eq_of_mem_replicate hpx]
-    rcases mem_support_weighted hm with ⟨e, he, rfl⟩ | rfl
-    · exact hn.1 e he p hp
-    · simp at hp
+    -- Every chain of the multiset is normal.
+    have hm' : ∀ p ∈ m, NormalChain p.1 := by
+      rcases mem_support_weighted hm with ⟨e, he, rfl⟩ | rfl
+      · obtain ⟨e', he', rfl⟩ := List.mem_map.mp he
+        exact hn.1 e' he'
+      · cases ms with
+        | nil => simp
+        | cons e ms => exact hn.1 e List.mem_cons_self
+    rw [PMF.map_comp, ← map_coe_stackDraws]
+    refine map_congr_support fun cs hcs => ?_
+    simp only [Function.comp_apply]
+    refine keptChains_ofChains _ fun x hx => ?_
+    obtain ⟨p, hp, hx⟩ := (mem_support_stackDraws hcs).2 x hx
+    exact normal_of_mem_support_became hn.2 (hm' p hp) hx
 
 /--
-Every chain of every multiset of chains of a well-formed, normal, joined roll
-is normal.
+Every chain of every multiset of chains of a well-formed, normal roll is
+normal.
 
 # Parameters
 - `ρ`: The roll.
@@ -1046,11 +1607,10 @@ is normal.
 # Hypotheses
 - `hρ`: The roll is well formed.
 - `hn`: The roll is normal.
-- `hj`: The roll is joined.
 - `he`: `e` is a multiset of chains of the roll.
 -/
 theorem normal_of_mem_stacks {ρ : Roll} {e : List (Chain × Nat) × Nat}
-    (hρ : ρ.WellFormed) (hn : ρ.Normal) (hj : ρ.Joined) (he : e ∈ ρ.stacks) :
+    (hρ : ρ.WellFormed) (hn : ρ.Normal) (he : e ∈ ρ.stacks) :
     ∀ p ∈ e.1, NormalChain p.1 := by
   have plain : ρ.Plain → ρ.stacks = ρ.outcomes.map fun e =>
       (e.1.map fun p => (Chain.single p.1, p.2), e.2) := fun hp => by
@@ -1081,10 +1641,11 @@ theorem normal_of_mem_stacks {ρ : Roll} {e : List (Chain × Nat) × Nat}
     obtain ⟨q, hq, hqp⟩ := mem_multisets law count.toNat e he p hp
     exact hqp ▸ hn q hq
   | stacked ms laws =>
-    have hl : laws = [] := hj
-    subst hl
-    simp only [Roll.stacks, joined, List.isEmpty_nil, ↓reduceIte] at he
-    exact hn.1 e he
+    intro p hp
+    obtain ⟨e', he', hmem, _⟩ := mem_joined he
+    obtain ⟨q, hq, r, hr, hrp⟩ := hmem p hp
+    rw [← hrp]
+    exact normal_of_mem_lawOf hn he' hq hr
 
 end Roll
 
@@ -1128,8 +1689,8 @@ theorem Roll.length_chains_of_mem_support_law {ρ : Roll} {r : Record}
   | pool => exact plain trivial
 
 /--
-Every kept chain of every record that a well-formed, normal, joined roll
-fills is normal.
+Every kept chain of every record that a well-formed, normal roll fills is
+normal.
 
 # Parameters
 - `ρ`: The roll.
@@ -1138,16 +1699,15 @@ fills is normal.
 # Hypotheses
 - `hw`: The roll is well formed.
 - `hn`: The roll is normal.
-- `hj`: The roll is joined.
 - `hr`: The roll can fill `r`.
 -/
 theorem Roll.normal_of_mem_support_law {ρ : Roll} {r : Record}
-    (hw : ρ.WellFormed) (hn : ρ.Normal) (hj : ρ.Joined)
+    (hw : ρ.WellFormed) (hn : ρ.Normal)
     (hr : r ∈ ρ.law.support) : ∀ ch ∈ r.keptChains, NormalChain ch := by
   have hm : (r.keptChains : Multiset Chain) ∈
       (ρ.law.map fun r => (r.keptChains : Multiset Chain)).support :=
     (PMF.mem_support_map_iff _ _ _).mpr ⟨r, hr, rfl⟩
-  rw [ρ.map_keptChains_law hw hn hj, PMF.mem_support_map_iff] at hm
+  rw [ρ.map_keptChains_law hw hn, PMF.mem_support_map_iff] at hm
   obtain ⟨ms, hms, hcoe⟩ := hm
   intro ch hch
   have hch' : ch ∈ Roll.expand ms := by
@@ -1156,12 +1716,12 @@ theorem Roll.normal_of_mem_support_law {ρ : Roll} {r : Record}
   obtain ⟨p, hp, hpx⟩ := List.mem_flatMap.mp hch'
   rw [List.eq_of_mem_replicate hpx]
   rcases mem_support_weighted hms with ⟨e, he, rfl⟩ | rfl
-  · exact ρ.normal_of_mem_stacks hw hn hj he p hp
+  · exact ρ.normal_of_mem_stacks hw hn he p hp
   · simp at hp
 
 /--
-Every multiset of chains of a well-formed roll but stacks holds as many chains
-as the roll's records hold results, and weighs something.
+Every multiset of chains of a well-formed roll holds as many chains as the
+roll's records hold results, and weighs something.
 
 # Parameters
 - `ρ`: The roll.
@@ -1169,12 +1729,10 @@ as the roll's records hold results, and weighs something.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
-- `hns`: The roll is not stacks.
 - `he`: `e` is a multiset of chains of the roll.
 -/
 theorem Roll.stacks_props {ρ : Roll} {e : List (Chain × Nat) × Nat}
-    (hρ : ρ.WellFormed) (hns : ∀ ms ls, ρ ≠ .stacked ms ls)
-    (he : e ∈ ρ.stacks) : (e.1.map (·.2)).sum = ρ.results ∧ 0 < e.2 := by
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.stacks) : (e.1.map (·.2)).sum = ρ.results ∧ 0 < e.2 := by
   have plain : ρ.Plain → ρ.stacks = ρ.outcomes.map fun e =>
       (e.1.map fun p => (Chain.single p.1, p.2), e.2) := fun hp => by
     cases ρ <;> first | rfl | exact hp.elim
@@ -1192,21 +1750,24 @@ theorem Roll.stacks_props {ρ : Roll} {e : List (Chain × Nat) × Nat}
   | chains count law =>
     obtain ⟨hc, hp⟩ := multisets_props law count.toNat e he
     exact ⟨hc, hp hρ.2⟩
-  | stacked ms ls => exact (hns ms ls rfl).elim
+  | stacked ms ls =>
+    obtain ⟨e', he', _, h⟩ := mem_joined he
+    obtain ⟨_, hpos, heven, hlaws⟩ := hρ
+    obtain ⟨hc, hp⟩ := h fun l hl r hr => (hlaws l hl).2 r hr
+    exact ⟨hc.trans (heven e' he'), hp (hpos e' he').2⟩
   | range | standard | custom | fixed | pool => exact hplain trivial
 
 /--
-The multisets of chains of a well-formed roll but stacks weigh something.
+The multisets of chains of a well-formed roll weigh something.
 
 # Parameters
 - `ρ`: The roll.
 
 # Hypotheses
 - `hρ`: The roll is well formed.
-- `hns`: The roll is not stacks.
 -/
-theorem Roll.sum_stacks_ne_zero {ρ : Roll} (hρ : ρ.WellFormed)
-    (hns : ∀ ms ls, ρ ≠ .stacked ms ls) : (ρ.stacks.map (·.2)).sum ≠ 0 := by
+theorem Roll.sum_stacks_ne_zero {ρ : Roll} (hρ : ρ.WellFormed) :
+    (ρ.stacks.map (·.2)).sum ≠ 0 := by
   cases ρ with
   | chains count law =>
     obtain ⟨hne, hpos⟩ := hρ
@@ -1215,7 +1776,9 @@ theorem Roll.sum_stacks_ne_zero {ρ : Roll} (hρ : ρ.WellFormed)
     obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil _ hne
     have := List.sum_eq_zero_iff.mp h0 e.2 (List.mem_map_of_mem he)
     exact (hpos e he).ne' this
-  | stacked ms ls => exact (hns ms ls rfl).elim
+  | stacked ms ls =>
+    rw [Roll.stacks, sum_joined]
+    exact sum_stackWeights_ne_zero hρ
   | range | standard | custom | fixed | pool =>
     simp only [Roll.stacks, List.map_map, Function.comp_def]
     exact (sum_outcomes _ hρ trivial).2 ∘ ((sum_outcomes _ hρ trivial).1 ▸ ·)
@@ -1239,10 +1802,9 @@ total.
 - `hρ`: The setup has the roll.
 - `hw`: The roll is well formed.
 - `hn`: The roll is normal.
-- `hj`: The roll is joined.
 -/
 theorem map_keptChains_law {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
-    (hw : ρ.WellFormed) (hn : ρ.Normal) (hj : ρ.Joined) :
+    (hw : ρ.WellFormed) (hn : ρ.Normal) :
     s.law.map (fun r => (r.keptChains : Multiset Chain)) =
       (weighted [] (keptPool ρ.stacks s.lowest s.highest)).map
         (fun ms => (Roll.expand ms : Multiset Chain)) := by
@@ -1266,7 +1828,7 @@ theorem map_keptChains_law {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
     refine map_congr_support fun r hr => ?_
     obtain ⟨hl, hh, _⟩ := Roll.mem_support_law_die hr
     have hlen := Roll.length_chains_of_mem_support_law hr
-    have hnr := ρ.normal_of_mem_support_law hw hn hj hr
+    have hnr := ρ.normal_of_mem_support_law hw hn hr
     simp only [Function.comp_apply, G]
     rw [hsort _ (r.keptChains_pairwise hnr) hnr,
       Record.length_keptChains_undropped hl hh hlen,
@@ -1276,14 +1838,14 @@ theorem map_keptChains_law {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ)
       (weighted [] ρ.stacks).map (fun ms => slice ms L H) := by
     rw [← weighted_map_of]
     exact congrArg₂ weighted (by simp [slice, group, Roll.expand]) rfl
-  rw [hlhs, ρ.map_keptChains_law hw hn hj, PMF.map_comp, hk, PMF.map_comp]
+  rw [hlhs, ρ.map_keptChains_law hw hn, PMF.map_comp, hk, PMF.map_comp]
   refine map_congr_support fun ms hms => ?_
   simp only [Function.comp_apply, G]
   have hnm : ∀ c ∈ Roll.expand ms, NormalChain c := fun c hc => by
     obtain ⟨p, hp, hpx⟩ := List.mem_flatMap.mp hc
     rw [List.eq_of_mem_replicate hpx]
     rcases mem_support_weighted hms with ⟨e, he, rfl⟩ | rfl
-    · exact ρ.normal_of_mem_stacks hw hn hj he p hp
+    · exact ρ.normal_of_mem_stacks hw hn he p hp
     · simp at hp
   refine coe_window_slice L H (pairwise_mergeSort_chains _) (fun c hc => ?_) ?_
   · exact hnm c (Multiset.mem_coe.mp
@@ -1296,10 +1858,10 @@ end Setup
 
 namespace Setup
 
-/-- The roll of a grounded setup is normal and joined, and is not stacks. -/
+/-- The roll of a grounded setup is normal, and is not stacks. -/
 private theorem roll_props {s : Setup} {ρ : Roll} (hg : s.Grounded)
     (hρ : s.roll = some ρ) :
-    ρ.Normal ∧ ρ.Joined ∧ ∀ ms ls, ρ ≠ .stacked ms ls := by
+    ρ.Normal ∧ ∀ ms ls, ρ ≠ .stacked ms ls := by
   have hgρ := hg.2 ρ hρ
   -- The results of any other roll are faces of the die.
   have plain : (∀ r ∈ s.law.support, ∀ x ∈ r.results,
@@ -1314,10 +1876,10 @@ private theorem roll_props {s : Setup} {ρ : Roll} (hg : s.Grounded)
       exact hg.1 x (h r' hr' x hx)
   cases ρ with
   | chains count law =>
-    exact ⟨fun e he => (hgρ.2 e he).1, trivial, fun _ _ h => by cases h⟩
+    exact ⟨fun e he => (hgρ.2 e he).1, fun _ _ h => by cases h⟩
   | stacked => exact hgρ.elim
   | range | standard | custom | fixed | pool =>
-    exact ⟨plain hgρ, trivial, fun _ _ h => by cases h⟩
+    exact ⟨plain hgρ, fun _ _ h => by cases h⟩
 
 /-- A setup whose chains are not alike, or have been dropped, explodes the
 multisets of its chains still kept, by a limited explode that matches some
@@ -1365,7 +1927,7 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
   let ext := extension c (customDie s.replacement.faces) (n + 1)
   let K : Chain → PMF Chain := fun ch =>
     if ch.grows c then ext.map (growChain ch) else PMF.pure ch
-  obtain ⟨hn, hj, hns⟩ := roll_props hg hρ
+  obtain ⟨hn, hns⟩ := roll_props hg hρ
   have hw := hs ρ hρ
   have hexp := explode_multisets (n := n) (c := c) hρ hk hm hna hns
   -- The specification explodes each record's kept chains independently.
@@ -1397,8 +1959,8 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
       simp only [Record.chainView, keptChains_ofChains _ hn,
         (Record.ofChains_fields _ _).2.2.2]
   set kp := keptPool ρ.stacks s.lowest s.highest with hkp
-  have hkc := map_keptChains_law hρ hw hn hj
-  have hWs := Roll.sum_stacks_ne_zero hw hns
+  have hkc := map_keptChains_law hρ hw hn
+  have hWs := Roll.sum_stacks_ne_zero hw
   have hW : (kp.map (·.2)).sum ≠ 0 := by
     simpa [hkp, keptPool, Function.comp_def] using hWs
   -- Every chain still kept of the pool is a normal chain of faces of the die.
@@ -1493,7 +2055,7 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
             Option.getD_some, bc, Burst.sum_chains hm]
         · simp only [hkp, keptPool, List.mem_map] at he
           obtain ⟨e', he', rfl⟩ := he
-          rw [count_slice, (Roll.stacks_props hw hns he').1],
+          rw [count_slice, (Roll.stacks_props hw he').1],
         weighted_congr_default _ [] hW]
     simp only [↓reduceIte]
     rw [hlaw, hspec' Record.chainView (fun M => (M, s.replacement))
@@ -1531,7 +2093,7 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
     have hkT : ∀ e ∈ ρ.stacks, e.2 ≠ 0 →
         ((slice e.1 s.lowest s.highest).map (·.2)).sum =
           ρ.results - s.lowest - s.highest := fun e he _ => by
-      rw [count_slice, (Roll.stacks_props hw hns he).1]
+      rw [count_slice, (Roll.stacks_props hw he).1]
     have hFn : s.replacement.faces.length ^ (n + 1) ≠ 0 :=
       pow_ne_zero _ (by simpa using hF)
     have hT := sum_transformPool_ne_zero ρ.stacks s.lowest s.highest 1
@@ -1688,15 +2250,15 @@ theorem burst_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
   by_cases ha : s.ExtendsAlike c limit
   · exact burst_invariants_alike c limit whole hs hg hfaced ha
   obtain ⟨ρ, n, hρ, rfl, hk, hm, hna⟩ := extends_multisets ha
-  obtain ⟨_, _, hns⟩ := roll_props hg hρ
+  obtain ⟨_, hns⟩ := roll_props hg hρ
   have hw := hs ρ hρ
   have hexp := explode_multisets (n := n) (c := c) hρ hk hm hna hns
-  have hWs := Roll.sum_stacks_ne_zero hw hns
+  have hWs := Roll.sum_stacks_ne_zero hw
   -- Every multiset of chains keeps as many chains, and weighs something.
   have hkept : ∀ e ∈ ρ.stacks,
       ((slice e.1 s.lowest s.highest).map (·.2)).sum =
         ρ.results - s.lowest - s.highest ∧ 0 < e.2 := fun e he => by
-    obtain ⟨hc, hp⟩ := Roll.stacks_props hw hns he
+    obtain ⟨hc, hp⟩ := Roll.stacks_props hw he
     exact ⟨by rw [count_slice, hc], hp⟩
   cases whole with
   | true =>
@@ -2900,12 +3462,9 @@ private theorem rerolls_whole_dropped {s : Setup} {c : Criterion}
   have hw := hs ρ hρ
   have hgρ := (hg.2 _ hρ).2
   have hn : ρ.Normal := fun e he => (hgρ e he).1
-  have hns : ∀ ms ls, ρ ≠ .stacked ms ls := fun _ _ h => by
-    rw [hρdef] at h
-    cases h
   set kp := keptPool ρ.stacks s.lowest s.highest with hkp
-  have hkc := map_keptChains_law hρ hw hn trivial
-  have hWs := Roll.sum_stacks_ne_zero hw hns
+  have hkc := map_keptChains_law hρ hw hn
+  have hWs := Roll.sum_stacks_ne_zero hw
   have hW : (kp.map (·.2)).sum ≠ 0 := by
     simpa [hkp, keptPool, Function.comp_def] using hWs
   -- Every chain still kept of the pool is a normal chain of faces of the die,
@@ -3203,9 +3762,7 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
     · obtain ⟨hls, hfit⟩ := rerolls_whole_dropped (c := c) (limit := limit) hs
         hg hρ hk hd he
       have hw := hs _ hρ
-      have hns : ∀ ms ls, (Roll.chains count cl) ≠ .stacked ms ls :=
-        fun _ _ h => by cases h
-      have hWs := Roll.sum_stacks_ne_zero hw hns
+      have hWs := Roll.sum_stacks_ne_zero hw
       set kp := keptPool (Roll.chains count cl).stacks s.lowest s.highest
         with hkp
       let dice := fun (chains : List (Chain × Nat)) =>
@@ -3229,7 +3786,7 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
         simp only [pool, hkp, keptPool, List.map_map, List.mem_map,
           Function.comp_apply] at he'
         obtain ⟨e', he'', rfl⟩ := he'
-        obtain ⟨hc, hpos⟩ := Roll.stacks_props hw hns he''
+        obtain ⟨hc, hpos⟩ := Roll.stacks_props hw he''
         refine ⟨by rw [count_slice, hc]; simp [results, hρ],
           fun p hp => (mem_slice hp).2,
           Nat.mul_pos hpos (Nat.pow_pos (Nat.pos_of_ne_zero hG))⟩
@@ -3335,7 +3892,35 @@ private theorem collapse_props {s : Setup} (hs : s.WellFormed)
         have := (expand_tally_perm _).mem_iff.mpr hx
         rw [h0] at this
         cases this
-    | range | standard | custom | fixed | pool | stacked =>
+    | stacked ms laws =>
+      obtain ⟨hT, hmem⟩ := joinedTotals_props (hs _ hρ)
+      have hcount : ∀ e ∈ (joinedTotals ms laws).map fun e =>
+          (tally (Roll.expand e.1), e.2),
+          (e.1.map (·.2)).sum = (Roll.stacked ms laws).results := fun e he => by
+        simp only [List.mem_map] at he
+        obtain ⟨o, ho, rfl⟩ := he
+        rw [← length_expand, (expand_tally_perm _).length_eq, length_expand]
+        exact (hmem o ho).1
+      refine ⟨fun ρ' h => ?_, fun ρ' h => ?_⟩
+      · simp only [collapse, hρ, Option.map_some, Option.mem_def,
+          Option.some.injEq, Roll.collapse] at h
+        subst h
+        refine ⟨fun h0 => hT ?_, fun e he => ?_, fun e he => ?_⟩
+        · simp only [List.map_eq_nil_iff] at h0
+          simp [h0]
+        · simp only [List.mem_map] at he
+          obtain ⟨o, ho, rfl⟩ := he
+          exact ⟨tally_wellFormed _, (hmem o ho).2⟩
+        · rw [even_of_count _ _ hcount e he]
+          cases (joinedTotals ms laws).map fun e =>
+              (tally (Roll.expand e.1), e.2) with
+          | nil => rfl
+          | cons m ms => rfl
+      · simp only [collapse, hρ, Option.map_some, Option.mem_def,
+          Option.some.injEq, Roll.collapse] at h
+        subst h
+        trivial
+    | range | standard | custom | fixed | pool =>
       have : s.collapse = s := by cases s; simp_all [collapse, Roll.collapse]
       rw [this]
       exact ⟨hs, hfaced⟩
@@ -3348,8 +3933,14 @@ private theorem law_collapse_of_props {s : Setup} (hs : s.WellFormed)
     s.collapse.law.map Record.view = s.law.map Record.view := by
   by_cases hst : ∃ ms ls, s.roll = some (.stacked ms ls)
   · obtain ⟨ms, ls, hρ⟩ := hst
-    have : s.collapse = s := by cases s; simp_all [collapse, Roll.collapse]
-    rw [this]
+    have hρ' : s.collapse.roll = some (Roll.stacked ms ls).collapse := by
+      simp [collapse, hρ]
+    have hrep : s.collapse.replacement = s.replacement := by
+      simp only [collapse, replacement, hρ, Option.map_some, Option.getD_some,
+        Roll.collapse, Roll.replacement]
+    rw [map_view_law hρ', map_view_law hρ, Roll.map_results_collapse (hs _ hρ),
+      hrep]
+    rfl
   · simp only [not_exists] at hst
     exact law_collapse hs (hg hst)
 

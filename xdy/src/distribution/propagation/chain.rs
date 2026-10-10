@@ -68,7 +68,11 @@
 //! reroll of each of its dice (`weighted_rerolled`), and so the laws of
 //! [`Roll::reroll_chains`] on i.i.d. chains, dropped or not
 //! (`Setup.law_reroll`), whose stacks weigh each multiset by the branches of
-//! its deferred laws, as [`joined`] does (`stackWeight`). The rerolls and
+//! its deferred laws, as [`joined`] does (`stackWeight`); that [`joined`],
+//! over its weights, draws what each chain of stacks has become, so that the
+//! joins that stacks defer are the eager ones (`weighted_joined`); and that
+//! [`Roll::collapse`] of stacks, by [`joined_totals`], leaves the results of
+//! the records that they fill (`Roll.map_results_collapse`). The rerolls and
 //! explodes of stacks none of whose chains has been dropped, which compose the
 //! deferred laws of stacks, have no proof yet; the tests check every law
 //! against an independent enumeration.
@@ -1436,6 +1440,9 @@ fn kept_pool(
 /// `joined`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and `Roll.law`,
 /// in `lean/spec/XdySpec/Mixture.lean`, weighs each multiset of stacks by its
 /// branches times those of the draws that this joins (`stackWeight`).
+/// `weighted_joined`, in `lean/spec/XdySpec/Stacks.lean`, proves that the
+/// multisets, over their weights, are that law, so that the joins that stacks
+/// defer until a drop or a split needs them are the eager ones.
 fn joined(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1486,6 +1493,12 @@ fn joined(
 ///
 /// # Errors
 /// [`Halt`] if the multisets would exceed the budget or are cancelled.
+///
+/// # Notes
+/// `joinedTotals`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
+/// `Roll.map_results_collapse`, in `lean/spec/XdySpec/Stacks.lean`, proves
+/// that the pool of these multisets, which [`Roll::collapse`] leaves, fills
+/// records with the results of those that the stacks fill, as a multiset.
 fn joined_totals(
 	pool: &Multisets<Chain>,
 	laws: &Laws,
@@ -1872,6 +1885,14 @@ impl Roll
 	///
 	/// # Errors
 	/// [`Halt`] if reducing would exceed the budget or is cancelled.
+	///
+	/// # Notes
+	/// `Roll.collapse`, in `lean/spec/XdySpec/Explode.lean`, mirrors this.
+	/// `Setup.law_collapse` there proves that reducing i.i.d. chains leaves
+	/// the records of a setup as every later drop, keep, and sum views them,
+	/// and `Roll.map_results_collapse`, in `lean/spec/XdySpec/Stacks.lean`,
+	/// that the records that reduced stacks fill hold the results of those
+	/// that the stacks fill.
 	pub(super) fn collapse(&self, meter: &mut Meter) -> Result<Roll, Halt>
 	{
 		match self
@@ -1973,8 +1994,7 @@ impl Roll
 	/// `Roll.stacks`, in `lean/spec/XdySpec/Chains.lean`, mirrors this, and
 	/// `Roll.map_keptChains_law`, in `lean/spec/XdySpec/Stacks.lean`, proves
 	/// that, over their weights, the multisets are the law of the chains of
-	/// the records that the roll fills, for every roll but stacks whose chains
-	/// have become others since they were last joined.
+	/// the records that the roll fills.
 	fn stacks(&self, meter: &mut Meter) -> Result<Multisets<Chain>, Halt>
 	{
 		match self

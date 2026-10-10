@@ -7,8 +7,8 @@ The multisets of draws of chains, as `multisets` in `propagation/record.rs`
 answers them; the slices of multisets of chains, which keep a window of the
 chains sorted by `Xdy.Chain.le`, their totals first, whatever the order in
 which they come; the kept pools, the transforms of pools and of stacks, and
-the joins of stacks; the multisets of chains of every kind of roll; and the
-transforms of laws and the rerolls of chains.
+the joins of stacks and of their totals; the multisets of chains of every
+kind of roll; and the transforms of laws and the rerolls of chains.
 -/
 
 namespace Xdy.Spec.Test.Chains
@@ -142,6 +142,16 @@ private def law : List (Chain × Nat) := [(.single 1, 1), (.live [2] 2, 1)]
 #guard joined [([(.single 2, 1)], 3)]
     [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])] ==
   [([(.single 2, 1)], 3), ([(.live [6] 2, 1)], 3)]
+
+-- The totals of stacks draw the total of what each copy of each chain has
+-- become, without joining the chains.
+#guard joinedTotals [([(.single 2, 2)], 3)] [] == [([(2, 2)], 3)]
+#guard joinedTotals [([(.single 2, 1)], 3)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])] ==
+  [([(2, 1)], 3), ([(8, 1)], 3)]
+#guard joinedTotals [([(.single 1, 1), (.single 2, 1)], 1)]
+    [(.single 1, [(.live [1] 1, 2)])] ==
+  [([(2, 1), (2, 1)], 2)]
 
 #guard (Roll.range 1 2).stacks ==
   [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]

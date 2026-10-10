@@ -26,7 +26,8 @@ transform:
   `transformStacks` mirrors `transform_stacks` on stacks whose chains are still
   themselves, which defers the law of what each chain becomes instead; and
   `joined` mirrors `joined`, which draws each copy of each chain of stacks from
-  the law of what it has become.
+  the law of what it has become, and `joinedTotals` mirrors `joined_totals`,
+  which draws its total instead.
 - `Roll.stacks` mirrors `Roll::stacks`, which answers every outcome of a roll
   as multisets of chains: the multisets of the law of i.i.d. chains, the
   joined stacks, or the outcomes of any other roll, each result the chain of
@@ -280,10 +281,40 @@ def joined (pool : List (List (Chain × Nat) × Nat))
     List (List (Chain × Nat) × Nat) :=
   if laws.isEmpty then pool
   else
-    transformPool pool 0 0 1 fun ch =>
-      match laws.lookup ch with
-      | some law => (law, 0)
-      | none => ([(ch, 1)], 0)
+    transformPool pool 0 0 1 fun ch => ((laws.lookup ch).getD [(ch, 1)], 0)
+
+/--
+The multisets of the totals of the chains that stacks hold, each with its
+branches, each copy of each chain of each multiset of the pool drawn
+independently from the totals of the law of what it has become, and so
+without joining the chains themselves. Mirrors `joined_totals` in
+`propagation/chain.rs`, by which `Roll::collapse` reduces stacks to a pool.
+
+# Parameters
+- `pool`: The multisets of the stacks, each with its branches.
+- `laws`: The law of what each distinct chain of the pool has become, or none
+  for a chain that is still itself.
+
+# Returns
+The multisets of the totals, each with its branches.
+
+# Notes
+The Rust merges the totals of each law that coincide, in ascending order;
+this lists them as they come.
+
+# Examples
+```lean
+#guard joinedTotals [([(.single 2, 2)], 3)] [] == [([(2, 2)], 3)]
+#guard joinedTotals [([(.single 2, 1)], 3)]
+    [(.single 2, [(.single 2, 1), (.live [6] 2, 1)])] ==
+  [([(2, 1)], 3), ([(8, 1)], 3)]
+```
+-/
+def joinedTotals (pool : List (List (Chain × Nat) × Nat))
+    (laws : List (Chain × List (Chain × Nat))) :
+    List (List (Int × Nat) × Nat) :=
+  transformPool pool 0 0 1 fun ch =>
+    (((laws.lookup ch).getD [(ch, 1)]).map fun e => (e.1.total, e.2), 0)
 
 /--
 Every outcome of a roll as multisets of chains: each multiset of the chains of

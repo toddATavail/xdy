@@ -8,7 +8,9 @@ of their roll's multisets of chains weighs them: of dice, whose chains are of
 one die, and of i.i.d. chains that an explode grew. The explodes of dice and
 chains after a drop, and of fixed results and pools, which transform the
 multisets of their chains still kept, and their laws, whole or reduced to
-totals, and of a mixture.
+totals, and of a mixture; and the joins of stacks whose chains have become
+others, under laws that weigh unlike, which a drop needs, and the totals to
+which they collapse.
 -/
 
 namespace Xdy.Spec.Test.Stacks
@@ -39,7 +41,7 @@ private theorem standard_normal : (Roll.standard 3 2).Normal := by
 example : threeD2.law.map (fun r => (r.keptChains : Multiset Chain)) =
     (weighted [] (keptPool (Roll.standard 3 2).stacks 1 0)).map
       (fun ms => (Roll.expand ms : Multiset Chain)) :=
-  Setup.map_keptChains_law rfl trivial standard_normal trivial
+  Setup.map_keptChains_law rfl trivial standard_normal
 
 /-! ## Chains -/
 
@@ -67,7 +69,7 @@ private theorem law_normal : (Roll.chains 2 law).Normal := by
 example : twoChains.law.map (fun r => (r.keptChains : Multiset Chain)) =
     (weighted [] (keptPool (Roll.chains 2 law).stacks 1 0)).map
       (fun ms => (Roll.expand ms : Multiset Chain)) :=
-  Setup.map_keptChains_law rfl ⟨by decide, by decide⟩ law_normal trivial
+  Setup.map_keptChains_law rfl ⟨by decide, by decide⟩ law_normal
 
 /-! ## Explodes of multisets of chains -/
 
@@ -301,6 +303,86 @@ example : twoChains.RerollsAs (.within 1 2) none true :=
 example : threeD2.RerollsAs (.within 1 1) (some 1) false :=
   let ⟨hs, hg, hf⟩ := threeD2_invariants
   Setup.law_reroll _ _ _ hs hg hf
+
+/-! ## Deferred joins -/
+
+/-- The stacks that rerolling every `1` once leaves of two chains after a
+drop, the laws of whose chains weigh unlike. -/
+private def rerolledStacks : Roll :=
+  .stacked
+    [([(.single 1, 1)], 2), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
+    [(.single 1, [(.single 1, 1), (.single 2, 1)]),
+      (.live [2] 2, [(.live [2] 2, 4)])]
+
+/-- The stacks are well formed. -/
+private theorem rerolledStacks_wellFormed : rerolledStacks.WellFormed := by
+  simp only [rerolledStacks, Roll.WellFormed, Roll.Even]
+  decide
+
+/-- The stacks are normal. -/
+private theorem rerolledStacks_normal : rerolledStacks.Normal := by
+  simp only [rerolledStacks, Roll.Normal, List.mem_cons, List.not_mem_nil,
+    or_false, forall_eq_or_imp, forall_eq, Chain.single]
+  simp [NormalChain, i32Min, i32Max]
+
+-- Joining them draws what each chain has become, weighing each multiset by
+-- the branches of its law.
+#guard rerolledStacks.stacks ==
+  [([(.single 1, 1)], 2), ([(.single 2, 1)], 2), ([(.live [2] 2, 1)], 8),
+    ([(.live [2] 2, 1)], 4)]
+#guard drawWeight (fun ch => (([(.single 1, [(.single 1, 1), (.single 2, 1)]),
+      (Chain.live [2] 2, [(.live [2] 2, 4)])].lookup ch).getD [(ch, 1)], 0))
+    [(.single 1, 2), (.live [2] 2, 1)] == 16
+
+-- Their kept chains have the law of the joined stacks.
+example : rerolledStacks.law.map (fun r => (r.keptChains : Multiset Chain)) =
+    (weighted [] rerolledStacks.stacks).map
+      (fun ms => (Roll.expand ms : Multiset Chain)) :=
+  Roll.map_keptChains_law rerolledStacks_wellFormed rerolledStacks_normal
+
+-- Reduced to their totals, they leave the pool of the totals of what each
+-- chain has become, whose records hold the same results.
+#guard rerolledStacks.collapse ==
+  .pool [([(1, 1)], 2), ([(2, 1)], 2), ([(4, 1)], 8), ([(4, 1)], 4)]
+example : rerolledStacks.collapse.law.map
+      (fun r => (r.results : Multiset Int)) =
+    rerolledStacks.law.map (fun r => (r.results : Multiset Int)) :=
+  Roll.map_results_collapse rerolledStacks_wellFormed
+
+
+/-- The stacks that exploding three two-sided dice on `2` once leaves after
+the lowest is dropped, the lowest of whose chains is then dropped again. -/
+private def explodedStacks : Setup :=
+  { roll := some (.stacked
+      [([(.single 1, 2)], 1), ([(.single 1, 1), (.single 2, 1)], 3),
+        ([(.single 2, 2)], 3), ([(.single 2, 2)], 1)]
+      [(.single 1, [(.single 1, 2)]),
+        (.single 2, [(.live [2] 1, 1), (.live [2] 2, 1)])]),
+    die := some (.standard 2), lowest := 1 }
+
+/-- The exploded stacks are well formed and normal. -/
+private theorem explodedStacks_props : ∀ ρ ∈ explodedStacks.roll,
+    ρ.WellFormed ∧ ρ.Normal := by
+  intro ρ hρ
+  cases hρ
+  refine ⟨?_, ?_⟩
+  · simp only [Roll.WellFormed, Roll.Even]
+    decide
+  · simp only [Roll.Normal, List.mem_cons, List.not_mem_nil, or_false,
+      forall_eq_or_imp, forall_eq, Chain.single]
+    simp [NormalChain, i32Min, i32Max]
+
+-- Dropping the lowest chain joins the stacks first, each chain drawn from
+-- what it has become, and then keeps the higher.
+#guard keptPool (explodedStacks.roll.map Roll.stacks |>.getD []) 1 0 ==
+  [([(.single 1, 1)], 4), ([(.live [2] 1, 1)], 6), ([(.live [2] 2, 1)], 6),
+    ([(.live [2] 1, 1)], 3), ([(.live [2] 2, 1)], 6), ([(.live [2] 2, 1)], 3),
+    ([(.live [2] 1, 1)], 1), ([(.live [2] 2, 1)], 2), ([(.live [2] 2, 1)], 1)]
+example : explodedStacks.law.map (fun r => (r.keptChains : Multiset Chain)) =
+    (weighted [] (keptPool (explodedStacks.roll.map Roll.stacks |>.getD [])
+      1 0)).map (fun ms => (Roll.expand ms : Multiset Chain)) :=
+  let ⟨hw, hn⟩ := explodedStacks_props _ rfl
+  Setup.map_keptChains_law rfl hw hn
 
 /-! ## Mixtures -/
 

@@ -1720,21 +1720,24 @@ def saturate (ρ : Roll) (value : Int) (kept : Nat) (whole : Bool) : Roll :=
 /--
 Reduce the chains of a roll to their totals, which behave as the results of
 dice do. Mirrors `Roll::collapse` in `propagation/chain.rs`: i.i.d. chains
-become custom dice of their totals.
+become custom dice of their totals, and stacks a pool of the multisets of
+their totals (`joinedTotals`).
 
 # Parameters
 - `ρ`: The roll.
 
 # Returns
-The reduced roll, or the roll itself if it holds no i.i.d. chains.
+The reduced roll, or the roll itself if it holds no chains.
 
 # Notes
-The Rust reduces stacks to a pool of the multisets of their totals, which
-this does not yet model.
+The Rust joins the totals of each multiset as a sorted map; this tallies
+them, which sorts them and merges those that coincide.
 -/
 def collapse : Roll → Roll
   | .chains count law =>
     .custom count (tally (expand (law.map fun e => (e.1.total, e.2))))
+  | .stacked ms laws =>
+    .pool ((joinedTotals ms laws).map fun e => (tally (expand e.1), e.2))
   | ρ => ρ
 
 end Roll
@@ -2461,9 +2464,18 @@ theorem view_ofChains (D : Die) (cs : List Chain) :
     (cs.map Chain.total)
   simpa using this
 
-/-- The view of a record that drops nothing, after the lowest `L` and the
-highest `H` of its results are dropped. -/
-private def dropView (L H : Nat) (v : List Int × Die) : List Int × Die :=
+/--
+The view of a record that drops nothing, after the lowest `L` and the highest
+`H` of its results are dropped.
+
+# Parameters
+- `L`, `H`: The numbers of lowest and highest results dropped.
+- `v`: The view of the record: its sorted results, and its die.
+
+# Returns
+The view of the record after the drops.
+-/
+def dropView (L H : Nat) (v : List Int × Die) : List Int × Die :=
   ((v.1.drop L).take (v.1.length - L - H), v.2)
 
 /-- Dropping results from a record that drops none drops them from its view. -/
@@ -2474,6 +2486,30 @@ private theorem view_drops {r : Record} (L H : Nat) (hl : r.lowest = 0)
   rw [Record.view_of_undropped hl hh]
   simp only [Record.view, Record.kept, Record.sorted, dropView,
     List.length_mergeSort]
+
+/--
+The records that a setup describes, as every later drop, keep, and sum views
+them, depend only on the results of the records that its roll fills, as a
+multiset: each view is the multiset sorted, after the setup's drops, with the
+setup's die.
+
+# Parameters
+- `s`: The setup.
+- `ρ`: Its roll.
+
+# Hypotheses
+- `hρ`: The setup has the roll.
+-/
+theorem map_view_law {s : Setup} {ρ : Roll} (hρ : s.roll = some ρ) :
+    s.law.map Record.view =
+      (ρ.law.map fun r => (r.results : Multiset Int)).map fun M =>
+        dropView s.lowest s.highest (sortBag M, s.replacement) := by
+  simp only [law, hρ, Option.map_some, Option.getD_some, PMF.map_comp]
+  refine map_congr_support fun r _ => ?_
+  simp only [Function.comp_apply, Record.view, Record.kept, Record.sorted,
+    dropView, mergeSort_eq_sortBag]
+  rw [show r.results.length = (sortBag r.results).length by
+    rw [← mergeSort_eq_sortBag, List.length_mergeSort]]
 
 /--
 The results of independent dice, as a multiset, are independent draws.
@@ -3717,6 +3753,7 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
           have := (expand_tally_perm _).mem_iff.mpr hx
           rw [he'] at this
           cases this
+      | stacked => exact (hg.2 _ hρ).elim
       | _ =>
         have : s.collapse = s := by
           rcases s with ⟨_ | _, _, _, _⟩ <;> simp_all [collapse, Roll.collapse]
