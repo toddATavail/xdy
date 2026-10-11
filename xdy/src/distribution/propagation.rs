@@ -40,8 +40,8 @@
 //! roll without bound, so the pass refuses every function in which one may
 //! extend a chain, before it begins. The Lean specification proves the laws of
 //! explodes that do nothing, saturate every chain, or extend the chains of any
-//! roll, dropped or not, and of the rerolls of chains, as cited below; nothing
-//! yet proves those of stacks of saturated chains.
+//! roll, dropped or not, and of the rerolls of chains, and of the explodes and
+//! rerolls that leave stacks of saturated chains alone, as cited below.
 //!
 //! Combining operands pair by pair is exact only if the operands are
 //! independent. Every roll is independent of every other, so the operands of

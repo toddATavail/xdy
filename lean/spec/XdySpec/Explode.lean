@@ -48,15 +48,20 @@ of the record as the specification's explode does:
   by their kept chains and die (`Record.chainView`), which a later reroll or
   explode reads; and otherwise by their kept results and die
   (`Record.view`).
-- The proofs ask that every setup be well formed, have faces, and be grounded
-  (`Setup.Grounded`): its die's faces lie within the `i32` range, and its
-  records hold only faces of the die, in normal chains that may still grow,
-  whose kept chains, after any drop, are a window of them (`Record.Fits.drops`),
-  whether the roll is i.i.d. chains, stacks, or any other; every explode of
-  alike chains leaves the first two, and the third if its chains stay whole
-  and it does not saturate them (`Setup.burst_invariants_alike`). The
-  collapse of stacks, which `XdySpec/Stacks.lean` proves, is a hypothesis
-  here.
+- The proofs ask that every setup be well formed, have faces, and be live
+  (`Setup.Live`): its die's faces lie within the `i32` range, and its records
+  hold only faces of the die, in normal chains that may still grow, whose kept
+  chains, after any drop, are a window of them (`Record.Fits.drops`), whether
+  the roll is i.i.d. chains, stacks, or any other; every explode of alike
+  chains leaves the first two, and the third if its chains stay whole and it
+  does not saturate them (`Setup.burst_invariants_alike`). The collapse of
+  stacks, which `XdySpec/Stacks.lean` proves, is a hypothesis here.
+- An explode that saturates leaves stacks of saturated chains
+  (`Setup.Saturated`), every record of which is saturated
+  (`Setup.saturated_of_mem`), and which every later explode leaves alone, as
+  the specification leaves their records (`Record.Saturated.explode`). A
+  grounded setup (`Setup.Grounded`) is live or saturated, and
+  `XdySpec/Stacks.lean` proves the laws of both.
 - The Rust also explodes the chains of a roll after a drop, or of fixed
   results, a pool, or stacks after a drop, by transforming the multisets of
   the chains still kept, which `Roll.explodeMultisets` mirrors;
@@ -1850,22 +1855,21 @@ def burst (s : Setup) (c : Criterion) (limit : Option Nat) (whole : Bool) :
   if whole then s.explode c limit whole else (s.explode c limit whole).collapse
 
 /--
-Whether a setup is one whose explodes the specification describes: the faces
-of its die lie within the `i32` range; a roll of i.i.d. chains holds the die
-from which they were drawn, as every explode leaves it, and each chain that it
-may be is normal, may still grow, and holds only faces of the die, whatever
-its drops; stacks hold the die too, and each chain of their pool, and each
-that it may have become, is likewise; and any other roll holds only faces of
-the die. Stacks of saturated chains, which an unlimited explode that matches
-every face leaves, are not grounded.
+Whether a setup is one whose chains may still grow, as every grounded setup
+but stacks of saturated chains is (`Setup.Grounded`): the faces of its die lie
+within the `i32` range; a roll of i.i.d. chains holds the die from which they
+were drawn, as every explode leaves it, and each chain that it may be is
+normal, may still grow, and holds only faces of the die, whatever its drops;
+stacks hold the die too, and each chain of their pool, and each that it may
+have become, is likewise; and any other roll holds only faces of the die.
 
 # Parameters
 - `s`: The setup.
 
 # Returns
-Whether the setup is grounded.
+Whether the setup is live.
 -/
-def Grounded (s : Setup) : Prop :=
+def Live (s : Setup) : Prop :=
   (∀ x ∈ s.replacement.faces, i32Min ≤ x ∧ x ≤ i32Max) ∧
     ∀ ρ ∈ s.roll, match ρ with
       | .chains _ law => s.die.isSome ∧
@@ -1878,6 +1882,39 @@ def Grounded (s : Setup) : Prop :=
           ∀ x ∈ q.1.dice, x ∈ s.replacement.faces
       | _ => ∀ r ∈ s.law.support, ∀ x ∈ r.results,
         x ∈ s.replacement.faces
+
+/--
+Whether a setup is stacks of saturated chains, as an unlimited explode that
+matches every face leaves them, and every later explode and reroll leaves
+them: a saturated die decides its chains (`Roll.isSaturated`), and every
+chain of their pool, and each that it may have become, has saturated.
+
+# Parameters
+- `s`: The setup.
+
+# Returns
+Whether the setup is saturated.
+-/
+def Saturated (s : Setup) : Prop :=
+  ∃ ms laws, s.roll = some (.stacked ms laws) ∧
+    (Roll.stacked ms laws).isSaturated = true ∧
+    (∀ e ∈ ms, ∀ p ∈ e.1, p.1.saturates = true) ∧
+    ∀ e ∈ laws, ∀ q ∈ e.2, q.1.saturates = true
+
+/--
+Whether a setup is one whose explodes and rerolls the specification
+describes: one whose chains may still grow (`Setup.Live`), or stacks of
+saturated chains (`Setup.Saturated`), which no explode or reroll changes.
+Every explode and reroll that keeps its chains whole leaves a grounded setup
+grounded (`Setup.burst_invariants`, `Setup.reroll_invariants`).
+
+# Parameters
+- `s`: The setup.
+
+# Returns
+Whether the setup is grounded.
+-/
+def Grounded (s : Setup) : Prop := s.Live ∨ s.Saturated
 
 /--
 Whether an explode of a setup is one whose law the pass describes: not an
@@ -1925,10 +1962,25 @@ end Setup
 
 /-! ## Records that an explode reads -/
 
+/--
+Every saturated chain is normal.
+
+# Parameters
+- `ch`: The chain.
+
+# Hypotheses
+- `h`: The chain has saturated.
+-/
+theorem normal_of_saturates {ch : Chain} (h : ch.saturates = true) :
+    NormalChain ch := by
+  cases ch with
+  | live => simp [Chain.saturates] at h
+  | saturated => trivial
+
 namespace Record
 
-/-- What every record that a grounded setup describes is, as an explode reads
-it (`Setup.fits_of_grounded`): it holds its die, its kept chains are normal,
+/-- What every record that a live setup describes is, as an explode reads
+it (`Setup.fits_of_live`): it holds its die, its kept chains are normal,
 may still grow, and hold only faces of the die, and its kept results are their
 totals. -/
 structure Fits (D : Die) (r : Record) : Prop where
@@ -1949,6 +2001,33 @@ private theorem eq_of_coe_eq {xs ys : List Int} (hx : xs.Pairwise (· ≤ ·))
   (Multiset.coe_eq_coe.mp h).eq_of_pairwise
     (fun _ _ _ _ h₁ h₂ => Int.le_antisymm h₁ h₂) hx hy
 
+/-- What every record that a saturated setup describes is
+(`Setup.saturated_of_mem`): it holds its die, every kept chain has saturated,
+and its kept results are their totals. -/
+structure Saturated (D : Die) (r : Record) : Prop where
+  /-- The record holds the die. -/
+  die : r.die = D
+  /-- Every kept chain has saturated. -/
+  saturated : ∀ ch ∈ r.keptChains, ch.saturates = true
+  /-- The kept results are the totals of the kept chains. -/
+  kept : (r.kept : Multiset Int) = r.keptChains.map Chain.total
+
+/-- A record of the kept chains of a record of its die, normal, whose kept
+results are their totals, without drops, is the record, as every later
+instruction views it. -/
+private theorem views_of {D : Die} {r : Record} (hd : r.die = D)
+    (hn : ∀ ch ∈ r.keptChains, NormalChain ch)
+    (hk : (r.kept : Multiset Int) = r.keptChains.map Chain.total) :
+    (ofChains D r.keptChains).chainView = r.chainView ∧
+      (ofChains D r.keptChains).view = r.view := by
+  have hd' : (ofChains D r.keptChains).die = D :=
+    (Record.ofChains_fields D r.keptChains).2.2.2
+  refine ⟨?_, ?_⟩
+  · simp only [chainView, keptChains_ofChains D hn, hd', hd]
+  · simp only [view, hd', hd, Prod.mk.injEq, and_true]
+    refine eq_of_coe_eq (kept_pairwise _) (kept_pairwise _) ?_
+    rw [kept_ofChains, hk]
+
 /--
 A record of the kept chains of a record that fits its die, without drops, is
 the record, as every later instruction views it.
@@ -1961,14 +2040,23 @@ the record, as every later instruction views it.
 -/
 theorem Fits.views {D : Die} {r : Record} (h : r.Fits D) :
     (ofChains D r.keptChains).chainView = r.chainView ∧
-      (ofChains D r.keptChains).view = r.view := by
-  have hd : (ofChains D r.keptChains).die = D :=
-    (Record.ofChains_fields D r.keptChains).2.2.2
-  refine ⟨?_, ?_⟩
-  · simp only [chainView, keptChains_ofChains D h.normal, hd, h.die]
-  · simp only [view, hd, h.die, Prod.mk.injEq, and_true]
-    refine eq_of_coe_eq (kept_pairwise _) (kept_pairwise _) ?_
-    rw [kept_ofChains, h.kept]
+      (ofChains D r.keptChains).view = r.view :=
+  views_of h.die h.normal h.kept
+
+/--
+A record of the kept chains of a saturated record, without drops, is the
+record, as every later instruction views it.
+
+# Parameters
+- `r`: The record.
+
+# Hypotheses
+- `h`: The record is saturated.
+-/
+theorem Saturated.views {D : Die} {r : Record} (h : r.Saturated D) :
+    (ofChains D r.keptChains).chainView = r.chainView ∧
+      (ofChains D r.keptChains).view = r.view :=
+  views_of h.die (fun ch hch => normal_of_saturates (h.saturated ch hch)) h.kept
 
 end Record
 
@@ -2034,6 +2122,42 @@ theorem explode_stays {D : Die} {r : Record} {c : Criterion}
       by_cases hl : l = 0
       · simp [hl]
       · simp [hg ch hc (by simpa using hl)], hd]
+
+/--
+Every explode leaves a saturated record, as every later instruction views it:
+it grows no saturated chain, and saturates none anew.
+
+# Parameters
+- `c`: The criterion.
+- `limit`: The limit.
+
+# Hypotheses
+- `h`: The record is saturated.
+-/
+theorem Record.Saturated.explode {D : Die} {r : Record} (h : r.Saturated D)
+    (c : Criterion) (limit : Option Nat) :
+    Spec.explode r c limit = PMF.pure (Record.ofChains D r.keptChains) := by
+  have hn : ∀ ch ∈ r.keptChains, NormalChain ch := fun ch hch =>
+    normal_of_saturates (h.saturated ch hch)
+  have hg : ∀ ch ∈ r.keptChains, ch.grows c = false := fun ch hch => by
+    simp [Chain.grows, h.saturated ch hch]
+  cases limit with
+  | none =>
+    simp only [Spec.explode]
+    split
+    · -- Saturating a saturated chain leaves it.
+      have hsat : r.keptChains.map (·.saturate r.die.saturatedValue) =
+          r.keptChains := by
+        refine (List.map_congr_left fun ch hch => ?_).trans (List.map_id _)
+        have := h.saturated ch hch
+        cases ch with
+        | live => simp [Chain.saturates] at this
+        | saturated => rfl
+      rw [hsat, h.die]
+    · rw [explodeChains_stays _ _ _ hn hg, h.die]
+  | some l =>
+    simp only [Spec.explode]
+    rw [explodeChains_stays _ _ _ hn fun ch hch => by simp [hg ch hch], h.die]
 
 /--
 An explode that saturates every kept chain of a record that fits its die
@@ -2190,6 +2314,38 @@ theorem length_chains_ofChains (die : Die) (cs : List Chain) :
   · rename_i hall
     simp only [hall, Bool.false_eq_true, ↓reduceIte, List.length_map]
 
+/-- Dropping chains from a record of normal kept chains, whose kept results
+are their totals, and that drops none, keeps a window of its kept chains, whose
+totals are its kept results. -/
+private theorem drops_of {r : Record} (L H : Nat)
+    (hn : ∀ ch ∈ r.keptChains, NormalChain ch)
+    (hkt : (r.kept : Multiset Int) = r.keptChains.map Chain.total)
+    (hl : r.lowest = 0) (hh : r.highest = 0)
+    (hlen : r.chains ≠ [] → r.chains.length = r.results.length) :
+    (∀ ch ∈ ({ r with lowest := L, highest := H } : Record).keptChains,
+      ch ∈ r.keptChains) ∧
+      (({ r with lowest := L, highest := H } : Record).kept : Multiset Int) =
+        ({ r with lowest := L, highest := H } : Record).keptChains.map
+          Chain.total := by
+  have hk := keptChains_drops L H hl hh hlen
+  refine ⟨fun ch hch => ?_, ?_⟩
+  · rw [hk] at hch
+    exact List.mem_of_mem_drop (List.mem_of_mem_take hch)
+  -- The kept results of the record are the totals of its kept chains, which
+  -- ascend.
+  have hsorted : r.kept = r.keptChains.map Chain.total := by
+    refine (Multiset.coe_eq_coe.mp hkt).eq_of_pairwise
+      (fun _ _ _ _ h₁ h₂ => Int.le_antisymm h₁ h₂) (kept_pairwise r) ?_
+    exact List.pairwise_map.mpr ((keptChains_pairwise r hn).imp
+      Chain.total_le_of_le)
+  have hkept : ({ r with lowest := L, highest := H } : Record).kept =
+      (r.kept.drop L).take (r.results.length - L - H) := by
+    simp only [Record.kept, Record.sorted, hl, hh, List.drop_zero,
+      Nat.sub_zero]
+    rw [List.take_of_length_le (l := r.results.mergeSort fun x1 x2 =>
+      decide (x1 ≤ x2)) (by simp [List.length_mergeSort])]
+  rw [hk, hkept, hsorted, List.map_take, List.map_drop]
+
 /--
 Dropping chains from a record that fits its die, and drops none, leaves a
 record that fits it: its kept chains are a window of the record's, and its
@@ -2207,32 +2363,35 @@ theorem Fits.drops {D : Die} {r : Record} (h : r.Fits D) (L H : Nat)
     (hl : r.lowest = 0) (hh : r.highest = 0)
     (hlen : r.chains ≠ [] → r.chains.length = r.results.length) :
     ({ r with lowest := L, highest := H } : Record).Fits D := by
-  have hk := keptChains_drops L H hl hh hlen
-  have hsub : ∀ ch ∈ ({ r with lowest := L, highest := H } : Record).keptChains,
-      ch ∈ r.keptChains := fun ch hch => by
-    rw [hk] at hch
-    exact List.mem_of_mem_drop (List.mem_of_mem_take hch)
-  -- The kept results of the record are the totals of its kept chains, which
-  -- ascend.
-  have hsorted : r.kept = r.keptChains.map Chain.total := by
-    refine (Multiset.coe_eq_coe.mp h.kept).eq_of_pairwise
-      (fun _ _ _ _ h₁ h₂ => Int.le_antisymm h₁ h₂) (kept_pairwise r) ?_
-    exact List.pairwise_map.mpr ((keptChains_pairwise r h.normal).imp
-      Chain.total_le_of_le)
-  refine ⟨h.die, fun ch hch => h.normal ch (hsub ch hch),
+  obtain ⟨hsub, hkept⟩ := drops_of L H h.normal h.kept hl hh hlen
+  exact ⟨h.die, fun ch hch => h.normal ch (hsub ch hch),
     fun ch hch => h.live ch (hsub ch hch),
-    fun ch hch => h.faces ch (hsub ch hch), ?_⟩
-  have hkept : ({ r with lowest := L, highest := H } : Record).kept =
-      (r.kept.drop L).take (r.results.length - L - H) := by
-    simp only [Record.kept, Record.sorted, hl, hh, List.drop_zero,
-      Nat.sub_zero]
-    rw [List.take_of_length_le (l := r.results.mergeSort fun x1 x2 =>
-      decide (x1 ≤ x2)) (by simp [List.length_mergeSort])]
-  rw [hk, hkept, hsorted, List.map_take, List.map_drop]
+    fun ch hch => h.faces ch (hsub ch hch), hkept⟩
+
+/--
+Dropping chains from a saturated record that drops none leaves a saturated
+record: its kept chains are a window of the record's, and its kept results
+are their totals.
+
+# Parameters
+- `L`, `H`: The numbers of lowest and highest chains dropped.
+
+# Hypotheses
+- `h`: The record is saturated.
+- `hl`, `hh`: The record drops nothing.
+- `hlen`: A record of chains holds one result for each chain.
+-/
+theorem Saturated.drops {D : Die} {r : Record} (h : r.Saturated D)
+    (L H : Nat) (hl : r.lowest = 0) (hh : r.highest = 0)
+    (hlen : r.chains ≠ [] → r.chains.length = r.results.length) :
+    ({ r with lowest := L, highest := H } : Record).Saturated D := by
+  obtain ⟨hsub, hkept⟩ := drops_of L H
+    (fun ch hch => normal_of_saturates (h.saturated ch hch)) h.kept hl hh hlen
+  exact ⟨h.die, fun ch hch => h.saturated ch (hsub ch hch), hkept⟩
 
 end Record
 
-/-! ## Grounded setups -/
+/-! ## Live setups -/
 
 /--
 Weighted values of positive total weight take only values that they list.
@@ -2426,16 +2585,16 @@ private theorem mem_support_law_stacked {s : Setup}
     | cons e ms => exact ⟨e, List.mem_cons_self, p, hp, hx⟩
 
 /--
-A grounded setup's roll is not decided by a saturated die.
+A live setup's roll is not decided by a saturated die.
 
 # Parameters
 - `ρ`: The roll.
 
 # Hypotheses
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hρ`: The setup's roll is `ρ`.
 -/
-theorem isSaturated_of_grounded {s : Setup} {ρ : Roll} (hg : s.Grounded)
+theorem isSaturated_of_live {s : Setup} {ρ : Roll} (hg : s.Live)
     (hρ : s.roll = some ρ) : ρ.isSaturated = false := by
   have hgρ := hg.2 ρ hρ
   cases ρ with
@@ -2453,7 +2612,7 @@ theorem isSaturated_of_grounded {s : Setup} {ρ : Roll} (hg : s.Grounded)
   | _ => rfl
 
 /--
-Every record that a well-formed, grounded setup describes fits its die: its
+Every record that a well-formed, live setup describes fits its die: its
 kept chains are normal, may still grow, and hold only faces of the die, and
 its kept results are their totals.
 
@@ -2462,10 +2621,10 @@ its kept results are their totals.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hr`: The setup describes `r`.
 -/
-theorem fits_of_grounded {s : Setup} (hs : s.WellFormed) (hg : s.Grounded)
+theorem fits_of_live {s : Setup} (hs : s.WellFormed) (hg : s.Live)
     {r : Record} (hr : r ∈ s.law.support) : r.Fits s.replacement := by
   have hd := (mem_support_law_die hr).1
   -- A record without chains keeps the chains of one die of its kept results.
@@ -2556,7 +2715,38 @@ theorem fits_of_grounded {s : Setup} (hs : s.WellFormed) (hg : s.Grounded)
       exact plain (mem_support_law_plain hρ trivial hr) (hgρ r hr)
 
 /--
-Every record that a well-formed, grounded setup describes keeps as many chains
+Every record that a saturated setup describes is saturated: each of its kept
+chains is a chain of the pool, or one that such a chain may have become, and
+its kept results are their totals.
+
+# Parameters
+- `r`: The record.
+
+# Hypotheses
+- `hsat`: The setup is saturated.
+- `hr`: The setup describes `r`.
+-/
+theorem saturated_of_mem {s : Setup} (hsat : s.Saturated) {r : Record}
+    (hr : r ∈ s.law.support) : r.Saturated s.replacement := by
+  obtain ⟨ms, laws, hρ, _, hpool, hlaws⟩ := hsat
+  obtain ⟨cs, hcs, rfl⟩ := mem_support_law_stacked hρ hr
+  -- Every chain drawn is a chain of the pool, or of a law.
+  have hsc : ∀ x ∈ cs, x.saturates = true := fun x hx => by
+    obtain ⟨e, he, p, hp, hx⟩ := hcs x hx
+    rcases mem_support_became hx with rfl | ⟨e', he', q, hq, rfl⟩
+    · exact hpool e he p hp
+    · exact hlaws e' he' q hq
+  have hk := keptChains_ofChains s.replacement fun x hx =>
+    normal_of_saturates (hsc x hx)
+  have h0 : (Record.ofChains s.replacement cs).Saturated s.replacement :=
+    ⟨(Record.ofChains_fields _ _).2.2.2,
+      fun ch hch => hsc ch (mem_of_coe_eq hk hch),
+      by rw [kept_ofChains, ← Multiset.map_coe, ← Multiset.map_coe, hk]⟩
+  exact h0.drops _ _ (Record.ofChains_fields _ _).2.1
+    (Record.ofChains_fields _ _).2.2.1 (Record.length_chains_ofChains _ _)
+
+/--
+Every record that a well-formed, live setup describes keeps as many chains
 as the setup keeps results.
 
 # Parameters
@@ -2564,13 +2754,13 @@ as the setup keeps results.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hr`: The setup describes `r`.
 -/
-theorem length_keptChains {s : Setup} (hs : s.WellFormed) (hg : s.Grounded)
+theorem length_keptChains {s : Setup} (hs : s.WellFormed) (hg : s.Live)
     {r : Record} (hr : r ∈ s.law.support) :
     r.keptChains.length = s.results - s.lowest - s.highest := by
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   have hk := congrArg Multiset.card hf.kept
   simp only [Multiset.coe_card, List.length_map] at hk
   rw [← hk, Record.length_kept]
@@ -2728,7 +2918,7 @@ theorem map_results_rollDice (n : Int) (die : PMF Int) :
   exact (bagDraws_pure fun _ _ => rfl).symm
 
 /--
-Reducing a well-formed, grounded setup's chains to their totals leaves the law
+Reducing a well-formed, live setup's chains to their totals leaves the law
 of the records that it describes, as every later drop, keep, and sum views
 them. Mirrors `Setup::collapse` in `propagation/mixture.rs`: the totals of
 independent and alike chains are the results of custom dice of their totals.
@@ -2736,10 +2926,10 @@ independent and alike chains are the results of custom dice of their totals.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hns`: The setup's roll is not stacks.
 -/
-theorem law_collapse {s : Setup} (hs : s.WellFormed) (hg : s.Grounded)
+theorem law_collapse {s : Setup} (hs : s.WellFormed) (hg : s.Live)
     (hns : ∀ ms ls, s.roll ≠ some (.stacked ms ls)) :
     s.collapse.law.map Record.view = s.law.map Record.view := by
   have hsame : (∀ ρ ∈ s.roll, ρ.collapse = ρ) → s.collapse = s :=
@@ -2816,7 +3006,7 @@ namespace Setup
 its records, if the explode grows no kept chain of any, and saturates none,
 so long as reducing its chains to their totals leaves their law. -/
 private theorem bursts_of_stays {s : Setup} {c : Criterion}
-    {limit : Option Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded)
+    {limit : Option Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
     (hcol : s.collapse.law.map Record.view = s.law.map Record.view)
     (hst : ∀ w, s.explode c limit w = s)
     (hgrow : ∀ r ∈ s.law.support, ∀ ch ∈ r.keptChains, limit ≠ some 0 →
@@ -2826,7 +3016,7 @@ private theorem bursts_of_stays {s : Setup} {c : Criterion}
     s.Bursts c limit whole := by
   have hspec : ∀ r ∈ s.law.support, Spec.explode r c limit =
       PMF.pure (Record.ofChains s.replacement r.keptChains) := fun r hr =>
-    explode_stays (fits_of_grounded hs hg hr) (fun hl => by
+    explode_stays (fits_of_live hs hg hr) (fun hl => by
       rcases hsat hl with h | h
       · exact .inl h
       · exact .inr (List.eq_nil_of_length_eq_zero
@@ -2839,14 +3029,14 @@ private theorem bursts_of_stays {s : Setup} {c : Criterion}
     rw [bind_congr_support hspec, PMF.map_bind]
     simp only [PMF.pure_map]
     refine (map_congr_support fun r hr =>
-      ((fits_of_grounded hs hg hr).views).1.symm).trans ?_
+      ((fits_of_live hs hg hr).views).1.symm).trans ?_
     exact (PMF.bind_pure_comp _ _).symm
   | false =>
     simp only [Bool.false_eq_true, ↓reduceIte, burst, hst, hcol]
     rw [bind_congr_support hspec, PMF.map_bind]
     simp only [PMF.pure_map]
     refine (map_congr_support fun r hr =>
-      ((fits_of_grounded hs hg hr).views).2.symm).trans ?_
+      ((fits_of_live hs hg hr).views).2.symm).trans ?_
     exact (PMF.bind_pure_comp _ _).symm
 
 /-- Independent draws of a certain chain are copies of it. -/
@@ -2909,11 +3099,11 @@ private theorem total_ne_zero {ρ : Roll} (hρ : ρ.WellFormed) :
 /-- Exploding a setup by an unlimited explode that matches every face of its
 die saturates every kept chain of every record that it describes. -/
 private theorem bursts_of_saturate {s : Setup} {c : Criterion} {ρ : Roll}
-    {v : Int} (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded)
+    {v : Int} (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some ρ) (hk : s.results - s.lowest - s.highest ≠ 0)
     (hb : ∀ w, Burst.resolve s.replacement c none w = .saturate v) :
     s.Bursts c none whole := by
-  have hsat := isSaturated_of_grounded hg hρ
+  have hsat := isSaturated_of_live hg hρ
   -- The burst saturates at the die's saturated value, and matches every face.
   have hres := hb true
   have hm : s.replacement.faces.countP c.matches ≠ 0 := by
@@ -2940,7 +3130,7 @@ private theorem bursts_of_saturate {s : Setup} {c : Criterion} {ρ : Roll}
       PMF.pure (Record.ofChains s.replacement
         (r.keptChains.map (·.saturate v))) :=
     fun r hr => by
-      have hd := (fits_of_grounded hs hg hr).die
+      have hd := (fits_of_live hs hg hr).die
       simp only [Spec.explode, hd, hw, ↓reduceDIte, hall.2]
   rw [Bursts]
   cases whole with
@@ -2952,7 +3142,7 @@ private theorem bursts_of_saturate {s : Setup} {c : Criterion} {ρ : Roll}
         (Multiset.replicate (s.results - s.lowest - s.highest) (.saturated v),
           s.replacement))
       fun r hr => by
-        rw [(fits_of_grounded hs hg hr).saturates v |>.1,
+        rw [(fits_of_live hs hg hr).saturates v |>.1,
           length_keptChains hs hg hr], PMF.bind_const]
     simp only [law, Option.map_some, Option.getD_some, Roll.saturate,
       ↓reduceIte, Roll.law, List.map_cons, List.map_nil, stackWeight_nil,
@@ -2974,7 +3164,7 @@ private theorem bursts_of_saturate {s : Setup} {c : Criterion} {ρ : Roll}
     rw [bind_congr_support (p := s.law) (g := fun _ => PMF.pure
         (List.replicate (s.results - s.lowest - s.highest) v, s.replacement))
       fun r hr => by
-        rw [(fits_of_grounded hs hg hr).saturates v |>.2,
+        rw [(fits_of_live hs hg hr).saturates v |>.2,
           length_keptChains hs hg hr], PMF.bind_const]
     simp only [collapse, Option.map_some, Roll.saturate, Bool.false_eq_true,
       ↓reduceIte, Roll.collapse, law, Option.getD_some, Roll.law,
@@ -3225,7 +3415,7 @@ drawn anew.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hfaced`: Every die of the setup has a face.
 - `hρ`: The setup's roll is `ρ`.
 - `hlike`: Its chains are independent and alike.
@@ -3233,7 +3423,7 @@ drawn anew.
 - `hk`: It keeps some chain.
 -/
 theorem bind_bagDraws_keptChains {s : Setup} {ρ : Roll} {β : Type}
-    (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced)
+    (hs : s.WellFormed) (hg : s.Live) (hfaced : s.Faced)
     (hρ : s.roll = some ρ) (hlike : ρ.chainLike) (hl : s.lowest = 0)
     (hh : s.highest = 0) (hk : s.results - s.lowest - s.highest ≠ 0)
     (K : Chain → PMF β) :
@@ -3271,11 +3461,11 @@ end Setup
 
 namespace Setup
 
-/-- The law of each chain of a well-formed, grounded setup whose chains are
+/-- The law of each chain of a well-formed, live setup whose chains are
 independent and alike, and that keeps some chain, has branches, and each of
 its chains is normal and holds only faces of the die. -/
 private theorem chainLaw_props {s : Setup} {ρ : Roll} (hs : s.WellFormed)
-    (hg : s.Grounded) (hfaced : s.Faced) (hρ : s.roll = some ρ)
+    (hg : s.Live) (hfaced : s.Faced) (hρ : s.roll = some ρ)
     (hlike : ρ.chainLike) (hk : s.results - s.lowest - s.highest ≠ 0) :
     (ρ.chainLaw.2.map (·.2)).sum ≠ 0 ∧
       ∀ ch ∈ (weighted (.single 0) ρ.chainLaw.2).support,
@@ -3339,7 +3529,7 @@ private theorem chainLaw_props {s : Setup} {ρ : Roll} (hs : s.WellFormed)
 by a limited explode that matches some face of its die, transforms the law of
 each chain as the specification explodes each record's chains. -/
 private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
-    {n : Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded)
+    {n : Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
     (hfaced : s.Faced) (hρ : s.roll = some ρ)
     (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0) (hlike : ρ.chainLike)
@@ -3364,7 +3554,7 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
   have hspec : ∀ r ∈ s.law.support, Spec.explode r c (some (n + 1)) =
       (bagDraws K r.keptChains).map
         fun M => Record.ofChains s.replacement M.toList := fun r hr => by
-    have hf := fits_of_grounded hs hg hr
+    have hf := fits_of_live hs hg hr
     simp only [Spec.explode, hf.die]
     rw [explodeChains_congr _ _ (grows' := fun ch => ch.grows c)
       (fun ch _ => by simp)]
@@ -3429,7 +3619,7 @@ private theorem bursts_of_extend {s : Setup} {c : Criterion} {ρ : Roll}
       _ = _ := by
           rw [PMF.map_bind]
           refine bind_congr_support fun r hr => map_congr_support fun M hM => ?_
-          have hf := fits_of_grounded hs hg hr
+          have hf := fits_of_live hs hg hr
           have hn : ∀ x ∈ M.toList, NormalChain x := fun x hx => by
             obtain ⟨ch, hch, hx⟩ := mem_support_bagDraws hM x
               (Multiset.mem_toList.mp hx)
@@ -3499,7 +3689,7 @@ private theorem mem_faces_ofFaces {xs : List Int} {x : Int}
     exact .inl ((List.mergeSort_perm xs _).mem_iff.mp hx')
 
 /--
-If no end of a chain of a well-formed, grounded setup's roll may match a
+If no end of a chain of a well-formed, live setup's roll may match a
 criterion, then no explode by it grows any kept chain of any record that the
 setup describes.
 
@@ -3509,16 +3699,16 @@ setup describes.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hρ`: The setup's roll is `ρ`.
 - `hshow`: No end of a chain of the roll may match.
 - `hr`: The setup describes `r`.
 -/
 theorem grows_of_not_shows {s : Setup} {ρ : Roll} {c : Criterion}
-    (hs : s.WellFormed) (hg : s.Grounded) (hρ : s.roll = some ρ)
+    (hs : s.WellFormed) (hg : s.Live) (hρ : s.roll = some ρ)
     (hshow : ρ.shows c = false) {r : Record} (hr : r ∈ s.law.support) :
     ∀ ch ∈ r.keptChains, ch.grows c = false := by
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   -- A result that no criterion's match reaches leaves a chain that does not
   -- grow.
   have plain : ρ.Plain → (∀ x ∈ r.results, c.matches x = false) →
@@ -3694,7 +3884,7 @@ the collapse of stacks, which it proves.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hfaced`: Every die of the setup has a face.
 - `he`: The explode is not one that the pass refuses.
 - `ha`: Every explode that extends extends alike chains.
@@ -3703,7 +3893,7 @@ the collapse of stacks, which it proves.
   them, as `law_collapse` proves of every other roll.
 -/
 theorem law_burst_alike {s : Setup} (c : Criterion) (limit : Option Nat)
-    (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced)
+    (whole : Bool) (hs : s.WellFormed) (hg : s.Live) (hfaced : s.Faced)
     (he : s.Explodes c limit) (ha : s.ExtendsAlike c limit)
     (hcol : (∃ ms ls, s.roll = some (.stacked ms ls)) →
       s.collapse.law.map Record.view = s.law.map Record.view) :
@@ -3728,7 +3918,7 @@ theorem law_burst_alike {s : Setup} (c : Criterion) (limit : Option Nat)
         (fun w => by simp [explode, hρ, hk])
         (fun r hr ch hch => by rw [hnone hk r hr] at hch; cases hch)
         fun _ => .inr hk
-    have hsat := isSaturated_of_grounded hg hρ
+    have hsat := isSaturated_of_live hg hρ
     have hstays : (∀ w, Burst.resolve s.replacement c limit w = .nothing ∨
         Burst.resolve s.replacement c limit w = .unbounded) →
         ∀ w, s.explode c limit w = s := fun h w => by
@@ -3740,7 +3930,7 @@ theorem law_burst_alike {s : Setup} (c : Criterion) (limit : Option Nat)
     have hlast : ∀ r ∈ s.law.support, ∀ ch ∈ r.keptChains,
         ch.grows c = c.matches ch.last ∧ ch.last ∈ s.replacement.faces :=
       fun r hr ch hch => by
-        have hf := fits_of_grounded hs hg hr
+        have hf := fits_of_live hs hg hr
         refine ⟨by simp [Chain.grows, hf.live ch hch], hf.faces ch hch _
           (last_mem_dice (hf.live ch hch))⟩
     by_cases hm : s.replacement.faces.countP c.matches = 0
@@ -3997,8 +4187,8 @@ private theorem chainLaw_pos {s : Setup} {ρ : Roll} (hs : s.WellFormed)
 
 /--
 A burst that extends only alike chains (`Setup.ExtendsAlike`) leaves a
-well-formed, grounded setup with faces well formed and with faces, and, if it
-keeps the chains whole and does not saturate them, grounded too, so that
+well-formed, live setup with faces well formed and with faces, and, if it
+keeps the chains whole and does not saturate them, live too, so that
 the law of a later explode holds of it (`Setup.law_burst` in
 `XdySpec/Stacks.lean`): an
 explode that does nothing leaves the setup, or reduces it to custom dice of
@@ -4014,20 +4204,20 @@ or custom dice of their totals.
 
 # Hypotheses
 - `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
+- `hg`: The setup is live.
 - `hfaced`: Every die of the setup has a face.
 - `ha`: Every explode that extends extends alike chains.
 - `hcp`: If the setup's roll is stacks, reducing its chains to their totals
   leaves a well-formed setup with faces.
 -/
 theorem burst_invariants_alike {s : Setup} (c : Criterion)
-    (limit : Option Nat) (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded)
+    (limit : Option Nat) (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
     (hfaced : s.Faced) (ha : s.ExtendsAlike c limit)
     (hcp : (∃ ms ls, s.roll = some (.stacked ms ls)) →
       s.collapse.WellFormed ∧ s.collapse.Faced) :
     (s.burst c limit whole).WellFormed ∧ (s.burst c limit whole).Faced ∧
       (whole = true → (∀ v, Burst.resolve s.replacement c limit true ≠
-        .saturate v) → (s.burst c limit true).Grounded) := by
+        .saturate v) → (s.burst c limit true).Live) := by
   -- Reducing the chains to their totals leaves custom dice of them.
   have hcollapse : (s.collapse).WellFormed ∧ (s.collapse).Faced := by
     cases hρ : s.roll with
@@ -4064,7 +4254,7 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
   have hstay : (∀ w, s.explode c limit w = s) →
       (s.burst c limit whole).WellFormed ∧ (s.burst c limit whole).Faced ∧
         (whole = true → (∀ v, Burst.resolve s.replacement c limit true ≠
-          .saturate v) → (s.burst c limit true).Grounded) :=
+          .saturate v) → (s.burst c limit true).Live) :=
       fun h => by
     cases whole with
     | true =>
@@ -4078,7 +4268,7 @@ theorem burst_invariants_alike {s : Setup} (c : Criterion)
   | some ρ =>
     by_cases hk : s.results - s.lowest - s.highest = 0
     · exact hstay fun w => by simp [explode, hρ, hk]
-    have hsat := isSaturated_of_grounded hg hρ
+    have hsat := isSaturated_of_live hg hρ
     have hstays : (∀ w, Burst.resolve s.replacement c limit w = .nothing ∨
         Burst.resolve s.replacement c limit w = .unbounded) →
         ∀ w, s.explode c limit w = s := fun h w => by

@@ -13,7 +13,8 @@ chains has been dropped, which compose the laws that they defer; and the
 joins of stacks whose chains have become others, under laws that weigh
 unlike, which a drop needs, and the totals to which they collapse; and the
 compositions of the laws of stacks with what each chain becomes, and their
-weights.
+weights; and the explodes and rerolls of stacks of saturated chains, which
+leave them alone, dropped or not.
 -/
 
 namespace Xdy.Spec.Test.Stacks
@@ -89,7 +90,7 @@ private theorem explodes_of {s : Setup} {c : Criterion} {limit : Option Nat}
 have faces. -/
 private theorem threeD2_invariants :
     threeD2.WellFormed ∧ threeD2.Grounded ∧ threeD2.Faced := by
-  refine ⟨fun _ h => by cases h; trivial, ⟨by decide, fun ρ h => ?_⟩,
+  refine ⟨fun _ h => by cases h; trivial, .inl ⟨by decide, fun ρ h => ?_⟩,
     fun _ h => by cases h; trivial⟩
   cases h
   intro r hr x hx
@@ -149,9 +150,7 @@ private theorem threeD2Stacks_invariants :
   obtain ⟨hs, hg, hf⟩ := threeD2_invariants
   obtain ⟨hs', hf', hg'⟩ :=
     Setup.burst_invariants (.within 2 2) (some 1) true hs hg hf
-  refine ⟨hs', hg' rfl fun v h => ?_, hf'⟩
-  rw [Burst.resolve_some true (by decide)] at h
-  cases h
+  exact ⟨hs', hg' rfl, hf'⟩
 
 -- Exploding those stacks again, and rerolling them, whole or reduced to
 -- their totals, describe the specification's explodes and rerolls.
@@ -204,7 +203,7 @@ faces. -/
 private theorem fixedD2_invariants :
     fixedD2.WellFormed ∧ fixedD2.Grounded ∧ fixedD2.Faced := by
   refine ⟨fun _ h => by cases h; exact ⟨by decide, by decide⟩,
-    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+    .inl ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
   cases h
   intro r hr x hx
   rw [show fixedD2.replacement.faces = [1, 2] by decide]
@@ -235,7 +234,7 @@ private theorem poolD2_invariants :
       refine ⟨by decide, by decide, fun e he => ?_⟩
       simp only [List.mem_cons, List.not_mem_nil, or_false] at he
       rcases he with rfl | rfl <;> rfl,
-    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+    .inl ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
   cases h
   intro r hr x hx
   rw [show poolD2.replacement.faces = [1, 2] by decide]
@@ -265,7 +264,7 @@ faces. -/
 private theorem twoChains_invariants :
     twoChains.WellFormed ∧ twoChains.Grounded ∧ twoChains.Faced := by
   refine ⟨fun _ h => by cases h; exact ⟨by decide, by decide⟩,
-    ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
+    .inl ⟨by decide, fun ρ h => ?_⟩, fun _ h => by cases h; trivial⟩
   cases h
   refine ⟨rfl, fun e he => ⟨law_normal e he, ?_⟩⟩
   rw [show twoChains.replacement.faces = [1, 2] by decide]
@@ -290,6 +289,105 @@ example : twoChains.Bursts (.within 2 2) (some 1) true :=
 example : twoChains.Bursts (.within 2 2) (some 1) false :=
   let ⟨hs, hg, hf⟩ := twoChains_invariants
   Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+
+/-! ## Saturated stacks -/
+
+-- An unlimited explode of every face saturates the two chains still kept of
+-- three two-sided dice, the lowest dropped, into one multiset of two
+-- saturated chains, weighing the eight branches of the dice.
+#guard threeD2.burst (.within 1 2) none true ==
+  { roll := some (.stacked [([(.saturated i32Max, 2)], 8)] []),
+    die := some (.standard 2) }
+
+/-- The stacks that saturating three two-sided dice leaves, after the lowest
+is dropped, are well formed, grounded, and have faces. -/
+private theorem saturatedD2_invariants :
+    (threeD2.burst (.within 1 2) none true).WellFormed ∧
+      (threeD2.burst (.within 1 2) none true).Grounded ∧
+      (threeD2.burst (.within 1 2) none true).Faced := by
+  obtain ⟨hs, hg, hf⟩ := threeD2_invariants
+  obtain ⟨hs', hf', hg'⟩ :=
+    Setup.burst_invariants (.within 1 2) none true hs hg hf
+  exact ⟨hs', hg' rfl, hf'⟩
+
+-- Every later explode leaves them alone; a reroll that crosses out leaves
+-- them alone; and one that may change the dice still kept leaves their
+-- saturated chains alone, spelling out what each has become.
+#guard (threeD2.burst (.within 1 2) none true).burst (.within 2 2) (some 1)
+    true == threeD2.burst (.within 1 2) none true
+#guard (threeD2.burst (.within 1 2) none true).reroll (.within 1 2) none ==
+  threeD2.burst (.within 1 2) none true
+#guard (threeD2.burst (.within 1 2) none true).reroll (.within 1 1) (some 1) ==
+  { roll := some (.stacked [([(.saturated i32Max, 2)], 8)]
+      [(.saturated i32Max, [(.saturated i32Max, 1)])]),
+    die := some (.standard 2) }
+
+-- Each describes the specification's explode or reroll, whole or reduced to
+-- the totals.
+example : (threeD2.burst (.within 1 2) none true).Bursts (.within 2 2)
+    (some 1) true :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : (threeD2.burst (.within 1 2) none true).Bursts (.within 2 2)
+    (some 1) false :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  Setup.law_burst _ _ _ hs hg hf (explodes_of (by decide))
+example : (threeD2.burst (.within 1 2) none true).RerollsAs (.within 1 2)
+    none true :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : (threeD2.burst (.within 1 2) none true).RerollsAs (.within 1 1)
+    (some 1) true :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : (threeD2.burst (.within 1 2) none true).RerollsAs (.within 1 1)
+    (some 1) false :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+-- What they leave stays grounded if the chains stay whole.
+example : ((threeD2.burst (.within 1 2) none true).burst (.within 2 2)
+    (some 1) true).Grounded :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  (Setup.burst_invariants _ _ _ hs hg hf).2.2 rfl
+example : ((threeD2.burst (.within 1 2) none true).rerollAs (.within 1 1)
+    (some 1) true).Grounded :=
+  let ⟨hs, hg, hf⟩ := saturatedD2_invariants
+  (Setup.reroll_invariants _ _ _ hs hg hf).2.2 rfl
+
+/-- Two saturated chains of a two-sided die, the lowest dropped. -/
+private def saturatedDropped : Setup :=
+  { roll := some (.stacked [([(.saturated i32Max, 2)], 8)] []),
+    die := some (.standard 2), lowest := 1 }
+
+/-- The saturated chains, the lowest dropped, are well formed, saturated, and
+have faces. -/
+private theorem saturatedDropped_invariants : saturatedDropped.WellFormed ∧
+    saturatedDropped.Grounded ∧ saturatedDropped.Faced :=
+  ⟨fun _ h => by
+      cases h
+      refine ⟨by simp, by simp, fun e he => ?_, by simp⟩
+      simp only [List.mem_singleton] at he
+      subst he
+      rfl,
+    .inr ⟨_, _, rfl, by decide, by decide, by decide⟩,
+    fun _ h => by cases h; trivial⟩
+
+-- After a drop, a reroll leaves the stacks of the one saturated chain still
+-- kept, and describes the specification's reroll, whole or reduced to the
+-- totals.
+#guard saturatedDropped.reroll (.within 1 1) (some 1) ==
+  { roll := some (.stacked [([(.saturated i32Max, 1)], 8)]
+      [(.saturated i32Max, [(.saturated i32Max, 1)])]),
+    die := some (.standard 2) }
+example : saturatedDropped.RerollsAs (.within 1 1) (some 1) true :=
+  let ⟨hs, hg, hf⟩ := saturatedDropped_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : saturatedDropped.RerollsAs (.within 1 1) (some 1) false :=
+  let ⟨hs, hg, hf⟩ := saturatedDropped_invariants
+  Setup.law_reroll _ _ _ hs hg hf
+example : (saturatedDropped.rerollAs (.within 1 1) (some 1) true).Grounded :=
+  let ⟨hs, hg, hf⟩ := saturatedDropped_invariants
+  (Setup.reroll_invariants _ _ _ hs hg hf).2.2 rfl
 
 /-! ## Rerolls of chains -/
 
@@ -320,8 +418,10 @@ private def twoChainsWhole : Setup := { twoChains with lowest := 0 }
 faces. -/
 private theorem twoChainsWhole_invariants : twoChainsWhole.WellFormed ∧
     twoChainsWhole.Grounded ∧ twoChainsWhole.Faced :=
-  let ⟨hs, hg, hf⟩ := twoChains_invariants
-  ⟨hs, ⟨hg.1, fun _ h => by cases h; exact hg.2 _ rfl⟩, hf⟩
+  match twoChains_invariants with
+  | ⟨hs, .inl hg, hf⟩ =>
+    ⟨hs, .inl ⟨hg.1, fun _ h => by cases h; exact hg.2 _ rfl⟩, hf⟩
+  | ⟨_, .inr ⟨_, _, h, _⟩, _⟩ => by cases h
 
 -- Rerolling every `1` once, none dropped, transforms the law of each chain,
 -- padding the chain of one die to the chain of two.

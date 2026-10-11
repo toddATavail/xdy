@@ -78,8 +78,10 @@
 //! each multiset to make up what its composed laws lack
 //! (`law_transformStacks`), and so the laws of the rerolls and explodes of
 //! stacks none of whose chains has been dropped (`Setup.law_burst`,
-//! `Setup.law_reroll`). Stacks of saturated chains have no proof yet; the
-//! tests check every law against an independent enumeration.
+//! `Setup.law_reroll`), and that every explode and reroll leaves stacks of
+//! saturated chains alone, as the specification leaves their records
+//! (`Setup.Saturated`); the tests check every law against an independent
+//! enumeration.
 
 use std::{
 	cmp::Ordering,

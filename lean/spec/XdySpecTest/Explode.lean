@@ -122,9 +122,9 @@ private def stackedD2 : Setup :=
 
 /-! ## Laws -/
 
-/-- Two two-sided dice are well formed, grounded, and have faces. -/
+/-- Two two-sided dice are well formed, live, and have faces. -/
 private theorem twoD2_invariants :
-    twoD2.WellFormed ∧ twoD2.Grounded ∧ twoD2.Faced :=
+    twoD2.WellFormed ∧ twoD2.Live ∧ twoD2.Faced :=
   ⟨fun _ h => by cases h; trivial,
     ⟨by decide, fun ρ h => by
       cases h
@@ -176,7 +176,7 @@ example : twoD2.Bursts (.within 1 2) none true :=
 
 -- An explode of the chains that an explode left describes the
 -- specification's, as every explode that keeps the chains whole, and does not
--- saturate them, leaves them grounded.
+-- saturate them, leaves them live.
 example : (twoD2.burst (.within 2 2) (some 1) true).Bursts (.within 1 1)
     (some 2) false := by
   obtain ⟨hs, hg, hf⟩ := twoD2_invariants

@@ -56,11 +56,9 @@ laws of the explodes that transform them:
   which composes the laws that they defer (`Roll.explodeStacks`), since the
   records of a setup of stacks are the chains that they draw
   (`map_coe_stackDraws`). `Setup.law_burst` lifts `Setup.law_burst_alike` of
-  `XdySpec/Explode.lean` to every explode of a grounded setup that the pass
-  does not refuse, and of a mixture (`mixtureLaw_burst_whole`,
-  `mixtureLaw_burst_totals`). Every burst leaves a well-formed setup with
-  faces, grounded if it keeps its chains whole and does not saturate them
-  (`Setup.burst_invariants`).
+  `XdySpec/Explode.lean` to every explode of a live setup that the pass does
+  not refuse, and of a mixture (`mixtureLaw_burst_whole`,
+  `mixtureLaw_burst_totals`).
 - A reroll of a chain rerolls each of its kept dice that the criterion
   matches, the replacement of its last die becoming its last die
   (`rerollChain`), and what `rerolled` lists of it, over its weights, is that
@@ -75,18 +73,25 @@ laws of the explodes that transform them:
   (`stackWeight_of_pow`); a reroll of stacks none of whose chains has been
   dropped composes the laws that they defer with the reroll of each chain.
   `Setup.law_reroll` lifts `Setup.law_reroll_plain` of
-  `XdySpec/Reroll.lean` to every grounded setup, by its kept chains if its
+  `XdySpec/Reroll.lean` to every live setup, by its kept chains if its
   chains stay whole and by its kept results if they reduce to their totals
   (`Setup.rerollAs`, `Setup.RerollsAs`), as every record that either reroll
   leaves fits the die (`fits_reroll`, `view_of_fits`), and so to a mixture
-  (`mixtureLaw_reroll_whole`, `mixtureLaw_reroll_totals`). Every reroll leaves
-  a well-formed setup with faces, grounded if it keeps its chains whole
-  (`Setup.reroll_invariants`).
+  (`mixtureLaw_reroll_whole`, `mixtureLaw_reroll_totals`).
+- Every explode leaves stacks of saturated chains alone, which have no end
+  from which to grow, as the specification leaves their records
+  (`Record.Saturated.explode`). Every reroll leaves their chains alone too, as
+  the specification does (`Record.Saturated.reroll`): one that crosses out
+  leaves the stacks, and one that may change the dice still kept leaves their
+  multisets and weights, and spells out what each chain had become, which
+  draws the same records, or after a drop, the stacks of the kept pool.
+  `Setup.law_burst` and `Setup.law_reroll` so hold of every grounded setup,
+  live or saturated (`Setup.Grounded`). Every burst and reroll leaves a
+  well-formed setup with faces, grounded if it keeps its chains whole
+  (`Setup.burst_invariants`, `Setup.reroll_invariants`).
 - The proofs ask that the roll be well formed, that its chains be normal, and
   its results lie within the `i32` range (`Roll.Normal`); the explodes and
-  rerolls ask that the setup be grounded (`Setup.Grounded`), and so hold no
-  stacks of saturated chains, which an unlimited explode that matches every
-  face leaves, and which are left to later proofs.
+  rerolls ask that the setup be grounded (`Setup.Grounded`).
 
 ```mermaid
 flowchart TD
@@ -2432,11 +2437,11 @@ private theorem collapse_props {s : Setup} (hs : s.WellFormed)
       rw [this]
       exact ⟨hs, hfaced⟩
 
-/-- Reducing the chains of a well-formed setup, grounded unless it holds
+/-- Reducing the chains of a well-formed setup, live unless it holds
 stacks, to their totals leaves its records as every later drop, keep, and sum
 views them. -/
 private theorem law_collapse_of_props {s : Setup} (hs : s.WellFormed)
-    (hg : (∀ ms ls, s.roll ≠ some (.stacked ms ls)) → s.Grounded) :
+    (hg : (∀ ms ls, s.roll ≠ some (.stacked ms ls)) → s.Live) :
     s.collapse.law.map Record.view = s.law.map Record.view := by
   by_cases hst : ∃ ms ls, s.roll = some (.stacked ms ls)
   · obtain ⟨ms, ls, hρ⟩ := hst
@@ -2457,11 +2462,11 @@ end Setup
 
 namespace Setup
 
-/-- Every chain that a chain of a grounded setup's stacks may have become is
+/-- Every chain that a chain of a live setup's stacks may have become is
 normal, may still grow, and holds only faces of the die. -/
 private theorem live_of_mem_became {s : Setup}
     {ms : List (List (Chain × Nat) × Nat)}
-    {laws : List (Chain × List (Chain × Nat))} (hg : s.Grounded)
+    {laws : List (Chain × List (Chain × Nat))} (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws)) {e : List (Chain × Nat) × Nat}
     {p : Chain × Nat} {x : Chain} (he : e ∈ ms) (hp : p ∈ e.1)
     (hx : x ∈ (became laws p.1).support) :
@@ -2504,12 +2509,12 @@ private theorem law_stacked {s : Setup} {ms : List (List (Chain × Nat) × Nat)}
     (funext fun cs => ?_))
   exact ofChains_with _ _
 
-/-- The kept chains of the records of a grounded setup of stacks that drops
+/-- The kept chains of the records of a live setup of stacks that drops
 nothing are the chains that the stacks draw, each copy of each chain of a
 multiset of the pool drawn from what it has become. -/
 private theorem bind_keptChains_stacked {s : Setup}
     {ms : List (List (Chain × Nat) × Nat)}
-    {laws : List (Chain × List (Chain × Nat))} (hg : s.Grounded)
+    {laws : List (Chain × List (Chain × Nat))} (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws)) (hl : s.lowest = 0)
     (hh : s.highest = 0) {β : Type} (V : Multiset Chain → PMF β) :
     s.law.bind (fun r => V (r.keptChains : Multiset Chain)) =
@@ -2540,8 +2545,8 @@ private theorem sum_laws_ne_zero {ms : List (List (Chain × Nat) × Nat)}
 
 /-- Stacks of normal chains that may still grow, of faces of a die within the
 `i32` range, transformed by what each chain becomes, with the die, are
-grounded, if each chain that such a chain becomes is likewise. -/
-private theorem grounded_transformStacks {D : Die}
+live, if each chain that such a chain becomes is likewise. -/
+private theorem live_transformStacks {D : Die}
     (hD : ∀ x ∈ D.faces, i32Min ≤ x ∧ x ≤ i32Max)
     {pool : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))}
@@ -2555,7 +2560,7 @@ private theorem grounded_transformStacks {D : Die}
         NormalChain o.1 ∧ o.1.saturates = false ∧
           ∀ x ∈ o.1.dice, x ∈ D.faces) :
     ({ roll := some (transformStacks pool laws G f), die := some D } :
-      Setup).Grounded := by
+      Setup).Live := by
   refine ⟨hD, fun ρ h => ?_⟩
   simp only [Option.mem_def, Option.some.injEq] at h
   subst h
@@ -2592,7 +2597,7 @@ private theorem sum_transformPool_compose_ne_zero {T : Type}
   exact mul_ne_zero (hw.2.1 e he).2.ne' (mul_ne_zero (pow_ne_zero _ hQ)
     (stackWeight_ne_zero hw.2.2.2 e.1)) this
 
-/-- Stacks of a grounded setup that drops nothing, transformed by what each
+/-- Stacks of a live setup that drops nothing, transformed by what each
 chain becomes, as an explode or a reroll keeps them whole, describe each
 record's chains drawn anew, independently, as a later reroll or explode reads
 them, if what each chain becomes weighs alike but for the padding of its kept
@@ -2600,7 +2605,7 @@ dice, and leaves normal chains that may still grow, of faces of the die. -/
 private theorem chainView_transformStacks {s : Setup}
     {ms : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))} (hs : s.WellFormed)
-    (hg : s.Grounded) (hρ : s.roll = some (.stacked ms laws))
+    (hg : s.Live) (hρ : s.roll = some (.stacked ms laws))
     (hl : s.lowest = 0) (hh : s.highest = 0) {G Q : Nat}
     {f : Chain → List (Chain × Nat) × Nat} (hQ : Q ≠ 0) (hG : G ≠ 0)
     (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q * G ^ (f ch).2)
@@ -2659,7 +2664,7 @@ private theorem chainView_transformStacks {s : Setup}
       (fun M => (M, s.replacement)) ∘ Multiset.ofList from rfl,
     ← PMF.map_comp, hc, PMF.map_bind]
 
-/-- Stacks of a grounded setup that drops nothing, reduced without joining
+/-- Stacks of a live setup that drops nothing, reduced without joining
 them to the totals of what each chain becomes, as an explode that reduces the
 chains to their totals leaves them, describe the totals of each record's
 chains drawn anew, independently, as every later drop, keep, and sum reads
@@ -2667,7 +2672,7 @@ them, if what each chain becomes weighs alike. -/
 private theorem view_transformPool_stacked {s : Setup}
     {ms : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))} (hs : s.WellFormed)
-    (hg : s.Grounded) (hρ : s.roll = some (.stacked ms laws))
+    (hg : s.Live) (hρ : s.roll = some (.stacked ms laws))
     (hl : s.lowest = 0) (hh : s.highest = 0) {Q : Nat}
     {f : Chain → List (Int × Nat) × Nat} (hQ : Q ≠ 0)
     (hf : ∀ ch, ((f ch).1.map (·.2)).sum = Q) (K : Chain → PMF Chain)
@@ -2725,11 +2730,11 @@ private theorem view_transformPool_stacked {s : Setup}
     ← bagDraws_map_map, bagDraws_bind, PMF.map_comp, PMF.map_bind]
   rfl
 
-/-- The specification's explode of each record of a well-formed, grounded
+/-- The specification's explode of each record of a well-formed, live
 setup, limited to `n + 1` times, extends each of its kept chains
 independently. -/
 private theorem explode_of_mem {s : Setup} {c : Criterion} {n : Nat}
-    (hs : s.WellFormed) (hg : s.Grounded)
+    (hs : s.WellFormed) (hg : s.Live)
     (hm : s.replacement.faces.countP c.matches ≠ 0) {r : Record}
     (hr : r ∈ s.law.support) :
     Spec.explode r c (some (n + 1)) = (bagDraws (fun ch =>
@@ -2739,7 +2744,7 @@ private theorem explode_of_mem {s : Setup} {c : Criterion} {n : Nat}
       else PMF.pure ch) r.keptChains).map
         fun M => Record.ofChains s.replacement M.toList := by
   have hF : s.replacement.faces ≠ [] := fun h => hm (by rw [h]; rfl)
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   simp only [Spec.explode, hf.die]
   rw [explodeChains_congr _ _ (grows' := fun ch => ch.grows c)
     (fun ch _ => by simp)]
@@ -2773,8 +2778,8 @@ end Setup
 
 namespace Setup
 
-/-- The roll of a grounded setup is normal. -/
-private theorem normal_of_grounded {s : Setup} {ρ : Roll} (hg : s.Grounded)
+/-- The roll of a live setup is normal. -/
+private theorem normal_of_live {s : Setup} {ρ : Roll} (hg : s.Live)
     (hρ : s.roll = some ρ) : ρ.Normal := by
   have hgρ := hg.2 ρ hρ
   -- The results of any other roll are faces of the die.
@@ -2796,15 +2801,15 @@ private theorem normal_of_grounded {s : Setup} {ρ : Roll} (hg : s.Grounded)
   | range | standard | custom | fixed | pool => exact plain hgρ
 
 /-- Every chain of the kept pool of the multisets of the chains of a
-well-formed, grounded setup's roll is normal, may still grow, and holds only
+well-formed, live setup's roll is normal, may still grow, and holds only
 faces of the die. -/
 private theorem keptPool_live {s : Setup} {ρ : Roll} (hs : s.WellFormed)
-    (hg : s.Grounded) (hρ : s.roll = some ρ) :
+    (hg : s.Live) (hρ : s.roll = some ρ) :
     ∀ e ∈ keptPool ρ.stacks s.lowest s.highest, ∀ p ∈ e.1,
       NormalChain p.1 ∧ p.1.saturates = false ∧
         ∀ x ∈ p.1.dice, x ∈ s.replacement.faces := by
   have hw := hs ρ hρ
-  have hkc := map_keptChains_law hρ hw (normal_of_grounded hg hρ)
+  have hkc := map_keptChains_law hρ hw (normal_of_live hg hρ)
   intro e he p hp
   simp only [keptPool, List.mem_map] at he
   obtain ⟨e', he', rfl⟩ := he
@@ -2823,15 +2828,15 @@ private theorem keptPool_live {s : Setup} {ρ : Roll} (hs : s.WellFormed)
     rw [← Multiset.mem_coe, hre]
     exact List.mem_flatMap.mpr ⟨p, hp,
       List.mem_replicate.mpr ⟨(mem_slice hp).2.ne', rfl⟩⟩
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   exact ⟨hf.normal _ hch, hf.live _ hch, hf.faces _ hch⟩
 
-/-- A grounded setup whose chains are not alike, or have been dropped, and
+/-- A live setup whose chains are not alike, or have been dropped, and
 which are not stacks none of whose chains has been dropped, explodes the
 multisets of its chains still kept, by a limited explode that matches some
 face of its die. -/
 private theorem explode_multisets {s : Setup} {c : Criterion} {ρ : Roll}
-    {n : Nat} (hg : s.Grounded) (hρ : s.roll = some ρ)
+    {n : Nat} (hg : s.Live) (hρ : s.roll = some ρ)
     (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0)
     (hna : ¬(ρ.chainLike = true ∧ s.lowest = 0 ∧ s.highest = 0))
@@ -2841,7 +2846,7 @@ private theorem explode_multisets {s : Setup} {c : Criterion} {ρ : Roll}
       { roll := some (ρ.explodeMultisets s.lowest s.highest
           (Burst.resolve s.replacement c (some (n + 1)) w) c w),
         die := some s.replacement } := by
-  have hsat := isSaturated_of_grounded hg hρ
+  have hsat := isSaturated_of_live hg hρ
   have hre : ∀ b, ρ.explode s.lowest s.highest b c w =
       ρ.explodeMultisets s.lowest s.highest b c w := fun b => by
     unfold Roll.explode
@@ -2865,7 +2870,7 @@ been dropped, by a limited explode that matches some face of its die,
 transforms each multiset of its chains still kept as the specification
 explodes each record's chains. -/
 private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
-    {n : Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded)
+    {n : Nat} (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some ρ) (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0)
     (hna : ¬(ρ.chainLike = true ∧ s.lowest = 0 ∧ s.highest = 0))
@@ -2875,14 +2880,14 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
   let ext := extension c (customDie s.replacement.faces) (n + 1)
   let K : Chain → PMF Chain := fun ch =>
     if ch.grows c then ext.map (growChain ch) else PMF.pure ch
-  have hn := normal_of_grounded hg hρ
+  have hn := normal_of_live hg hρ
   have hw := hs ρ hρ
   have hexp := explode_multisets (n := n) (c := c) hg hρ hk hm hna hnd
   -- The specification explodes each record's kept chains independently.
   have hspec : ∀ r ∈ s.law.support, Spec.explode r c (some (n + 1)) =
       (bagDraws K r.keptChains).map
         fun M => Record.ofChains s.replacement M.toList := fun r hr => by
-    have hf := fits_of_grounded hs hg hr
+    have hf := fits_of_live hs hg hr
     simp only [Spec.explode, hf.die]
     rw [explodeChains_congr _ _ (grows' := fun ch => ch.grows c)
       (fun ch _ => by simp)]
@@ -2923,7 +2928,7 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
     have hch' : ch ∈ r.keptChains := by
       rw [← Multiset.mem_coe, hre]
       exact hch
-    have hf := fits_of_grounded hs hg hr
+    have hf := fits_of_live hs hg hr
     exact ⟨hf.normal ch hch', hf.faces ch hch'⟩
   -- The specification's explodes, as the multisets of the chains still kept
   -- weigh them.
@@ -2956,7 +2961,7 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
     refine bind_congr_support fun r hr => ?_
     rw [hspec r hr, PMF.map_comp]
     refine map_congr_support fun M hM => hVU M fun x hx => ?_
-    have hf := fits_of_grounded hs hg hr
+    have hf := fits_of_live hs hg hr
     obtain ⟨ch, hch, hx⟩ := mem_support_bagDraws hM x hx
     exact hKn' ch (hf.normal ch hch) (hf.faces ch hch) x hx
   have hrep : ∀ ρ' : Roll,
@@ -3090,12 +3095,12 @@ private theorem bursts_of_multisets {s : Setup} {c : Criterion} {ρ : Roll}
       ← PMF.map_comp, bagDraws_map_map]
     simp only [hbt]
 
-/-- A grounded setup of stacks none of whose chains has been dropped explodes
+/-- A live setup of stacks none of whose chains has been dropped explodes
 them by composing the law of what each chain of the pool has become with the
 explode, limited to `n + 1` times, if it matches some face of its die. -/
 private theorem explode_stacks {s : Setup} {c : Criterion}
     {ms : List (List (Chain × Nat) × Nat)}
-    {laws : List (Chain × List (Chain × Nat))} {n : Nat} (hg : s.Grounded)
+    {laws : List (Chain × List (Chain × Nat))} {n : Nat} (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws)) (hl : s.lowest = 0)
     (hh : s.highest = 0) (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0) (w : Bool) :
@@ -3103,20 +3108,20 @@ private theorem explode_stacks {s : Setup} {c : Criterion}
       { roll := some (Roll.explodeStacks ms laws
           (Burst.resolve s.replacement c (some (n + 1)) w) c w),
         die := some s.replacement } := by
-  have hsat := isSaturated_of_grounded hg hρ
+  have hsat := isSaturated_of_live hg hρ
   have hk' : ¬s.results - 0 - 0 = 0 := by rwa [hl, hh] at hk
   simp only [explode, hρ, hk', hsat, hl, hh, Bool.false_eq_true, or_false,
     ↓reduceIte, Burst.resolve_some w hm, Roll.explode, Roll.chainLike,
     false_and, and_self]
 
-/-- Exploding a grounded setup of stacks none of whose chains has been
+/-- Exploding a live setup of stacks none of whose chains has been
 dropped, by a limited explode that matches some face of its die, composes the
 law of what each chain of the pool has become with its explode, as the
 specification explodes each record's chains. -/
 private theorem bursts_of_stacks {s : Setup} {c : Criterion}
     {ms : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))} {n : Nat} (whole : Bool)
-    (hs : s.WellFormed) (hg : s.Grounded)
+    (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws)) (hl : s.lowest = 0)
     (hh : s.highest = 0) (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0) :
@@ -3133,7 +3138,7 @@ private theorem bursts_of_stacks {s : Setup} {c : Criterion}
   have hn : ∀ r ∈ s.law.support,
       ∀ M ∈ (bagDraws K r.keptChains).support, ∀ x ∈ M, NormalChain x :=
     fun r hr M hM x hx => by
-      have hf := fits_of_grounded hs hg hr
+      have hf := fits_of_live hs hg hr
       obtain ⟨ch, hch, hx⟩ := mem_support_bagDraws hM x hx
       exact (live_of_burst hm hg.1
         ⟨hf.normal ch hch, hf.live ch hch, hf.faces ch hch⟩ x hx).1
@@ -3203,6 +3208,45 @@ private theorem extends_multisets {s : Setup} {c : Criterion}
   rw [Burst.resolve_some true hm] at hna
   exact ⟨ρ, n, hρ, rfl, hk, hm, hna⟩
 
+/-- Every explode leaves a saturated setup alone, since a saturated die decides
+its chains, which have no end from which to grow. -/
+private theorem explode_saturated {s : Setup} (hsat : s.Saturated)
+    (c : Criterion) (limit : Option Nat) (whole : Bool) :
+    s.explode c limit whole = s := by
+  obtain ⟨ms, laws, hρ, hst, _⟩ := hsat
+  simp only [explode, hρ, hst, or_true, ↓reduceIte]
+
+/-- Exploding a well-formed, saturated setup, which the explode leaves alone,
+describes the specification's explode of its records, which leaves each of
+them as every later instruction views it. -/
+private theorem bursts_of_saturated {s : Setup} (c : Criterion)
+    (limit : Option Nat) (whole : Bool) (hs : s.WellFormed)
+    (hsat : s.Saturated) : s.Bursts c limit whole := by
+  have hspec : ∀ r ∈ s.law.support, Spec.explode r c limit =
+      PMF.pure (Record.ofChains s.replacement r.keptChains) := fun r hr =>
+    (saturated_of_mem hsat hr).explode c limit
+  have hst := explode_saturated hsat c limit
+  -- Stacks reduce to their totals as their records do.
+  have hcol : s.collapse.law.map Record.view = s.law.map Record.view := by
+    obtain ⟨ms, laws, hρ, _⟩ := hsat
+    exact law_collapse_of_props hs fun h => absurd hρ (h ms laws)
+  rw [Bursts]
+  cases whole with
+  | true =>
+    simp only [↓reduceIte, burst, hst]
+    rw [bind_congr_support hspec, PMF.map_bind]
+    simp only [PMF.pure_map]
+    refine (map_congr_support fun r hr =>
+      ((saturated_of_mem hsat hr).views).1.symm).trans ?_
+    exact (PMF.bind_pure_comp _ _).symm
+  | false =>
+    simp only [Bool.false_eq_true, ↓reduceIte, burst, hst, hcol]
+    rw [bind_congr_support hspec, PMF.map_bind]
+    simp only [PMF.pure_map]
+    refine (map_congr_support fun r hr =>
+      ((saturated_of_mem hsat hr).views).2.symm).trans ?_
+    exact (PMF.bind_pure_comp _ _).symm
+
 /--
 Exploding a setup, as `Mixture::explode` in `propagation/mixture.rs` explodes
 each setup, describes the specification's explode of the records that it
@@ -3213,8 +3257,10 @@ has been dropped (`Setup.law_burst_alike`), extends the chains of stacks none
 of which has been dropped, composing the law of what each chain of their pool
 has become with its explode, or extends the chains still kept of each
 multiset of the chains of any other roll, or after a drop, which it
-transforms multiset by multiset; an unlimited explode that may extend a chain
-the pass refuses. Mirrors `Setup::explode` and `Setup::collapse` in
+transforms multiset by multiset; and every explode leaves stacks of saturated
+chains alone, as the specification leaves their records
+(`Record.Saturated.explode`). The pass refuses an unlimited explode that may
+extend a chain. Mirrors `Setup::explode` and `Setup::collapse` in
 `propagation/mixture.rs`, and `burst`, `Roll::explode`, `compose`,
 `transform_pool`, `transform_stacks`, `kept_pool`, `Roll::saturate`, and
 `Roll::collapse` in `propagation/chain.rs`.
@@ -3235,31 +3281,34 @@ the pass refuses. Mirrors `Setup::explode` and `Setup::collapse` in
 theorem law_burst {s : Setup} (c : Criterion) (limit : Option Nat)
     (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced)
     (he : s.Explodes c limit) : s.Bursts c limit whole := by
-  by_cases ha : s.ExtendsAlike c limit
-  · exact law_burst_alike c limit whole hs hg hfaced he ha fun _ =>
-      law_collapse_of_props hs fun _ => hg
-  · obtain ⟨ρ, n, hρ, rfl, hk, hm, hna⟩ := extends_multisets ha
-    by_cases hst : ∃ ms ls, ρ = .stacked ms ls ∧ s.lowest = 0 ∧ s.highest = 0
-    · obtain ⟨ms, ls, rfl, hl, hh⟩ := hst
-      exact bursts_of_stacks whole hs hg hρ hl hh hk hm
-    · exact bursts_of_multisets whole hs hg hρ hk hm hna
-        fun ms ls h hd => hst ⟨ms, ls, h, hd⟩
+  rcases hg with hg | hsat
+  · by_cases ha : s.ExtendsAlike c limit
+    · exact law_burst_alike c limit whole hs hg hfaced he ha fun _ =>
+        law_collapse_of_props hs fun _ => hg
+    · obtain ⟨ρ, n, hρ, rfl, hk, hm, hna⟩ := extends_multisets ha
+      by_cases hst : ∃ ms ls, ρ = .stacked ms ls ∧ s.lowest = 0 ∧
+          s.highest = 0
+      · obtain ⟨ms, ls, rfl, hl, hh⟩ := hst
+        exact bursts_of_stacks whole hs hg hρ hl hh hk hm
+      · exact bursts_of_multisets whole hs hg hρ hk hm hna
+          fun ms ls h hd => hst ⟨ms, ls, h, hd⟩
+  · exact bursts_of_saturated c limit whole hs hsat
 
-/-- An explode of a well-formed, grounded setup of stacks none of whose
+/-- An explode of a well-formed, live setup of stacks none of whose
 chains has been dropped, limited to `n + 1` times, that matches some face of
-its die, leaves a well-formed setup with faces, grounded if its chains stay
+its die, leaves a well-formed setup with faces, live if its chains stay
 whole. -/
 private theorem burst_invariants_stacks {s : Setup} {c : Criterion}
     {ms : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))} {n : Nat} (whole : Bool)
-    (hs : s.WellFormed) (hg : s.Grounded)
+    (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws)) (hl : s.lowest = 0)
     (hh : s.highest = 0) (hk : s.results - s.lowest - s.highest ≠ 0)
     (hm : s.replacement.faces.countP c.matches ≠ 0) :
     (s.burst c (some (n + 1)) whole).WellFormed ∧
       (s.burst c (some (n + 1)) whole).Faced ∧
       (whole = true → (∀ v, Burst.resolve s.replacement c (some (n + 1)) true ≠
-        .saturate v) → (s.burst c (some (n + 1)) true).Grounded) := by
+        .saturate v) → (s.burst c (some (n + 1)) true).Live) := by
   have hw := hs _ hρ
   have hexp := explode_stacks (n := n) hg hρ hl hh hk hm
   obtain ⟨_, hpool, hlaws⟩ := hg.2 _ hρ
@@ -3269,7 +3318,7 @@ private theorem burst_invariants_stacks {s : Setup} {c : Criterion}
   | true =>
     simp only [burst, ↓reduceIte, hexp, Roll.explodeStacks]
     refine ⟨fun ρ' h => ?_, fun ρ' h => ?_, fun _ _ =>
-      grounded_transformStacks hg.1 hpool hlaws fun ch hch =>
+      live_transformStacks hg.1 hpool hlaws fun ch hch =>
         Burst.chains_live hm hg.1 hch⟩
     · simp only [Option.mem_def, Option.some.injEq] at h
       subst h
@@ -3318,36 +3367,15 @@ private theorem burst_invariants_stacks {s : Setup} {c : Criterion}
       subst h
       trivial
 
-/--
-A burst leaves a well-formed, grounded setup with faces well formed and with
-faces, and, if it keeps the chains whole and does not saturate them, grounded
-too, so that the laws of a later reroll (`law_reroll`) and explode
-(`law_burst`) hold of it: an explode that does nothing leaves the setup, or
-reduces it to custom dice of its totals; one that saturates leaves one
-multiset of the saturated chains, or of their value; one that extends alike
-chains leaves i.i.d. chains of the die's faces, or custom dice of their totals
-(`Setup.burst_invariants_alike`); one that extends the chains of stacks none
-of which has been dropped leaves stacks that compose the laws that they
-defer, or a pool of the multisets of their totals; and one that extends the
-chains of each multiset leaves stacks of the kept pool, or a pool of the
-multisets of their totals.
-
-# Parameters
-- `c`: The criterion.
-- `limit`: The number of times that each chain may be exploded, or `none` for
-  no limit.
-- `whole`: Whether the chains stay whole.
-
-# Hypotheses
-- `hs`: The setup is well formed.
-- `hg`: The setup is grounded.
-- `hfaced`: Every die of the setup has a face.
--/
-theorem burst_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
-    (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
+/-- A burst leaves a well-formed, live setup with faces well formed and with
+faces, and, if it keeps the chains whole and does not saturate them, live
+too. -/
+private theorem burst_invariants_live {s : Setup} (c : Criterion)
+    (limit : Option Nat) (whole : Bool) (hs : s.WellFormed) (hg : s.Live)
+    (hfaced : s.Faced) :
     (s.burst c limit whole).WellFormed ∧ (s.burst c limit whole).Faced ∧
       (whole = true → (∀ v, Burst.resolve s.replacement c limit true ≠
-        .saturate v) → (s.burst c limit true).Grounded) := by
+        .saturate v) → (s.burst c limit true).Live) := by
   by_cases ha : s.ExtendsAlike c limit
   · exact burst_invariants_alike c limit whole hs hg hfaced ha fun _ =>
       collapse_props hs hfaced
@@ -3368,7 +3396,7 @@ theorem burst_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
   cases whole with
   | true =>
     -- The stacks keep the chains of the kept pool, and what each becomes.
-    have hG := grounded_transformStacks (D := s.replacement) hg.1
+    have hG := live_transformStacks (D := s.replacement) hg.1
       (keptPool_live hs hg hρ) (laws := []) (fun e he => by cases he)
       (G := 1) (f := fun ch =>
         ((Burst.resolve s.replacement c (some (n + 1)) true).chains c ch, 0))
@@ -3446,6 +3474,75 @@ theorem burst_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
     · simp only [Option.mem_def, Option.some.injEq] at h
       subst h
       trivial
+
+
+/-- An explode that saturates leaves a setup alone, or saturates it. -/
+private theorem burst_saturate {s : Setup} {c : Criterion}
+    {limit : Option Nat} {v : Int}
+    (hv : Burst.resolve s.replacement c limit true = .saturate v) :
+    s.burst c limit true = s ∨ (s.burst c limit true).Saturated := by
+  simp only [burst, ↓reduceIte, explode]
+  cases hρ : s.roll with
+  | none => exact .inl rfl
+  | some ρ =>
+    simp only
+    split
+    · exact .inl rfl
+    · rw [hv]
+      refine .inr ⟨_, _, rfl, ?_, ?_, ?_⟩
+      · simp [Roll.isSaturated, Chain.saturates]
+      · simp [Chain.saturates]
+      · simp
+
+/--
+A burst leaves a well-formed, grounded setup with faces well formed and with
+faces, and, if it keeps the chains whole, grounded too, so that the laws of
+a later reroll (`law_reroll`) and explode (`law_burst`) hold of it: an
+explode that does nothing leaves the setup, or reduces it to custom dice of
+its totals; one that saturates leaves one multiset of the saturated chains,
+which is saturated, or of their value; one that extends alike chains leaves
+i.i.d. chains of the die's faces, or custom dice of their totals
+(`Setup.burst_invariants_alike`); one that extends the chains of stacks none
+of which has been dropped leaves stacks that compose the laws that they
+defer, or a pool of the multisets of their totals; one that extends the
+chains of each multiset leaves stacks of the kept pool, or a pool of the
+multisets of their totals; and every explode leaves a saturated setup alone,
+or reduces it to the multisets of its values.
+
+# Parameters
+- `c`: The criterion.
+- `limit`: The number of times that each chain may be exploded, or `none` for
+  no limit.
+- `whole`: Whether the chains stay whole.
+
+# Hypotheses
+- `hs`: The setup is well formed.
+- `hg`: The setup is grounded.
+- `hfaced`: Every die of the setup has a face.
+-/
+theorem burst_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
+    (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
+    (s.burst c limit whole).WellFormed ∧ (s.burst c limit whole).Faced ∧
+      (whole = true → (s.burst c limit true).Grounded) := by
+  rcases hg with hg | hsat
+  · obtain ⟨hw, hf, hl⟩ := burst_invariants_live c limit whole hs hg hfaced
+    refine ⟨hw, hf, fun hwh => ?_⟩
+    by_cases hv : ∀ v, Burst.resolve s.replacement c limit true ≠ .saturate v
+    · exact .inl (hl hwh hv)
+    · obtain ⟨v, hv⟩ := not_forall_not.mp hv
+      rcases burst_saturate hv with h | h
+      · rw [h]
+        exact .inl hg
+      · exact .inr h
+  · have hst := explode_saturated hsat c limit
+    cases whole with
+    | true =>
+      simp only [burst, ↓reduceIte, hst]
+      exact ⟨hs, hfaced, fun _ => .inr hsat⟩
+    | false =>
+      simp only [burst, Bool.false_eq_true, ↓reduceIte, hst]
+      exact ⟨(collapse_props hs hfaced).1, (collapse_props hs hfaced).2,
+        fun h => by cases h⟩
 
 end Setup
 
@@ -4068,6 +4165,94 @@ theorem reroll_chainView_of_crossOut {r : Record} {D : Die} {c : Criterion}
       (fun x (hx : x ∈ []) => absurd hx (by simp)),
       (Record.ofChains_fields _ _).2.2.2, hd]
 
+/--
+Every reroll leaves a saturated record, as every later instruction views it:
+it rerolls no saturated chain, and crosses out none.
+
+# Parameters
+- `c`: The criterion.
+- `limit`: The number of times that each die may be rerolled, or `none` for no
+  limit.
+
+# Hypotheses
+- `h`: The record is saturated.
+-/
+theorem Record.Saturated.reroll {D : Die} {r : Record} (h : r.Saturated D)
+    (c : Criterion) (limit : Option Nat) :
+    (Spec.reroll r c limit).map Record.chainView = PMF.pure r.chainView ∧
+      (Spec.reroll r c limit).map Record.view = PMF.pure r.view := by
+  have hn : ∀ ch ∈ r.keptChains, NormalChain ch := fun ch hch =>
+    normal_of_saturates (h.saturated ch hch)
+  -- A reroll leaves each saturated chain alone.
+  have hpure : ∀ (rerolled : Int → Bool) (P : PMF Int), ∀ ch ∈ r.keptChains,
+      rerollChain rerolled P ch = PMF.pure ch := fun rerolled P ch hch => by
+    have := h.saturated ch hch
+    cases ch with
+    | live => simp [Chain.saturates] at this
+    | saturated => rfl
+  suffices hR : ∃ R : Record, Spec.reroll r c limit = PMF.pure R ∧
+      R.chainView = r.chainView ∧ R.view = r.view by
+    obtain ⟨R, hR, hc, hv⟩ := hR
+    rw [hR, PMF.pure_map, PMF.pure_map, hc, hv]
+    exact ⟨rfl, rfl⟩
+  by_cases hc : r.chains = []
+  · -- A record without chains keeps none, since its chains of one die each
+    -- have not saturated.
+    have hkc : r.keptChains = r.kept.map .single := by
+      simp [Record.keptChains, hc]
+    have hk : r.kept = [] := List.eq_nil_iff_forall_not_mem.mpr fun x hx => by
+      have := h.saturated (.single x) (hkc ▸ List.mem_map_of_mem hx)
+      simp [Chain.single, Chain.saturates] at this
+    have hce : r.chains.isEmpty = true := by simp [hc]
+    refine ⟨{ die := r.die }, ?_, ?_, ?_⟩
+    · cases limit with
+      | none =>
+        simp only [Spec.reroll]
+        split
+        · simp [hk]
+        · simp [rerollEach, hce, hk, rerollKept]
+      | some l => simp [Spec.reroll, rerollEach, hce, hk, rerollKept]
+    · rw [Record.chainView, Record.chainView, hkc, hk]
+      simp [Record.keptChains, Record.kept, Record.sorted]
+    · rw [Record.view, Record.view, hk]
+      simp [Record.kept, Record.sorted]
+  · have hce : r.chains.isEmpty = false := by simpa using hc
+    refine ⟨Record.ofChains D r.keptChains, ?_, h.views.1, h.views.2⟩
+    -- Rerolling each die leaves the record of the kept chains.
+    have heach : ∀ (rerolled : Int → Bool) (P : PMF Int),
+        rerollEach r rerolled P = PMF.pure (Record.ofChains D r.keptChains) :=
+      fun rerolled P => by
+        have hp := Multiset.coe_eq_coe.mp
+          (Multiset.coe_toList (r.keptChains : Multiset Chain))
+        simp only [rerollEach, hce, Bool.false_eq_true, ↓reduceIte]
+        rw [rerollChains_eq_bag _ _ _ fun ch hch x hx => by
+            rw [hpure _ _ ch hch, PMF.mem_support_pure_iff] at hx
+            exact hx ▸ hn ch hch,
+          bagDraws_pure (hpure rerolled P), PMF.pure_map, h.die]
+        exact congrArg PMF.pure (ofChains_perm D hp fun x hx =>
+          hn x (hp.mem_iff.mp hx))
+    cases limit with
+    | none =>
+      simp only [Spec.reroll]
+      split
+      · simp only [hce, Bool.false_eq_true, ↓reduceIte,
+          List.filter_eq_self.mpr h.saturated, h.die]
+      · exact heach _ _
+    | some l => exact heach _ _
+
+/--
+A saturated record is viewed by the sorted totals of its kept chains: every
+later drop, keep, and sum reads what a later reroll or explode reads, reduced
+to the totals.
+
+# Hypotheses
+- `h`: The record is saturated.
+-/
+theorem view_of_saturated {D : Die} {r : Record} (h : r.Saturated D) :
+    r.view = (sortBag (r.chainView.1.map Chain.total), r.chainView.2) := by
+  rw [← h.views.2, view_ofChains]
+  simp [Record.chainView, h.die]
+
 /-- Every record that a reroll of a record without chains reaches holds no
 chains. -/
 theorem chains_of_mem_support_reroll {r : Record} {c : Criterion}
@@ -4349,8 +4534,8 @@ def RerollsAs (s : Setup) (c : Criterion) (limit : Option Nat) (whole : Bool) :
     (s.rerollAs c limit false).law.map Record.view =
       (s.law.bind fun r => Spec.reroll r c limit).map Record.view
 
-/-- Every record of a grounded setup without chains is faithful to its die. -/
-theorem faithful_of_grounded {s : Setup} (hg : s.Grounded) (hp : s.Plain) :
+/-- Every record of a live setup without chains is faithful to its die. -/
+theorem faithful_of_live {s : Setup} (hg : s.Live) (hp : s.Plain) :
     s.Faithful := by
   intro r hr x hx
   cases hρ : s.roll with
@@ -4366,17 +4551,17 @@ theorem faithful_of_grounded {s : Setup} (hg : s.Grounded) (hp : s.Plain) :
     | chains | stacked => exact hpρ.elim
     | range | standard | custom | fixed | pool => exact hgρ r hr x hx
 
-/-- A reroll of a grounded setup without chains describes the specification's
+/-- A reroll of a live setup without chains describes the specification's
 reroll of its records, as a later reroll or explode reads them. -/
 private theorem rerolls_whole_plain {s : Setup} (c : Criterion)
-    (limit : Option Nat) (hs : s.WellFormed) (hg : s.Grounded)
+    (limit : Option Nat) (hs : s.WellFormed) (hg : s.Live)
     (hfaced : s.Faced) (hp : s.Plain) :
     (s.reroll c limit).law.map Record.chainView =
       (s.law.bind fun r => Spec.reroll r c limit).map Record.chainView := by
   let G : List Int × Die → Multiset Chain × Die := fun v =>
     (((v.1.map Chain.single : List Chain) : Multiset Chain), v.2)
   have hp' := (reroll_invariants_plain c limit hs
-    (faithful_of_grounded hg hp) hfaced hp).2.2.2
+    (faithful_of_live hg hp) hfaced hp).2.2.2
   have hl : (s.reroll c limit).law.map Record.chainView =
       ((s.reroll c limit).law.map Record.view).map G := by
     rw [PMF.map_comp]
@@ -4390,7 +4575,7 @@ private theorem rerolls_whole_plain {s : Setup} (c : Criterion)
     exact chainView_of_plain (chains_of_mem_support_reroll
       (Setup.chains_of_mem_support_law hp hr) hR)
   rw [hl, hr,
-    law_reroll_plain c limit hs (faithful_of_grounded hg hp) hfaced hp]
+    law_reroll_plain c limit hs (faithful_of_live hg hp) hfaced hp]
 
 /-- Every final result of a matched die that a reroll draws is a face of the
 die. -/
@@ -4403,28 +4588,28 @@ theorem mem_faces_of_redraw {D : Die} {c : Criterion} {limit : Option Nat}
   · exact hgf y hy
   · exact absurd (by rw [← hglen, Roll.expand]; simp [h0]) hG
 
-/-- The specification rerolls each record of a grounded setup, by a reroll that
+/-- The specification rerolls each record of a live setup, by a reroll that
 may change its dice still kept, as independent draws of the reroll of each of
 its kept chains. -/
 private theorem reroll_chainView_of_redraw {s : Setup} {c : Criterion}
     {limit : Option Nat} {G : Nat} {g : List (Int × Nat)} (hs : s.WellFormed)
-    (hg : s.Grounded) (he : Effect.resolve s.replacement c limit = .redraw G g)
+    (hg : s.Live) (he : Effect.resolve s.replacement c limit = .redraw G g)
     {r : Record} (hr : r ∈ s.law.support) :
     (Spec.reroll r c limit).map Record.chainView =
       (bagDraws (rerollChain c.matches (weightedDie g)) r.keptChains).map
         fun M => (M, s.replacement) := by
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   rw [reroll_eq_rerollEach (hf.die ▸ he), map_chainView_rerollEach hf.normal
     hf.live fun _ _ _ _ _ y hy => hg.1 y (mem_faces_of_redraw he hy), hf.die]
 
-/-- The specification's reroll of every record of a grounded setup that keeps
+/-- The specification's reroll of every record of a live setup that keeps
 no chain leaves it, as a later reroll or explode reads it. -/
 private theorem reroll_chainView_of_empty {s : Setup} {c : Criterion}
-    {limit : Option Nat} (hs : s.WellFormed) (hg : s.Grounded)
+    {limit : Option Nat} (hs : s.WellFormed) (hg : s.Live)
     (hk : s.results - s.lowest - s.highest = 0) {r : Record}
     (hr : r ∈ s.law.support) :
     (Spec.reroll r c limit).map Record.chainView = PMF.pure r.chainView := by
-  have hf := fits_of_grounded hs hg hr
+  have hf := fits_of_live hs hg hr
   have hkc : r.keptChains = [] := List.eq_nil_of_length_eq_zero
     ((length_keptChains hs hg hr).trans hk)
   have hv : r.chainView = (0, s.replacement) := by
@@ -4441,7 +4626,7 @@ private theorem reroll_chainView_of_empty {s : Setup} {c : Criterion}
     rw [reroll_chainView_of_redraw hs hg he hr, hkc, hv]
     simp [bagDraws, PMF.pure_map]
 
-/-- A reroll of a grounded setup of i.i.d. chains describes the
+/-- A reroll of a live setup of i.i.d. chains describes the
 specification's reroll of its records, as a later reroll or explode reads
 them, if it keeps no chain, does nothing, or crosses out every chain. -/
 private theorem rerolls_whole_stays {s : Setup} {c : Criterion}
@@ -4481,12 +4666,12 @@ theorem weighted_transformLaw_rerolled {c : Criterion} {G : Nat}
   rw [show (fun o : Chain => o) = id from rfl, PMF.map_id, id,
     weighted_rerolled hg hG]
 
-/-- A reroll of a grounded setup of i.i.d. chains, none dropped, that may
+/-- A reroll of a live setup of i.i.d. chains, none dropped, that may
 change its chains still kept, describes the specification's reroll of its
 records, as a later reroll or explode reads them. -/
 private theorem rerolls_whole_iid {s : Setup} {c : Criterion}
     {limit : Option Nat} {count : Int} {cl : List (Chain × Nat)} {G : Nat}
-    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Grounded)
+    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Live)
     (hfaced : s.Faced) (hρ : s.roll = some (.chains count cl))
     (hk : s.results - s.lowest - s.highest ≠ 0) (hl : s.lowest = 0)
     (hh : s.highest = 0)
@@ -4531,14 +4716,14 @@ private theorem rerolls_whole_iid {s : Setup} {c : Criterion}
     ← PMF.map_bind, bind_bagDraws_keptChains hs hg hfaced hρ rfl hl hh hk K]
   rfl
 
-/-- A reroll of a grounded setup of stacks, none dropped, that may change its
+/-- A reroll of a live setup of stacks, none dropped, that may change its
 chains still kept, composes the law of what each chain of the pool has become
 with its reroll, as the specification rerolls each record's chains, as a later
 reroll or explode reads them. -/
 private theorem rerolls_whole_stacks {s : Setup} {c : Criterion}
     {limit : Option Nat} {ms : List (List (Chain × Nat) × Nat)}
     {laws : List (Chain × List (Chain × Nat))} {G : Nat}
-    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Grounded)
+    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some (.stacked ms laws))
     (hk : s.results - s.lowest - s.highest ≠ 0) (hl : s.lowest = 0)
     (hh : s.highest = 0)
@@ -4565,12 +4750,12 @@ private theorem rerolls_whole_stacks {s : Setup} {c : Criterion}
   exact (bind_congr_support fun r hr =>
     reroll_chainView_of_redraw hs hg he hr).symm
 
-/-- A reroll of a grounded setup of i.i.d. chains or stacks, some dropped,
+/-- A reroll of a live setup of i.i.d. chains or stacks, some dropped,
 that may change its chains still kept, describes the specification's reroll of
 its records, as a later reroll or explode reads them. -/
 private theorem rerolls_whole_dropped {s : Setup} {c : Criterion}
     {limit : Option Nat} {ρ : Roll} {G : Nat}
-    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Grounded)
+    {g : List (Int × Nat)} (hs : s.WellFormed) (hg : s.Live)
     (hρ : s.roll = some ρ) (hch : ρ.chained = true)
     (hk : s.results - s.lowest - s.highest ≠ 0)
     (hd : ¬(s.lowest = 0 ∧ s.highest = 0))
@@ -4583,7 +4768,7 @@ private theorem rerolls_whole_dropped {s : Setup} {c : Criterion}
   have hG := (redraw_law he).2.1
   have hgG := sum_of_redraw he
   have hw := hs ρ hρ
-  have hn := normal_of_grounded hg hρ
+  have hn := normal_of_live hg hρ
   set kp := keptPool ρ.stacks s.lowest s.highest with hkp
   have hkc := map_keptChains_law hρ hw hn
   have hWs := Roll.sum_stacks_ne_zero hw
@@ -4603,7 +4788,7 @@ private theorem rerolls_whole_dropped {s : Setup} {c : Criterion}
     have hch' : ch ∈ r.keptChains := by
       rw [← Multiset.mem_coe, hre]
       exact hch
-    have hf := fits_of_grounded hs hg hr
+    have hf := fits_of_live hs hg hr
     exact ⟨hf.normal ch hch', hf.live ch hch', hf.faces ch hch'⟩
   -- The specification's rerolls, as the multisets of the chains still kept
   -- weigh them.
@@ -4761,10 +4946,10 @@ theorem replacement_reroll (s : Setup) (c : Criterion) (limit : Option Nat) :
       · split <;> rfl
       · rfl
 
-/-- A grounded setup without chains is faithful to its die, and conversely. -/
-private theorem grounded_of_faithful {s : Setup}
+/-- A live setup without chains is faithful to its die, and conversely. -/
+private theorem live_of_faithful {s : Setup}
     (hD : ∀ x ∈ s.replacement.faces, i32Min ≤ x ∧ x ≤ i32Max)
-    (hp : s.Plain) (hf : s.Faithful) : s.Grounded := by
+    (hp : s.Plain) (hf : s.Faithful) : s.Live := by
   refine ⟨hD, fun ρ hρ => ?_⟩
   have hpρ := hp ρ hρ
   cases ρ with
@@ -4817,27 +5002,27 @@ private theorem wellFormed_keptPool {ρ : Roll} {lowest highest : Nat}
     | nil => rfl
     | cons m ms => rfl
 
-/-- What a reroll leaves of a well-formed, grounded setup with faces: a
-well-formed, grounded setup with faces, each of whose records fits the die. -/
+/-- What a reroll leaves of a well-formed, live setup with faces: a
+well-formed, live setup with faces, each of whose records fits the die. -/
 private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
+    (hs : s.WellFormed) (hg : s.Live) (hfaced : s.Faced) :
     (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faced ∧
-      (s.reroll c limit).Grounded ∧
+      (s.reroll c limit).Live ∧
       ∀ R ∈ (s.reroll c limit).law.support, R.Fits s.replacement := by
   have hrep := replacement_reroll s c limit
-  -- A grounded setup's records fit its die.
+  -- A live setup's records fit its die.
   suffices h : (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faced ∧
-      (s.reroll c limit).Grounded from
-    ⟨h.1, h.2.1, h.2.2, fun R hR => hrep ▸ fits_of_grounded h.1 h.2.2 hR⟩
+      (s.reroll c limit).Live from
+    ⟨h.1, h.2.1, h.2.2, fun R hR => hrep ▸ fits_of_live h.1 h.2.2 hR⟩
   -- A reroll that leaves the setup.
   have stays : s.reroll c limit = s → (s.reroll c limit).WellFormed ∧
-      (s.reroll c limit).Faced ∧ (s.reroll c limit).Grounded := fun h => by
+      (s.reroll c limit).Faced ∧ (s.reroll c limit).Live := fun h => by
     rw [h]
     exact ⟨hs, hfaced, hg⟩
   by_cases hp : s.Plain
   · obtain ⟨hs', hf', hc', hp'⟩ := reroll_invariants_plain c limit hs
-      (faithful_of_grounded hg hp) hfaced hp
-    exact ⟨hs', hc', grounded_of_faithful (hrep ▸ hg.1) hp' hf'⟩
+      (faithful_of_live hg hp) hfaced hp
+    exact ⟨hs', hc', live_of_faithful (hrep ▸ hg.1) hp' hf'⟩
   obtain ⟨ρ, hρ⟩ : ∃ ρ, s.roll = some ρ := by
     cases h : s.roll with
     | none => exact absurd (fun ρ hρ => by rw [h] at hρ; cases hρ) hp
@@ -4851,8 +5036,8 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
   | nothing => exact stays (by simp [reroll, hρ, hk, he])
   | crossOut =>
     have hs' : s.reroll c limit = { s with lowest := s.results } := by
-      simp [reroll, hρ, hk, he, isSaturated_of_grounded hg hρ]
-    have hg' : ({ s with lowest := s.results } : Setup).Grounded := by
+      simp [reroll, hρ, hk, he, isSaturated_of_live hg hρ]
+    have hg' : ({ s with lowest := s.results } : Setup).Live := by
       refine ⟨hg.1, fun ρ' h => ?_⟩
       simp only [Option.mem_def, hρ, Option.some.injEq] at h
       subst h
@@ -4896,7 +5081,7 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
           have := List.flatMap_eq_nil_iff.mp (by rw [← h, hTL, transformLaw])
             e he'
           exact (rerolled_pos hgpos hgne hG e.1).1 (List.map_eq_nil_iff.mp this)
-        have hg' : s''.Grounded := by
+        have hg' : s''.Live := by
           refine ⟨hg.1, fun ρ' h => ?_⟩
           simp only [s'', Option.mem_def, Option.some.injEq] at h
           subst h
@@ -4929,7 +5114,7 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
             and_self]
         rw [hs']
         refine ⟨fun ρ' h => ?_, fun ρ' h => by cases h; trivial,
-          grounded_transformStacks hg.1 hpool hlaws fun ch hch =>
+          live_transformStacks hg.1 hpool hlaws fun ch hch =>
             rerolled_live he hg.1 hch⟩
         cases h
         exact wellFormed_transformStacks (hs _ hρ) hG
@@ -4944,16 +5129,334 @@ private theorem reroll_props {s : Setup} (c : Criterion) (limit : Option Nat)
           ↓reduceIte, hch, Roll.rerollChains, hd]
       rw [hs']
       refine ⟨fun ρ' h => ?_, fun ρ' h => by cases h; trivial,
-        grounded_transformStacks hg.1 (keptPool_live hs hg hρ)
+        live_transformStacks hg.1 (keptPool_live hs hg hρ)
           (fun e he => by cases he) fun ch hch => rerolled_live he hg.1 hch⟩
       cases h
       exact wellFormed_transformStacks (wellFormed_keptPool (hs _ hρ)) hG
         (rerolled_pos hgpos hgne hG)
 
-/-- A reroll of a grounded setup describes the specification's reroll of its
+/-- The greatest of values that are all zero, from zero, is zero. -/
+private theorem foldl_max_eq_zero :
+    ∀ {l : List Nat}, (∀ x ∈ l, x = 0) → l.foldl Max.max 0 = 0
+  | [], _ => rfl
+  | x :: l, h => by
+    rw [List.foldl_cons, h x List.mem_cons_self, Nat.max_self]
+    exact foldl_max_eq_zero fun y hy => h y (List.mem_cons_of_mem _ hy)
+
+/-- Stacks of saturated chains, rerolled, keep their multisets and weights,
+and hold what each chain of their pool had become, which the reroll leaves
+alone, as a chain of no kept dice. -/
+private theorem transformStacks_saturated
+    {pool : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))} {c : Criterion} {G : Nat}
+    {g : List (Int × Nat)}
+    (hpool : ∀ e ∈ pool, ∀ p ∈ e.1, p.1.saturates = true)
+    (hlaws : ∀ e ∈ laws, ∀ q ∈ e.2, q.1.saturates = true) :
+    transformStacks pool laws G (rerolled c G g) =
+      .stacked pool ((pool.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
+        (ch, (laws.lookup ch).getD [(ch, 1)])) := by
+  have hrer : ∀ ch : Chain, ch.saturates = true →
+      rerolled c G g ch = ([(ch, 1)], 0) := fun ch h => by
+    cases ch with
+    | live => simp [Chain.saturates] at h
+    | saturated => rfl
+  -- What each chain of the pool has become composes to itself.
+  have hcomp : ∀ ch ∈ pool.flatMap (fun e => e.1.map (·.1)),
+      compose laws G (rerolled c G g) ch =
+        ((laws.lookup ch).getD [(ch, 1)], 0) := fun ch hch => by
+    obtain ⟨e, he, hpm⟩ := List.mem_flatMap.mp hch
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hpm
+    cases hl : laws.lookup p.1 with
+    | none => simp [compose, hl, hrer _ (hpool e he p hp)]
+    | some law =>
+      have hq : ∀ q ∈ law, rerolled c G g q.1 = ([(q.1, 1)], 0) := fun q hq =>
+        hrer _ (hlaws _ (mem_of_lookup hl) q hq)
+      have hmost : (law.map fun e => (rerolled c G g e.1).2).foldl Max.max 0 =
+          0 := foldl_max_eq_zero fun x hx => by
+        obtain ⟨q, hq', rfl⟩ := List.mem_map.mp hx
+        rw [hq q hq']
+      have hlaw : ∀ l : List (Chain × Nat), (∀ q ∈ l,
+          rerolled c G g q.1 = ([(q.1, 1)], 0)) →
+          (l.flatMap fun e => (rerolled c G g e.1).1.map fun o =>
+            (o.1, e.2 * G ^ (0 - (rerolled c G g e.1).2) * o.2)) = l := by
+        intro l hl'
+        induction l with
+        | nil => rfl
+        | cons q l ih =>
+          rw [List.flatMap_cons, hl' q List.mem_cons_self,
+            ih fun q' h => hl' q' (List.mem_cons_of_mem _ h)]
+          simp
+      simp only [compose, hl, transformLaw, hmost, Option.getD_some]
+      rw [hlaw law hq]
+  have hdice : ∀ e ∈ pool,
+      (e.1.map fun p => (compose laws G (rerolled c G g) p.1).2 * p.2).sum =
+        0 := fun e he => List.sum_eq_zero fun x hx => by
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hx
+    rw [hcomp p.1 (List.mem_flatMap.mpr ⟨e, he, List.mem_map_of_mem hp⟩),
+      zero_mul]
+  have hmost : (pool.map fun e => (e.1.map fun p =>
+      (compose laws G (rerolled c G g) p.1).2 * p.2).sum).foldl Max.max 0 =
+        0 := foldl_max_eq_zero fun x hx => by
+    obtain ⟨e, he, rfl⟩ := List.mem_map.mp hx
+    exact hdice e he
+  simp only [transformStacks, hmost]
+  congr 1
+  · refine (List.map_congr_left fun e he => ?_).trans (List.map_id _)
+    rw [hdice e he]
+    simp
+  · exact List.map_congr_left fun ch hch => by
+      rw [hcomp ch (List.mem_dedup.mp hch)]
+
+/-- What a chain of stacks has become is drawn from the law of what it has
+become, or else is the chain itself. -/
+private theorem became_getD (laws : List (Chain × List (Chain × Nat)))
+    (ch : Chain) :
+    became laws ch = weighted ch ((laws.lookup ch).getD [(ch, 1)]) := by
+  cases h : laws.lookup ch with
+  | none => simp [became, h, weighted_single ch ch one_ne_zero]
+  | some law => simp [became, h]
+
+/-- The branches that the laws of stacks add to a multiset are those of the
+law of what each chain has become, or one for a chain that is still itself. -/
+private theorem stackWeight_getD (laws : List (Chain × List (Chain × Nat)))
+    (ms : List (Chain × Nat)) :
+    stackWeight laws ms = (ms.map fun p =>
+      (((laws.lookup p.1).getD [(p.1, 1)]).map (·.2)).sum ^ p.2).prod := by
+  unfold stackWeight
+  congr 1
+  refine List.map_congr_left fun p _ => ?_
+  cases laws.lookup p.1 <;> simp
+
+/-- Draws of the chains of a multiset of stacks depend only on what each
+chain has become. -/
+private theorem stackDraws_congr
+    {laws laws' : List (Chain × List (Chain × Nat))} :
+    ∀ {ms : List (Chain × Nat)},
+      (∀ p ∈ ms, became laws p.1 = became laws' p.1) →
+        stackDraws laws ms = stackDraws laws' ms
+  | [], _ => rfl
+  | (ch, k) :: ms, h => by
+    simp only [stackDraws, h (ch, k) List.mem_cons_self,
+      stackDraws_congr fun p hp => h p (List.mem_cons_of_mem _ hp)]
+
+/-- Stacks whose laws agree on what each chain of their pool has become fill
+the same records. -/
+private theorem law_stacked_congr {ms : List (List (Chain × Nat) × Nat)}
+    {laws laws' : List (Chain × List (Chain × Nat))}
+    (h : ∀ e ∈ ms, ∀ p ∈ e.1, (laws.lookup p.1).getD [(p.1, 1)] =
+      (laws'.lookup p.1).getD [(p.1, 1)]) :
+    (Roll.stacked ms laws).law = (Roll.stacked ms laws').law := by
+  have hw : (ms.map fun e => (e.1, e.2 * stackWeight laws e.1)) =
+      ms.map fun e => (e.1, e.2 * stackWeight laws' e.1) :=
+    List.map_congr_left fun e he => by
+      rw [stackWeight_getD, stackWeight_getD,
+        List.map_congr_left fun p hp => by rw [h e he p hp]]
+  simp only [Roll.law]
+  rw [hw]
+  refine bind_congr_support fun m hm => ?_
+  rw [← hw] at hm
+  rw [stackDraws_congr fun p hp => ?_]
+  obtain ⟨e, he, hpe⟩ := mem_pool_of_mem_support hm p hp
+  rw [became_getD, became_getD, h e he p hpe]
+
+/-- A record that a setup describes, as a later reroll or explode reads it, is
+its kept chains and the setup's die. -/
+private theorem map_chainView_law (s : Setup) :
+    s.law.map Record.chainView =
+      (s.law.map fun r => (r.keptChains : Multiset Chain)).map
+        fun M => (M, s.replacement) := by
+  rw [PMF.map_comp]
+  exact map_congr_support fun r hr => by
+    simp [Record.chainView, (mem_support_law_die hr).1]
+
+/-- Stacks of saturated chains, and of nothing that they have become, are
+normal. -/
+private theorem normal_stacked_saturated
+    {ms : List (List (Chain × Nat) × Nat)}
+    {laws : List (Chain × List (Chain × Nat))}
+    (hpool : ∀ e ∈ ms, ∀ p ∈ e.1, p.1.saturates = true)
+    (hlaws : ∀ e ∈ laws, ∀ q ∈ e.2, q.1.saturates = true) :
+    (Roll.stacked ms laws).Normal :=
+  ⟨fun e he p hp => normal_of_saturates (hpool e he p hp),
+    fun e he q hq => normal_of_saturates (hlaws e he q hq)⟩
+
+/-- A reroll leaves a well-formed, saturated setup well formed and saturated,
+with faces, and leaves its records, as a later reroll or explode reads them:
+a reroll that does nothing, or crosses out, leaves the setup alone; and one
+that may change the dice still kept leaves every saturated chain alone, and
+so its stacks, or the stacks of its kept pool, after a drop. -/
+private theorem reroll_saturated {s : Setup} (c : Criterion)
+    (limit : Option Nat) (hs : s.WellFormed) (hsat : s.Saturated) :
+    (s.reroll c limit).WellFormed ∧ (s.reroll c limit).Faced ∧
+      (s.reroll c limit).Saturated ∧
+      (s.reroll c limit).law.map Record.chainView =
+        s.law.map Record.chainView := by
+  obtain ⟨ms, laws, hρ, hst, hpool, hlaws⟩ := hsat
+  have stays : s.reroll c limit = s → (s.reroll c limit).WellFormed ∧
+      (s.reroll c limit).Faced ∧ (s.reroll c limit).Saturated ∧
+      (s.reroll c limit).law.map Record.chainView =
+        s.law.map Record.chainView := fun h => by
+    rw [h]
+    exact ⟨hs, fun ρ' h' => by rw [hρ] at h'; cases h'; trivial,
+      ⟨ms, laws, hρ, hst, hpool, hlaws⟩, rfl⟩
+  by_cases hk : s.results - s.lowest - s.highest = 0
+  · exact stays (by simp [reroll, hρ, hk])
+  cases he : Effect.resolve s.replacement c limit with
+  | nothing => exact stays (by simp [reroll, hρ, hk, he])
+  | crossOut => exact stays (by simp [reroll, hρ, hk, he, hst])
+  | redraw G g =>
+    obtain ⟨hglen, hG, _⟩ := redraw_law he
+    have hgpos : ∀ f ∈ g, 0 < f.2 := (wellFormed_of_redraw he 0).2
+    have hgne : g ≠ [] := fun h => hG (by rw [← hglen, h]; rfl)
+    have hw := hs _ hρ
+    by_cases hd : s.lowest = 0 ∧ s.highest = 0
+    · -- The reroll leaves the stacks, and what each chain had become.
+      obtain ⟨hl, hh⟩ := hd
+      have hs' : s.reroll c limit =
+          { roll := some (transformStacks ms laws G (rerolled c G g)),
+            die := some s.replacement } := by
+        have hk' : ¬s.results - 0 - 0 = 0 := by rwa [hl, hh] at hk
+        simp only [reroll, hρ, hk', he, Roll.alike, Bool.false_eq_true,
+          false_and, ↓reduceIte, Roll.chained, Roll.rerollChains, hl, hh,
+          and_self]
+      have hW := wellFormed_transformStacks hw hG
+        (rerolled_pos (c := c) hgpos hgne hG)
+      rw [transformStacks_saturated hpool hlaws] at hs' hW
+      set laws' := (ms.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
+        (ch, (laws.lookup ch).getD [(ch, 1)]) with hlaws'
+      -- Each chain of the pool has become what it had become.
+      have hlook : ∀ e ∈ ms, ∀ p ∈ e.1,
+          laws'.lookup p.1 = some ((laws.lookup p.1).getD [(p.1, 1)]) :=
+        fun e he p hp => lookup_graph _ _ _ (List.mem_dedup.mpr
+          (List.mem_flatMap.mpr ⟨e, he, List.mem_map_of_mem hp⟩))
+      rw [hs']
+      refine ⟨fun ρ' h => by cases h; exact hW, fun ρ' h => by cases h; trivial,
+        ⟨ms, laws', rfl, ?_, hpool, ?_⟩, ?_⟩
+      · simp only [Roll.isSaturated, List.any_eq_true] at hst ⊢
+        obtain ⟨e, he, p, hp, hsp⟩ := hst
+        refine ⟨e, he, p, hp, ?_⟩
+        rw [hlook e he p hp]
+        cases hl' : laws.lookup p.1 with
+        | none => simpa [hl'] using hsp
+        | some law => simpa [hl'] using hsp
+      · intro e he q hq
+        obtain ⟨ch, hch, rfl⟩ := List.mem_map.mp he
+        obtain ⟨e', he', hpm⟩ := List.mem_flatMap.mp (List.mem_dedup.mp hch)
+        obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hpm
+        cases hl' : laws.lookup p.1 with
+        | none =>
+          simp only [hl', Option.getD_none, List.mem_singleton] at hq
+          rw [hq]
+          exact hpool e' he' p hp
+        | some law =>
+          simp only [hl', Option.getD_some] at hq
+          exact hlaws _ (mem_of_lookup hl') q hq
+      · have hlaw : (Roll.stacked ms laws').law = (Roll.stacked ms laws).law :=
+          law_stacked_congr fun e he p hp => by
+            rw [hlook e he p hp, Option.getD_some]
+        simp only [law, hρ, Option.map_some, Option.getD_some, hlaw, hl, hh]
+        rfl
+    · -- After a drop, the reroll leaves the stacks of the kept pool.
+      set kp := keptPool (Roll.stacked ms laws).stacks s.lowest s.highest
+        with hkp
+      have hs' : s.reroll c limit =
+          { roll := some (transformStacks kp [] G (rerolled c G g)),
+            die := some s.replacement } := by
+        simp only [reroll, hρ, hk, he, Roll.alike, Bool.false_eq_true,
+          false_and, ↓reduceIte, Roll.chained, Roll.rerollChains, hd, ← hkp]
+      -- Every chain still kept of the pool has saturated.
+      have hkps : ∀ e ∈ kp, ∀ p ∈ e.1, p.1.saturates = true := by
+        intro e he p hp
+        simp only [hkp, keptPool, List.mem_map] at he
+        obtain ⟨e₀, he₀, rfl⟩ := he
+        obtain ⟨p₀, hp₀, hpx⟩ := List.mem_flatMap.mp (mem_slice hp).1
+        rw [List.eq_of_mem_replicate hpx]
+        obtain ⟨e', he', hq, _⟩ := mem_joined (pool := ms) (laws := laws) he₀
+        obtain ⟨q, hq', r, hr, hrp⟩ := hq p₀ hp₀
+        rw [← hrp]
+        cases hl' : laws.lookup q.1 with
+        | none =>
+          simp only [hl', Option.getD_none, List.mem_singleton] at hr
+          rw [hr]
+          exact hpool e' he' q hq'
+        | some law =>
+          simp only [hl', Option.getD_some] at hr
+          exact hlaws _ (mem_of_lookup hl') r hr
+      have hW := wellFormed_transformStacks
+        (wellFormed_keptPool (lowest := s.lowest) (highest := s.highest) hw) hG
+        (rerolled_pos (c := c) hgpos hgne hG)
+      rw [← hkp, transformStacks_saturated hkps (fun e he => by cases he)] at hW
+      rw [transformStacks_saturated hkps (fun e he => by cases he)] at hs'
+      set laws'' := (kp.flatMap fun e => e.1.map (·.1)).dedup.map fun ch =>
+        (ch, (([] : List (Chain × List (Chain × Nat))).lookup ch).getD
+          [(ch, 1)]) with hlaws''
+      have hlook : ∀ e ∈ kp, ∀ p ∈ e.1, laws''.lookup p.1 = some [(p.1, 1)] :=
+        fun e he p hp => lookup_graph _ _ _ (List.mem_dedup.mpr
+          (List.mem_flatMap.mpr ⟨e, he, List.mem_map_of_mem hp⟩))
+      -- Some multiset of the kept pool keeps a chain.
+      have hne : ∃ e ∈ kp, ∃ p, p ∈ e.1 := by
+        obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil
+          (Roll.stacked ms laws).stacks fun h0 =>
+            Roll.sum_stacks_ne_zero hw (by rw [h0]; rfl)
+        have hc := count_slice e.1 s.lowest s.highest
+        rw [(Roll.stacks_props hw he).1] at hc
+        obtain ⟨p, hp⟩ := List.exists_mem_of_ne_nil
+          (slice e.1 s.lowest s.highest) fun h0 =>
+            hk (by rw [h0] at hc; simpa [results, hρ] using hc.symm)
+        exact ⟨_, List.mem_map_of_mem (f := fun e : List (Chain × Nat) × Nat =>
+          (slice e.1 s.lowest s.highest, e.2)) he, p, hp⟩
+      rw [hs']
+      refine ⟨fun ρ' h => by cases h; exact hW, fun ρ' h => by cases h; trivial,
+        ⟨kp, laws'', rfl, ?_, hkps, ?_⟩, ?_⟩
+      · obtain ⟨e, he, p, hp⟩ := hne
+        simp only [Roll.isSaturated, List.any_eq_true]
+        refine ⟨e, he, p, hp, ?_⟩
+        rw [hlook e he p hp]
+        simpa using hkps e he p hp
+      · intro e he q hq
+        obtain ⟨ch, hch, rfl⟩ := List.mem_map.mp he
+        obtain ⟨e', he', hpm⟩ := List.mem_flatMap.mp (List.mem_dedup.mp hch)
+        obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hpm
+        simp only [List.lookup, Option.getD_none, List.mem_singleton] at hq
+        rw [hq]
+        exact hkps e' he' p hp
+      · -- The stacks of the kept pool fill records of its chains.
+        let s'' : Setup :=
+          { roll := some (.stacked kp []), die := some s.replacement }
+        have hlaw : ({ roll := some (.stacked kp laws''),
+                       die := some s.replacement } : Setup).law =
+            s''.law := by
+          have := law_stacked_congr (ms := kp) (laws := laws'') (laws' := [])
+            fun e he p hp => by rw [hlook e he p hp]; rfl
+          simp only [law, Option.map_some, Option.getD_some, this, s'',
+            replacement]
+        have hn'' := normal_stacked_saturated hkps
+          (laws := []) (fun e he => by cases he)
+        have hkc'' := map_keptChains_law (s := s'') rfl
+          (wellFormed_keptPool (lowest := s.lowest) (highest := s.highest) hw)
+          hn''
+        have hkc := map_keptChains_law hρ hw
+          (normal_stacked_saturated hpool hlaws)
+        rw [hlaw, map_chainView_law, map_chainView_law, hkc'', hkc, ← hkp]
+        -- Slicing nothing from the kept pool keeps it, as multisets.
+        have hk0 : weighted [] (keptPool (Roll.stacked kp []).stacks 0 0) =
+            (weighted [] kp).map (fun ms => slice ms 0 0) := by
+          rw [← weighted_map_of]
+          exact congrArg₂ weighted (by
+            simp [slice, group, Roll.expand]) rfl
+        simp only [s'', replacement, Option.getD_some]
+        rw [hk0]
+        simp only [PMF.map_comp]
+        refine map_congr_support fun m _ => ?_
+        simp only [Function.comp_apply, slice, Nat.sub_zero, List.drop_zero]
+        rw [List.take_of_length_le (le_refl _)]
+        refine congrArg (·, _) (Multiset.coe_eq_coe.mpr
+          ((expand_group_perm _).trans (List.mergeSort_perm _ _)))
+
+/-- A reroll of a live setup describes the specification's reroll of its
 records, as a later reroll or explode reads them. -/
 private theorem rerolls_whole {s : Setup} (c : Criterion) (limit : Option Nat)
-    (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
+    (hs : s.WellFormed) (hg : s.Live) (hfaced : s.Faced) :
     (s.reroll c limit).law.map Record.chainView =
       (s.law.bind fun r => Spec.reroll r c limit).map Record.chainView := by
   by_cases hp : s.Plain
@@ -4971,27 +5474,27 @@ private theorem rerolls_whole {s : Setup} (c : Criterion) (limit : Option Nat)
   cases he : Effect.resolve s.replacement c limit with
   | nothing =>
     exact rerolls_whole_stays (by simp [reroll, hρ, hk, he])
-      fun r hr => reroll_chainView_of_nothing (fits_of_grounded hs hg hr) he
+      fun r hr => reroll_chainView_of_nothing (fits_of_live hs hg hr) he
   | crossOut =>
     obtain ⟨rfl, hm⟩ := Effect.resolve_crossOut he
     have hw : s.replacement.facesWithin c := by
       rw [Die.facesWithin, List.all_eq_true]
       exact List.countP_eq_length.mp hm
     have hs' : s.reroll c none = { s with lowest := s.results } := by
-      simp [reroll, hρ, hk, he, isSaturated_of_grounded hg hρ]
+      simp [reroll, hρ, hk, he, isSaturated_of_live hg hρ]
     -- Every record keeps no chain.
-    have hg' : ({ s with lowest := s.results } : Setup).Grounded := by
+    have hg' : ({ s with lowest := s.results } : Setup).Live := by
       refine ⟨hg.1, fun ρ' h => ?_⟩
       simp only [Option.mem_def, hρ, Option.some.injEq] at h
       subst h
       have := hg.2 _ hρ
       cases ρ <;> first | exact this | cases hch
     rw [hs', PMF.map_bind, bind_congr_support fun r hr =>
-        reroll_chainView_of_crossOut (fits_of_grounded hs hg hr) hw,
+        reroll_chainView_of_crossOut (fits_of_live hs hg hr) hw,
       PMF.bind_const, map_congr_support (g := fun _ => (0, s.replacement))
         fun R hR => ?_]
     · exact PMF.map_const _ _
-    have hf := fits_of_grounded (s := { s with lowest := s.results }) hs hg' hR
+    have hf := fits_of_live (s := { s with lowest := s.results }) hs hg' hR
     have hlen :=
       length_keptChains (s := { s with lowest := s.results }) hs hg' hR
     have hkc : R.keptChains = [] := List.eq_nil_of_length_eq_zero (by
@@ -5007,6 +5510,42 @@ private theorem rerolls_whole {s : Setup} (c : Criterion) (limit : Option Nat)
       | range | standard | custom | fixed | pool => cases hch
     · exact (rerolls_whole_dropped hs hg hρ hch hk hd he).1
 
+/-- The records of a saturated setup, as every later drop, keep, and sum
+views them, are the sorted totals of what a later reroll or explode reads. -/
+private theorem map_view_of_saturated {s : Setup} (h : s.Saturated) :
+    s.law.map Record.view = (s.law.map Record.chainView).map fun v =>
+      (sortBag (v.1.map Chain.total), v.2) := by
+  rw [PMF.map_comp]
+  exact map_congr_support fun r hr => view_of_saturated (saturated_of_mem h hr)
+
+/-- Rerolling a well-formed, saturated setup describes the specification's
+reroll of its records, which leaves each of them as every later instruction
+views it. -/
+private theorem rerolls_saturated {s : Setup} (c : Criterion)
+    (limit : Option Nat) (whole : Bool) (hs : s.WellFormed)
+    (hsat : s.Saturated) : s.RerollsAs c limit whole := by
+  obtain ⟨hs', _, hsat', hlaw⟩ := reroll_saturated c limit hs hsat
+  -- The specification's reroll leaves each record.
+  have hspec : ∀ {β : Type} (V : Record → β),
+      (∀ r ∈ s.law.support, (Spec.reroll r c limit).map V = PMF.pure (V r)) →
+      (s.law.bind fun r => Spec.reroll r c limit).map V = s.law.map V :=
+    fun V h => by
+      rw [PMF.map_bind, bind_congr_support h]
+      exact PMF.bind_pure_comp _ _
+  cases whole with
+  | true =>
+    simp only [RerollsAs, rerollAs, ↓reduceIte]
+    rw [hlaw, hspec _ fun r hr =>
+      ((saturated_of_mem hsat hr).reroll c limit).1]
+  | false =>
+    simp only [RerollsAs, rerollAs, Bool.false_eq_true, ↓reduceIte]
+    have hcol : (s.reroll c limit).collapse.law.map Record.view =
+        (s.reroll c limit).law.map Record.view := by
+      obtain ⟨ms, laws, hρ, _⟩ := hsat'
+      exact law_collapse_of_props hs' fun h => absurd hρ (h ms laws)
+    rw [hcol, map_view_of_saturated hsat', hlaw, ← map_view_of_saturated hsat,
+      hspec _ fun r hr => ((saturated_of_mem hsat hr).reroll c limit).2]
+
 /--
 Rerolling a setup, as `Mixture::reroll` in `propagation/mixture.rs` rerolls
 each setup, describes the specification's reroll of the records that it
@@ -5019,7 +5558,9 @@ chain, transforming the law of each if none has been dropped
 its chains, into stacks, if some have (`transformStacks`), whose deferred laws
 weigh each multiset as `joined` does (`stackWeight`); and one of stacks none
 of whose chains has been dropped composes the law of what each chain of their
-pool has become with its reroll (`law_transformStacks`). Mirrors
+pool has become with its reroll (`law_transformStacks`). Every reroll leaves
+the chains of stacks of saturated chains alone, as the specification leaves
+their records (`Record.Saturated.reroll`). Mirrors
 `Setup::reroll` and `Setup::collapse` in `propagation/mixture.rs`, and
 `Roll::reroll_chains`, `rerolled`, `compose`, `transform_law`,
 `transform_stacks`, and `kept_pool` in `propagation/chain.rs`.
@@ -5039,6 +5580,9 @@ pool has become with its reroll (`law_transformStacks`). Mirrors
 theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
     (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
     s.RerollsAs c limit whole := by
+  rcases hg with hg | hsat
+  swap
+  · exact rerolls_saturated c limit whole hs hsat
   have hw := rerolls_whole c limit hs hg hfaced
   cases whole with
   | true => simpa [RerollsAs, rerollAs] using hw
@@ -5048,7 +5592,7 @@ theorem law_reroll {s : Setup} (c : Criterion) (limit : Option Nat)
     rw [law_collapse_of_props hs' fun _ => hg']
     refine map_view_of_chainView hfit (fun R hR => ?_) hw
     obtain ⟨r, hr, hR⟩ := (PMF.mem_support_bind_iff _ _ _).mp hR
-    exact fits_reroll (fits_of_grounded hs hg hr) hg.1 hR
+    exact fits_reroll (fits_of_live hs hg hr) hg.1 hR
 
 /--
 A reroll leaves a well-formed, grounded setup with faces well formed and with
@@ -5058,8 +5602,9 @@ a setup without chains leaves one, faithful to its die
 (`Setup.reroll_invariants_plain`); one of i.i.d. chains none of which has
 been dropped leaves i.i.d. chains of the die's faces, or custom dice of their
 totals; one of stacks none of whose chains has been dropped leaves stacks
-that compose the laws that they defer; and one of chains some of which have
-been dropped leaves stacks of the kept pool.
+that compose the laws that they defer; one of chains some of which have been
+dropped leaves stacks of the kept pool; and one of stacks of saturated chains
+leaves stacks of saturated chains.
 
 # Parameters
 - `c`: The criterion.
@@ -5076,7 +5621,13 @@ theorem reroll_invariants {s : Setup} (c : Criterion) (limit : Option Nat)
     (whole : Bool) (hs : s.WellFormed) (hg : s.Grounded) (hfaced : s.Faced) :
     (s.rerollAs c limit whole).WellFormed ∧ (s.rerollAs c limit whole).Faced ∧
       (whole = true → (s.rerollAs c limit true).Grounded) := by
-  obtain ⟨hs', hc', hg', _⟩ := reroll_props c limit hs hg hfaced
+  obtain ⟨hs', hc', hg'⟩ : (s.reroll c limit).WellFormed ∧
+      (s.reroll c limit).Faced ∧ (s.reroll c limit).Grounded := by
+    rcases hg with hg | hsat
+    · obtain ⟨hs', hc', hg', _⟩ := reroll_props c limit hs hg hfaced
+      exact ⟨hs', hc', .inl hg'⟩
+    · obtain ⟨hs', hc', hsat', _⟩ := reroll_saturated c limit hs hsat
+      exact ⟨hs', hc', .inr hsat'⟩
   cases whole with
   | true => exact ⟨hs', hc', fun _ => hg'⟩
   | false =>
