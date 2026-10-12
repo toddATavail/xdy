@@ -4,12 +4,16 @@ import XdySpec.Explode
 # The bounds of explodes
 
 The bounds evaluator in `xdy/src/evaluator.rs` bounds the totals of the chains
-that an explode may grow from a record that no explode has extended yet, each
-of whose chains still kept holds one kept die (`Explosion::totals`). It never
-enumerates the chains, but folds a few shapes of them, each die at its least
-or greatest result, and every reader of the totals reads only their hull.
-This module mirrors it and proves that the hull is sound, and exact for one
-die and one criterion:
+of a record by their shapes (`ChainShape`): runs of middle dice, each die of
+which may show any of a set of results, and the results of the end. It never
+enumerates the chains, but folds each shape at its least or greatest results
+(`ChainShape::totals`), and every reader of the totals reads only their hull.
+This module models the first explode of a record that no explode has extended
+yet, each of whose chains still kept holds one kept die, whose shapes
+`DieChains::explode` makes, and proves that the hull is sound, and exact for
+one die and one criterion. Both this model and the Rust are exact there, so
+their hulls agree; the shapes of later rerolls and explodes are not yet
+modeled:
 
 - `fold` mirrors `fold`, `min(i32Max, max(i32Min, Σneg) + Σpos)` over the
   negative and other dice, each with its copies, and is the total of every
@@ -30,18 +34,18 @@ die and one criterion:
   (`shapeFold_between`), or, without limit, at none and at `unboundedDice`
   (`shapeFold_unbounded`); and a chain that ends before its limit is spent is
   never more extreme than both the chain that ends after one extension and
-  the chain that spends its limit (`shapeFold_short`), so `Explosion::totals`
+  the chain that spends its limit (`shapeFold_short`), so `Explosion.totals`
   need not fold the chains that end after `L - 1` extensions.
-- `Explosion.totals` mirrors `Explosion::totals`, over results modeled as
-  finite sets. Its hull covers the total of every chain that the explode may
-  make of a chain of one die, for any die, criterion, and limit that the
-  explosion admits (`totals_sound`), as when `RollingRecordBounds::explode`
-  explodes every die and criterion at once, and so of every chain still kept
-  that the explode leaves of a record (`explode_sound`). For one die and one
-  criterion (`pair`), its least and greatest are some chain's
-  (`pair_exact`, `Exact.hull`), and so are those of the union of every pair
-  (`explodePairs_exact`), as `RollingRecordBounds::explode` unites them when
-  they are few enough. The totals themselves may leave gaps between the
+- `Explosion.totals` folds the shapes of a first explode, over results
+  modeled as finite sets. Its hull covers the total of every chain that the
+  explode may make of a chain of one die, for any die, criterion, and limit
+  that the explosion admits (`totals_sound`), as when the bounds explode every
+  die and criterion at once, and so of every chain still kept that the
+  explode leaves of a record (`explode_sound`). For one die and one criterion
+  (`pair`), its least and greatest are some chain's (`pair_exact`,
+  `Exact.hull`), and so are those of the union of every pair
+  (`explodePairs_exact`), as the bounds unite them when they are few
+  enough. The totals themselves may leave gaps between the
   shapes that some chain fills, which no reader sees.
 
 ```mermaid
@@ -688,7 +692,8 @@ limited to a positive number of times grows a chain whose end it matches by a
 limited tail, an unlimited explode that matches every face of the die
 saturates every chain, and one that does not grows a chain whose end it
 matches by an unlimited tail; every other chain stays as it was. Mirrors the
-shapes of chain that `Explosion::totals` in `evaluator.rs` considers.
+shapes of chain that `DieChains::explode` in `evaluator.rs` makes of a chain
+of one die.
 
 # Parameters
 - `d`: The die.
@@ -863,7 +868,7 @@ theorem mem_explode_iff {r : Record} {c : Criterion} {l : Option Nat}
 
 /--
 The fold of a chain of a shape: a first die, `count` middle dice that show
-alike, and a last die, if the chain has one, as `Explosion::totals` in
+alike, and a last die, if the chain has one, as `ChainShape::totals` in
 `evaluator.rs` folds each shape at its least or greatest results.
 
 # Parameters
@@ -1065,7 +1070,7 @@ the chain that ends after one extension and the chain whose limit is spent,
 which holds at least as many middle dice and a last die that may show any
 face, at least as extreme as one that ends the chain: if the middle dice move
 the total toward an extreme, the spent chain is at least as extreme, and
-otherwise the short one. So `Explosion::totals` need not fold the chains that
+otherwise the short one. So `Explosion.totals` need not fold the chains that
 end after `L - 1` extensions.
 
 # Parameters
@@ -1293,8 +1298,8 @@ theorem Exact.hull {s : Finset Int} {A : Set Int} {p : Int × Int}
 
 /--
 Results that bound values exactly, united, bound the values united exactly,
-as `RollingRecordBounds::explode` in `evaluator.rs` unites its answers for
-each pair of a die and a criterion.
+as the bounds in `evaluator.rs` unite their answers for each pair of a die
+and a criterion.
 
 # Parameters
 - `s`, `s'`: The results.
@@ -1321,7 +1326,8 @@ theorem Exact.union {s s' : Finset Int} {A A' : Set Int} (h : Exact s A)
 /-- An explode of the chains still kept by a rolling record that no explode
 has extended yet, each of which holds one kept die, over the dice and criteria
 that it may resolve to, for the purpose of bounding the totals of the chains
-that it grows. Mirrors `Explosion` in `evaluator.rs`. -/
+that it grows, as `DieChains::explode` in `evaluator.rs` transforms the chains
+of one die. -/
 structure Explosion where
   /-- The results that a die still kept may show. -/
   results : Finset Int
@@ -1347,7 +1353,8 @@ if the limit may be `0`; the die and one die that does not match, if the limit
 may exceed `1`; and the chain that spends each end of the range of limits, at
 least `1`, whose last die may show any face. Without limit, the die and one
 die that does not match, after no middle dice or after `unboundedDice` of
-them. Mirrors the shapes in `Explosion::totals` in `evaluator.rs`.
+them. These span the totals of the shapes that `DieChains::explode` in
+`evaluator.rs` makes of a chain of one die.
 
 # Parameters
 - `e`: The explosion.
@@ -1412,8 +1419,8 @@ that some criterion does not match, alone; the values of saturated chains;
 and the totals of each shape, between its extremes. Their hull covers every
 total that a chain may show (`totals_sound`), and is exact if the die and
 criterion are each one (`pair_exact`), but they may leave gaps between
-the shapes that some chain fills. Mirrors `Explosion::totals` in
-`evaluator.rs`.
+the shapes that some chain fills. Models the hull of the totals of the shapes
+that `DieChains::explode` in `evaluator.rs` makes of a chain of one die.
 
 # Parameters
 - `e`: The explosion.
@@ -1571,8 +1578,8 @@ explosion: for any die whose faces the explosion's faces include, any
 criterion that matches only results that some criterion of the explosion
 matches, and every result that every one does, and any limit that the
 explosion's bounds admit. So it covers every one die and criterion of a
-predicate, as `RollingRecordBounds::explode` in `evaluator.rs` explodes them
-all at once, when they are too many to explode one pair at a time.
+predicate, as the bounds in `evaluator.rs` explode them all at once, when
+they are too many to explode one pair at a time.
 
 # Parameters
 - `e`: The explosion.
@@ -1811,8 +1818,8 @@ theorem explode_sound {r : Record} {e : Explosion} {c : Criterion}
 /-! ## Exactness -/
 
 /--
-The explosion of one die and one criterion, as `RollingRecordBounds::explode`
-in `evaluator.rs` explodes each pair when they are few enough: the results
+The explosion of one die and one criterion, as the bounds in `evaluator.rs`
+explode each pair when they are few enough: the results
 that the die may show, its faces, the criterion as both the results that some
 criterion matches and those that every one does, and the die's saturated
 value, if the explode, without limit, matches every face and some die is
@@ -2066,8 +2073,7 @@ theorem pair_exact {R C : Finset Int} {d : Die} {c : Criterion}
 
 /--
 The union of the totals of some explosions. Mirrors the union of the answers
-for each pair of a die and a criterion in `RollingRecordBounds::explode` in
-`evaluator.rs`.
+for each pair of a die and a criterion in the bounds in `evaluator.rs`.
 
 # Parameters
 - `es`: The explosions.
@@ -2113,9 +2119,9 @@ theorem unite_exact {ι : Type} (is : List ι) (f : ι → Explosion)
   simpa [unite] using this ∅ ∅ h₀
 
 /--
-The totals of every pair of a die and a criterion, united. Mirrors
-`RollingRecordBounds::explode` in `evaluator.rs` when the dice and criteria
-are few enough to enumerate.
+The totals of every pair of a die and a criterion, united. Mirrors the
+bounds of a first explode in `evaluator.rs` when the dice and criteria are
+few enough to enumerate.
 
 # Parameters
 - `results`: The results that a die still kept may show.

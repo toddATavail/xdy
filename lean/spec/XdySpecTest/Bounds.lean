@@ -99,7 +99,7 @@ private theorem six_kept :
 
 -- An explode of a six limited to three times may leave the six grown by a
 -- six and then a two, totalling `14`, which lies in none of the shapes that
--- `Explosion::totals` folds, but within their hull.
+-- `Explosion.totals` folds, but within their hull.
 example : ∃ r' ∈ (explode six (.within 6 6) (some 3)).support,
     growChain (.single 6) ([6], 2) ∈ r'.keptChains := by
   refine (mem_explode_iff six_faces six_kept _).mpr

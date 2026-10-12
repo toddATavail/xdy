@@ -7,6 +7,7 @@
 
 use std::{
 	borrow::Cow,
+	cmp::Ordering,
 	collections::{HashMap, HashSet},
 	error::Error,
 	fmt::{Display, Formatter},
@@ -1680,39 +1681,16 @@ struct RollingRecordBounds
 	/// 2` keeps at most 2 dice, however many it rolls.
 	kept: EvaluationBounds,
 
-	/// The results that a die still kept may show, of the chains still kept
-	/// that no [saturated](Origin::Saturates) die decides, since later rerolls
-	/// and explodes leave those alone. Every roll sets them to the
-	/// [faces](RollingRecordKind::faces) of its die; an unlimited reroll
-	/// narrows them to those that its predicate cannot match, and a limited
-	/// reroll or an explode restores them, since a replacement or an extension
-	/// may show any face.
-	results: ResultSet,
+	/// The chains still kept, by the die that rolled them: one entry for each
+	/// die that the bounds of the faces or endpoints of the record admit, once
+	/// a reroll or explode [splits](Self::split) them, or one for any die
+	/// before then, or if the dice are too many to enumerate. A record never
+	/// rolled has none.
+	dice: Vec<DieChains>,
 
-	/// The totals that a [chain](crate::RollingRecord::chains) still kept may
-	/// show, whose hull bounds the sum of the record, with `kept`. Until an
-	/// [explode](crate::Explode) extends a die, each chain still kept holds
-	/// one kept die, so these are the `results`; an explode sets them so
-	/// that their hull covers the totals of the chains that it may grow, and
-	/// is exact for one die and one criterion. They may leave gaps between
-	/// the shapes of chain that the explode folds, which some chain fills,
-	/// so only their hull is meaningful.
-	totals: ResultSet,
-
-	/// The greatest number of kept dice of a chain still kept that no
-	/// saturated die decides, saturating at `u64::MAX`, which stands for any
-	/// number. Every roll sets it to `1`, and only an explode raises it, by
-	/// its limit, or without bound, unless it saturates. A replacement takes
-	/// the place of the die that it replaces, so a reroll never raises it. The
-	/// least number is always `1`, since a chain still kept holds some kept
-	/// die. An uninitialized record has no dice, so its length is `0`.
-	length: u64,
-
-	/// The values that a chain still kept that a saturated die decides may
-	/// take, which are none until an unlimited explode may saturate a chain.
-	/// Later rerolls and explodes leave such chains alone, so their totals
-	/// stay among these.
-	saturated: ResultSet
+	/// Whether the chains have [split](Self::split) by die since the roll, or
+	/// tried to.
+	split: bool
 }
 
 impl RollingRecordKind<EvaluationBounds>
@@ -2131,6 +2109,30 @@ impl ResultSet
 	}
 }
 
+/// Sets order by their intervals, lexicographically, so that the bounds of a
+/// [shape](ChainShape) of chain may sort its runs by their results.
+impl Ord for ResultSet
+{
+	fn cmp(&self, other: &Self) -> Ordering
+	{
+		let key = |set: &Self| {
+			set.0
+				.iter()
+				.map(|interval| (interval.min, interval.max))
+				.collect::<Vec<_>>()
+		};
+		key(self).cmp(&key(other))
+	}
+}
+
+impl PartialOrd for ResultSet
+{
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering>
+	{
+		Some(self.cmp(other))
+	}
+}
+
 /// The [least dice](RollingRecordKind::least_dice) of a rolling record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LeastDice
@@ -2280,6 +2282,22 @@ impl Criteria
 		}
 	}
 
+	/// Answer the criteria that hold only the specified criterion.
+	///
+	/// # Parameters
+	/// - `criterion`: The results that the criterion matches.
+	///
+	/// # Returns
+	/// The requested criteria.
+	fn exact(criterion: ResultSet) -> Self
+	{
+		Self {
+			certain: criterion.clone(),
+			possible: criterion,
+			shape: Shape::Greatest
+		}
+	}
+
 	/// Answer whether some criterion matches every face of some die among the
 	/// specified least dice.
 	///
@@ -2348,16 +2366,17 @@ impl From<&Criterion> for ResultSet
 	}
 }
 
-/// The greatest number of pairs of a die and a criterion that the bounds of an
-/// [explode](crate::Explode) will enumerate in pursuit of an exact answer.
-/// Beyond this they approximate. Every die of a chain is the same die, and
-/// every one is matched by the same criterion, which the union of the faces of
-/// every die, and of the results that every criterion matches, forgets; so the
-/// bounds explode each pair alone, and unite the answers. The budget is
-/// generous enough to cover two operands that range over a few dozen values
-/// each, while bounding the work at a trivial cost paid once per explode
-/// during bounds analysis.
-const EXPLODE_ENUMERATION_BUDGET: u128 = 1024;
+/// The greatest number of pairs of a die and a criterion, each counted once for
+/// every [shape](ChainShape) of chain that its die may leave, that the bounds
+/// of a [reroll](crate::Reroll) or an [explode](crate::Explode) will enumerate
+/// in pursuit of an exact answer. Beyond this they approximate. Every die of a
+/// chain is the same die, and every one is matched by the same criterion,
+/// which the union of the faces of every die, and of the results that every
+/// criterion matches, forgets; so the bounds transform the chains of each pair
+/// alone, and unite the answers. The budget is generous enough to cover two
+/// operands that range over a few dozen values each, while bounding the work
+/// at a trivial cost paid once per clause during bounds analysis.
+const ENUMERATION_BUDGET: u128 = 1024;
 
 /// The number of middle dice of a [chain](crate::RollingRecord::chains) that
 /// stands for a chain without bound: many enough that the total saturates,
@@ -2365,8 +2384,18 @@ const EXPLODE_ENUMERATION_BUDGET: u128 = 1024;
 /// least `1`, and an `i32` spans fewer than `2^33` values.
 const UNBOUNDED_DICE: i128 = 1 << 33;
 
-/// A die that a rolling record may roll, as the bounds of an
-/// [explode](crate::Explode) enumerate them.
+/// The greatest number of [shapes](ChainShape) of chain that the bounds of a
+/// rolling record keep for one die. Beyond this, they
+/// [coarsen](ChainShape::coarsen) the shapes of the die into one, which covers
+/// every chain of each, but whose totals may be loose. Each explode may
+/// multiply the shapes of a die by a few, and each criterion to which its
+/// predicate may resolve may add its own, so without a budget the shapes of a
+/// run of explodes over wide operands might grow exponentially. The budget is
+/// generous enough for several explodes and rerolls, each of a few criteria.
+const SHAPE_BUDGET: usize = 64;
+
+/// A die that a rolling record may roll, as the bounds of a
+/// [reroll](crate::Reroll) or an [explode](crate::Explode) enumerate them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DieFaces
 {
@@ -2603,144 +2632,748 @@ fn criteria_within(
 	}
 }
 
-/// An [explode](crate::Explode) of the chains still kept by a rolling record
-/// that no explode has extended yet, each of which holds one kept die, over
-/// the dice and criteria that it may resolve to, for the purpose of bounding
-/// the totals of the chains that it grows.
-#[derive(Debug)]
-struct Explosion<'a>
+/// A run of the middle dice of a [chain](crate::RollingRecord::chains), those
+/// that some die extends, each of which may show any of the same results,
+/// independently of the others.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Segment
 {
-	/// The results that a die still kept may show.
-	results: &'a ResultSet,
+	/// The results that each die of the run may show, which are never empty.
+	results: ResultSet,
 
-	/// The faces that an extension may show.
-	faces: &'a ResultSet,
+	/// The least number of dice of the run.
+	least: u64,
 
-	/// The results that some criterion matches.
-	possible: &'a ResultSet,
-
-	/// The results that every criterion matches.
-	certain: &'a ResultSet,
-
-	/// The values that a saturated chain may take, which are none if no chain
-	/// may saturate.
-	saturated: &'a ResultSet,
-
-	/// The bounds of the limit, or `None` for no limit.
-	limit: Option<EvaluationBounds>
+	/// The greatest number of dice of the run, saturating at `u64::MAX`, which
+	/// stands for any number.
+	greatest: u64
 }
 
-impl Explosion<'_>
+/// A shape of a [chain](crate::RollingRecord::chains) still kept that no
+/// [saturated](Origin::Saturates) die decides: its middle dice, those that
+/// some die extends, in runs, and the results that its end, the kept die that
+/// no die extends, may show. Each die of the chain may show any result of its
+/// run, or of the end, independently of the others, and each run may hold any
+/// number of dice within its bounds, so the shape describes every chain that
+/// these choices make.
+///
+/// A chain still kept that no saturated die decides always has an end, since
+/// only an unlimited reroll that matches every face crosses out a die without
+/// replacing it, and that crosses out every die of the chain. A later reroll
+/// acts on each die of a chain alike, so it maps the results of every run, and
+/// of the end; a later explode extends only the end, so it appends runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChainShape
 {
-	/// Answer the totals that a chain still kept may show after the explode.
+	/// The runs of middle dice, ascending by their results, no two of which
+	/// show the same results, and none of which is empty.
+	middles: Vec<Segment>,
+
+	/// The results that the end may show, which are never empty.
+	end: ResultSet
+}
+
+impl ChainShape
+{
+	/// Answer the shape of the specified runs of middle dice and end, sorting
+	/// the runs by their results, merging the runs of the same results, whose
+	/// numbers of dice add, and discarding the runs that hold no dice.
+	///
+	/// # Parameters
+	/// - `middles`: The runs of middle dice, in any order.
+	/// - `end`: The results that the end may show.
 	///
 	/// # Returns
-	/// The totals, whose hull covers every total that a chain may show, and
-	/// is exact if the die and criterion are each one. They may leave gaps
-	/// between the shapes, which some chain fills: a six that explodes on six
-	/// at most three times may total `13` after two extensions, which lies in
-	/// no shape. So only their hull is meaningful.
+	/// The requested shape.
+	fn new(middles: impl IntoIterator<Item = Segment>, end: ResultSet) -> Self
+	{
+		let mut runs = middles
+			.into_iter()
+			.filter(|run| run.greatest > 0)
+			.collect::<Vec<_>>();
+		runs.sort_by(|a, b| a.results.cmp(&b.results));
+		let mut middles = Vec::<Segment>::with_capacity(runs.len());
+		for run in runs
+		{
+			match middles.last_mut()
+			{
+				// The dice of both runs may show the same results, so they form
+				// one run.
+				Some(last) if last.results == run.results =>
+				{
+					last.least = last.least.saturating_add(run.least);
+					last.greatest = last.greatest.saturating_add(run.greatest);
+				},
+				_ => middles.push(run)
+			}
+		}
+		Self { middles, end }
+	}
+
+	/// Answer the least and greatest totals of the chains of the shape.
+	///
+	/// # Returns
+	/// The totals, which are exact.
 	///
 	/// # Notes
-	/// A chain that grows from a matching die `r` holds `r`, then `m` middle
-	/// dice that match, and then a last die: one that does not match, ending
-	/// the chain, or, if the limit is spent, any face. A chain whose die cannot
-	/// match keeps its die alone. The total of a chain folds its dice in
-	/// ascending order, saturating, which never decreases as any die grows,
-	/// so the least total of a chain of such a shape shows the least result
-	/// at each die, and the greatest, the greatest. Nor does it ever move
-	/// against the sign of a middle die as `m` grows, so the extreme totals
-	/// over a range of `m` lie at its ends.
+	/// The total of a chain folds its dice in ascending order, saturating,
+	/// which never decreases as any die grows, so the least total shows the
+	/// least result of its run at every die, and the greatest, the greatest.
+	/// Nor does it ever move against the sign of a die as their number grows,
+	/// so the least total holds the most dice of a run whose least result is
+	/// negative, and the fewest of any other, and the greatest total the most
+	/// dice of a run whose greatest result is positive, and the fewest of any
+	/// other. Each of these chains has the shape. A run of any number of dice
+	/// holds [`UNBOUNDED_DICE`] of them, which saturate the total unless they
+	/// show `0`.
 	///
-	/// Under a limit `L`, the last die ends the chain after `1` to `L - 1`
-	/// extensions, so `m` ranges from `0` to `L - 2`; or the limit is spent
-	/// after `L` extensions, so `m` is `L - 1`, and the last die shows any
-	/// face. A chain that ends after `L - 1` extensions is never more extreme
-	/// than both the chain that ends after one and the chain whose limit is
-	/// spent, which holds one middle die more and a last die that may show any
-	/// face: if the middle dice move the total toward an extreme, the spent
-	/// chain is at least as extreme, and otherwise the short one. A limit of
-	/// zero or less extends nothing, leaving `r` alone. The extreme totals over
-	/// a range of limits lie at its ends, too. Without limit, the last die ends
-	/// the chain after any number of extensions, so `m` grows without bound,
-	/// unless every face matches, whence the chain saturates instead.
+	/// `fold_mono_results`, `fold_mono_copies`, and `fold_unbounded`, in
+	/// `lean/spec/XdySpec/Bounds.lean`, prove the properties of the fold on
+	/// which these extremes rest, and `pair_exact` that the shapes of a first
+	/// explode are exact; the shapes of later rerolls and explodes are not yet
+	/// modeled there.
+	fn totals(&self) -> EvaluationBounds
+	{
+		let copies = |count: u64| (count as i128).min(UNBOUNDED_DICE);
+		let hull = |results: &ResultSet| {
+			results
+				.hull()
+				.expect("every die of a shape shows some result")
+		};
+		let end = hull(&self.end);
+		let least = fold([(end.min, 1)].into_iter().chain(
+			self.middles.iter().map(|run| {
+				let least = hull(&run.results).min;
+				let count = match least < 0
+				{
+					true => run.greatest,
+					false => run.least
+				};
+				(least, copies(count))
+			})
+		));
+		let greatest = fold([(end.max, 1)].into_iter().chain(
+			self.middles.iter().map(|run| {
+				let greatest = hull(&run.results).max;
+				let count = match greatest > 0
+				{
+					true => run.greatest,
+					false => run.least
+				};
+				(greatest, copies(count))
+			})
+		));
+		(least, greatest).into()
+	}
+
+	/// Answer the greatest number of kept dice of a chain of the shape.
 	///
-	/// `Explosion.totals`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this
-	/// method. `totals_sound` proves that the hull covers the total of every
-	/// chain that the explode may grow, for any die, criterion, and limit that
-	/// the explosion admits; `pair_exact` that it is exact for one die and one
-	/// criterion; and `shapeFold_between`, `shapeFold_short`, and
-	/// `shapeFold_unbounded` the dominance of the shapes on which both rest.
+	/// # Returns
+	/// The number of dice, saturating at `u64::MAX`.
+	fn dice(&self) -> u64
+	{
+		self.middles
+			.iter()
+			.fold(1u64, |dice, run| dice.saturating_add(run.greatest))
+	}
+
+	/// Answer the greatest number of kept dice of a chain of the shape that may
+	/// show a result of the specified set.
+	///
+	/// # Parameters
+	/// - `results`: The results.
+	///
+	/// # Returns
+	/// The number of dice, saturating at `u64::MAX`.
+	fn matching(&self, results: &ResultSet) -> u64
+	{
+		self.middles
+			.iter()
+			.filter(|run| run.results.meets(results))
+			.fold(self.end.meets(results) as u64, |dice, run| {
+				dice.saturating_add(run.greatest)
+			})
+	}
+
+	/// Answer the shape whose dice show the results to which the specified
+	/// function maps the results of the receiver's, run by run, as a reroll
+	/// replaces each die alike.
+	///
+	/// # Parameters
+	/// - `map`: The function from the results that a die may show to those that
+	///   it may show afterward.
+	///
+	/// # Returns
+	/// The requested shape.
+	fn map(&self, map: impl Fn(&ResultSet) -> ResultSet) -> Self
+	{
+		Self::new(
+			self.middles.iter().map(|run| Segment {
+				results: map(&run.results),
+				..run.clone()
+			}),
+			map(&self.end)
+		)
+	}
+
+	/// Answer whether every chain of the receiver has the specified shape.
+	///
+	/// # Parameters
+	/// - `other`: The other shape.
+	///
+	/// # Returns
+	/// `true` if the receiver's chains are among the other's, `false` if they
+	/// may not be.
+	///
+	/// # Notes
+	/// The answer compares the runs in order, so it may miss some shapes that
+	/// another covers, but never claims one that it does not.
+	fn within(&self, other: &Self) -> bool
+	{
+		self.middles.len() == other.middles.len()
+			&& self.end.is_subset(&other.end)
+			&& self.middles.iter().zip(&other.middles).all(|(run, other)| {
+				run.results.is_subset(&other.results)
+					&& other.least <= run.least
+					&& run.greatest <= other.greatest
+			})
+	}
+
+	/// Answer one shape that stands for both the receiver and the specified
+	/// shape, through every later reroll and explode, if there is one that
+	/// the bounds find.
+	///
+	/// # Parameters
+	/// - `other`: The other shape.
+	///
+	/// # Returns
+	/// The united shape, or `None` if the shapes differ too much.
+	///
+	/// # Notes
+	/// If one shape covers the other, then it stands for both. Otherwise, two
+	/// shapes that differ only in their ends, or only in the results or only
+	/// in the numbers of dice of one run, unite into the shape that unites
+	/// those. Uniting the ends is exact, since a chain has one end. Uniting
+	/// the results of a run of several dice admits chains that mix them, and
+	/// uniting the numbers of dice of a run may admit numbers between them,
+	/// but neither moves the totals of the united shape beyond those of
+	/// either, nor will any later reroll or explode: a reroll maps each result
+	/// of a run alike, and an explode leaves the runs alone, so each run of
+	/// the united shape always shows the results of both, and its extreme
+	/// totals show the extreme result at every die of a run, as a chain of
+	/// one of the shapes does, and the extreme number of dice of each run,
+	/// as a chain of one of them does. Nor does uniting them change the most
+	/// dice of a chain that may match a criterion.
+	fn unite(&self, other: &Self) -> Option<Self>
+	{
+		if self.within(other)
+		{
+			return Some(other.clone())
+		}
+		if other.within(self)
+		{
+			return Some(self.clone())
+		}
+		if self.middles.len() != other.middles.len()
+		{
+			return None
+		}
+		let differences = self
+			.middles
+			.iter()
+			.zip(&other.middles)
+			.enumerate()
+			.filter(|(_, (run, other))| run != other)
+			.map(|(index, _)| index)
+			.collect::<Vec<_>>();
+		match (differences.as_slice(), self.end == other.end)
+		{
+			([], _) => Some(Self {
+				middles: self.middles.clone(),
+				end: self.end.union(&other.end)
+			}),
+			([index], true) =>
+			{
+				let (run, theirs) =
+					(&self.middles[*index], &other.middles[*index]);
+				let united = match (
+					run.results == theirs.results,
+					(run.least, run.greatest)
+						== (theirs.least, theirs.greatest)
+				)
+				{
+					(true, _) => Segment {
+						results: run.results.clone(),
+						least: run.least.min(theirs.least),
+						greatest: run.greatest.max(theirs.greatest)
+					},
+					(false, true) => Segment {
+						results: run.results.union(&theirs.results),
+						..run.clone()
+					},
+					(false, false) => return None
+				};
+				let mut middles = self.middles.clone();
+				middles[*index] = united;
+				Some(Self::new(middles, self.end.clone()))
+			},
+			_ => None
+		}
+	}
+
+	/// Answer one shape that covers every chain of each of the specified
+	/// shapes: one run, which may show any result of any of their runs, and
+	/// holds as few or as many dice as the fewest or most of theirs, and an end
+	/// that may show any result of any of their ends.
+	///
+	/// # Parameters
+	/// - `shapes`: The shapes, which are not empty.
+	///
+	/// # Returns
+	/// The coarsened shape, which may admit totals that none of the shapes
+	/// admits.
+	fn coarsen(shapes: &[Self]) -> Self
+	{
+		let mut results = ResultSet::default();
+		let mut end = ResultSet::default();
+		let (mut least, mut greatest) = (u64::MAX, 0u64);
+		for shape in shapes
+		{
+			for run in &shape.middles
+			{
+				results = results.union(&run.results);
+			}
+			least = least.min(
+				shape
+					.middles
+					.iter()
+					.fold(0u64, |dice, run| dice.saturating_add(run.least))
+			);
+			greatest = greatest.max(
+				shape
+					.middles
+					.iter()
+					.fold(0u64, |dice, run| dice.saturating_add(run.greatest))
+			);
+			end = end.union(&shape.end);
+		}
+		let run = Segment {
+			results,
+			least,
+			greatest
+		};
+		match run.results.is_empty()
+		{
+			true => Self::new([], end),
+			false => Self::new([run], end)
+		}
+	}
+}
+
+/// Unite the specified shapes into as few as the bounds find that stand for
+/// all of them, through every later reroll and explode, as
+/// [`ChainShape::unite`] does for two. If more than [`SHAPE_BUDGET`] remain,
+/// [coarsen](ChainShape::coarsen) them into one.
+///
+/// # Parameters
+/// - `shapes`: The shapes.
+///
+/// # Returns
+/// The united shapes.
+fn unite_shapes(shapes: Vec<ChainShape>) -> Vec<ChainShape>
+{
+	let mut united = Vec::<ChainShape>::new();
+	for mut shape in shapes
+	{
+		// A shape that unites with another may then unite with a third, so
+		// begin again after each.
+		let mut index = 0;
+		while index < united.len()
+		{
+			match united[index].unite(&shape)
+			{
+				Some(both) =>
+				{
+					shape = both;
+					united.swap_remove(index);
+					index = 0;
+				},
+				None => index += 1
+			}
+		}
+		united.push(shape);
+		if united.len() > SHAPE_BUDGET
+		{
+			united = vec![ChainShape::coarsen(&united)];
+		}
+	}
+	united
+}
+
+/// The chains still kept by a rolling record whose dice are all the same die,
+/// or, if the bounds cannot tell its dice apart, any die that the record may
+/// roll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DieChains
+{
+	/// The faces of the die, any of which an extension or a replacement may
+	/// show.
+	faces: ResultSet,
+
+	/// The least dice of the die, which decide whether some criterion may
+	/// match every face: the die itself, or, for any die of the record, the
+	/// [least dice](RollingRecordKind::least_dice) of the record.
+	least: Vec<LeastDice>,
+
+	/// The values that a [saturated](Origin::Saturates) die of the die may
+	/// take.
+	saturating: ResultSet,
+
+	/// The shapes of the chains still kept that no saturated die decides.
+	live: Vec<ChainShape>,
+
+	/// The values that a chain still kept that a saturated die decides may
+	/// take, which are none until an unlimited explode may saturate a chain.
+	saturated: ResultSet
+}
+
+impl DieChains
+{
+	/// Answer the chains of a die just rolled, each of which holds one die,
+	/// which may show any face.
+	///
+	/// # Parameters
+	/// - `faces`: The faces of the die.
+	/// - `least`: The least dice of the die.
+	/// - `saturating`: The values that a saturated die of the die may take.
+	///
+	/// # Returns
+	/// The requested chains, of which there are none if the die has no faces,
+	/// as an uninitialized record does not.
+	fn rolled(
+		faces: ResultSet,
+		least: Vec<LeastDice>,
+		saturating: ResultSet
+	) -> Self
+	{
+		let live = match faces.is_empty()
+		{
+			true => Vec::new(),
+			false => vec![ChainShape::new([], faces.clone())]
+		};
+		Self {
+			faces,
+			least,
+			saturating,
+			live,
+			saturated: ResultSet::default()
+		}
+	}
+
+	/// Answer the totals that a chain still kept may show.
+	///
+	/// # Returns
+	/// The totals, whose hull is exact, unless the shapes were coarsened. They
+	/// may leave gaps that some chain fills, so only their hull is meaningful.
 	fn totals(&self) -> ResultSet
 	{
-		// A die that the criterion does not match stays alone.
-		let mut totals = self.results.difference(self.certain);
-		let Some(starts) = self.results.intersection(self.possible).hull()
-		else
+		self.live
+			.iter()
+			.map(|shape| ResultSet::from(shape.totals()))
+			.fold(self.saturated.clone(), |totals, shape| totals.union(&shape))
+	}
+
+	/// Answer whether every chain of the die may be crossed out, i.e., if
+	/// none is still kept, whatever the drops and keeps.
+	///
+	/// # Returns
+	/// `true` if no chain is still kept, `false` otherwise.
+	fn is_empty(&self) -> bool
+	{
+		self.live.is_empty() && self.saturated.is_empty()
+	}
+
+	/// Answer whether the specified criteria certainly match every face of the
+	/// die.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria.
+	///
+	/// # Returns
+	/// `true` if every criterion matches every face, `false` otherwise.
+	fn covered(&self, criteria: &Criteria) -> bool
+	{
+		self.faces.is_subset(&criteria.certain)
+	}
+
+	/// Answer whether some criterion may match every face of the die.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria.
+	///
+	/// # Returns
+	/// `true` if some criterion may match every face, `false` otherwise.
+	fn may_be_covered(&self, criteria: &Criteria) -> bool
+	{
+		self.least.iter().any(|die| criteria.may_cover(die))
+	}
+
+	/// Answer whether some criterion may match some kept die of a chain still
+	/// kept that no saturated die decides.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria.
+	///
+	/// # Returns
+	/// `true` if some die may match, `false` otherwise.
+	fn may_match(&self, criteria: &Criteria) -> bool
+	{
+		self.live
+			.iter()
+			.any(|shape| shape.matching(&criteria.possible) > 0)
+	}
+
+	/// Answer whether some criterion may match the end of a chain still kept
+	/// that no saturated die decides.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria.
+	///
+	/// # Returns
+	/// `true` if some end may match, `false` otherwise.
+	fn may_extend(&self, criteria: &Criteria) -> bool
+	{
+		self.live
+			.iter()
+			.any(|shape| shape.end.meets(&criteria.possible))
+	}
+
+	/// Answer whether an [explode](crate::Explode) may have extended or
+	/// saturated some chain of the die.
+	///
+	/// # Returns
+	/// `true` if some chain may hold a middle die or may saturate, `false`
+	/// otherwise.
+	fn exploded(&self) -> bool
+	{
+		!self.saturated.is_empty()
+			|| self.live.iter().any(|shape| !shape.middles.is_empty())
+	}
+
+	/// Answer the chains after a [reroll](crate::Reroll) by any of the
+	/// specified criteria, uniting the chains of each.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria, each of which the predicate may resolve to,
+	///   or one that stands for every one.
+	/// - `limit`: The bounds of the limit, or `None` for no limit.
+	///
+	/// # Returns
+	/// The chains; whether the reroll may cross out every chain that no
+	/// saturated die decides, of which there are some; and the greatest number
+	/// of dice that it may roll for one chain still kept, saturating at
+	/// `u64::MAX`.
+	///
+	/// # Notes
+	/// The reroll leaves alone every chain that a saturated die decides, and
+	/// rerolls every other die that a criterion matches: up to the limit, so
+	/// that it may show any face, or without limit, until it shows a face that
+	/// the criterion does not match. Without limit, a criterion that matches
+	/// every face crosses out every die instead, rolling nothing, and so every
+	/// chain that no saturated die decides. A limit that may be zero or less
+	/// may leave the chains as they were.
+	fn reroll(
+		&self,
+		criteria: &[Criteria],
+		limit: Option<EvaluationBounds>
+	) -> (Self, bool, u64)
+	{
+		let mut live = Vec::new();
+		let mut crosses = false;
+		let mut rolls = 0u64;
+		let (stays, rerolls) = match limit
 		{
-			return totals
+			Some(limit) => (limit.min <= 0, limit.max > 0),
+			None => (false, true)
 		};
-		totals = totals.union(self.saturated);
-		// Every result lies among the faces, so some face matches whenever
-		// some result does.
-		let middles = self
-			.faces
-			.intersection(self.possible)
-			.hull()
-			.unwrap_or(starts);
-		let faces = self.faces.hull().unwrap_or(starts);
-		let ends = self.faces.difference(self.certain).hull();
-		// Each shape of chain: the number of middle dice, and the results of
-		// the last die, if the chain has one.
-		let mut shapes = Vec::<(i128, Option<EvaluationBounds>)>::new();
-		match self.limit
+		for criteria in criteria
 		{
-			None =>
+			if limit.is_none() && self.may_be_covered(criteria)
 			{
-				if let Some(ends) = ends
-				{
-					shapes.push((0, Some(ends)));
-					shapes.push((UNBOUNDED_DICE, Some(ends)));
-				}
-			},
-			Some(limit) =>
+				crosses |= !self.live.is_empty();
+			}
+			if limit.is_none() && self.covered(criteria)
 			{
-				let (least, greatest) =
-					(limit.min.max(0) as i128, limit.max.max(0) as i128);
-				if least == 0
+				continue
+			}
+			let replacements = match limit
+			{
+				Some(_) => self.faces.clone(),
+				None => self.faces.difference(&criteria.certain)
+			};
+			let reroll = |results: &ResultSet| {
+				let kept = results.difference(&criteria.certain);
+				match results.meets(&criteria.possible)
 				{
-					shapes.push((0, None));
+					true => kept.union(&replacements),
+					false => kept
 				}
-				if let Some(ends) = ends
-					&& greatest >= 2
+			};
+			for shape in &self.live
+			{
+				if stays
 				{
-					shapes.push((0, Some(ends)));
+					live.push(shape.clone());
 				}
-				if greatest >= 1
+				if rerolls
 				{
-					for limit in [least.max(1), greatest]
+					live.push(shape.map(reroll));
+					// Each matching die may roll up to the limit more times,
+					// or without limit, any number.
+					let times = limit.map_or(u64::MAX, |limit| dice(limit.max));
+					rolls = rolls.max(
+						shape
+							.matching(&criteria.possible)
+							.saturating_mul(times)
+					);
+				}
+			}
+		}
+		let chains = Self {
+			faces: self.faces.clone(),
+			least: self.least.clone(),
+			saturating: self.saturating.clone(),
+			live: unite_shapes(live),
+			saturated: self.saturated.clone()
+		};
+		(chains, crosses, rolls)
+	}
+
+	/// Answer the chains after an [explode](crate::Explode) by any of the
+	/// specified criteria, uniting the chains of each.
+	///
+	/// # Parameters
+	/// - `criteria`: The criteria, each of which the predicate may resolve to,
+	///   or one that stands for every one.
+	/// - `limit`: The bounds of the limit, or `None` for no limit.
+	///
+	/// # Returns
+	/// The chains; and the greatest number of dice that the explode may roll
+	/// for one chain still kept, saturating at `u64::MAX`, which stands for
+	/// any number, as an unlimited explode that does not saturate may roll.
+	///
+	/// # Notes
+	/// The explode leaves alone every chain that a saturated die decides, and
+	/// extends only the end of every other, so a chain whose end the criterion
+	/// does not match stays as it was. A chain whose end `e` it matches holds
+	/// `e` among its middle dice, then `m` more middle dice that it matches,
+	/// and then a new end: one that it does not match, ending the chain, or,
+	/// if the limit is spent, any face. Under a limit `L`, the chain ends after
+	/// `1` to `L - 1` extensions, so `m` ranges from `0` to `L - 2`, or the
+	/// limit is spent after `L` extensions, so `m` is `L - 1`; over a range of
+	/// limits, these unite. A limit that may be zero or less may leave the
+	/// chains as they were. Without limit, `m` is any number, unless the
+	/// criterion matches every face, whence every chain saturates instead,
+	/// rolling nothing.
+	fn explode(
+		&self,
+		criteria: &[Criteria],
+		limit: Option<EvaluationBounds>
+	) -> (Self, u64)
+	{
+		let mut live = Vec::new();
+		let mut saturated = self.saturated.clone();
+		let mut extensions = 0u64;
+		let (stays, extends) = match limit
+		{
+			Some(limit) => (limit.min <= 0, limit.max > 0),
+			None => (false, true)
+		};
+		for criteria in criteria
+		{
+			let may_extend = self.may_extend(criteria);
+			if limit.is_none() && may_extend && self.may_be_covered(criteria)
+			{
+				saturated = saturated.union(&self.saturating);
+			}
+			if limit.is_none() && self.covered(criteria)
+			{
+				continue
+			}
+			if extends && may_extend
+			{
+				extensions = extensions
+					.max(limit.map_or(u64::MAX, |limit| dice(limit.max)));
+			}
+			let middles = self.faces.intersection(&criteria.possible);
+			let ends = self.faces.difference(&criteria.certain);
+			for shape in &self.live
+			{
+				if stays
+				{
+					live.push(shape.clone());
+				}
+				if !extends
+				{
+					continue
+				}
+				let rest = shape.end.difference(&criteria.certain);
+				if !rest.is_empty()
+				{
+					live.push(ChainShape::new(shape.middles.clone(), rest));
+				}
+				let start = shape.end.intersection(&criteria.possible);
+				if start.is_empty()
+				{
+					continue
+				}
+				let grow = |least: u64, greatest: u64, end: ResultSet| {
+					ChainShape::new(
+						shape.middles.iter().cloned().chain([
+							Segment {
+								results: start.clone(),
+								least: 1,
+								greatest: 1
+							},
+							Segment {
+								results: middles.clone(),
+								least,
+								greatest
+							}
+						]),
+						end
+					)
+				};
+				match limit
+				{
+					// Some face does not match, or the criteria would cover the
+					// die.
+					None => live.push(grow(0, u64::MAX, ends.clone())),
+					Some(limit) =>
 					{
-						shapes.push((limit - 1, Some(faces)));
+						let (least, greatest) =
+							(dice(limit.min).max(1), dice(limit.max));
+						if greatest >= 2 && !ends.is_empty()
+						{
+							live.push(grow(0, greatest - 2, ends.clone()));
+						}
+						live.push(grow(
+							least - 1,
+							greatest - 1,
+							self.faces.clone()
+						));
 					}
 				}
 			}
 		}
-		for (count, last) in shapes
-		{
-			let least = fold(
-				[(starts.min, 1), (middles.min, count)]
-					.into_iter()
-					.chain(last.map(|last| (last.min, 1)))
-			);
-			let greatest = fold(
-				[(starts.max, 1), (middles.max, count)]
-					.into_iter()
-					.chain(last.map(|last| (last.max, 1)))
-			);
-			totals = totals
-				.union(&ResultSet::interval(least as i64, greatest as i64));
-		}
-		totals
+		let chains = Self {
+			faces: self.faces.clone(),
+			least: self.least.clone(),
+			saturating: self.saturating.clone(),
+			live: unite_shapes(live),
+			saturated
+		};
+		(chains, extensions)
 	}
 }
 
@@ -2783,6 +3416,80 @@ fn fold(dice: impl IntoIterator<Item = (i32, i128)>) -> i32
 
 impl RollingRecordBounds
 {
+	/// Reset the chains of the record after a roll fills it: each still kept
+	/// holds one die, which may show any face of any die that the record may
+	/// roll.
+	fn rolled(&mut self)
+	{
+		self.dice = vec![DieChains::rolled(
+			self.kind.faces(),
+			self.kind.least_dice(),
+			self.kind.saturated_values()
+		)];
+		self.split = false;
+	}
+
+	/// Split the chains of the record by the die that it rolls, if the bounds
+	/// of its faces or endpoints admit few enough dice, and it has not yet
+	/// split. Every die of a chain is the same die, so a reroll or explode
+	/// treats the chains of each die alone. Until the first reroll or explode,
+	/// each chain holds one die, which may show any face, so the split loses
+	/// nothing.
+	fn split(&mut self)
+	{
+		if self.split
+		{
+			return
+		}
+		self.split = true;
+		if let Some(dice) = self.kind.dice_within(ENUMERATION_BUDGET)
+		{
+			self.dice = dice
+				.into_iter()
+				.map(|die| {
+					DieChains::rolled(
+						die.faces.clone(),
+						vec![LeastDice::Fixed(die.faces)],
+						ResultSet::of([die.saturated])
+					)
+				})
+				.collect();
+		}
+	}
+
+	/// Answer the criteria to which the specified predicate may resolve, over
+	/// the bounds of its operands, for a reroll or explode of the record.
+	///
+	/// # Parameters
+	/// - `predicate`: The predicate.
+	/// - `value`: The function that answers the bounds of an operand.
+	///
+	/// # Returns
+	/// Each criterion alone, if they are few enough to transform every shape
+	/// of every die by each within [`ENUMERATION_BUDGET`], or otherwise the
+	/// criteria together, which stand for every one.
+	fn criteria(
+		&self,
+		predicate: &Predicate,
+		value: impl Fn(AddressingMode) -> EvaluationBounds
+	) -> Vec<Criteria>
+	{
+		let shapes = self
+			.dice
+			.iter()
+			.map(|die| die.live.len().max(1) as u128)
+			.sum::<u128>()
+			.max(1);
+		match criteria_within(predicate, &value, ENUMERATION_BUDGET / shapes)
+		{
+			Some(criteria) =>
+			{
+				criteria.into_iter().map(Criteria::exact).collect()
+			},
+			None => vec![Criteria::new(predicate, &value)]
+		}
+	}
+
 	/// Answer whether an [explode](crate::Explode) may have extended or
 	/// saturated some chain of the record since its roll. If not, each chain
 	/// still kept holds one kept die, which ends it.
@@ -2790,142 +3497,41 @@ impl RollingRecordBounds
 	/// # Returns
 	/// `true` if some chain may hold more than one kept die or may saturate,
 	/// `false` otherwise.
-	#[inline]
-	fn exploded(&self) -> bool { self.length > 1 || !self.saturated.is_empty() }
+	fn exploded(&self) -> bool { self.dice.iter().any(DieChains::exploded) }
 
-	/// Answer the totals that a chain still kept may show, from the results
-	/// that its kept dice may show and its greatest number of them, for a
-	/// record that an explode may have extended, whose chains the bounds do
-	/// not otherwise track.
+	/// Answer the totals that a chain still kept may show.
 	///
 	/// # Returns
-	/// The totals, which cover every total that a chain may show.
-	///
-	/// # Notes
-	/// The total of a chain that no saturated die decides folds its kept dice
-	/// in ascending order, saturating, which never decreases as any die grows,
-	/// so it lies between the folds of `n` copies of the least and of the
-	/// greatest result, where the chain holds `n` kept dice. Nor does a fold
-	/// of `n` copies of one result ever move against its sign as `n` grows, so
-	/// the extremes over every `n` from `1` to the length lie at its ends. A
-	/// chain that a saturated die decides totals its value.
-	fn chain_totals(&self) -> ResultSet
+	/// The totals, whose hull is exact, unless the operands of the record and
+	/// of its rerolls and explodes are too many to enumerate, or the shapes of
+	/// its chains were coarsened. They may leave gaps that some chain fills,
+	/// so only their hull is meaningful.
+	fn totals(&self) -> ResultSet
 	{
-		let Some(results) = self.results.hull()
-		else
-		{
-			return self.saturated.clone()
-		};
-		let length = (self.length as i128).min(UNBOUNDED_DICE);
-		let least = fold([(results.min, 1)]).min(fold([(results.min, length)]));
-		let greatest =
-			fold([(results.max, 1)]).max(fold([(results.max, length)]));
-		ResultSet::interval(least as i64, greatest as i64)
-			.union(&self.saturated)
+		self.dice.iter().fold(ResultSet::default(), |totals, die| {
+			totals.union(&die.totals())
+		})
 	}
 
-	/// Answer the totals that a chain still kept may show after the specified
-	/// [explode](crate::Explode) of the record, which no explode has extended
-	/// yet, and the values that a chain that it saturates may take.
-	///
-	/// # Parameters
-	/// - `predicate`: The predicate of the explode.
-	/// - `value`: The function that answers the bounds of an operand.
-	/// - `limit`: The bounds of the limit, or `None` for no limit.
+	/// Answer the greatest number of kept dice of a chain still kept that no
+	/// saturated die decides.
 	///
 	/// # Returns
-	/// The totals, whose hull covers every total that a chain may show, and
-	/// is exact if the dice of the record and the criteria of the predicate
-	/// are few enough to enumerate, and the results that a die still kept may
-	/// show are all that the bounds admit of each die; and the saturated
-	/// values, which are none if no chain may saturate.
-	///
-	/// # Notes
-	/// If the dice and criteria are few enough, explode each pair alone, and
-	/// unite the answers. Otherwise, explode every die and criterion at once,
-	/// which is sound, since each set is a superset of each of its members,
-	/// but may be loose, since it mixes the faces of one die, or the results
-	/// that one criterion matches, with those of another.
-	///
-	/// `explodePairs`, in `lean/spec/XdySpec/Bounds.lean`, mirrors the union
-	/// of the pairs, and `explodePairs_exact` proves it exact in its hull;
-	/// `totals_sound` proves the explode of every die and criterion at once
-	/// sound, and `explode_sound` lifts it to the chains that the explode
-	/// leaves of the record.
-	fn explode(
-		&self,
-		predicate: &Predicate,
-		value: impl Fn(AddressingMode) -> EvaluationBounds,
-		limit: Option<EvaluationBounds>
-	) -> (ResultSet, ResultSet)
+	/// The number of kept dice, saturating at `u64::MAX`, which stands for any
+	/// number. A roll sets it to `1`, and only an explode raises it. It is at
+	/// least `1` for a record rolled, even once no such chain remains, and `0`
+	/// for a record never rolled, which has no dice.
+	fn length(&self) -> u64
 	{
-		let pairs = self.kind.dice_within(EXPLODE_ENUMERATION_BUDGET).and_then(
-			|dice| {
-				let budget =
-					EXPLODE_ENUMERATION_BUDGET / dice.len().max(1) as u128;
-				Some((dice, criteria_within(predicate, &value, budget)?))
-			}
-		);
-		match pairs
+		match self.kind
 		{
-			Some((dice, criteria)) =>
-			{
-				let mut totals = ResultSet::default();
-				let mut saturated_values = ResultSet::default();
-				for die in &dice
-				{
-					let results = self.results.intersection(&die.faces);
-					for criterion in &criteria
-					{
-						// Without limit, a die whose faces all match saturates,
-						// if it is still kept.
-						let saturated = match limit.is_none()
-							&& die.faces.is_subset(criterion)
-							&& !results.is_empty()
-						{
-							true => ResultSet::of([die.saturated]),
-							false => ResultSet::default()
-						};
-						let explosion = Explosion {
-							results: &results,
-							faces: &die.faces,
-							possible: criterion,
-							certain: criterion,
-							saturated: &saturated,
-							limit
-						};
-						totals = totals.union(&explosion.totals());
-						saturated_values = saturated_values.union(&saturated);
-					}
-				}
-				(totals, saturated_values)
-			},
-			None =>
-			{
-				let criteria = Criteria::new(predicate, &value);
-				// Without limit, a die may saturate if some criterion matches
-				// every face of it.
-				let saturated = match limit.is_none()
-					&& self
-						.kind
-						.least_dice()
-						.iter()
-						.any(|die| criteria.may_cover(die))
-				{
-					true => self.kind.saturated_values(),
-					false => ResultSet::default()
-				};
-				let totals = Explosion {
-					results: &self.results,
-					faces: &self.kind.faces(),
-					possible: &criteria.possible,
-					certain: &criteria.certain,
-					saturated: &saturated,
-					limit
-				}
-				.totals();
-				(totals, saturated)
-			}
+			RollingRecordKind::Uninitialized => 0,
+			_ => self
+				.dice
+				.iter()
+				.flat_map(|die| &die.live)
+				.map(ChainShape::dice)
+				.fold(1, u64::max)
 		}
 	}
 }
@@ -2984,11 +3590,12 @@ pub struct Bounds
 	/// like [`value`](Self::value), it may over-approximate, e.g.,
 	/// `({a}@(1D6) + -{a})D6` always rolls exactly one die, but its bound is
 	/// `6`. A limited [explode](crate::Explode) may roll its limit for every
-	/// chain still kept, and a limited [reroll](crate::Reroll), for every kept
-	/// die of every chain still kept, of which an explode limited to `n` times
-	/// adds up to `n` to each chain. An unlimited explode that may roll a die,
-	/// unless it saturates, saturates the bound, and so does a later limited
-	/// reroll of the chains that it grows.
+	/// chain still kept, if the end of some chain may match, and a limited
+	/// [reroll](crate::Reroll), for each kept die of a chain that may match,
+	/// for every chain still kept; the bounds track the shapes of the chains,
+	/// so the bound of `4D6 explode = 6 1 times reroll = 1` is `12`, since the
+	/// `6` from which a chain grows never shows `1`. An unlimited explode that
+	/// may roll a die, unless it saturates, saturates the bound.
 	pub dice: u64
 }
 
@@ -3328,7 +3935,7 @@ impl<'eval> BoundsEvaluator<'eval>
 		op: RollingRecordIndex
 	) -> Option<EvaluationBounds>
 	{
-		self.record(op).totals.hull()
+		self.record(op).totals().hull()
 	}
 
 	/// Answer the greatest number of kept dice of a
@@ -3345,7 +3952,7 @@ impl<'eval> BoundsEvaluator<'eval>
 	#[inline]
 	pub(crate) fn length(&self, op: RollingRecordIndex) -> u64
 	{
-		self.record(op).length
+		self.record(op).length()
 	}
 
 	/// Obtain the specified rolling record bounds.
@@ -3468,10 +4075,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			end: (end.min, end.max).into()
 		};
 		record.kept = 1.into();
-		record.results = record.kind.faces();
-		record.totals = record.results.clone();
-		record.length = 1;
-		record.saturated = ResultSet::default();
+		record.rolled();
 		self.dice = self.dice.saturating_add(1);
 		if self.sum(inst.start) || self.sum(inst.end)
 		{
@@ -3502,10 +4106,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			faces: (faces.min, faces.max).into()
 		};
 		record.kept = count.max(0.into());
-		record.results = record.kind.faces();
-		record.totals = record.results.clone();
-		record.length = 1;
-		record.saturated = ResultSet::default();
+		record.rolled();
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count) || self.sum(inst.faces)
 		{
@@ -3536,10 +4137,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			faces
 		};
 		record.kept = count.max(0.into());
-		record.results = record.kind.faces();
-		record.totals = record.results.clone();
-		record.length = 1;
-		record.saturated = ResultSet::default();
+		record.rolled();
 		self.dice = self.dice.saturating_add(dice(count.max));
 		if self.sum(inst.count)
 		{
@@ -3588,22 +4186,39 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			// roll, so disable counting for the remainder of the function.
 			self.count = None;
 		}
+		self.record_mut(inst.dest).split();
 		let record = self.record(inst.dest);
 		let kept = record.kept;
 		let (branches, matching) = record.kind.branches(&criteria.certain);
-		let faces = record.kind.faces();
-		let least_dice = record.kind.least_dice();
+		let resolutions = record.criteria(&inst.predicate, |op| self.value(op));
 		// A die still kept may be rerolled only if some criterion matches some
 		// result that it may show.
-		let may_match =
-			kept.max > 0 && record.results.meets(&criteria.possible);
+		let may_match = kept.max > 0
+			&& record.dice.iter().any(|die| {
+				resolutions.iter().any(|criteria| die.may_match(criteria))
+			});
 		let exploded = record.exploded();
-		let length = record.length;
-		let saturated = !record.saturated.is_empty();
-		match exploded
+		if exploded && !may_match
 		{
 			// A reroll that cannot match leaves the chains as they were.
-			true if !may_match => return Ok(()),
+			return Ok(())
+		}
+		// Reroll the chains of each die by each criterion. The reroll leaves
+		// alone every chain that a saturated die decides.
+		let mut crosses = false;
+		let mut rolls = 0u64;
+		let chains = record
+			.dice
+			.iter()
+			.map(|die| {
+				let (chains, crossed, rolled) = die.reroll(&resolutions, limit);
+				crosses |= crossed;
+				rolls = rolls.max(rolled);
+				chains
+			})
+			.collect::<Vec<_>>();
+		match exploded
+		{
 			// A chain may hold several dice, each of which the reroll rerolls
 			// alone, so the number of dice rerolled varies; give up counting.
 			true => self.count = None,
@@ -3645,69 +4260,22 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 				}
 			}
 		}
-		// Bound the dice still kept and their results. The reroll leaves alone
-		// every chain that a saturated die decides.
 		let record = self.record_mut(inst.dest);
-		let rerolls = match limit
+		record.dice = chains;
+		if crosses
 		{
-			Some(limit) => match may_match && limit.max > 0
+			// Without limit, a reroll that matches every face crosses out every
+			// chain that no saturated die decides, so only the chains that
+			// saturated dice decide may stay kept.
+			record.kept = match record.dice.iter().all(DieChains::is_empty)
 			{
-				// A replacement may show any face of the die, and may match
-				// again once the limit is spent. Each kept die of each chain
-				// still kept may be rerolled up to the limit.
-				true =>
-				{
-					record.results = faces;
-					dice(kept.max)
-						.saturating_mul(length)
-						.saturating_mul(dice(limit.max))
-				},
-				false => 0
-			},
-			None =>
-			{
-				// Without limit, a die finally shows a face that no criterion
-				// matches, if there is one; if every face matches, the reroll
-				// crosses out every die still kept instead, rolling nothing,
-				// so only the chains that saturated dice decide stay kept.
-				let rest = faces.difference(&criteria.certain);
-				if rest.is_empty()
-				{
-					record.kept = match saturated
-					{
-						true => (0, kept.max).into(),
-						false => 0.into()
-					};
-				}
-				else if least_dice.iter().any(|die| criteria.may_cover(die))
-				{
-					record.kept = (0, kept.max).into();
-				}
-				match may_match
-				{
-					true =>
-					{
-						// A die may be rerolled any number of times, unless
-						// every face matches.
-						let rerolls = match rest.is_empty()
-						{
-							true => 0,
-							false => u64::MAX
-						};
-						record.results = rest;
-						rerolls
-					},
-					false => 0
-				}
-			}
-		};
-		record.totals = match exploded
-		{
-			true => record.chain_totals(),
-			// Each chain still kept holds its one kept die.
-			false => record.results.clone()
-		};
-		self.dice = self.dice.saturating_add(rerolls);
+				true => 0.into(),
+				false => (0, kept.max).into()
+			};
+		}
+		self.dice = self
+			.dice
+			.saturating_add(dice(kept.max).saturating_mul(rolls));
 		Ok(())
 	}
 
@@ -3721,104 +4289,58 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 			// roll, so disable counting for the remainder of the function.
 			self.count = None;
 		}
+		self.record_mut(inst.dest).split();
 		let record = self.record(inst.dest);
 		let kept = record.kept;
-		let exploded = record.exploded();
 		let (branches, matching) = record.kind.branches(&criteria.certain);
-		let faces = record.kind.faces();
-		// A die still kept may be exploded only if some criterion matches some
-		// result that it may show, and the limit may be positive.
-		let may_match =
-			kept.max > 0 && record.results.meets(&criteria.possible);
-		let may_explode = may_match && limit.is_none_or(|limit| limit.max > 0);
-		// Without limit, a chain saturates, rolling nothing, if every face
-		// matches; otherwise it may grow without bound.
-		let saturates =
-			limit.is_none() && faces.difference(&criteria.certain).is_empty();
-		let (totals, saturated) = match (exploded, may_explode)
+		let resolutions = record.criteria(&inst.predicate, |op| self.value(op));
+		// A chain still kept may be extended only if some criterion matches
+		// some result that its end may show, and the limit may be positive.
+		let may_explode = kept.max > 0
+			&& limit.is_none_or(|limit| limit.max > 0)
+			&& record.dice.iter().any(|die| {
+				resolutions.iter().any(|criteria| die.may_extend(criteria))
+			});
+		let exploded = record.exploded();
+		if !may_explode
+		{
+			// Count the branches that the explode would roll, even if no die
+			// still kept may match, unless a chain may hold several dice.
+			if !exploded
+			{
+				self.count_explode(kept, limit, branches, matching);
+			}
+			return Ok(())
+		}
+		// Explode the chains of each die by each criterion. Each chain still
+		// kept grows only from its end, so a limited explode extends each up
+		// to the limit, and a saturating one rolls nothing.
+		let mut extensions = 0u64;
+		let chains = record
+			.dice
+			.iter()
+			.map(|die| {
+				let (chains, extended) = die.explode(&resolutions, limit);
+				extensions = extensions.max(extended);
+				chains
+			})
+			.collect::<Vec<_>>();
+		match exploded
 		{
 			// A chain may hold several dice, of which the explode extends only
-			// the last, so the number of dice rolled varies; give up counting,
-			// and bound the totals by the lengths of the chains.
-			(true, true) =>
-			{
-				// Without limit, a chain may saturate if some criterion
-				// matches every face of its die.
-				let saturated = match limit.is_none()
-					&& record
-						.kind
-						.least_dice()
-						.iter()
-						.any(|die| criteria.may_cover(die))
-				{
-					true => record.kind.saturated_values(),
-					false => ResultSet::default()
-				};
-				self.count = None;
-				(None, saturated)
-			},
-			(true, false) => return Ok(()),
-			// Count the branches that the explode would roll, even if no die
-			// still kept may match.
-			(false, false) =>
-			{
-				self.count_explode(kept, limit, branches, matching);
-				return Ok(())
-			},
-			(false, true) =>
-			{
-				let (totals, saturated) =
-					record.explode(&inst.predicate, |op| self.value(op), limit);
-				self.count_explode(kept, limit, branches, matching);
-				(Some(totals), saturated)
-			}
-		};
-		// Each chain still kept grows only from its end, so a limited explode
-		// extends each up to the limit, and a saturating one rolls nothing.
-		let extensions = match limit
-		{
-			Some(limit) => dice(kept.max).saturating_mul(dice(limit.max)),
-			None => match saturates
-			{
-				true => 0,
-				false =>
-				{
-					// A chain may grow without bound.
-					self.unbounded = true;
-					u64::MAX
-				}
-			}
-		};
-		self.dice = self.dice.saturating_add(extensions);
-		let record = self.record_mut(inst.dest);
-		match (limit, saturates)
-		{
-			(Some(limit), _) =>
-			{
-				record.length = record.length.saturating_add(dice(limit.max));
-			},
-			(None, false) => record.length = u64::MAX,
-			// Every chain that grows saturates. Until an explode extends a
-			// die, each chain still kept ends at its one kept die, which
-			// matches, so no chain stays finite; later, a chain whose last die
-			// a reroll crossed out stays as it was.
-			(None, true) =>
-			{}
+			// the last, so the number of dice rolled varies; give up counting.
+			true => self.count = None,
+			false => self.count_explode(kept, limit, branches, matching)
 		}
-		match (exploded, saturates)
+		if extensions == u64::MAX
 		{
-			(false, true) => record.results = ResultSet::default(),
-			(true, true) =>
-			{},
-			// An extension may show any face.
-			(_, false) => record.results = faces.union(&record.results)
+			// Some chain may grow without bound.
+			self.unbounded = true;
 		}
-		record.saturated = record.saturated.union(&saturated);
-		record.totals = match totals
-		{
-			Some(totals) => totals,
-			None => record.chain_totals()
-		};
+		self.dice = self
+			.dice
+			.saturating_add(dice(kept.max).saturating_mul(extensions));
+		self.record_mut(inst.dest).dice = chains;
 		Ok(())
 	}
 
@@ -3843,7 +4365,7 @@ impl InstructionVisitor<()> for BoundsEvaluator<'_>
 		// as any total grows, so it is least when every chain shows the least
 		// total, and greatest when every chain shows the greatest; and the
 		// sum of `n` equal totals is their saturated product by `n`.
-		let sum = match record.totals.hull()
+		let sum = match record.totals().hull()
 		{
 			Some(totals) => record.kept * totals,
 			None => 0.into()

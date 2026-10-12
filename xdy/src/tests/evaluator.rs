@@ -6,7 +6,7 @@
 //! rendition.
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeSet, HashMap, HashSet},
 	ops::RangeInclusive
 };
 
@@ -3357,18 +3357,24 @@ fn test_explode_bounds()
 			None,
 			u64::MAX
 		),
-		// Every chain that grows saturates, but the bounds do not know that
-		// every chain grows.
+		// The end of every chain matches, so every chain saturates.
 		(
 			&["explode = 6 up to 1 times", "explode >= 1 unlimited times"],
-			(4, i32::MAX).into(),
+			i32::MAX.into(),
 			None,
 			4 + 4
 		),
 		// A later reroll rerolls each kept die of a chain, of which there are
-		// up to two.
+		// up to two, but only the end of a chain may show a `1`, since the
+		// `6` that it extends cannot; both may show a `6`.
 		(
 			&["explode = 6 up to 1 times", "reroll = 1 up to 1 times"],
+			(4, 48).into(),
+			None,
+			4 + 4 + 4
+		),
+		(
+			&["explode = 6 up to 1 times", "reroll = 6 up to 1 times"],
 			(4, 48).into(),
 			None,
 			4 + 4 + 4 * 2
@@ -3418,14 +3424,26 @@ fn test_explode_bounds()
 		assert_eq!(bounds.dice, dice, "{}", clauses);
 	}
 	for (body, value, dice) in [
-		// A chain of up to three dice, each `-2` or `3`, totals at least three
-		// `-2`s and at most three `3`s.
+		// A chain of up to three dice, each `-2` or `3`, totals at most three
+		// `3`s, but at least one `-2`, since only a `3` grows a chain, and
+		// the reroll may leave a `-2` only at the end of a chain, whose `3`s
+		// it leaves alone; and it rerolls only that end.
 		(
 			"⚅0 <- roll custom dice 2D[-2, 3]
 			⚅0 <- explode = 3 up to 2 times from ⚅0
 			⚅0 <- reroll = -2 up to 1 times from ⚅0",
-			(-12, 18).into(),
-			2 + 2 * 2 + 2 * 3
+			(-4, 18).into(),
+			2 + 2 * 2 + 2
+		),
+		// A chain totals at least `-1`, though it may hold two dice, each of
+		// which may show `-1`: a `-1` that the reroll leaves at the end of a
+		// chain stays alone, since only a `3` grows a chain.
+		(
+			"⚅0 <- roll custom dice 1D[-1, 3]
+			⚅0 <- explode = 3 up to 1 times from ⚅0
+			⚅0 <- reroll = -1 up to 1 times from ⚅0",
+			(-1, 6).into(),
+			1 + 1 + 1
 		),
 		// The explode saturates the chains if the threshold is `1`, but not if
 		// it is `2`; the reroll crosses out every die of the chains that do
@@ -3838,6 +3856,717 @@ fn test_explode_bounds_exhaustive()
 				}
 			}
 		}
+	}
+}
+
+/// A chain of a record of the [clause grid](test_clause_bounds_exhaustive), as
+/// its brute-force enumeration tracks it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum GridChain
+{
+	/// A chain that no saturated die decides: the results of its middle dice,
+	/// those that some die extends, ascending, and of its end.
+	Live(Vec<i32>, i32),
+
+	/// A chain that a saturated die of this value decides.
+	Saturated(i32),
+
+	/// A chain whose every die a reroll crossed out.
+	Gone
+}
+
+/// A clause of the [clause grid](test_clause_bounds_exhaustive), resolved:
+/// whether it explodes, rather than rerolls; its criterion; and its limit, or
+/// `None` for no limit.
+type GridClause = (bool, Criterion, Option<i32>);
+
+/// Answer every result that a die still kept may finally show after a reroll,
+/// by rolling it again from its faces while the criterion matches it and the
+/// limit allows. Without limit, roll it at most `depth` times, and discard
+/// every die that still matches.
+///
+/// # Parameters
+/// - `value`: The result of the die.
+/// - `faces`: The faces of the die.
+/// - `criterion`: The criterion of the reroll.
+/// - `limit`: The limit, or `None` for no limit.
+/// - `depth`: The greatest number of rolls to enumerate without limit.
+///
+/// # Returns
+/// The results, without repetition.
+fn grid_reroll(
+	value: i32,
+	faces: &[i32],
+	criterion: &Criterion,
+	limit: Option<i32>,
+	depth: i32
+) -> Vec<i32>
+{
+	/// Roll the die again while it matches, adding the results of the dice
+	/// that stop.
+	fn roll(
+		value: i32,
+		faces: &[i32],
+		criterion: &Criterion,
+		remaining: i32,
+		limited: bool,
+		finals: &mut Vec<i32>
+	)
+	{
+		let matches = criterion.matches(value);
+		if !matches || remaining == 0
+		{
+			// A die without limit that still matches has not stopped.
+			if (limited || !matches) && !finals.contains(&value)
+			{
+				finals.push(value);
+			}
+			return
+		}
+		for face in faces
+		{
+			roll(*face, faces, criterion, remaining - 1, limited, finals);
+		}
+	}
+	let (remaining, limited) = match limit
+	{
+		Some(limit) => (limit.max(0), true),
+		None => (depth, false)
+	};
+	let mut finals = Vec::new();
+	roll(value, faces, criterion, remaining, limited, &mut finals);
+	finals
+}
+
+/// Answer every chain that an explode may make of the specified chain, by
+/// rolling extensions of its end from its faces while the criterion matches
+/// the last and the limit allows. Without limit, roll at most `depth`
+/// extensions, and discard every chain that has not ended.
+///
+/// # Parameters
+/// - `middles`: The results of the middle dice of the chain.
+/// - `end`: The result of the end of the chain.
+/// - `faces`: The faces of the die.
+/// - `criterion`: The criterion of the explode.
+/// - `limit`: The limit, or `None` for no limit.
+/// - `depth`: The greatest number of extensions to enumerate without limit.
+///
+/// # Returns
+/// The chains.
+fn grid_explode(
+	middles: &[i32],
+	end: i32,
+	faces: &[i32],
+	criterion: &Criterion,
+	limit: Option<i32>,
+	depth: i32
+) -> Vec<GridChain>
+{
+	/// Grow the chain by every face, until it ends, adding the chains that
+	/// end.
+	fn grow(
+		chain: &mut Vec<i32>,
+		faces: &[i32],
+		criterion: &Criterion,
+		remaining: i32,
+		limited: bool,
+		chains: &mut Vec<GridChain>
+	)
+	{
+		let last = *chain.last().unwrap();
+		let matches = criterion.matches(last);
+		if !matches || remaining == 0
+		{
+			// A chain without limit that still matches has not ended.
+			if limited || !matches
+			{
+				let mut middles = chain[..chain.len() - 1].to_vec();
+				middles.sort_unstable();
+				chains.push(GridChain::Live(middles, last));
+			}
+			return
+		}
+		for face in faces
+		{
+			chain.push(*face);
+			grow(chain, faces, criterion, remaining - 1, limited, chains);
+			chain.pop();
+		}
+	}
+	let (remaining, limited) = match limit
+	{
+		Some(limit) => (limit.max(0), true),
+		None => (depth, false)
+	};
+	let mut chain = middles.to_vec();
+	chain.push(end);
+	let mut chains = Vec::new();
+	grow(
+		&mut chain,
+		faces,
+		criterion,
+		remaining,
+		limited,
+		&mut chains
+	);
+	chains
+}
+
+/// Answer every chain that the specified clauses may leave of a die just
+/// rolled, by applying them in turn to every chain that each may leave.
+///
+/// # Parameters
+/// - `faces`: The faces of the die, as it rolls them, with repetition.
+/// - `clauses`: The clauses.
+/// - `depth`: The greatest number of rolls of a die, or of extensions of a
+///   chain, to enumerate without limit.
+///
+/// # Returns
+/// The chains.
+fn grid_chains(
+	faces: &[i32],
+	clauses: &[GridClause],
+	depth: i32
+) -> BTreeSet<GridChain>
+{
+	let mean = faces.iter().map(|face| *face as i64).sum::<i64>();
+	let saturated = match mean
+	{
+		mean if mean > 0 => i32::MAX,
+		mean if mean < 0 => i32::MIN,
+		_ => 0
+	};
+	let mut chains = faces
+		.iter()
+		.map(|face| GridChain::Live(Vec::new(), *face))
+		.collect::<BTreeSet<_>>();
+	for (explode, criterion, limit) in clauses
+	{
+		// Without limit, a criterion that matches every face crosses out every
+		// die of a reroll, or saturates every chain of an explode.
+		let covers = limit.is_none()
+			&& faces.iter().all(|face| criterion.matches(*face));
+		let mut next = BTreeSet::new();
+		for chain in chains
+		{
+			let GridChain::Live(middles, end) = chain
+			else
+			{
+				// Later rerolls and explodes leave these alone.
+				next.insert(chain);
+				continue
+			};
+			match (explode, covers)
+			{
+				(false, true) =>
+				{
+					next.insert(GridChain::Gone);
+				},
+				(true, true) =>
+				{
+					next.insert(GridChain::Saturated(saturated));
+				},
+				(true, false) => next.extend(grid_explode(
+					&middles, end, faces, criterion, *limit, depth
+				)),
+				(false, false) =>
+				{
+					// Each die rerolls alone.
+					let mut rerolled = BTreeSet::from([Vec::<i32>::new()]);
+					for middle in &middles
+					{
+						let finals = grid_reroll(
+							*middle, faces, criterion, *limit, depth
+						);
+						rerolled = rerolled
+							.iter()
+							.flat_map(|middles| {
+								finals.iter().map(move |value| {
+									let mut middles = middles.clone();
+									middles.push(*value);
+									middles.sort_unstable();
+									middles
+								})
+							})
+							.collect();
+					}
+					let ends =
+						grid_reroll(end, faces, criterion, *limit, depth);
+					for middles in rerolled
+					{
+						for end in &ends
+						{
+							next.insert(GridChain::Live(middles.clone(), *end));
+						}
+					}
+				}
+			}
+		}
+		chains = next;
+	}
+	chains
+}
+
+/// The memo of [`grid_chains`], by its arguments, of the least and greatest
+/// totals of the chains, or `None` for a chain that a reroll crossed out.
+type ClauseMemo =
+	HashMap<(Vec<i32>, Vec<GridClause>, i32), Vec<Option<(i32, i32)>>>;
+
+/// Answer the brute-force extrema of the sum of a record of the
+/// [clause grid](test_clause_bounds_exhaustive), over every assignment of the
+/// operands, by enumerating the chains of each. Without limit, the enumeration
+/// ends at [`CHAIN_DEPTH`], so an extremum of an assignment that still grows
+/// from one fewer stands for one without bound.
+///
+/// # Parameters
+/// - `die`: The index of the die among those of the grid.
+/// - `clauses`: Each clause: whether it explodes, and its predicate, whose
+///   operand is the register after that of the die's, two for each clause, and
+///   whether its limit, in the register after that, is limited.
+/// - `operands`: The intervals of the registers.
+/// - `memo`: The memo of [`grid_chains`].
+///
+/// # Returns
+/// The least and greatest sums, each `None` if some assignment's grows
+/// without bound.
+fn clause_grid_truth(
+	die: usize,
+	clauses: &[(bool, Predicate, bool)],
+	operands: &[EvaluationBounds],
+	memo: &mut ClauseMemo
+) -> (Option<i32>, Option<i32>)
+{
+	let mut truth = (Some(i32::MAX), Some(i32::MIN));
+	// Count through the assignments, as an odometer does.
+	let mut assignment =
+		operands.iter().map(|bounds| bounds.min).collect::<Vec<_>>();
+	loop
+	{
+		let (faces, count) = clause_grid_faces(die, assignment[0]);
+		let resolved = clauses
+			.iter()
+			.enumerate()
+			.map(|(index, (explode, predicate, limited))| {
+				let criterion =
+					predicate.resolve(|_| assignment[1 + 2 * index]);
+				let limit = limited.then_some(assignment[2 + 2 * index]);
+				(*explode, criterion, limit)
+			})
+			.collect::<Vec<_>>();
+		let [deep, shallow] = [CHAIN_DEPTH, CHAIN_DEPTH - 1].map(|depth| {
+			clause_grid_sums(&faces, count, &resolved, depth, memo)
+		});
+		truth = (
+			match deep.0 == shallow.0
+			{
+				true => truth.0.map(|least| least.min(deep.0)),
+				false => None
+			},
+			match deep.1 == shallow.1
+			{
+				true => truth.1.map(|greatest| greatest.max(deep.1)),
+				false => None
+			}
+		);
+		let mut digit = 0;
+		loop
+		{
+			if digit == assignment.len()
+			{
+				return truth
+			}
+			if assignment[digit] < operands[digit].max
+			{
+				assignment[digit] += 1;
+				break
+			}
+			assignment[digit] = operands[digit].min;
+			digit += 1;
+		}
+	}
+}
+
+/// Answer the brute-force extrema of the sum of a record of the
+/// [clause grid](test_clause_bounds_exhaustive) for one assignment of the
+/// operands, by enumerating its chains.
+///
+/// # Parameters
+/// - `faces`: The faces of the die, with repetition.
+/// - `count`: The number of dice.
+/// - `clauses`: The clauses, resolved.
+/// - `depth`: The greatest number of rolls to enumerate without limit.
+/// - `memo`: The memo of [`grid_chains`].
+///
+/// # Returns
+/// The least and greatest sums.
+fn clause_grid_sums(
+	faces: &[i32],
+	count: i32,
+	clauses: &[GridClause],
+	depth: i32,
+	memo: &mut ClauseMemo
+) -> (i32, i32)
+{
+	let mut truth = (i32::MAX, i32::MIN);
+	{
+		let totals = memo
+			.entry((faces.to_vec(), clauses.to_vec(), depth))
+			.or_insert_with(|| {
+				grid_chains(faces, clauses, depth)
+					.into_iter()
+					.map(|chain| match chain
+					{
+						GridChain::Live(middles, end) =>
+						{
+							let mut dice = middles;
+							dice.push(end);
+							dice.sort_unstable();
+							let total =
+								dice.into_iter().fold(0, i32::saturating_add);
+							Some((total, total))
+						},
+						GridChain::Saturated(value) => Some((value, value)),
+						GridChain::Gone => None
+					})
+					.collect()
+			});
+		for total in totals.iter()
+		{
+			// Every chain of a record that a reroll crossed out is crossed
+			// out, so the record sums to `0`.
+			let sum = match total
+			{
+				Some((min, max)) =>
+				{
+					(min.saturating_mul(count), max.saturating_mul(count))
+				},
+				None => (0, 0)
+			};
+			truth = (truth.0.min(sum.0), truth.1.max(sum.1));
+		}
+	}
+	truth
+}
+
+/// A roll of the [clause grid](test_clause_bounds_exhaustive), with the
+/// intervals of its parameter, `@0`, and the thresholds and their intervals
+/// that its predicates test.
+type ClauseGridDie =
+	(&'static str, &'static [(i32, i32)], &'static [(i32, i32)]);
+
+/// The rolls of the [clause grid](test_clause_bounds_exhaustive).
+const CLAUSE_GRID_DICE: [ClauseGridDie; 4] = [
+	(
+		"roll custom dice 2D[-1, 1, 1, 3]",
+		&[(0, 0)],
+		&[(-1, -1), (0, 0), (1, 1), (3, 3), (-1, 1)]
+	),
+	(
+		"roll custom dice 1D[1, 4]",
+		&[(0, 0)],
+		&[(1, 1), (4, 4), (1, 4)]
+	),
+	(
+		"roll custom dice 1D[-4, -1]",
+		&[(0, 0)],
+		&[(-4, -4), (-1, -1), (-4, -1)]
+	),
+	(
+		"roll standard dice 1D@0",
+		&[(2, 2), (3, 3), (2, 3)],
+		&[(1, 1), (2, 2), (3, 3), (1, 2)]
+	)
+];
+
+/// Answer the faces of a die of the [clause
+/// grid](test_clause_bounds_exhaustive) and the number of dice that it rolls,
+/// given the value of its parameter, as the evaluator rolls them.
+///
+/// # Parameters
+/// - `die`: The index of the die among [`CLAUSE_GRID_DICE`].
+/// - `value`: The value of `@0`.
+///
+/// # Returns
+/// The faces, with repetition, and the number of dice.
+fn clause_grid_faces(die: usize, value: i32) -> (Vec<i32>, i32)
+{
+	match die
+	{
+		0 => (vec![-1, 1, 1, 3], 2),
+		1 => (vec![1, 4], 1),
+		2 => (vec![-4, -1], 1),
+		_ => ((1..=value).collect(), 1)
+	}
+}
+
+/// Test that the bounds of the sum of a record are exact over an exhaustive
+/// grid of dice and runs of explodes and rerolls, each after an explode, over
+/// predicates, limits, and intervals of their operands, against the
+/// brute-force extrema of every assignment of their operands, found by
+/// enumerating the chains of each. The runs reroll the middle dice of chains,
+/// and their ends, extend chains that rerolls changed, cross out every die of
+/// the chains, and saturate them. Without limit, the enumeration ends at a
+/// fixed depth, so the bounds must agree with it where its extrema have
+/// settled, and saturate where they still grow.
+#[test]
+fn test_clause_bounds_exhaustive()
+{
+	let threshold =
+		|index: usize| AddressingMode::from(RegisterIndex(1 + 2 * index));
+	let predicates = |index: usize, wide: bool| {
+		let t = threshold(index);
+		match wide
+		{
+			true => vec![
+				Predicate::Eq(t),
+				Predicate::Ne(t),
+				Predicate::Ge(t),
+				Predicate::Le(t),
+			],
+			false => vec![Predicate::Eq(t), Predicate::Ge(t)]
+		}
+	};
+	// Each run, as whether each clause explodes; and whether its clauses
+	// range over every predicate, threshold, and limit, rather than a few.
+	let runs = [
+		(&[true, true][..], true),
+		(&[true, false], true),
+		(&[true, false, true], false),
+		(&[true, true, false], false)
+	];
+	let mut memo = ClauseMemo::new();
+	let mut checked = 0;
+	for (die, (roll, die_operands, thresholds)) in
+		CLAUSE_GRID_DICE.iter().enumerate()
+	{
+		for (run, wide) in runs
+		{
+			// Each clause: whether it explodes, its predicate, and the
+			// intervals of its threshold and of its limit, or `None` for no
+			// limit.
+			type Choice = (bool, Predicate, (i32, i32), Option<(i32, i32)>);
+			let mut choices = vec![Vec::<Choice>::new()];
+			for (index, explode) in run.iter().enumerate()
+			{
+				let thresholds = match wide
+				{
+					true => thresholds.to_vec(),
+					false => thresholds
+						.iter()
+						.copied()
+						.filter(|(min, max)| min == max)
+						.take(2)
+						.collect()
+				};
+				let limits = match wide
+				{
+					true =>
+					{
+						vec![Some((1, 1)), Some((2, 2)), Some((0, 1)), None]
+					},
+					false => vec![Some((1, 1)), None]
+				};
+				let mut next = Vec::new();
+				for prefix in &choices
+				{
+					for predicate in predicates(index, wide)
+					{
+						for threshold in &thresholds
+						{
+							for limit in &limits
+							{
+								let mut choice = prefix.clone();
+								choice.push((
+									*explode,
+									predicate.clone(),
+									*threshold,
+									*limit
+								));
+								next.push(choice);
+							}
+						}
+					}
+				}
+				choices = next;
+			}
+			for choice in choices
+			{
+				let body = choice
+					.iter()
+					.enumerate()
+					.map(|(index, (explode, predicate, _, limit))| {
+						format!(
+							"\t\t⚅0 <- {} {} {} from ⚅0\n",
+							match explode
+							{
+								true => "explode",
+								false => "reroll"
+							},
+							predicate,
+							match limit
+							{
+								Some(_) =>
+									format!("up to @{} times", 2 + 2 * index),
+								None => "unlimited times".to_string()
+							}
+						)
+					})
+					.collect::<String>();
+				let function = Assembler::assemble(&format!(
+					"Function({{a}}@0, {{b}}@1, {{c}}@2, {{d}}@3, {{e}}@4, \
+					 {{f}}@5, {{g}}@6) r#8 ⚅#1\n\textern[]\n\tbody:\n\t\t\
+					 ⚅0 <- {}\n{}\t\t@7 <- sum rolling record ⚅0\n\t\t\
+					 return @7\n",
+					roll, body
+				))
+				.unwrap();
+				let evaluator = Evaluator::new(function);
+				let clauses = choice
+					.iter()
+					.map(|(explode, predicate, _, limit)| {
+						(*explode, predicate.clone(), limit.is_some())
+					})
+					.collect::<Vec<_>>();
+				for die_operand in *die_operands
+				{
+					let mut operands = vec![EvaluationBounds::from(0); 7];
+					operands[0] = (*die_operand).into();
+					for (index, (_, _, threshold, limit)) in
+						choice.iter().enumerate()
+					{
+						operands[1 + 2 * index] = (*threshold).into();
+						operands[2 + 2 * index] =
+							limit.unwrap_or((0, 0)).into();
+					}
+					let bounds = evaluator
+						.bounds_over(
+							std::array::from_fn::<_, 7, _>(|index| {
+								Some(operands[index])
+							}),
+							[]
+						)
+						.unwrap();
+					let truth =
+						clause_grid_truth(die, &clauses, &operands, &mut memo);
+					let context =
+						format!("{}\n{}over {:?}", roll, body, operands);
+					// A run whose extrema have settled is exact; one whose
+					// extrema still grow saturates.
+					match truth.0
+					{
+						Some(least) =>
+						{
+							assert_eq!(bounds.value.min, least, "{}", context)
+						},
+						None => assert!(
+							bounds.value.min <= i32::MIN + 4,
+							"{}: {}",
+							context,
+							bounds.value
+						)
+					}
+					match truth.1
+					{
+						Some(greatest) =>
+						{
+							assert_eq!(
+								bounds.value.max, greatest,
+								"{}",
+								context
+							)
+						},
+						None => assert_eq!(
+							bounds.value.max,
+							i32::MAX,
+							"{}",
+							context
+						)
+					}
+					checked += 1;
+				}
+			}
+		}
+	}
+	assert!(checked > 0);
+}
+
+/// Test that the bounds of the sum of a record stay sound when the shapes of
+/// its chains outgrow their budget and coarsen: a long run of explodes and a
+/// reroll, each limited, whose many criteria multiply the shapes, against the
+/// brute-force extrema found by enumerating its chains. The first seven
+/// clauses leave few enough shapes that the bounds stay exact; the eighth
+/// leaves too many, so they coarsen, and the bounds loosen.
+#[test]
+fn test_clause_bounds_coarsened()
+{
+	let faces = [-2, 1, 3];
+	let clause = |explode: bool, criterion: Criterion, limit: Option<i32>| {
+		(explode, criterion, limit)
+	};
+	let eq = |value: i32| Criterion::Within(value..=value);
+	let mut clauses = vec![
+		clause(true, eq(3), Some(2)),
+		clause(true, eq(-2), Some(2)),
+		clause(true, eq(1), Some(2)),
+		clause(false, eq(3), Some(1)),
+		clause(true, Criterion::Within(1..=i32::MAX), Some(2)),
+		clause(true, Criterion::Within(i32::MIN..=1), Some(2)),
+		clause(true, eq(3), Some(2)),
+		clause(true, eq(-2), Some(2)),
+		clause(true, eq(1), Some(2)),
+	];
+	let sources = [
+		"explode = 3 2 times",
+		"explode = -2 2 times",
+		"explode = 1 2 times",
+		"reroll = 3",
+		"explode ≥ 1 2 times",
+		"explode ≤ 1 2 times",
+		"explode = 3 2 times",
+		"explode = -2 2 times",
+		"explode = 1 2 times"
+	];
+	while clauses.len() >= 6
+	{
+		let source =
+			format!("1D[-2, 1, 3] {}", sources[..clauses.len()].join(" "));
+		let evaluator = Evaluator::new(compile_valid(&source));
+		let bounds = evaluator
+			.bounds_over(
+				std::iter::empty(),
+				std::iter::empty::<(&str, EvaluationBounds)>()
+			)
+			.unwrap();
+		let totals = grid_chains(&faces, &clauses, CHAIN_DEPTH)
+			.into_iter()
+			.map(|chain| match chain
+			{
+				GridChain::Live(mut dice, end) =>
+				{
+					dice.push(end);
+					dice.sort_unstable();
+					dice.into_iter().fold(0, i32::saturating_add)
+				},
+				GridChain::Saturated(value) => value,
+				GridChain::Gone => 0
+			})
+			.collect::<Vec<_>>();
+		let truth =
+			(*totals.iter().min().unwrap(), *totals.iter().max().unwrap());
+		match clauses.len() <= 7
+		{
+			true => assert_eq!(bounds.value, truth.into(), "{}", source),
+			false => assert!(
+				bounds.value.contains(truth.0)
+					&& bounds.value.contains(truth.1)
+					&& bounds.value != truth.into(),
+				"{}: {} does not loosely cover {:?}",
+				source,
+				bounds.value,
+				truth
+			)
+		}
+		clauses.pop();
 	}
 }
 

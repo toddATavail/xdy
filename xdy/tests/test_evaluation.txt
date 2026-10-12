@@ -3716,11 +3716,11 @@ value ∈ [1, 8], count = None, dice = 3
 
 1D6 explode = 6 explode = 5
 =
-value ∈ [1, 18], count = None, dice = 3
+value ∈ [1, 17], count = None, dice = 3
 
 1D6 explode = 6 reroll = 1
 =
-value ∈ [1, 12], count = None, dice = 4
+value ∈ [1, 12], count = None, dice = 3
 
 1D6 reroll = 1 explode = 6
 =
