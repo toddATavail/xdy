@@ -2662,6 +2662,9 @@ struct Segment
 /// replacing it, and that crosses out every die of the chain. A later reroll
 /// acts on each die of a chain alike, so it maps the results of every run, and
 /// of the end; a later explode extends only the end, so it appends runs.
+///
+/// `ChainShape`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this type, and
+/// `ChainShape.Has` there describes the chains that a shape describes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ChainShape
 {
@@ -2729,9 +2732,12 @@ impl ChainShape
 	///
 	/// `fold_mono_results`, `fold_mono_copies`, and `fold_unbounded`, in
 	/// `lean/spec/XdySpec/Bounds.lean`, prove the properties of the fold on
-	/// which these extremes rest, and `pair_exact` that the shapes of a first
-	/// explode are exact; the shapes of later rerolls and explodes are not yet
-	/// modeled there.
+	/// which these extremes rest, and `fold_eq_of_cap` that capping the dice
+	/// of a run at [`UNBOUNDED_DICE`] changes no fold. `ChainShape.totals_le`
+	/// there proves that the totals bound every chain of the shape, and
+	/// `ChainShape.totals_realized` that each is the total of a corner of the
+	/// shape, which, unless the shapes were coarsened, is a chain that the
+	/// rerolls and explodes may make.
 	fn totals(&self) -> EvaluationBounds
 	{
 		let copies = |count: u64| (count as i128).min(UNBOUNDED_DICE);
@@ -2864,6 +2870,11 @@ impl ChainShape
 	/// one of the shapes does, and the extreme number of dice of each run,
 	/// as a chain of one of them does. Nor does uniting them change the most
 	/// dice of a chain that may match a criterion.
+	///
+	/// `ChainShape.unite_has`, in `lean/spec/XdySpec/Bounds.lean`, proves that
+	/// the united shape describes every chain of either, and
+	/// `ChainShape.unite_realized` that each of its corners, which its extreme
+	/// totals show, is a corner of one of them.
 	fn unite(&self, other: &Self) -> Option<Self>
 	{
 		if self.within(other)
@@ -2932,6 +2943,10 @@ impl ChainShape
 	/// # Returns
 	/// The coarsened shape, which may admit totals that none of the shapes
 	/// admits.
+	///
+	/// # Notes
+	/// `ChainShape.coarsen_has`, in `lean/spec/XdySpec/Bounds.lean`, proves
+	/// that the coarsened shape describes every chain of each.
 	fn coarsen(shapes: &[Self]) -> Self
 	{
 		let mut results = ResultSet::default();
@@ -2980,6 +2995,14 @@ impl ChainShape
 ///
 /// # Returns
 /// The united shapes.
+///
+/// # Notes
+/// `uniteShapes`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this function,
+/// and also reports whether it coarsened the shapes. `uniteShapes_has` there
+/// proves that some united shape describes every chain of each shape, and
+/// `uniteShapes_preserves` that, unless it coarsened them, the united shapes
+/// keep every property of the shapes that uniting two keeps, such as that
+/// every corner is a chain that the clauses may make.
 fn unite_shapes(shapes: Vec<ChainShape>) -> Vec<ChainShape>
 {
 	let mut united = Vec::<ChainShape>::new();
@@ -3013,6 +3036,10 @@ fn unite_shapes(shapes: Vec<ChainShape>) -> Vec<ChainShape>
 /// The chains still kept by a rolling record whose dice are all the same die,
 /// or, if the bounds cannot tell its dice apart, any die that the record may
 /// roll.
+///
+/// `DieChains`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this type, with a
+/// function that stands for [`least`](Self::least) and the shapes of the
+/// criteria.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DieChains
 {
@@ -3182,6 +3209,10 @@ impl DieChains
 	/// every face crosses out every die instead, rolling nothing, and so every
 	/// chain that no saturated die decides. A limit that may be zero or less
 	/// may leave the chains as they were.
+	///
+	/// `DieChains.reroll_covers`, in `lean/spec/XdySpec/Bounds.lean`, proves
+	/// that the chains answered cover every chain that the reroll may make of
+	/// a chain that the receiver covered.
 	fn reroll(
 		&self,
 		criteria: &[Criteria],
@@ -3275,6 +3306,10 @@ impl DieChains
 	/// chains as they were. Without limit, `m` is any number, unless the
 	/// criterion matches every face, whence every chain saturates instead,
 	/// rolling nothing.
+	///
+	/// `DieChains.explode_covers`, in `lean/spec/XdySpec/Bounds.lean`, proves
+	/// that the chains answered cover every chain that the explode may make of
+	/// a chain that the receiver covered.
 	fn explode(
 		&self,
 		criteria: &[Criteria],
@@ -3506,6 +3541,14 @@ impl RollingRecordBounds
 	/// of its rerolls and explodes are too many to enumerate, or the shapes of
 	/// its chains were coarsened. They may leave gaps that some chain fills,
 	/// so only their hull is meaningful.
+	///
+	/// # Notes
+	/// `DieChains.run_sound`, in `lean/spec/XdySpec/Bounds.lean`, proves that
+	/// the totals of the chains of a die hold the total of every chain still
+	/// kept after any sequence of rerolls, explodes, drops, and keeps, and
+	/// `DieChains.run_exact` that, for exact criteria and shapes never
+	/// coarsened, their hull is exactly that of the totals of the chains that
+	/// the clauses may make of one face.
 	fn totals(&self) -> ResultSet
 	{
 		self.dice.iter().fold(ResultSet::default(), |totals, die| {
