@@ -1692,9 +1692,11 @@ struct RollingRecordBounds
 	/// The totals that a [chain](crate::RollingRecord::chains) still kept may
 	/// show, whose hull bounds the sum of the record, with `kept`. Until an
 	/// [explode](crate::Explode) extends a die, each chain still kept holds
-	/// one kept die, so these are the `results`; an explode sets them to
-	/// cover the totals of the chains that it may grow, which may have
-	/// gaps that these fill, but whose hull is exact.
+	/// one kept die, so these are the `results`; an explode sets them so
+	/// that their hull covers the totals of the chains that it may grow, and
+	/// is exact for one die and one criterion. They may leave gaps between
+	/// the shapes of chain that the explode folds, which some chain fills,
+	/// so only their hull is meaningful.
 	totals: ResultSet,
 
 	/// The greatest number of kept dice of a chain still kept that no
@@ -2633,9 +2635,11 @@ impl Explosion<'_>
 	/// Answer the totals that a chain still kept may show after the explode.
 	///
 	/// # Returns
-	/// The totals, which cover every total that a chain may show, and whose
-	/// hull is exact if the die and criterion are each one, but which may fill
-	/// the gaps between them.
+	/// The totals, whose hull covers every total that a chain may show, and
+	/// is exact if the die and criterion are each one. They may leave gaps
+	/// between the shapes, which some chain fills: a six that explodes on six
+	/// at most three times may total `13` after two extensions, which lies in
+	/// no shape. So only their hull is meaningful.
 	///
 	/// # Notes
 	/// A chain that grows from a matching die `r` holds `r`, then `m` middle
@@ -2660,6 +2664,13 @@ impl Explosion<'_>
 	/// a range of limits lie at its ends, too. Without limit, the last die ends
 	/// the chain after any number of extensions, so `m` grows without bound,
 	/// unless every face matches, whence the chain saturates instead.
+	///
+	/// `Explosion.totals`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this
+	/// method. `totals_sound` proves that the hull covers the total of every
+	/// chain that the explode may grow, for any die, criterion, and limit that
+	/// the explosion admits; `pair_exact` that it is exact for one die and one
+	/// criterion; and `shapeFold_between`, `shapeFold_short`, and
+	/// `shapeFold_unbounded` the dominance of the shapes on which both rest.
 	fn totals(&self) -> ResultSet
 	{
 		// A die that the criterion does not match stays alone.
@@ -2749,6 +2760,13 @@ impl Explosion<'_>
 /// `i32::MIN` only if they sum below it, and then stays there until the rest
 /// arrive; the rest only rise, so the fold saturates at `i32::MAX` only if
 /// they lift it above.
+///
+/// `fold`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this function:
+/// `fold_eq_total` proves that it is the total of every chain of the dice,
+/// `fold_mono_results` and `fold_mono_copies` that it never decreases as any
+/// die grows nor moves against the sign of a die as its copies grow, and
+/// `fold_unbounded` that `UNBOUNDED_DICE` copies of a nonzero die saturate
+/// it.
 fn fold(dice: impl IntoIterator<Item = (i32, i128)>) -> i32
 {
 	let (mut negative, mut positive) = (0i128, 0i128);
@@ -2816,11 +2834,11 @@ impl RollingRecordBounds
 	/// - `limit`: The bounds of the limit, or `None` for no limit.
 	///
 	/// # Returns
-	/// The totals, which cover every total that a chain may show, and whose
-	/// hull is exact if the dice of the record and the criteria of the
-	/// predicate are few enough to enumerate, and the results that a die
-	/// still kept may show are all that the bounds admit of each die; and the
-	/// saturated values, which are none if no chain may saturate.
+	/// The totals, whose hull covers every total that a chain may show, and
+	/// is exact if the dice of the record and the criteria of the predicate
+	/// are few enough to enumerate, and the results that a die still kept may
+	/// show are all that the bounds admit of each die; and the saturated
+	/// values, which are none if no chain may saturate.
 	///
 	/// # Notes
 	/// If the dice and criteria are few enough, explode each pair alone, and
@@ -2828,6 +2846,12 @@ impl RollingRecordBounds
 	/// which is sound, since each set is a superset of each of its members,
 	/// but may be loose, since it mixes the faces of one die, or the results
 	/// that one criterion matches, with those of another.
+	///
+	/// `explodePairs`, in `lean/spec/XdySpec/Bounds.lean`, mirrors the union
+	/// of the pairs, and `explodePairs_exact` proves it exact in its hull;
+	/// `totals_sound` proves the explode of every die and criterion at once
+	/// sound, and `explode_sound` lifts it to the chains that the explode
+	/// leaves of the record.
 	fn explode(
 		&self,
 		predicate: &Predicate,

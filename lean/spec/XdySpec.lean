@@ -1,3 +1,4 @@
+import XdySpec.Bounds
 import XdySpec.Chains
 import XdySpec.Conditioning
 import XdySpec.Convolution
