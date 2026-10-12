@@ -272,7 +272,7 @@ Both formats brace every name, and read only canonical names, as their writers e
 | `DropLowest` | `⚅N <- drop lowest K from ⚅N` | Of the results of rolling record `N` still kept, cross out the `K` lowest; a `K` of zero or less drops nothing |
 | `DropHighest` | `⚅N <- drop highest K from ⚅N` | Of the results of rolling record `N` still kept, cross out the `K` highest; a `K` of zero or less drops nothing |
 
-Of equal results, a drop crosses out the first rolled, and the record keeps every result, crossed out or not, in the order rolled. Consecutive drops leave the same results kept in either order, but a drop does not commute with a keep or a reroll.
+After an explode, a drop counts each [chain](#explode-instructions) still kept as one result, worth its total, and crosses out every result of each chain that it crosses out. Of equal results, a drop crosses out the first rolled, and of chains of equal totals, it compares their kept results in ascending order, and then the results at their ends, before the order rolled. The record keeps every result, crossed out or not, in the order rolled. Consecutive drops leave the same results kept in either order, but a drop does not commute with a keep, a reroll, or an explode.
 
 ### Keep instructions
 
@@ -281,7 +281,7 @@ Of equal results, a drop crosses out the first rolled, and the record keeps ever
 | `KeepLowest` | `⚅N <- keep lowest K from ⚅N` | Of the results of rolling record `N` still kept, cross out all but the `K` lowest, from the high end; a `K` of zero or less keeps nothing |
 | `KeepHighest` | `⚅N <- keep highest K from ⚅N` | Of the results of rolling record `N` still kept, cross out all but the `K` highest, from the low end; a `K` of zero or less keeps nothing |
 
-A keep counts from the results that earlier drops and keeps left kept, so, unlike drops, keeps do not commute with drops or with each other: of `4D6`, dropping the lowest and then keeping the lowest 2 keeps the second and third lowest results. A keep crosses out the results that it does not keep, as a drop does, so a rolling record shows the dice that keeps and drops crossed out alike, as `Fate::Dropped`.
+A keep counts from the results that earlier drops and keeps left kept, so, unlike drops, keeps do not commute with drops or with each other: of `4D6`, dropping the lowest and then keeping the lowest 2 keeps the second and third lowest results. Like a drop, a keep counts chains and breaks ties between them, and crosses out the results that it does not keep, so a rolling record shows the dice that keeps and drops crossed out alike, as `Fate::Dropped`.
 
 ### Reroll instructions
 

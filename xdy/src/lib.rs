@@ -54,26 +54,34 @@
 //!
 //! ## Upgrading from 0.14
 //!
-//! `0.15.0` adds keep and reroll clauses, and the greatest and least of
-//! expressions, `highest(…)` and `lowest(…)` (see [Language
+//! `0.15.0` adds keep, reroll, and explode clauses, and the greatest and least
+//! of expressions, `highest(…)` and `lowest(…)` (see [Language
 //! features](#language-features)). A reroll changes the value of a die after
-//! the roll, which the counts of the lowest and highest dice dropped, by which
-//! a rolling record described its drops, cannot express. So a [`RollingRecord`]
-//! now holds its dice in the order rolled, each kept or crossed out. Every
-//! expression that `0.14` accepts answers the same totals, bounds, and
-//! distributions, but code that reads rolling records, or that matches or
-//! visits the IR, the AST, or diagnostics exhaustively, must change. I regret
-//! the churn, and hope that the steps below make the move painless:
+//! the roll, and an explode adds dice to it, which the counts of the lowest and
+//! highest dice dropped, by which a rolling record described its drops, cannot
+//! express. So a [`RollingRecord`] now holds its dice in the order rolled, each
+//! kept or crossed out. Every expression that `0.14` accepts answers the same
+//! totals, bounds, and distributions, but code that reads rolling records, or
+//! that matches or visits the IR, the AST, or diagnostics exhaustively, must
+//! change. I regret the churn, and hope that the steps below make the move
+//! painless:
 //!
 //! * [`RollingRecord::dice`], a vector of [`Die`]s in the order rolled,
 //!   replaces `results`, `lowest_dropped`, and `highest_dropped`. Each [`Die`]
 //!   holds its [`value`](Die::value); its [`fate`](Die::fate), which is
 //!   [`Fate::Kept`], [`Fate::Dropped`] if a drop or keep crossed it out, or
 //!   [`Fate::Rerolled`] if a reroll did; and its [`origin`](Die::origin), which
-//!   is [`Origin::Rolled`] if the roll rolled it, or [`Origin::Replaces`] with
-//!   the index of the die that it replaces if a reroll rolled it. Where you
-//!   read `record.results`, read `record.dice.iter().map(|die| die.value)`, but
-//!   mind that a reroll appends its replacements, so a record may hold more
+//!   is [`Origin::Rolled`] if the roll rolled it, [`Origin::Replaces`] with the
+//!   index of the die that it replaces if a reroll rolled it,
+//!   [`Origin::Extends`] with the index of the die that it extends if an
+//!   explode rolled it, or [`Origin::Saturates`] with the index of the die
+//!   after which it stands for the endless dice of a saturated chain.
+//!   [`Origin::link`] answers the index that any origin but `Rolled` names, and
+//!   [`Die::kept`], [`replacing`](Die::replacing),
+//!   [`extending`](Die::extending), and [`saturating`](Die::saturating) build
+//!   each kind of die. Where you read `record.results`, read
+//!   `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends
+//!   its replacements, and an explode its extensions, so a record may hold more
 //!   dice than its roll did.
 //! * [`RollingRecord::dropped`] replaces the methods `lowest_dropped` and
 //!   `highest_dropped`, answering every die that a drop or keep crossed out, in
@@ -84,10 +92,22 @@
 //!   crossed out.
 //! * [`RollingRecord::kept`] answers the kept results in the order rolled, not
 //!   ascending, so sort them if you relied on their order.
-//!   [`sum`](RollingRecord::sum) is unchanged.
+//!   [`sum`](RollingRecord::sum) is unchanged for every record that no explode
+//!   extended.
+//! * The new [`RollingRecord::chains`] answers the chains of a record: for each
+//!   die that the roll rolled, the indices of the dice that descend from it by
+//!   their links. [`sum`](RollingRecord::sum), and every drop and keep, count
+//!   each chain still kept as one die, worth its total, which is the sum of its
+//!   kept dice, or the value of its saturated die if it has one, and of chains
+//!   of equal totals, compare their dice in ascending order before the order
+//!   rolled. So [`kept`](RollingRecord::kept) answers the results of dice, not
+//!   the totals of chains, and once an explode saturates a chain, the results
+//!   that `kept` answers no longer add up to `sum`: read the total of a record
+//!   from `sum`.
 //! * A rolling record prints its dice in the order rolled, each crossed-out die
 //!   prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with
-//!   the dropped dice set apart by semicolons.
+//!   the dropped dice set apart by semicolons. It prints a saturated die as `∞`
+//!   or `-∞`, unless its value is `0`, and prints no links.
 //! * With the `serde` feature, a rolling record serializes its `dice`, so a
 //!   record serialized by `0.14` does not deserialize.
 //! * A drop crosses out the lowest or highest of the dice still kept, and of
@@ -224,16 +244,21 @@
 //!   `2D8 reroll ≥ 5`, `2D8 reroll >= 5 1 time`, `2D8 reroll ≤ 2 3 times`,
 //!   `{n}: 3D6 reroll = 1 {n} times`, `1D6 reroll = 1 unlimited times`, `1D6
 //!   reroll < 3 ∞ times`, …
-//! * Reroll predicates:
+//! * Explode, once, a given number of times, or without limit: `1D6 explode =
+//!   6`, `2D8 explode ≥ 7`, `2D8 explode >= 7 1 time`, `1D6 explode = 6 2
+//!   times`, `{n}: 3D6 explode = 6 {n} times`, `1D10 explode in 9..=10
+//!   unlimited times`, `1D6 explode = 6 ∞ times`, …
+//! * Reroll and explode predicates:
 //!   * Comparisons with a threshold: `= 1`, `≠ 3` or `!= 3`, `< 3`, `≤ 2` or
 //!     `<= 2`, `> 5`, `≥ 5` or `>= 5`, `< {dc}`, `= (1D6)`, …
 //!   * Lists of integers: `in [1, 2]`, `in [-1]`, `in []`, …
 //!   * Ranges, half-open or inclusive: `in 1..3`, `in 1..=3`, `in -1..=1`, `in
 //!     1..={x}`, `in (1D4)..=6`, …
-//! * Chained drops, keeps, and rerolls, applied in the order written: `4D6 drop
-//!   lowest drop highest`, `4D6 drop lowest keep lowest 2`, `5D6 keep highest 3
-//!   drop lowest`, `4D6 drop lowest reroll = 1`, `4D6 reroll = 1 drop lowest`,
-//!   …
+//! * Chained drops, keeps, rerolls, and explodes, applied in the order written:
+//!   `4D6 drop lowest drop highest`, `4D6 drop lowest keep lowest 2`, `5D6 keep
+//!   highest 3 drop lowest`, `4D6 drop lowest reroll = 1`, `4D6 reroll = 1 drop
+//!   lowest`, `5D10 explode = 10 keep highest 3`, `5D10 keep highest 3 explode
+//!   = 10`, `1D6 explode = 6 reroll = 1`, …
 //! * Formal parameters: `{x}: 1D6 + {x}`, `{y}: 1D6 + {y}`, `{x}, {y}:
 //!   {x}D{y}`, …
 //! * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
@@ -273,6 +298,30 @@
 //! `4D6 drop lowest reroll = 1` rerolls the `1`s that survive the drop, but
 //! `4D6 reroll = 1 drop lowest` drops the lowest die after the reroll.
 //!
+//! An explode clause rolls another die for each die still kept that its
+//! predicate matches, and another for each new die that matches in turn, once
+//! unless it says how many times, so `1D6 explode = 6 2 times` rolls a second
+//! die on a `6`, and a third if the second shows `6` too. A count of zero or
+//! less explodes nothing, and an unlimited explode rolls until a new die no
+//! longer matches. A die and every die that explodes from it form a
+//! [_chain_](RollingRecord::chains), which counts as one die, worth the sum of
+//! its dice, toward the total and toward every later drop or keep: `5D10
+//! explode = 10 keep highest 3` keeps the three highest chains, and a drop or
+//! keep that crosses out a chain crosses out every die of it. A later reroll
+//! acts on each die of a chain alone, and its replacement takes the die's place
+//! in the chain, so `1D6 explode = 6 reroll = 1` rerolls the `1` of the chain
+//! `6, 1`, but a later explode extends only the last die of each chain. If the
+//! predicate of an unlimited explode matches every face of the die, no chain
+//! could ever end, so instead each matching chain _saturates_: it rolls nothing
+//! more, and is worth `2147483647`, the greatest value, if the mean face value
+//! is positive, `-2147483648`, the least, if it is negative, or `0` if it is
+//! `0`, so `3D6 explode ≥ 1 ∞ times` is `2147483647`. Later rerolls and
+//! explodes leave a saturated chain alone, but drops and keeps still count it,
+//! worth its saturated value. Thresholds, range endpoints, and counts are
+//! rolled once, before any die explodes, as for a reroll, and explodes apply in
+//! the order written, like every other clause, so `5D10 keep highest 3 explode
+//! = 10` explodes only the three dice that the keep left kept.
+//!
 //! A call of `highest` or `lowest` takes two or more arguments, each a full
 //! expression, separated by commas, and answers the greatest or least of their
 //! values, so `lowest({POW} * 5, 99)` caps a value at `99`, and `highest(1D6 -
@@ -283,19 +332,28 @@
 //! argument is evaluated, left to right, and nothing short-circuits, so every
 //! die that any argument rolls appears in the records of the evaluation. A call
 //! may stand wherever an expression may begin, but must be grouped as a dice
-//! count, faces, the count of a clause, or an operand of a reroll, as in
-//! `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and `highest`
-//! still name its direction, so `4D6 drop lowest(2)` drops the lowest `2` dice.
+//! count, faces, the count of a clause, or an operand of a reroll or explode,
+//! as in `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and
+//! `highest` still name its direction, so `4D6 drop lowest(2)` drops the lowest
+//! `2` dice.
 //!
 //! A [rolling record](RollingRecord) keeps every die that it rolls, in the
 //! order rolled, whatever becomes of it. A drop or keep crosses out each die
 //! that it drops, and of equal dice, the first rolled. A reroll crosses out
 //! each die that it rolls again, and appends the die's replacement,
-//! [linked](Origin::Replaces) to the die that it replaces, so the whole chain
-//! of rerolls of each die can be traced. A record shows each crossed-out die
-//! with a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the
-//! [dice still kept](RollingRecord::kept) count toward the total, or toward any
-//! later clause.
+//! [linked](Origin::Replaces) to the die that it replaces. An explode appends
+//! each die that it rolls, [linked](Origin::Extends) to the die that it
+//! extends, which stays kept, and a chain that saturates appends one
+//! [die](Origin::Saturates), which stands for its endless dice and shows `∞`,
+//! `-∞`, or `0`. So the whole [chain](RollingRecord::chains) of each die can be
+//! traced by its links, wherever its dice lie in the record. A record shows
+//! each crossed-out die with a `~`, but not its links, so `3D4 reroll = 1`
+//! might show `3D4: [2, ~1, 4, 3]`, `2D6 explode = 6` might show `2D6: [6, 6,
+//! 4, 1]`, and `2D6 explode ≥ 1 ∞ times` might show `2D6: [3, 5, ∞, ∞]`. Only
+//! the [dice still kept](RollingRecord::kept) count toward the total, or toward
+//! any later clause. Of chains of equal totals, a drop or keep compares their
+//! dice in ascending order, so that the chain `6, 1` is lower than the chain
+//! `5, 2`, and of identical chains, crosses out the first rolled.
 //!
 //! Environmental variables permit background state to be associated with an
 //! evaluator, while formal parameters permit dynamic state to be passed into
@@ -447,6 +505,55 @@
 //!         Origin::Replaces(index)));
 //!     }
 //! }
+//! ```
+//!
+//! Exploding every `10` and keeping the three highest chains. Each die that a
+//! `10` explodes follows the dice already rolled, [linked](Origin::Extends) to
+//! the `10`, which stays kept, and the keep crosses out the two lowest
+//! [chains](RollingRecord::chains) whole:
+//!
+//! ```rust
+//! use xdy::{Fate, Origin, evaluate};
+//! use rand::rng;
+//!
+//! let result = evaluate(
+//!     "5D10 explode = 10 keep highest 3",
+//!     vec![],
+//!     vec![],
+//!     &mut rng()
+//! )
+//! .unwrap();
+//! let record = &result.records[0];
+//!
+//! // Every die that an explode rolled extends a `10`.
+//! for die in &record.dice {
+//!     if let Origin::Extends(index) = die.origin {
+//!         assert!(record.dice[index].value == 10);
+//!     }
+//! }
+//!
+//! // Five chains, each worth the sum of its dice, and each kept or crossed
+//! // out whole.
+//! let chains = record.chains();
+//! assert!(chains.len() == 5);
+//! let worth = |chain: &Vec<usize>| {
+//!     chain.iter().map(|&i| record.dice[i].value).sum::<i32>()
+//! };
+//! let (kept, crossed): (Vec<_>, Vec<_>) = chains
+//!     .iter()
+//!     .partition(|chain| record.dice[chain[0]].fate == Fate::Kept);
+//! assert!(kept.len() == 3);
+//! for chain in &chains {
+//!     let fate = record.dice[chain[0]].fate;
+//!     assert!(chain.iter().all(|&i| record.dice[i].fate == fate));
+//! }
+//!
+//! // The three chains kept are worth at least as much as the two crossed
+//! // out, and the total is their sum.
+//! let least_kept = kept.iter().map(|chain| worth(chain)).min().unwrap();
+//! assert!(crossed.iter().all(|chain| worth(chain) <= least_kept));
+//! let total = kept.iter().map(|chain| worth(chain)).sum::<i32>();
+//! assert!(result.result == total);
 //! ```
 //!
 //! ### Repeated evaluation
@@ -706,6 +813,48 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! A limited explode has an exact distribution, and so does an unlimited one
+//! whose predicate matches every face, which saturates. But an unlimited
+//! explode that does not may grow a chain without bound, so its distribution
+//! has no exact weights that the build could finish computing. The build
+//! refuses it with [`BuildError::Unbounded`], whatever the budget, before it
+//! charges anything, and its estimate exceeds every budget but the
+//! [unlimited](Budget::UNLIMITED) one. No greater budget would help, so
+//! [sample](Evaluator::sample) it instead:
+//!
+//! ```rust
+//! use std::num::NonZeroU64;
+//!
+//! use rand::rng;
+//! use xdy::{BuildError, Budget, Evaluator, Unobserved, Weight, compile};
+//!
+//! let budget = Budget {
+//!     steps: 1_000_000,
+//!     cells: 1_000_000
+//! };
+//!
+//! // A `6` explodes at most twice, so the total is never `6` or `12`, and is
+//! // `18`, three `6`s, once in `216`.
+//! let evaluator = Evaluator::new(compile("1D6 explode = 6 2 times")?);
+//! let distribution =
+//!     evaluator.plan_distribution([])?.build(budget, &Unobserved)?;
+//! assert_eq!(distribution.total(), &Weight::from(216u32));
+//! assert_eq!(distribution.get(6), &Weight::from(0u32));
+//! assert_eq!(distribution.get(12), &Weight::from(0u32));
+//! assert_eq!(distribution.get(18), &Weight::from(1u32));
+//!
+//! // Without a limit, a chain may hold any number of `6`s.
+//! let mut evaluator = Evaluator::new(compile("1D6 explode = 6 ∞ times")?);
+//! let plan = evaluator.plan_distribution([])?;
+//! assert!(plan.estimate().steps > budget.steps);
+//! assert_eq!(plan.build(budget, &Unobserved), Err(BuildError::Unbounded));
+//!
+//! let n = NonZeroU64::new(10_000).unwrap();
+//! let sampled = evaluator.sample([], &mut rng(), n, 1_000_000)?;
+//! assert_eq!(sampled.counts().total(), &Weight::from(10_000u32));
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! ## Diagnostics and validation
 //!
 //! The [`compile`] and [`evaluate`] happy path returns typed
@@ -790,11 +939,11 @@
 //! even where arithmetic saturates. The optimizer runs its passes repeatedly,
 //! in predefined order, until a fixed point is reached, and then coalesces
 //! registers once. It takes time linear in the length of the function, except
-//! that each reroll takes time proportional to the runs of consecutive faces of
-//! its die, so many rerolls of custom dice with many scattered faces take
-//! longer. [`compile`] and [`evaluate`] optimize fully; [`compile_unoptimized`]
-//! and [`evaluate_unoptimized`] skip the optimizer, and [`StandardOptimizer`]
-//! runs any chosen set of [`Passes`].
+//! that each reroll or explode takes time proportional to the runs of
+//! consecutive faces of its die, so many rerolls or explodes of custom dice
+//! with many scattered faces take longer. [`compile`] and [`evaluate`] optimize
+//! fully; [`compile_unoptimized`] and [`evaluate_unoptimized`] skip the
+//! optimizer, and [`StandardOptimizer`] runs any chosen set of [`Passes`].
 //!
 //! In `0.13.0`, the parser became an explicit-stack engine, and every other
 //! stage followed, so parsing, compilation, optimization, and diagnosis take
@@ -817,14 +966,14 @@
 //! expressions and inputs, though client misuse of vector results can lead to
 //! panics. `unsafe` code appears in one place. In the [abstract syntax
 //! tree](ast), the [`Drop`] implementation of
-//! [`DiceExpression`](ast::DiceExpression) dismantles stacked drop, keep, and
-//! reroll clauses (e.g., `4D6 drop lowest keep highest 2 reroll = 1`) without
-//! recursion or allocation, moving values out of place and back with
-//! [`ptr::read`](std::ptr::read) and [`ptr::write`](std::ptr::write). This is
-//! sound because every value has exactly one owner throughout, and nothing can
-//! unwind while a value is out of place. Dedicated tests check it under Miri:
-//! `cargo +nightly miri test -p xdy --lib tests::ast::test_miri`. No foreign
-//! function interfaces are involved.
+//! [`DiceExpression`](ast::DiceExpression) dismantles stacked drop, keep,
+//! reroll, and explode clauses (e.g., `4D6 drop lowest keep highest 2 reroll =
+//! 1 explode = 6`) without recursion or allocation, moving values out of place
+//! and back with [`ptr::read`](std::ptr::read) and
+//! [`ptr::write`](std::ptr::write). This is sound because every value has
+//! exactly one owner throughout, and nothing can unwind while a value is out of
+//! place. Dedicated tests check it under Miri: `cargo +nightly miri test -p xdy
+//! --lib tests::ast::test_miri`. No foreign function interfaces are involved.
 //!
 //! ## Cargo features
 //!

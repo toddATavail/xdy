@@ -48,19 +48,20 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 
 ## Upgrading from 0.14
 
-`0.15.0` adds keep and reroll clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). A reroll changes the value of a die after the roll, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
+`0.15.0` adds keep, reroll, and explode clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). A reroll changes the value of a die after the roll, and an explode adds dice to it, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
 
-* `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and its `origin`, which is `Origin::Rolled` if the roll rolled it, or `Origin::Replaces` with the index of the die that it replaces if a reroll rolled it. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, so a record may hold more dice than its roll did.
+* `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and its `origin`, which is `Origin::Rolled` if the roll rolled it, `Origin::Replaces` with the index of the die that it replaces if a reroll rolled it, `Origin::Extends` with the index of the die that it extends if an explode rolled it, or `Origin::Saturates` with the index of the die after which it stands for the endless dice of a saturated chain. `Origin::link` answers the index that any origin but `Rolled` names, and `Die::kept`, `replacing`, `extending`, and `saturating` build each kind of die. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, and an explode its extensions, so a record may hold more dice than its roll did.
 * `RollingRecord::dropped` replaces the methods `lowest_dropped` and `highest_dropped`, answering every die that a drop or keep crossed out, in the order rolled. Once keeps and rerolls may come between drops, the dice crossed out at each end no longer stand apart, so the record no longer says which end each came from. The new `rerolled` answers the dice that rerolls crossed out.
-* `RollingRecord::kept` answers the kept results in the order rolled, not ascending, so sort them if you relied on their order. `sum` is unchanged.
-* A rolling record prints its dice in the order rolled, each crossed-out die prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with the dropped dice set apart by semicolons.
+* `RollingRecord::kept` answers the kept results in the order rolled, not ascending, so sort them if you relied on their order. `sum` is unchanged for every record that no explode extended.
+* The new `RollingRecord::chains` answers the chains of a record: for each die that the roll rolled, the indices of the dice that descend from it by their links. `sum`, and every drop and keep, count each chain still kept as one die, worth its total, which is the sum of its kept dice, or the value of its saturated die if it has one, and of chains of equal totals, compare their dice in ascending order before the order rolled. So `kept` answers the results of dice, not the totals of chains, and once an explode saturates a chain, the results that `kept` answers no longer add up to `sum`: read the total of a record from `sum`.
+* A rolling record prints its dice in the order rolled, each crossed-out die prefixed with `~`, as in `4D6: [5, ~1, 3, 6]`, rather than sorted, with the dropped dice set apart by semicolons. It prints a saturated die as `∞` or `-∞`, unless its value is `0`, and prints no links.
 * With the `serde` feature, a rolling record serializes its `dice`, so a record serialized by `0.14` does not deserialize.
 * A drop crosses out the lowest or highest of the dice still kept, and of equal dice, the first rolled. The new `RollingRecord::keep_lowest`, `keep_highest`, and `reroll` apply keeps and rerolls to a record, as `drop_lowest` and `drop_highest` apply drops.
 * `Instruction` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Min`, and `InstructionVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_min`. A `Reroll` holds a `Predicate` and a `Limit`, and its predicate resolves to the `Criterion` that `RollingRecord::reroll` takes. A `Min` answers the lesser of its operands, as `Max` answers the greater.
 * `Instruction` gains `Explode`, and `InstructionVisitor` requires `visit_explode`. An `Explode` holds a `Predicate` and a `Limit`, as a `Reroll` does, and `RollingRecord::explode` applies it to a record, appending dice whose `origin` is `Origin::Extends` or `Origin::Saturates`. `AssemblyError` gains `ExplodeSourceMismatch`, and `BuildError` gains `Unbounded`, with which the forward pass refuses a function in which an explode without limit, which does not match every face, may grow a chain without bound. It builds the exact distributions of limited explodes, and of unlimited ones that match every face, and so saturate. The estimate prices every function that the pass builds: every explode whose chains no later reroll or explode reads, which reduce to their totals at once, and every explode and reroll of whole chains, for a later reroll or explode, whether before or after a drop or keep, on results that a split fixed, or on chains that an explode without limit saturated, and every split of whole chains.
 * `ast::DiceExpression` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Explode`, and `ast::ASTVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_explode`. An `ast::Explode` holds an `ast::Predicate` and an `ast::Limit`, as an `ast::Reroll` does.
 * `ast::Expression` gains `Extremum`, whose `ast::Extremum` holds a `Direction`, `Highest` or `Lowest`, and its arguments in the order written. `ast::ASTVisitor` requires `visit_extremum`, which receives the outputs of the arguments in order, and offers `enter_extremum`, which does nothing by default.
-* `diagnostics::DiagnosticKind` gains the kinds that diagnose malformed keep and reroll clauses, and malformed calls of `highest` and `lowest`.
+* `diagnostics::DiagnosticKind` gains the kinds that diagnose malformed keep, reroll, and explode clauses, and malformed calls of `highest` and `lowest`.
 * `Class` gains `rerolls`, which says whether some reroll may reroll or cross out a die, and `explodes`, which says whether some explode may extend or saturate a chain.
 
 ## Upgrading from 0.13
@@ -100,11 +101,12 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 * Keep lowest: `4D6 keep lowest`, `4D6 keep lowest 3`, `2D20 keep lowest`, …
 * Keep highest: `4D6 keep highest 3`, `2D20 keep highest`, `5D10 keep highest {k}`, …
 * Reroll, once, a given number of times, or without limit: `1D6 reroll = 1`, `2D8 reroll ≥ 5`, `2D8 reroll >= 5 1 time`, `2D8 reroll ≤ 2 3 times`, `{n}: 3D6 reroll = 1 {n} times`, `1D6 reroll = 1 unlimited times`, `1D6 reroll < 3 ∞ times`, …
-* Reroll predicates:
+* Explode, once, a given number of times, or without limit: `1D6 explode = 6`, `2D8 explode ≥ 7`, `2D8 explode >= 7 1 time`, `1D6 explode = 6 2 times`, `{n}: 3D6 explode = 6 {n} times`, `1D10 explode in 9..=10 unlimited times`, `1D6 explode = 6 ∞ times`, …
+* Reroll and explode predicates:
   * Comparisons with a threshold: `= 1`, `≠ 3` or `!= 3`, `< 3`, `≤ 2` or `<= 2`, `> 5`, `≥ 5` or `>= 5`, `< {dc}`, `= (1D6)`, …
   * Lists of integers: `in [1, 2]`, `in [-1]`, `in []`, …
   * Ranges, half-open or inclusive: `in 1..3`, `in 1..=3`, `in -1..=1`, `in 1..={x}`, `in (1D4)..=6`, …
-* Chained drops, keeps, and rerolls, applied in the order written: `4D6 drop lowest drop highest`, `4D6 drop lowest keep lowest 2`, `5D6 keep highest 3 drop lowest`, `4D6 drop lowest reroll = 1`, `4D6 reroll = 1 drop lowest`, …
+* Chained drops, keeps, rerolls, and explodes, applied in the order written: `4D6 drop lowest drop highest`, `4D6 drop lowest keep lowest 2`, `5D6 keep highest 3 drop lowest`, `4D6 drop lowest reroll = 1`, `4D6 reroll = 1 drop lowest`, `5D10 explode = 10 keep highest 3`, `5D10 keep highest 3 explode = 10`, `1D6 explode = 6 reroll = 1`, …
 * Formal parameters: `{x}: 1D6 + {x}`, `{y}: 1D6 + {y}`, `{x}, {y}: {x}D{y}`, …
 * Environmental variables: `1D6 + {x}`, `1D6 + {y}`, `{x}D{y}`, …
 * Subexpression naming: `{x}@(3D6) + {x}`, `{y}: {x}@(3D6) + {x} + {y}`, `{x}@(2 + 3)D6`, …
@@ -114,9 +116,11 @@ A standard die with zero or fewer faces always rolls `0`, so `3D-6` is `0`. A dr
 
 A reroll clause rolls again each die still kept that its predicate matches, once unless it says how many times, so `2D8 reroll ≤ 2 3 times` rolls each die that shows `1` or `2` again until it shows more or has been rolled again three times. A count of zero or less rerolls nothing. An unlimited reroll rolls each matching die again until it no longer matches, so each die falls as though rolled from the faces that the predicate does not match: `1D6 reroll = 1 unlimited times` rolls `2` through `6`, each equally likely. If the predicate matches every face of the die, no reroll could ever stop, so instead each matching die is crossed out, and counts as `0`: `3D6 reroll ≤ 6 unlimited times` is `0`. A threshold, like a range endpoint or a count, may be a constant, a name, a binding, or a group, and is rolled once, before any die is rolled again, so `1D6 reroll = (1D6)` rerolls against one target. A list holds only integers, as the faces of a custom die do. A range `M..N` holds `M` up to but not including `N`, and `M..=N` holds `N` too, and a range that is empty or inverted, such as `5..2`, matches nothing. `M..=N` differs from `[M:N]` by design: `[M:N]` rolls one value of the range, but `M..=N` names every value of it. Like drops and keeps, rerolls apply in the order written, each to the dice that the clauses before it left kept, so `4D6 drop lowest reroll = 1` rerolls the `1`s that survive the drop, but `4D6 reroll = 1 drop lowest` drops the lowest die after the reroll.
 
-A call of `highest` or `lowest` takes two or more arguments, each a full expression, separated by commas, and answers the greatest or least of their values, so `lowest({POW} * 5, 99)` caps a value at `99`, and `highest(1D6 - 2, 1)` floors one at `1`. Its arguments are values, not pools of dice: `highest(4D6)` would answer the sum of `4D6`, not its highest die, which is `4D6 keep highest`. So a call of one argument is an error, for which the [diagnostics](#diagnostics) suggest `4D6 keep highest`. Every argument is evaluated, left to right, and nothing short-circuits, so every die that any argument rolls appears in the records of the evaluation. A call may stand wherever an expression may begin, but must be grouped as a dice count, faces, the count of a clause, or an operand of a reroll, as in `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and `highest` still name its direction, so `4D6 drop lowest(2)` drops the lowest `2` dice.
+An explode clause rolls another die for each die still kept that its predicate matches, and another for each new die that matches in turn, once unless it says how many times, so `1D6 explode = 6 2 times` rolls a second die on a `6`, and a third if the second shows `6` too. A count of zero or less explodes nothing, and an unlimited explode rolls until a new die no longer matches. A die and every die that explodes from it form a _chain_, which counts as one die, worth the sum of its dice, toward the total and toward every later drop or keep: `5D10 explode = 10 keep highest 3` keeps the three highest chains, and a drop or keep that crosses out a chain crosses out every die of it. A later reroll acts on each die of a chain alone, and its replacement takes the die's place in the chain, so `1D6 explode = 6 reroll = 1` rerolls the `1` of the chain `6, 1`, but a later explode extends only the last die of each chain. If the predicate of an unlimited explode matches every face of the die, no chain could ever end, so instead each matching chain _saturates_: it rolls nothing more, and is worth `2147483647`, the greatest value, if the mean face value is positive, `-2147483648`, the least, if it is negative, or `0` if it is `0`, so `3D6 explode ≥ 1 ∞ times` is `2147483647`. Later rerolls and explodes leave a saturated chain alone, but drops and keeps still count it, worth its saturated value. Thresholds, range endpoints, and counts are rolled once, before any die explodes, as for a reroll, and explodes apply in the order written, like every other clause, so `5D10 keep highest 3 explode = 10` explodes only the three dice that the keep left kept.
 
-A rolling record keeps every die that it rolls, in the order rolled, whatever becomes of it. A drop or keep crosses out each die that it drops, and of equal dice, the first rolled. A reroll crosses out each die that it rolls again, and appends the die's replacement, linked to the die that it replaces, so the whole chain of rerolls of each die can be traced. A record shows each crossed-out die with a `~`, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`. Only the dice still kept count toward the total, or toward any later clause.
+A call of `highest` or `lowest` takes two or more arguments, each a full expression, separated by commas, and answers the greatest or least of their values, so `lowest({POW} * 5, 99)` caps a value at `99`, and `highest(1D6 - 2, 1)` floors one at `1`. Its arguments are values, not pools of dice: `highest(4D6)` would answer the sum of `4D6`, not its highest die, which is `4D6 keep highest`. So a call of one argument is an error, for which the [diagnostics](#diagnostics) suggest `4D6 keep highest`. Every argument is evaluated, left to right, and nothing short-circuits, so every die that any argument rolls appears in the records of the evaluation. A call may stand wherever an expression may begin, but must be grouped as a dice count, faces, the count of a clause, or an operand of a reroll or explode, as in `(highest({x}, 1))D6`. Within a drop or keep clause, `lowest` and `highest` still name its direction, so `4D6 drop lowest(2)` drops the lowest `2` dice.
+
+A rolling record keeps every die that it rolls, in the order rolled, whatever becomes of it. A drop or keep crosses out each die that it drops, and of equal dice, the first rolled. A reroll crosses out each die that it rolls again, and appends the die's replacement, linked to the die that it replaces. An explode appends each die that it rolls, linked to the die that it extends, which stays kept, and a chain that saturates appends one die, which stands for its endless dice and shows `∞`, `-∞`, or `0`. So the whole chain of each die can be traced by its links, wherever its dice lie in the record. A record shows each crossed-out die with a `~`, but not its links, so `3D4 reroll = 1` might show `3D4: [2, ~1, 4, 3]`, `2D6 explode = 6` might show `2D6: [6, 6, 4, 1]`, and `2D6 explode ≥ 1 ∞ times` might show `2D6: [3, 5, ∞, ∞]`. Only the dice still kept count toward the total, or toward any later clause. Of chains of equal totals, a drop or keep compares their dice in ascending order, so that the chain `6, 1` is lower than the chain `5, 2`, and of identical chains, crosses out the first rolled.
 
 Environmental variables permit background state to be associated with an evaluator, while formal parameters permit dynamic state to be passed into each evaluation. Both features can be used to parameterize dice expressions and make them more flexible. Environmental variables could easily cover, for example, the attributes and skills of a character in an RPG, while formal parameters could cover the situational modifiers applied to a particular roll.
 
@@ -236,6 +240,44 @@ for (index, die) in record.dice.iter().enumerate() {
         assert!(record.dice[index + 1..].iter().any(|d| d.origin == Origin::Replaces(index)));
     }
 }
+```
+
+Exploding every `10` and keeping the three highest chains. Each die that a `10` explodes follows the dice already rolled, linked to the `10`, which stays kept, and the keep crosses out the two lowest chains whole:
+
+```rust
+use xdy::{Fate, Origin, evaluate};
+use rand::rng;
+
+let result =
+    evaluate("5D10 explode = 10 keep highest 3", vec![], vec![], &mut rng()).unwrap();
+let record = &result.records[0];
+
+// Every die that an explode rolled extends a `10`.
+for die in &record.dice {
+    if let Origin::Extends(index) = die.origin {
+        assert!(record.dice[index].value == 10);
+    }
+}
+
+// Five chains, each worth the sum of its dice, and each kept or crossed out
+// whole.
+let chains = record.chains();
+assert!(chains.len() == 5);
+let worth = |chain: &Vec<usize>| chain.iter().map(|&i| record.dice[i].value).sum::<i32>();
+let (kept, crossed): (Vec<_>, Vec<_>) =
+    chains.iter().partition(|chain| record.dice[chain[0]].fate == Fate::Kept);
+assert!(kept.len() == 3);
+for chain in &chains {
+    let fate = record.dice[chain[0]].fate;
+    assert!(chain.iter().all(|&i| record.dice[i].fate == fate));
+}
+
+// The three chains kept are worth at least as much as the two crossed out,
+// and the total is their sum.
+let least_kept = kept.iter().map(|chain| worth(chain)).min().unwrap();
+assert!(crossed.iter().all(|chain| worth(chain) <= least_kept));
+let total = kept.iter().map(|chain| worth(chain)).sum::<i32>();
+assert!(result.result == total);
 ```
 
 ### Repeated evaluation
@@ -434,6 +476,37 @@ let confidence = Probability::new(Weight::from(19u8), Weight::from(20u8)).unwrap
 assert_eq!(format!("{:.4}", sampled.error_bound(&confidence)), "0.0136");
 ```
 
+A limited explode has an exact distribution, and so does an unlimited one whose predicate matches every face, which saturates. But an unlimited explode that does not may grow a chain without bound, so its distribution has no exact weights that the build could finish computing. The build refuses it with `BuildError::Unbounded`, whatever the budget, before it charges anything, and its estimate exceeds every budget but the unlimited one. No greater budget would help, so sample it instead:
+
+```rust
+use std::num::NonZeroU64;
+
+use rand::rng;
+use xdy::{BuildError, Budget, Evaluator, Unobserved, Weight, compile};
+
+let budget = Budget { steps: 1_000_000, cells: 1_000_000 };
+
+// A `6` explodes at most twice, so the total is never `6` or `12`, and is
+// `18`, three `6`s, once in `216`.
+let evaluator = Evaluator::new(compile("1D6 explode = 6 2 times").unwrap());
+let distribution =
+    evaluator.plan_distribution([]).unwrap().build(budget, &Unobserved).unwrap();
+assert_eq!(distribution.total(), &Weight::from(216u32));
+assert_eq!(distribution.get(6), &Weight::from(0u32));
+assert_eq!(distribution.get(12), &Weight::from(0u32));
+assert_eq!(distribution.get(18), &Weight::from(1u32));
+
+// Without a limit, a chain may hold any number of `6`s.
+let mut evaluator = Evaluator::new(compile("1D6 explode = 6 ∞ times").unwrap());
+let plan = evaluator.plan_distribution([]).unwrap();
+assert!(plan.estimate().steps > budget.steps);
+assert_eq!(plan.build(budget, &Unobserved), Err(BuildError::Unbounded));
+
+let n = NonZeroU64::new(10_000).unwrap();
+let sampled = evaluator.sample([], &mut rng(), n, 1_000_000).unwrap();
+assert_eq!(sampled.counts().total(), &Weight::from(10_000u32));
+```
+
 ### Diagnostics
 
 `compile` and `evaluate` report errors as typed values. For editor-style feedback — rich error reports, suggested fixes, and caret-precise source spans — use `diagnostics::diagnose` instead. It diagnoses every syntax error in a single recovering parse, in time linear in the length of the source, and suggests a fix for each that it can; or, if the source parses cleanly, it validates the function, reporting duplicate parameters and misused bindings. Each suggestion is a list of edits of the original source, which `Suggestion::apply` applies in the manner of an editor's quick fix, and the fully corrected source is ready when every error was fixable. The doctor also migrates sources written in the syntax that preceded `0.13.0`:
@@ -473,7 +546,7 @@ assert_eq!(result.corrected_source.as_deref(), Some("4D6 keep highest"));
 
 This dice expression involves argument binding, custom dice, and dropping values: roll `5` custom dice, each with faces `[-1, 0, 1, 3, 5]`, drop the `2` lowest results, and drop the `2` highest results, leaving only `1` die. On a 2026 MacBook Pro, `xDy` compiled and optimized this expression with mean time `5.304 µs` and evaluated it with mean time `115.92 ns`. Furthermore, `xDy` estimated the cost of its exact probability distribution with mean time `1.192 µs` and computed the distribution with mean time `4.593 µs`, where the enumerating builders of `0.13.0` took `1038.18 µs` serially and `702.56 µs` in parallel.
 
-`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer also puts the operands of commutative operations in canonical order and merges chained constants, to improve opportunities for constant folding and strength reduction. Every pass is exact: an optimized function answers exactly what the unoptimized one does, even where arithmetic saturates. The optimizer runs its passes repeatedly, in predefined order, until a fixed point is reached, and then coalesces registers once. It takes time linear in the length of the function, except that each reroll takes time proportional to the runs of consecutive faces of its die, so many rerolls of custom dice with many scattered faces take longer. `compile` and `evaluate` optimize fully; `compile_unoptimized` and `evaluate_unoptimized` skip the optimizer, and `StandardOptimizer` runs any chosen set of `Passes`.
+`xDy` provides a six-pass optimizer that rewrites IR into more efficient forms. The optimizer folds constant expressions, performs strength-reducing operations, eliminates common subexpressions, eliminates dead code, and coalesces registers. The optimizer also puts the operands of commutative operations in canonical order and merges chained constants, to improve opportunities for constant folding and strength reduction. Every pass is exact: an optimized function answers exactly what the unoptimized one does, even where arithmetic saturates. The optimizer runs its passes repeatedly, in predefined order, until a fixed point is reached, and then coalesces registers once. It takes time linear in the length of the function, except that each reroll or explode takes time proportional to the runs of consecutive faces of its die, so many rerolls or explodes of custom dice with many scattered faces take longer. `compile` and `evaluate` optimize fully; `compile_unoptimized` and `evaluate_unoptimized` skip the optimizer, and `StandardOptimizer` runs any chosen set of `Passes`.
 
 ### `nom` > `tree-sitter`
 
@@ -492,7 +565,7 @@ In `0.13.0`, the parser became an explicit-stack engine, and every other stage f
 
 ## Safety
 
-`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Nothing recurses in proportion to its input: the parser, the validator, the compiler, and the diagnostics handle expressions nested up to a million deep, or as deep as fits in a source of several megabytes, on a 2 MiB stack, and the optimizer handles functions compiled from expressions nested up to 100,000 deep. When expressions or their bindings are untrusted, [dice budgets](#dice-budgets) bound the work of evaluation, and budgets of steps and cells bound the work of [probability distributions](#probability-distributions). Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains `unsafe` code in one place: the abstract syntax tree's `Drop` implementation dismantles stacked drop, keep, and reroll clauses (e.g., `4D6 drop lowest keep highest 2 reroll = 1`) without recursion or allocation, by moving values out of place and back with `ptr::read` and `ptr::write`; this is sound because every value has exactly one owner throughout, and nothing can unwind while a value is out of place. Dedicated tests check this code under Miri: `cargo +nightly miri test -p xdy --lib tests::ast::test_miri`. No foreign function interfaces are involved.
+`xDy` is designed to be well-behaved for all inputs. Dice expression values are `i32` and all arithmetic operations saturate on overflow or underflow. Nothing recurses in proportion to its input: the parser, the validator, the compiler, and the diagnostics handle expressions nested up to a million deep, or as deep as fits in a source of several megabytes, on a 2 MiB stack, and the optimizer handles functions compiled from expressions nested up to 100,000 deep. When expressions or their bindings are untrusted, [dice budgets](#dice-budgets) bound the work of evaluation, and budgets of steps and cells bound the work of [probability distributions](#probability-distributions). Neither the compiler nor evaluator should panic or cause undefined behavior, even for invalid dice expressions and inputs, though client misuse of vector results can lead to panics. The main crate contains `unsafe` code in one place: the abstract syntax tree's `Drop` implementation dismantles stacked drop, keep, reroll, and explode clauses (e.g., `4D6 drop lowest keep highest 2 reroll = 1 explode = 6`) without recursion or allocation, by moving values out of place and back with `ptr::read` and `ptr::write`; this is sound because every value has exactly one owner throughout, and nothing can unwind while a value is out of place. Dedicated tests check this code under Miri: `cargo +nightly miri test -p xdy --lib tests::ast::test_miri`. No foreign function interfaces are involved.
 
 ## Cargo features
 
@@ -521,7 +594,7 @@ I plan to introduce an `xdy!` macro for compiling statically known dice expressi
 
 Other language features that I plan to add include:
 
-* Explosion, e.g., rolling additional dice under certain conditions, with the same predicates as rerolls: `1D6 explode = 6`, `2D8 explode ≥ 7`, `1D6 explode = 6 2 times`, `1D10 explode in 9..=10 unlimited times`, …
+* Dice-valued formal parameters and environmental variables, which bind a name to a dice expression rather than to an integer, so that higher-level clients may compose complex expressions from templates: `{x}, {y}: {x} + {y}`, where `{x}` is `3D6 - 1D4` and `{y}` is `1D3 * 5`, …
 
 ### Foreign function interface (FFI)
 
