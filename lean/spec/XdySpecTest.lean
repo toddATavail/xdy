@@ -15,6 +15,7 @@ import XdySpecTest.Paths
 import XdySpecTest.Record
 import XdySpecTest.Reroll
 import XdySpecTest.Semantics
+import XdySpecTest.Splits
 import XdySpecTest.Stacks
 import XdySpecTest.Unlimited
 import XdySpecTest.World

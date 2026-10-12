@@ -7,8 +7,8 @@ The program of `Roll::outcomes` against every roll of a few dice, sorted as
 `Record.sorted` sorts them: each multiset weighs the rolls that sort to it,
 the multisets are distinct, ascend strictly, and total the die's weight
 raised to the number of dice. Then the other branches of `Roll.outcomes`,
-the outcomes of setups, which keep their drops, and the law that the
-weights give.
+and the law that the weights give. `XdySpecTest/Splits.lean` tests the
+outcomes of setups.
 -/
 
 namespace Xdy.Spec.Test.Outcomes
@@ -75,25 +75,6 @@ private def agrees (die : List (Int × Nat)) (n : Nat) : Bool :=
 #guard (Roll.stacked [([(.single 1, 1)], 1), ([(.single 2, 1)], 1)]
     [(.single 2, [(.single 2, 1), (.single 3, 1)])]).total == 3
 
--- A setup's outcomes keep its die and its drops, and a setup without a roll
--- is its own.
-#guard ({ roll := some (.standard 2 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 2)]), die := some (.standard 2),
-      lowest := 1 }, 1),
-    ({ roll := some (.fixed [(1, 1), (2, 1)]), die := some (.standard 2),
-       lowest := 1 }, 2),
-    ({ roll := some (.fixed [(2, 2)]), die := some (.standard 2),
-       lowest := 1 }, 1)]
-#guard ({ roll := some (.fixed [(1, 1)]), die := some (.standard 2) } :
-    Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 1)]), die := some (.standard 2) }, 1)]
-#guard ({ highest := 0 } : Setup).outcomes == [({}, 1)]
-#guard (({ roll := some (.standard 2 2), lowest := 1 } : Setup).outcomes.map
-    (·.1.held)) ==
-  [{ results := [1, 1], lowest := 1, die := .standard 2 },
-    { results := [1, 2], lowest := 1, die := .standard 2 },
-    { results := [2, 2], lowest := 1, die := .standard 2 }]
-
 -- The law of `2D[1, 2, 2]`, sorted: `[1, 2]` along four of its nine rolls.
 example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
     4 / 9 := by
@@ -137,15 +118,6 @@ example : ((Roll.custom 2 [(1, 1), (2, 2)]).law.map Record.sorted) [1, 2] =
 #guard (Roll.range 4 3).outcomes == [([(0, 1)], 1)]
 #guard (Roll.range 1 2).outcomes == [([(1, 1)], 1), ([(2, 1)], 1)]
 #guard (Roll.custom 2 []).outcomes == [([(0, 2)], 1)]
-
-#guard ({ roll := some (.range 1 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 1)]), die := some (.range 1 2),
-      lowest := 1 }, 1),
-    ({ roll := some (.fixed [(2, 1)]), die := some (.range 1 2),
-       lowest := 1 }, 1)]
-
-#guard ({ roll := some (.fixed [(1, 2), (3, 1)]), highest := 1 } : Setup).held
-  == { results := [1, 1, 3], highest := 1 }
 
 -- A pool's outcomes are its multisets, which total its weights.
 #guard (Roll.pool [([(1, 2)], 1), ([(1, 1), (2, 1)], 3)]).outcomes ==

@@ -35,7 +35,9 @@ transform:
 - `Roll.stacks` mirrors `Roll::stacks`, which answers every outcome of a roll
   as multisets of chains: the multisets of the law of i.i.d. chains, the
   joined stacks, or the outcomes of any other roll, each result the chain of
-  one die.
+  one die. `Roll.chainOutcomes` mirrors `chain_outcomes`, which answers each
+  multiset of i.i.d. chains or stacks as stacks of one multiset, the outcomes
+  on which a split fixes them.
 - `rerolled` mirrors `rerolled`, which answers every chain that a chain still
   kept may become after a reroll of its dice; and `Roll.rerollChains` mirrors
   `Roll::reroll_chains`, which rerolls the law of each of i.i.d. chains, the
@@ -432,6 +434,29 @@ def Roll.stacks : Roll → List (List (Chain × Nat) × Nat)
   | .chains count law => multisets law count.toNat
   | .stacked ms laws => joined ms laws
   | ρ => ρ.outcomes.map fun e => (e.1.map fun p => (.single p.1, p.2), e.2)
+
+/--
+Every outcome of a roll of i.i.d. chains or of stacks, as a split fixes it:
+each multiset of its chains, as stacks of one multiset of weight one whose
+chains are all still themselves, with the branches of the roll that reach
+it. Mirrors `chain_outcomes` in `propagation/chain.rs`.
+
+# Parameters
+- `ρ`: The roll.
+
+# Returns
+The outcomes, each with its weight, whose weights sum to the total
+(`Roll.sum_stacks`).
+
+# Examples
+```lean
+#guard (Roll.chains 1 [(.single 1, 1), (.live [6] 2, 2)]).chainOutcomes ==
+  [(.stacked [([(.single 1, 1)], 1)] [], 1),
+    (.stacked [([(.live [6] 2, 1)], 1)] [], 2)]
+```
+-/
+def Roll.chainOutcomes (ρ : Roll) : List (Roll × Nat) :=
+  ρ.stacks.map fun e => (.stacked [(e.1, 1)] [], e.2)
 
 /--
 Every chain that a chain still kept may become after a reroll, which rerolls

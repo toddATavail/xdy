@@ -876,12 +876,13 @@ impl Mixture
 	/// [`Halt`] if the outcomes would exceed the budget or are cancelled.
 	///
 	/// # Notes
-	/// `Setup.tsum_law_toOracle`, in `lean/spec/XdySpec/Outcomes.lean`, proves
+	/// `Setup.tsum_law_toOracle`, in `lean/spec/XdySpec/Splits.lean`, proves
 	/// that each setup's outcomes, over its total, are the law of its record
-	/// read sorted, with its drops, and `map_toOracle_mixtureLaw` that the
-	/// record's law, read sorted, mixes them; `Dist.hasLaw_mixture`, in
-	/// `lean/spec/XdySpec/Law.lean`, proves that scaling them to their common
-	/// denominator mixes their laws.
+	/// read sorted, with its drops, whether its roll holds results or chains,
+	/// and `map_toOracle_mixtureLaw`, in `lean/spec/XdySpec/Outcomes.lean`,
+	/// that the record's law, read sorted, mixes them;
+	/// `Dist.hasLaw_mixture`, in `lean/spec/XdySpec/Law.lean`, proves that
+	/// scaling them to their common denominator mixes their laws.
 	pub(super) fn outcomes(
 		&self,
 		rerolled: bool,

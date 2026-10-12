@@ -617,9 +617,13 @@ impl Roll
 	///
 	/// # Notes
 	/// `Roll.tsum_law_sorted`, in `lean/spec/XdySpec/Outcomes.lean`, proves
-	/// that the outcomes, over the total, are the law of the record that the
-	/// roll fills, sorted, and `Roll.wellFormed_of_mem_outcomes` that each is
-	/// fixed results in ascending order.
+	/// that the outcomes of a roll without chains, over the total, are the law
+	/// of the record that the roll fills, sorted, and
+	/// `Roll.wellFormed_of_mem_outcomes` that each is fixed results in
+	/// ascending order; `Setup.tsum_law_toOracle`, in
+	/// `lean/spec/XdySpec/Splits.lean`, proves that every roll's outcomes, of
+	/// chains too, are the law of its record read sorted, and
+	/// `Setup.wellFormed_of_mem_outcomes` that each is well formed.
 	pub(super) fn outcomes(
 		&self,
 		meter: &mut Meter

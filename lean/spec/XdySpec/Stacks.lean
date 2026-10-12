@@ -292,6 +292,49 @@ theorem mem_multisets {α : Type} :
         exact ⟨face, by simp, rfl⟩
 
 /--
+Every distinct face of every multiset of draws of a die appears at least
+once, as `multisets` in `propagation/record.rs` places a face only if it
+places copies of it.
+
+# Type parameters
+- `α`: The type of the faces.
+
+# Parameters
+- `die`: The faces, each with its weight.
+- `J`: The number of draws.
+- `e`: A multiset with its weight.
+
+# Hypotheses
+- `he`: `e` is a multiset of the state of `J` draws.
+-/
+theorem copies_pos_of_mem_multisets {α : Type} :
+    ∀ (die : List (α × Nat)) (J : Nat) (e : List (α × Nat) × Nat),
+      e ∈ multisets die J → ∀ p ∈ e.1, 0 < p.2 := by
+  intro die
+  induction die using List.reverseRecOn with
+  | nil =>
+    intro J e he p hp
+    simp only [multisets, Outcomes.outcomeStates, List.foldl_nil,
+      Outcomes.initial] at he
+    split at he
+    · simp_all
+    · simp at he
+  | append_singleton die face ih =>
+    intro J e he p hp
+    simp only [multisets, Outcomes.outcomeStates_append, Outcomes.outcomeStep,
+      List.mem_flatMap, List.mem_range, List.mem_map] at he
+    obtain ⟨m, _, e', he', rfl⟩ := he
+    unfold Outcomes.grow at hp
+    split at hp
+    · exact ih _ e' he' p hp
+    · rename_i hm
+      rcases List.mem_append.mp hp with hp | hp
+      · exact ih _ e' he' p hp
+      · simp only [List.mem_singleton] at hp
+        subst hp
+        exact Nat.pos_of_ne_zero hm
+
+/--
 The multisets of `n` independent draws of a die weigh its total weight raised
 to `n` in all.
 
@@ -1254,6 +1297,23 @@ private theorem joinGroups_mem {T : Type}
     · obtain ⟨q, hq, hqp⟩ := mem_multisets _ _ _ ho' p hp
       exact hqp ▸ hg g List.mem_cons_self q hq
 
+/-- Every distinct value of every multiset of joined groups appears at least
+once, if it does in the multisets so far. -/
+private theorem joinGroups_copies_pos {T : Type}
+    (becomes : Chain → List (T × Nat) × Nat) :
+    ∀ (groups : List (Chain × Nat)) (init : List (List (T × Nat) × Nat)),
+      (∀ e ∈ init, ∀ p ∈ e.1, 0 < p.2) →
+      ∀ o ∈ joinGroups becomes groups init, ∀ p ∈ o.1, 0 < p.2
+  | [], init, hi, o, ho => hi o ho
+  | g :: groups, init, hi, o, ho => by
+    rw [joinGroups_cons] at ho
+    refine joinGroups_copies_pos becomes groups _ (fun e he p hp => ?_) o ho
+    simp only [List.mem_flatMap, List.mem_map] at he
+    obtain ⟨e', he', o', ho', rfl⟩ := he
+    rcases List.mem_append.mp hp with hp | hp
+    · exact hi e' he' p hp
+    · exact copies_pos_of_mem_multisets _ _ _ ho' p hp
+
 /--
 Every multiset of joined stacks joins draws of what the chains of some
 multiset of the pool have become: each of its chains is a chain of the law of
@@ -1633,6 +1693,47 @@ theorem normal_of_mem_stacks {ρ : Roll} {e : List (Chain × Nat) × Nat}
     rw [← hrp]
     exact normal_of_mem_lawOf hn he' hq hr
 
+/--
+Every record that i.i.d. chains or stacks fill is the record of the chains
+drawn, each normal if the roll is.
+
+# Parameters
+- `ρ`: The roll.
+- `r`: The record.
+
+# Hypotheses
+- `hc`: The roll holds chains.
+- `hn`: The roll is normal.
+- `hr`: The roll can fill `r`.
+-/
+theorem exists_ofChains_of_mem_support_law {ρ : Roll} {r : Record}
+    (hc : ¬ρ.Plain) (hn : ρ.Normal) (hr : r ∈ ρ.law.support) :
+    ∃ cs, r = Record.ofChains .none cs ∧ ∀ c ∈ cs, NormalChain c := by
+  cases ρ with
+  | chains count cl =>
+    simp only [law, PMF.support_map, Set.mem_image] at hr
+    obtain ⟨cs, hcs, rfl⟩ := hr
+    refine ⟨cs, rfl, fun x hx => ?_⟩
+    rcases mem_support_weighted ((mem_support_chainDraws hcs).2 x hx) with
+      ⟨e, he, rfl⟩ | rfl
+    · exact hn e he
+    · exact ⟨.nil, by simp [i32Min, i32Max]⟩
+  | stacked ms laws =>
+    simp only [law, PMF.mem_support_bind_iff, PMF.mem_support_map_iff] at hr
+    obtain ⟨m, hm, cs, hcs, rfl⟩ := hr
+    -- Every chain of the multiset is normal.
+    have hm' : ∀ p ∈ m, NormalChain p.1 := by
+      rcases mem_support_weighted hm with ⟨e, he, rfl⟩ | rfl
+      · obtain ⟨e', he', rfl⟩ := List.mem_map.mp he
+        exact hn.1 e' he'
+      · cases ms with
+        | nil => simp
+        | cons e ms => exact hn.1 e List.mem_cons_self
+    refine ⟨cs, rfl, fun x hx => ?_⟩
+    obtain ⟨p, hp, hx⟩ := (mem_support_stackDraws hcs).2 x hx
+    exact normal_of_mem_support_became hn.2 (hm' p hp) hx
+  | range | standard | custom | fixed | pool => exact absurd trivial hc
+
 end Roll
 
 /--
@@ -1744,6 +1845,36 @@ theorem Roll.stacks_props {ρ : Roll} {e : List (Chain × Nat) × Nat}
   | range | standard | custom | fixed | pool => exact hplain trivial
 
 /--
+Every distinct chain of every multiset of chains of a well-formed roll
+appears at least once, as the multisets of `propagation/chain.rs` hold them.
+
+# Parameters
+- `ρ`: The roll.
+- `e`: A multiset with its weight.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+- `he`: `e` is a multiset of chains of the roll.
+-/
+theorem Roll.copies_pos_of_mem_stacks {ρ : Roll} {e : List (Chain × Nat) × Nat}
+    (hρ : ρ.WellFormed) (he : e ∈ ρ.stacks) : ∀ p ∈ e.1, 0 < p.2 := by
+  cases ρ with
+  | chains count law => exact copies_pos_of_mem_multisets law _ e he
+  | stacked ms ls =>
+    simp only [Roll.stacks, joined] at he
+    split at he
+    · exact (hρ.2.1 e he).1
+    · obtain ⟨e', _, o', ho', h1, _⟩ := mem_transformPool he
+      rw [h1]
+      exact joinGroups_copies_pos _ _ _ (by simp) o' ho'
+  | range | standard | custom | fixed | pool =>
+    simp only [Roll.stacks, List.mem_map] at he
+    obtain ⟨o, ho, rfl⟩ := he
+    intro p hp
+    obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hp
+    exact (wellFormed_of_mem_outcomes hρ ho).2 q hq
+
+/--
 The multisets of chains of a well-formed roll weigh something.
 
 # Parameters
@@ -1768,6 +1899,32 @@ theorem Roll.sum_stacks_ne_zero {ρ : Roll} (hρ : ρ.WellFormed) :
   | range | standard | custom | fixed | pool =>
     simp only [Roll.stacks, List.map_map, Function.comp_def]
     exact (sum_outcomes _ hρ trivial).2 ∘ ((sum_outcomes _ hρ trivial).1 ▸ ·)
+
+/--
+The multisets of chains of a well-formed roll weigh its total, as the
+outcomes of `chain_outcomes` in `propagation/chain.rs` do.
+
+# Parameters
+- `ρ`: The roll.
+
+# Hypotheses
+- `hρ`: The roll is well formed.
+-/
+theorem Roll.sum_stacks {ρ : Roll} (hρ : ρ.WellFormed) :
+    (ρ.stacks.map (·.2)).sum = ρ.total := by
+  cases ρ with
+  | chains count law =>
+    simp only [Roll.stacks, sum_multisets, Roll.total, ne_eq, hρ.1,
+      not_false_eq_true, and_true]
+    split_ifs with h
+    · rfl
+    · rw [show count.toNat = 0 by omega, pow_zero]
+  | stacked ms ls =>
+    rw [Roll.stacks, sum_joined, Roll.total, List.map_map]
+    rfl
+  | range | standard | custom | fixed | pool =>
+    simp only [Roll.stacks, List.map_map, Function.comp_def]
+    exact (sum_outcomes _ hρ trivial).1
 
 /-! ## The chains of a setup -/
 

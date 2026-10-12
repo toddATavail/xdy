@@ -2061,6 +2061,12 @@ impl Roll
 	///
 	/// # Errors
 	/// [`Halt`] if the outcomes would exceed the budget or are cancelled.
+	///
+	/// # Notes
+	/// `Roll.chainOutcomes`, in `lean/spec/XdySpec/Chains.lean`, mirrors this,
+	/// and `Setup.tsum_law_toOracle`, in `lean/spec/XdySpec/Splits.lean`,
+	/// proves that, over the total, the outcomes are the law of the record that
+	/// the roll fills, read sorted, if its chains are normal.
 	pub(super) fn chain_outcomes(
 		&self,
 		meter: &mut Meter

@@ -1527,8 +1527,8 @@ theorem weight_pos_of_mem_outcomes {ρ : Roll} {e : List (Int × Nat) × Nat}
   | chains | stacked => simp [outcomes] at he
 
 /--
-A roll that has an outcome holds no chains, since this does not yet model the
-outcomes of chains.
+A roll that has an outcome holds no chains, since the outcomes of chains are
+the multisets of their chains (`Roll.chainOutcomes`), not of their results.
 
 # Parameters
 - `ρ`: The roll.

@@ -32,15 +32,13 @@ on one, changes nothing that any later instruction can tell:
   (`Roll.tsum_law_sorted`, `Roll.map_sorted_law`), and each outcome is fixed
   results in ascending order (`Roll.wellFormed_of_mem_outcomes`). A pool's
   outcomes are its multisets, whose weights are its law
-  (`Outcomes.tsum_weighted`). The Rust splits chains on the multisets of the
-  chains, which this does not yet model, so these laws ask that the roll hold
-  no chains (`Roll.Plain`).
-- A setup's outcomes keep its die and its drops, and are the law of its record
-  read as the oracle reads it, sorted (`Setup.tsum_law_toOracle`,
-  `Setup.map_toOracle_law`); each describes a certain record, already sorted
-  (`Setup.law_of_mem_outcomes`). A mixture read sorted mixes its setups read
-  sorted (`map_toOracle_mixtureLaw`), and `Dist.hasLaw_mixture` cancels the
-  scaling of each setup's outcomes to the common denominator.
+  (`Outcomes.tsum_weighted`). These are the multisets of the results of a
+  roll without chains (`Roll.Plain`); the Rust splits chains on the
+  multisets of the chains instead, which `XdySpec/Splits.lean` proves, with
+  the outcomes of setups, which keep their die and their drops.
+- A mixture read sorted mixes its setups read sorted
+  (`map_toOracle_mixtureLaw`), and `Dist.hasLaw_mixture` cancels the scaling
+  of each setup's outcomes to the common denominator.
 - Sorting commutes with every instruction (`Oracle.lean`'s `hasLaw_step`), so
   the law of states read sorted after any instructions depends only on the law
   read sorted before them (`map_toOracle_exec`). Splitting on a record read
@@ -52,7 +50,7 @@ on one, changes nothing that any later instruction can tell:
 flowchart TD
     W["integral_outcomeStates:<br/>the states are the weighed rolls"]
     R["Roll.tsum_law_sorted:<br/>outcomes over the total are<br/>the record's law, sorted"]
-    S["Setup.tsum_law_toOracle:<br/>with the drops kept"]
+    S["Setup.tsum_law_toOracle, in Splits.lean:<br/>with the drops kept,<br/>and chains split by chains"]
     C["map_toOracle_exec:<br/>sorting commutes with execution"]
     X["exec_split_sorted:<br/>fixing each world at its<br/>outcome keeps the law"]
     W --> R --> S --> X
@@ -401,8 +399,9 @@ The multisets, each with its weight, whose weights sum to the
 # Notes
 The Rust splits chains or stacks on the multisets of their chains, as stacks
 of one multiset each (`chain_outcomes` in `propagation/chain.rs`), not on the
-multisets of their results; this does not yet model them, and every proof
-about outcomes asks that the roll hold no chains (`Roll.Plain`).
+multisets of their results, so these are the outcomes of a roll without
+chains (`Roll.Plain`), which every proof about them asks; `Roll.chainOutcomes`
+mirrors those of chains, and `Setup.outcomes` splits on either.
 
 # Examples
 ```lean
@@ -1075,158 +1074,14 @@ The total.
 -/
 def total (s : Setup) : Nat := (s.roll.map Roll.total).getD 1
 
-/--
-Every outcome of a setup: the setup with each multiset of its roll's results
-fixed, keeping its die and its drops, or the setup itself if it has no roll.
-Mirrors the outcomes of each setup in `Mixture::outcomes` in `mixture.rs`,
-before it scales them to the common denominator.
-
-# Parameters
-- `s`: The setup.
-
-# Returns
-The outcomes, each with its weight, whose weights sum to the
-[total](Setup.total).
-
-# Notes
-The Rust keeps the die only if a later reroll reads the record before a roll
-refills it (`rerolled` in `propagation/plan.rs`), and otherwise merges the
-outcomes that differ only in their dice. Keeping it always splits no less
-finely, and is as sound.
-
-# Examples
-```lean
-#guard ({ roll := some (.range 1 2), lowest := 1 } : Setup).outcomes ==
-  [({ roll := some (.fixed [(1, 1)]), die := some (.range 1 2),
-      lowest := 1 }, 1),
-    ({ roll := some (.fixed [(2, 1)]), die := some (.range 1 2),
-       lowest := 1 }, 1)]
-```
--/
-def outcomes (s : Setup) : List (Setup × Nat) :=
-  match s.roll with
-  | some ρ => ρ.outcomes.map fun e =>
-    ({ s with roll := some (.fixed e.1), die := some s.replacement }, e.2)
-  | none => [(s, 1)]
-
-/--
-The record that an outcome of a setup holds, as the oracle reads it: the
-results of its fixed roll, or none if it has no roll, with its drops and its
-die.
-
-# Parameters
-- `s`: The outcome, a setup of fixed results or of no roll.
-
-# Returns
-The record. Any other setup holds no one record, and reads as empty.
-
-# Examples
-```lean
-#guard ({ roll := some (.fixed [(1, 2), (3, 1)]), highest := 1 } : Setup).held
-  == { results := [1, 1, 3], highest := 1 }
-```
--/
-def held (s : Setup) : Xdy.Record :=
-  { results :=
-      match s.roll with
-      | some (.fixed rs) => Roll.expand rs
-      | _ => []
-    lowest := s.lowest
-    highest := s.highest
-    die := s.replacement }
-
-/--
-A setup's outcomes, over its total, are the law of the record that it
-describes, read as the oracle reads it, sorted: a sum of `ψ` of the sorted
-record against the law is the outcomes' integral of `ψ` of the records that
-they hold, over the total.
-
-# Parameters
-- `s`: The setup.
-- `ψ`: The function of the sorted record.
-
-# Hypotheses
-- `hs`: The setup is well formed.
-- `hp`: The setup holds no chains.
--/
-theorem tsum_law_toOracle (s : Setup) (hs : s.WellFormed) (hp : s.Plain)
-    (ψ : Xdy.Record → Nat) :
-    ∑' r, s.law r * (ψ r.toOracle : ℝ≥0∞) =
-      (OrderStatistics.integral s.outcomes (fun o => ψ o.held) : ℝ≥0∞) /
-        (s.total : ℝ≥0∞) := by
-  rcases s with ⟨_ | ρ, die, lowest, highest⟩
-  · simp only [law, Option.map_none, Option.getD_none, PMF.pure_map,
-      Outcomes.tsum_pure_mul, outcomes, total]
-    simp [OrderStatistics.integral, held, Record.toOracle, Record.sorted]
-  · have h := ρ.tsum_law_sorted (hs ρ rfl) (hp ρ rfl)
-      fun ys => ψ ⟨ys, lowest, highest, die.getD ρ.replacement, []⟩
-    simp only [law, Option.map_some, Option.getD_some, tsum_map_mul]
-    refine (tsum_congr fun r => ?_).trans (h.trans ?_)
-    · by_cases hr : r ∈ ρ.law.support
-      · simp [Roll.chains_of_mem_support_law (hp ρ rfl) hr, Record.toOracle,
-          Record.sorted, replacement]
-      · rw [PMF.mem_support_iff, not_not] at hr
-        simp [hr]
-    · simp [outcomes, total, held, OrderStatistics.integral, Function.comp_def,
-        replacement]
-
-/--
-The law of the record that a setup describes, read as the oracle reads it,
-sorted, gives each sorted record the weight of the outcomes that hold it, over
-the total, as `Mixture::outcomes` weighs them.
-
-# Parameters
-- `s`: The setup.
-- `v`: The sorted record.
-
-# Hypotheses
-- `hs`: The setup is well formed.
-- `hp`: The setup holds no chains.
--/
-theorem map_toOracle_law (s : Setup) (hs : s.WellFormed) (hp : s.Plain)
-    (v : Xdy.Record) :
-    (s.law.map Record.toOracle) v =
-      (OrderStatistics.integral s.outcomes
-          (fun o => if o.held = v then 1 else 0) : ℝ≥0∞) /
-        (s.total : ℝ≥0∞) := by
-  rw [Outcomes.map_apply_eq_tsum]
-  exact s.tsum_law_toOracle hs hp fun r => if r = v then 1 else 0
-
-/--
-Every outcome of a well-formed setup describes a certain record, the one that
-it holds, whose results are sorted, so that the oracle reads it as it is: the
-world that a split fixes at the outcome holds that record.
-
-# Parameters
-- `s`: The setup.
-- `o`: An outcome with its weight.
-
-# Hypotheses
-- `hs`: The setup is well formed.
-- `ho`: `o` is an outcome of the setup.
--/
-theorem law_of_mem_outcomes {s : Setup} (hs : s.WellFormed)
-    {o : Setup × Nat} (ho : o ∈ s.outcomes) :
-    o.1.law = PMF.pure (Record.ofOracle o.1.held) ∧
-      o.1.held.results.Pairwise (· ≤ ·) := by
-  rcases s with ⟨_ | ρ, die, lowest, highest⟩
-  · simp only [outcomes, List.mem_singleton] at ho
-    subst ho
-    simp [law, PMF.pure_map, held, Record.ofOracle]
-  · simp only [outcomes, List.mem_map] at ho
-    obtain ⟨e, he, rfl⟩ := ho
-    have hw := Roll.wellFormed_of_mem_outcomes (hs ρ rfl) he
-    refine ⟨?_, Roll.expand_pairwise hw.1⟩
-    simp [law, Roll.law, PMF.pure_map, held, Record.ofOracle]
-
 end Setup
 
 /--
 The law of the record that a mixture describes, read sorted, mixes the laws
-of its setups, read sorted. With `Setup.map_toOracle_law`, the outcomes of
-every setup, each scaled to the common denominator and weighed by its setup,
-are the law of the mixture read sorted, as `Dist.hasLaw_mixture` cancels the
-scaling.
+of its setups, read sorted. With `Setup.map_toOracle_law`, in
+`XdySpec/Splits.lean`, the outcomes of every setup, each scaled to the common
+denominator and weighed by its setup, are the law of the mixture read sorted,
+as `Dist.hasLaw_mixture` cancels the scaling.
 
 # Parameters
 - `μ`: The law of the setups.
