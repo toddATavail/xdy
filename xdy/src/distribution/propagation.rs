@@ -214,20 +214,24 @@ impl Evaluator
 ///     C->>P: estimate()
 ///     P-->>C: cost
 ///     C->>P: build(budget, progress)
-///     loop before each operation expands anything
-///         alt the operation would exceed the budget
-///             P-->>C: Err(BudgetExhausted { estimate, … })
-///         else within the budget
-///             P->>R: report(consumed, estimate)
-///             alt Continue
-///                 R-->>P: Continue
-///             else Break
-///                 R-->>P: Break
-///                 P-->>C: Err(Cancelled)
+///     alt an explode may grow a chain without bound
+///         P-->>C: Err(Unbounded)
+///     else every chain is bounded
+///         loop before each operation expands anything
+///             alt the operation would exceed the budget
+///                 P-->>C: Err(BudgetExhausted { estimate, … })
+///             else within the budget
+///                 P->>R: report(consumed, estimate)
+///                 alt Continue
+///                     R-->>P: Continue
+///                 else Break
+///                     R-->>P: Break
+///                     P-->>C: Err(Cancelled)
+///                 end
 ///             end
 ///         end
+///         P-->>C: Ok(distribution)
 ///     end
-///     P-->>C: Ok(distribution)
 /// ```
 ///
 /// # Type parameters
@@ -252,7 +256,10 @@ impl DistributionPlan<'_>
 	///
 	/// # Returns
 	/// The estimate, whose steps and cells bound those that the build
-	/// consumes, and whose [class](Cost::class) describes the function.
+	/// consumes, and whose [class](Cost::class) describes the function. If an
+	/// explode may grow a chain without bound, so that the build refuses the
+	/// function as [`Unbounded`](BuildError::Unbounded), every quantity of the
+	/// estimate is [`u64::MAX`], but its class still describes the function.
 	#[inline]
 	pub fn estimate(&self) -> Cost { self.cost }
 

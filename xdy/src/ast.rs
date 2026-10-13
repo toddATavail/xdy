@@ -616,7 +616,7 @@ pub struct Explode<'src>
 	/// The predicate that a die must satisfy to be exploded.
 	pub predicate: Predicate<Box<Expression<'src>>>,
 
-	/// The number of times that each die may be exploded. Defaults to once.
+	/// The most dice that the explode may add to each chain. Defaults to one.
 	pub limit: Option<Limit<Box<Expression<'src>>>>,
 
 	/// The span of the explode expression, from the dice expression through
@@ -788,22 +788,24 @@ impl<T> Predicate<T>
 }
 
 /// The limit of a [reroll](Reroll) or an [explode](Explode): the number of
-/// times that each die may be rerolled or exploded. It mirrors the
-/// [limit](crate::Limit) of the reroll and explode instructions, but holds an
-/// operand of any type, as [`Predicate`] does.
+/// times that each die may be rerolled, or the most dice that an explode may
+/// add to each chain. It mirrors the [limit](crate::Limit) of the reroll and
+/// explode instructions, but holds an operand of any type, as [`Predicate`]
+/// does.
 ///
 /// # Type parameters
 /// - `T`: The type of the count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Limit<T>
 {
-	/// Reroll or explode each die at most this many times, written `n time` or
-	/// `n times`, or not at all if the count is zero or less.
+	/// Reroll each die, or extend each chain, at most this many times, written
+	/// `n time` or `n times`, or not at all if the count is zero or less.
 	Times(T),
 
-	/// Reroll or explode each die until it no longer matches, written
-	/// `∞ times` or `unlimited times`. If every face of the die matches, a
-	/// reroll rolls nothing, and an explode saturates.
+	/// Reroll each die until it no longer matches, or extend each chain until
+	/// its last die no longer matches, written `∞ times` or `unlimited times`.
+	/// If every face of the die matches, a reroll rolls nothing, and an
+	/// explode saturates.
 	Unlimited
 }
 

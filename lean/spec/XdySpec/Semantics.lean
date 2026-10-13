@@ -628,9 +628,10 @@ probability of `k` here, `(m/F)^k · (1 - m/F)`, for `m` matching and `u`
 other faces, so `1 - m/F = u/F`, times `m^-k · u^-1`, the probability of the
 draws given that they match or do not. This module does not prove that the
 limited explodes converge to it as their limit grows, as
-`XdySpec/Unlimited.lean` proves of rerolls. The law has infinitely many outcomes whenever some face matches, and
-the oracle refuses every function that reaches such an explode, so `run_eq`
-in `XdySpec/Oracle.lean` does not rest on it.
+`XdySpec/Unlimited.lean` proves of rerolls. The law has infinitely many
+outcomes whenever some face matches, and the oracle refuses every function
+that reaches such an explode, so `run_eq` in `XdySpec/Oracle.lean` does not
+rest on it.
 -/
 noncomputable def unlimitedExtension (c : Criterion) (d : Die)
     (h : ¬d.facesWithin c = true) : PMF (List Int × Int) :=

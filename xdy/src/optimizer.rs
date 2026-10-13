@@ -308,10 +308,10 @@ fn faces(roll: &Instruction) -> ResultSet
 }
 
 /// Answer the [criteria](Criteria) to which the specified predicate of a
-/// [reroll](crate::Reroll) may resolve, given its operands as they stand. If
-/// every operand is an [immediate](Immediate), then the predicate resolves to
-/// a single criterion, which the criteria's `certain` and `possible` results
-/// both match exactly.
+/// [reroll](crate::Reroll) or [explode](crate::Explode) may resolve, given its
+/// operands as they stand. If every operand is an [immediate](Immediate), then
+/// the predicate resolves to a single criterion, which the criteria's
+/// `certain` and `possible` results both match exactly.
 ///
 /// # Parameters
 /// - `predicate`: The predicate.

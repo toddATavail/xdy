@@ -608,8 +608,8 @@ impl RollingRecord
 	/// # Parameters
 	/// - `rng`: The pseudo-random number generator.
 	/// - `criterion`: The set of results to explode.
-	/// - `limit`: The number of times that each die may be exploded, or `None`
-	///   for no limit.
+	/// - `limit`: The most dice that the explode may add to each chain, or
+	///   `None` for no limit.
 	///
 	/// # Returns
 	/// The number of dice rolled, one for each extension.
@@ -676,8 +676,8 @@ impl RollingRecord
 	/// # Parameters
 	/// - `rng`: The pseudo-random number generator.
 	/// - `criterion`: The set of results to explode.
-	/// - `limit`: The number of times that each die may be exploded, or `None`
-	///   for no limit.
+	/// - `limit`: The most dice that the explode may add to each chain, or
+	///   `None` for no limit.
 	/// - `budget`: The greatest number of dice that the explode may roll.
 	///
 	/// # Returns

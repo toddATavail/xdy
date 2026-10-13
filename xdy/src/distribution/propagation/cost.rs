@@ -187,7 +187,8 @@ pub struct Class
 
 	/// Whether the count, faces, or range endpoints of some roll, the count
 	/// of some drop or keep, or the threshold, endpoints, or limit of some
-	/// reroll depend on a roll, so that some record holds a mixture of setups.
+	/// reroll or explode depend on a roll, so that some record holds a mixture
+	/// of setups.
 	pub dynamic: bool,
 
 	/// Whether some random value fans out, so that the pass splits its worlds

@@ -124,7 +124,10 @@
 //!   [`visit_min`](InstructionVisitor::visit_min). A [`Reroll`] holds a
 //!   [`Predicate`] and a [`Limit`], and its predicate resolves to the
 //!   [`Criterion`] that [`RollingRecord::reroll`] takes. A [`Min`] answers the
-//!   lesser of its operands, as [`Max`] answers the greater.
+//!   lesser of its operands, as [`Max`] answers the greater. [`AssemblyError`]
+//!   gains [`KeepSourceMismatch`](AssemblyError::KeepSourceMismatch) and
+//!   [`RerollSourceMismatch`](AssemblyError::RerollSourceMismatch), as it has
+//!   [`DropSourceMismatch`](AssemblyError::DropSourceMismatch).
 //! * [`Instruction`] gains [`Explode`], and [`InstructionVisitor`] requires
 //!   [`visit_explode`](InstructionVisitor::visit_explode). An [`Explode`] holds
 //!   a [`Predicate`] and a [`Limit`], as a [`Reroll`] does, and
@@ -141,7 +144,10 @@
 //!   which reduce to their totals at once, and every explode and reroll of
 //!   whole chains, for a later reroll or explode, whether before or after a
 //!   drop or keep, on results that a split fixed, or on chains that an explode
-//!   without limit saturated, and every split of whole chains.
+//!   without limit saturated, and every split of whole chains. The estimate of
+//!   a function that the pass refuses as [`Unbounded`](BuildError::Unbounded)
+//!   saturates every quantity, but its [class](Cost::class) still says that it
+//!   explodes.
 //! * [`ast::DiceExpression`] gains `KeepLowest`, `KeepHighest`, `Reroll`, and
 //!   `Explode`, and [`ast::ASTVisitor`] requires
 //!   [`visit_keep_lowest`](ast::ASTVisitor::visit_keep_lowest),
@@ -320,7 +326,10 @@
 //! worth its saturated value. Thresholds, range endpoints, and counts are
 //! rolled once, before any die explodes, as for a reroll, and explodes apply in
 //! the order written, like every other clause, so `5D10 keep highest 3 explode
-//! = 10` explodes only the three dice that the keep left kept.
+//! = 10` explodes only the three dice that the keep left kept. Other kinds of
+//! explosion are not yet supported: on a total, or on a condition of the whole
+//! pool, such as doubles; downward, subtracting what the new dice show;
+//! penetrating, each new die counting one less; and doubling.
 //!
 //! A call of `highest` or `lowest` takes two or more arguments, each a full
 //! expression, separated by commas, and answers the greatest or least of their

@@ -369,7 +369,7 @@ pub struct Explode
 	/// The predicate that a die must satisfy to be exploded.
 	pub predicate: Predicate,
 
-	/// The number of times that each die may be exploded.
+	/// The most dice that the explode may add to each chain.
 	pub limit: Limit
 }
 
@@ -628,17 +628,19 @@ impl Display for Predicate
 }
 
 /// The limit of a [reroll](Reroll) or [explode](Explode): the number of times
-/// that each die may be rerolled or exploded.
+/// that each die may be rerolled, or the most dice that an explode may add to
+/// each chain.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Limit
 {
-	/// Reroll or explode each die at most this many times, or not at all if
-	/// the count is zero or less.
+	/// Reroll each die, or extend each chain, at most this many times, or not
+	/// at all if the count is zero or less.
 	Times(AddressingMode),
 
-	/// Reroll or explode each die until it no longer matches. If every face of
-	/// the die matches, a reroll rolls nothing, and an explode saturates.
+	/// Reroll each die until it no longer matches, or extend each chain until
+	/// its last die no longer matches. If every face of the die matches, a
+	/// reroll rolls nothing, and an explode saturates.
 	Unlimited
 }
 
@@ -1238,7 +1240,7 @@ impl Instruction
 	/// # Parameters
 	/// - `dest`: The destination rolling record.
 	/// - `predicate`: The predicate that a die must satisfy to be exploded.
-	/// - `limit`: The number of times that each die may be exploded.
+	/// - `limit`: The most dice that the explode may add to each chain.
 	///
 	/// # Returns
 	/// The instruction.

@@ -3526,9 +3526,9 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 		},
 		Err(e) if primary =>
 		{
-			// A keep or reroll clause after the dice count follows no dice
-			// expression. A fix supplies the dice operator and faces just
-			// after the count, and the clause then modifies the dice
+			// A keep, reroll, or explode clause after the dice count follows
+			// no dice expression. A fix supplies the dice operator and faces
+			// just after the count, and the clause then modifies the dice
 			// expression. If the policy declines, the expression ends at the
 			// dice count, as in the ordinary parse.
 			if rec.recovering()
@@ -6701,8 +6701,8 @@ fn literal<'src>(
 
 /// Parse a negative constant, as [`negative_constant`], but read an
 /// [overlaid](Overlay::Constant) constant after the `-`. While recovering,
-/// decline a negative constant that a keep or reroll clause follows, as
-/// [`negative_constant`] declines one that a dice operator follows, so that
+/// decline a negative constant that a keep, reroll, or explode clause follows,
+/// as [`negative_constant`] declines one that a dice operator follows, so that
 /// the constant is read as a dice count, and the clause offers a repair at
 /// [`Site::DiceOperator`], e.g., `-3D6 keep lowest` for `-3 keep lowest`. The
 /// input fails in the ordinary parse anyway, so only the error differs.
@@ -7143,10 +7143,10 @@ fn skip_whitespace(input: Span<'_>) -> Span<'_>
 }
 
 /// Answer whether the input begins with `-`. After the direction of a drop or
-/// keep clause, or the predicate of a reroll clause, this precludes a count,
-/// which never begins with `-`, so after a clause, a `-` is always
+/// keep clause, or the predicate of a reroll or explode clause, this precludes
+/// a count, which never begins with `-`, so after a clause, a `-` is always
 /// subtraction: `4D6 drop lowest -1` is `(4D6 drop lowest) - 1`. A count of
-/// zero or less drops nothing, keeps nothing, or rerolls nothing, so reading
+/// zero or less drops, keeps, rerolls, or explodes nothing, so reading
 /// `-1` as the count would quietly discard the clause, or every die, which is
 /// never what the author meant. A negative count must be grouped, as in `4D6
 /// drop lowest (-1)`, or bound to a variable. The [constant] of a count is

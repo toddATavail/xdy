@@ -59,7 +59,8 @@ use crate::{
 ///
 /// A record prints its kind and then its dice, in the order rolled, each
 /// crossed-out die prefixed with `~`, whatever crossed it out, as in
-/// `3D6: [5, ~1, 3]`. A saturated die prints as `∞` or `-∞`.
+/// `3D6: [5, ~1, 3]`. A saturated die prints as `∞` or `-∞`, or as `0` if the
+/// mean of its faces is zero.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RollingRecord

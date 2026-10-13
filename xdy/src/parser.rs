@@ -87,9 +87,9 @@
 //! explode = 6` adds another die to each six, and `3D6 explode = 6 ∞ times`
 //! keeps adding while the new die is a six. Later drops and keeps count each
 //! chain as one die, worth its total, so `4D6 explode = 6 keep highest 3`
-//! keeps the three highest chains, while later rerolls and explodes consider
-//! each die of a chain. If an unlimited explode matches every face of its die,
-//! the chain never ends, and saturates instead, as
+//! keeps the three highest chains, while a later reroll considers each die of
+//! a chain, and a later explode only its end. If an unlimited explode matches
+//! every face of its die, the chain never ends, and saturates instead, as
 //! [`Explode`](crate::ast::Explode) describes.
 //!
 //! A call of `highest` or `lowest` answers the greatest or the least of the
