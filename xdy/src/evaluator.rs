@@ -2776,6 +2776,11 @@ impl ChainShape
 	///
 	/// # Returns
 	/// The number of dice, saturating at `u64::MAX`.
+	///
+	/// # Notes
+	/// `ChainShape.dice`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this
+	/// method, and `ChainShape.length_le_dice` there proves that no chain of
+	/// the shape holds more kept dice.
 	fn dice(&self) -> u64
 	{
 		self.middles
@@ -2791,6 +2796,11 @@ impl ChainShape
 	///
 	/// # Returns
 	/// The number of dice, saturating at `u64::MAX`.
+	///
+	/// # Notes
+	/// `ChainShape.matching`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this
+	/// method, and `ChainShape.countP_le_matching` there proves that no chain
+	/// of the shape holds more kept dice that show one of the results.
 	fn matching(&self, results: &ResultSet) -> u64
 	{
 		self.middles
@@ -3153,6 +3163,11 @@ impl DieChains
 	///
 	/// # Returns
 	/// `true` if some die may match, `false` otherwise.
+	///
+	/// # Notes
+	/// `DieChains.mayMatch`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this
+	/// method, and `DieChains.rerollBecomes_of_not_mayMatch` there proves that,
+	/// if no die may match, then a reroll leaves every chain as it was.
 	fn may_match(&self, criteria: &Criteria) -> bool
 	{
 		self.live
@@ -3212,7 +3227,10 @@ impl DieChains
 	///
 	/// `DieChains.reroll_covers`, in `lean/spec/XdySpec/Bounds.lean`, proves
 	/// that the chains answered cover every chain that the reroll may make of
-	/// a chain that the receiver covered.
+	/// a chain that the receiver covered. `DieChains.rerollRolls` there
+	/// mirrors the dice answered, and `DieChains.rerollDraws_le` proves that
+	/// the reroll draws no more for any chain that the receiver covered, as
+	/// `rerollDraws` counts the draws beside the specification's reroll.
 	fn reroll(
 		&self,
 		criteria: &[Criteria],
@@ -3309,7 +3327,10 @@ impl DieChains
 	///
 	/// `DieChains.explode_covers`, in `lean/spec/XdySpec/Bounds.lean`, proves
 	/// that the chains answered cover every chain that the explode may make of
-	/// a chain that the receiver covered.
+	/// a chain that the receiver covered. `DieChains.extensions` there mirrors
+	/// the dice answered, and `DieChains.explodeDraws_le` proves that the
+	/// explode draws no more for any chain that the receiver covered, as
+	/// `explodeDraws` counts the draws beside the specification's explode.
 	fn explode(
 		&self,
 		criteria: &[Criteria],
@@ -3564,6 +3585,12 @@ impl RollingRecordBounds
 	/// number. A roll sets it to `1`, and only an explode raises it. It is at
 	/// least `1` for a record rolled, even once no such chain remains, and `0`
 	/// for a record never rolled, which has no dice.
+	///
+	/// # Notes
+	/// `lengthOf`, in `lean/spec/XdySpec/Bounds.lean`, mirrors this method for
+	/// a record rolled, and `DieChains.run_length` there proves that no such
+	/// chain still kept after any sequence of rerolls, explodes, drops, and
+	/// keeps holds more kept dice.
 	fn length(&self) -> u64
 	{
 		match self.kind

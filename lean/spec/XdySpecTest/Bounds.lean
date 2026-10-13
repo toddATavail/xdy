@@ -9,7 +9,9 @@ monotonicity in each die and its copies, and the saturation of
 `unboundedDice` copies. The tails and the chains that rerolls and explodes
 leave; the shapes of chains, their totals, and their normalization, union,
 and coarsening; the chains of a die through runs of rerolls, explodes, and
-drops, mirroring examples of the Rust; and the exactness of their totals.
+drops, mirroring examples of the Rust; the exactness of their totals; and the
+dice that they count: the kept dice of each chain, and the dice that each
+reroll and explode may draw for one chain.
 -/
 
 namespace Xdy.Spec.Test.Bounds
@@ -439,5 +441,85 @@ example (bs : List ClauseBounds) (he : ∀ b ∈ bs, b.Exact (.custom d6))
     ∃ x ∈ d6, ∃ ch, ReachesChain (.custom d6) bs (.single x) ch ∧
       ch.total = p.2 :=
   ((DieChains.run_exact (by decide) (by decide) he hc).hull hp).2
+
+/-! ## Counting dice -/
+
+-- A six, then up to two more sixes, and a last die of one to five: at most
+-- four kept dice, three of them sixes, and one a five.
+#guard ChainShape.dice { middles := [sixes3], last := {1, 2, 3, 4, 5} } == 4
+#guard ChainShape.matching { middles := [sixes3], last := {1, 2, 3, 4, 5} }
+  {6} == 3
+#guard ChainShape.matching { middles := [sixes3], last := {1, 2, 3, 4, 5} }
+  {5} == 1
+#guard ChainShape.matching { middles := [sixes3], last := {1, 2, 3, 4, 5} }
+  {7} == 0
+-- A run of any number of dice holds any number of kept dice.
+#guard ChainShape.dice
+  { middles := [{ results := {6}, least := 0, greatest := ⊤ }], last := {1} }
+    == ⊤
+
+example : ((Chain.live [6, 6] 2).dice.length : ℕ∞) ≤
+    ChainShape.dice { middles := [sixes3], last := {1, 2, 3, 4, 5} } :=
+  ChainShape.length_le_dice ⟨by decide, [[6, 6]],
+    .cons ⟨by decide, by decide, by decide⟩ .nil, by simp⟩
+
+/-- The chains of `1D6 explode = 6`, exploding once. -/
+private def sixOnce : DieChains :=
+  (runBounds (rolledDie d6set i32Max)
+    [.explode [.exact {6}] (some (1, 1))]).1
+
+-- `1D6 explode = 6 reroll = 1` rolls at most `3` dice: the roll, one
+-- extension, and one reroll, of the one die of a chain that may show `1`.
+#guard (rolledDie d6set i32Max).extensions [.exact {6}] (some (1, 1)) == 1
+#guard sixOnce.rerollRolls [.exact {1}] (some (1, 1)) == 1
+-- A chain holds at most two kept dice, but a die just rolled holds one.
+#guard lengthOf [sixOnce] == 2
+#guard lengthOf [rolledDie d6set i32Max] == 1
+-- A reroll limited to three times rolls each die that it may match up to
+-- three times: of a chain of two sixes, six dice.
+#guard sixOnce.rerollRolls [.exact {6}] (some (0, 3)) == 6
+#guard sixOnce.rerollRolls [.exact {1}] (some (3, 3)) == 3
+-- A limit that is never positive rolls nothing.
+#guard sixOnce.rerollRolls [.exact {1}] (some (-1, 0)) == 0
+#guard sixOnce.extensions [.exact {1}] (some (-1, 0)) == 0
+-- Without limit, a reroll or explode that may match rolls any number of dice,
+-- unless it matches every face, which crosses out or saturates every chain,
+-- rolling nothing.
+#guard sixOnce.rerollRolls [.exact {1}] none == ⊤
+#guard sixOnce.extensions [.exact {1}] none == ⊤
+#guard sixOnce.rerollRolls [.exact (Finset.Icc 1 6)] none == 0
+#guard sixOnce.extensions [.exact (Finset.Icc 1 6)] none == 0
+-- A reroll or explode that matches no face rolls nothing.
+#guard sixOnce.rerollRolls [.exact {7}] (some (1, 1)) == 0
+#guard sixOnce.extensions [.exact {7}] (some (1, 1)) == 0
+-- Among several criteria, the most rolls of any.
+#guard sixOnce.rerollRolls [.exact {7}, .exact {6}] (some (2, 2)) == 4
+-- An unlimited explode may grow a chain without bound.
+#guard lengthOf [(runBounds (rolledDie d6set i32Max)
+    [.explode [.exact {6}] none]).1] == ⊤
+
+-- Some criterion may match some die of a chain of `1D6 explode = 6`, unless
+-- it matches no face.
+#guard sixOnce.mayMatch (.exact {1})
+#guard !sixOnce.mayMatch (.exact {7})
+-- A chain whose every die saturated holds no die that a reroll may match.
+#guard !(runBounds (rolledDie d6set i32Max)
+    [.explode [.exact (Finset.Icc 1 6)] none]).1.mayMatch (.exact {1})
+
+-- The counted replacement, its draws forgotten, is the specification's.
+example (c : Criterion) (die : PMF Int) :
+    (countedReplacement c die 3).map Prod.fst = limitedReplacement c die 3 :=
+  countedReplacement_fst c die 3
+
+-- A reroll of `1D6` by `= 1`, once, draws for a chain that the chains of the
+-- die cover no more dice than the bounds find, which is one.
+#guard (rolledDie d6set i32Max).rerollRolls [.exact {1}] (some (1, 1)) == 1
+example (ch : Chain) (k : Nat) (hf : Fine (.custom d6) ch)
+    (hc : (rolledDie d6set i32Max).Covers ch)
+    (hk : k ∈ (rerollDraws (.custom d6) (.within 1 1) (some 1) ch).support) :
+    (k : ℕ∞) ≤
+      (rolledDie d6set i32Max).rerollRolls [.exact {1}] (some (1, 1)) :=
+  DieChains.rerollDraws_le ⟨by decide, by decide⟩ (List.mem_singleton_self _)
+    ⟨by decide, by decide, by decide⟩ ⟨1, le_rfl, le_rfl, rfl⟩ hf hc hk
 
 end Xdy.Spec.Test.Bounds

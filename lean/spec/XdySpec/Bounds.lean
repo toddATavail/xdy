@@ -12,7 +12,8 @@ reroll and explode, never enumerating the chains, and folds each shape at its
 least or greatest results (`ChainShape::totals`); every reader of the totals
 reads only their hull. This module mirrors the shapes and their transforms,
 and proves the hull sound for every chain that a sequence of rerolls,
-explodes, drops, and keeps leaves, and exact within the budget:
+explodes, drops, and keeps leaves, and exact within the budget, and the counts
+of dice that the bounds take of the shapes sound:
 
 - `fold` mirrors `fold`, `min(i32Max, max(i32Min, Σneg) + Σpos)` over the
   negative and other dice, each with its copies, and is the total of every
@@ -53,6 +54,23 @@ explodes, drops, and keeps leaves, and exact within the budget:
   criteria and never coarsen the shapes, the least and greatest totals are
   those of chains that the clauses may make of a chain of one face
   (`DieChains.run_exact`, `Exact.hull`).
+- `ChainShape.dice` and `ChainShape.matching` mirror the Rust, and bound the
+  kept dice of every chain of a shape, and those that show one of some results
+  (`ChainShape.length_le_dice`, `ChainShape.countP_le_matching`), so
+  `lengthOf`, which mirrors `RollingRecordBounds::length`, bounds the kept dice
+  of every chain still kept that no saturated die decides after any sequence of
+  clauses (`DieChains.run_length`). The specification's reroll and explode
+  forget their draws, so `countedReplacement`, `countedUnlimited`,
+  `countedRerollChain`, `countedExtension`, and `countedUnlimitedExtension`
+  count them beside the specification's laws, which they become once the
+  draws are forgotten (`countedRerollChain_fst` and the like), and
+  `rerollDraws` and `explodeDraws` answer the law of the dice that a clause
+  draws for one chain. `DieChains.rerollRolls` and `DieChains.extensions`
+  mirror the dice that `DieChains::reroll` and `DieChains::explode` answer,
+  and bound them for every chain that the chains cover
+  (`DieChains.rerollDraws_le`, `DieChains.explodeDraws_le`). If no criterion
+  may match a kept die (`DieChains.mayMatch`), then a reroll leaves every such
+  chain as it was (`DieChains.rerollBecomes_of_not_mayMatch`).
 
 ```mermaid
 flowchart TD
@@ -65,6 +83,10 @@ flowchart TD
     R["corner_new, unite_realized,<br/>rerollShapes_realized,<br/>explodeShapes_realized"]
     T["ChainShape.totals_realized:<br/>extremes are corners"]
     E["DieChains.run_exact:<br/>the hull is exact"]
+    N["length_le_dice,<br/>countP_le_matching:<br/>a shape bounds its dice"]
+    D["counted laws, *_fst:<br/>the draws of a clause"]
+    L["DieChains.run_length:<br/>the length holds every chain"]
+    K["rerollDraws_le, explodeDraws_le,<br/>rerollBecomes_of_not_mayMatch"]
     F --> H
     H --> S
     U --> C
@@ -74,6 +96,11 @@ flowchart TD
     R --> E
     T --> E
     S --> E
+    N --> L
+    C --> L
+    N --> K
+    D --> K
+    B --> K
 ```
 -/
 
@@ -5963,6 +5990,1070 @@ theorem DieChains.run_exact {d : Die} {bs : List ClauseBounds}
       obtain ⟨x₂, hx₂, h₂'⟩ := hreach _ hc₂
       exact ⟨⟨_, ⟨x₁, hx₁, ch₁, h₁', rfl⟩, he₁ ▸ h₁⟩,
         ⟨_, ⟨x₂, hx₂, ch₂, h₂', rfl⟩, he₂ ▸ h₂⟩⟩
+
+/-! ## Counting dice -/
+
+/--
+The most kept dice of a chain of a shape: its last die, and the most dice of
+each run. Mirrors `ChainShape::dice` in `evaluator.rs`, which saturates at
+`u64::MAX`; here, `⊤` stands for any number. It bounds the kept dice of every
+chain of the shape (`ChainShape.length_le_dice`).
+
+# Parameters
+- `S`: The shape.
+
+# Returns
+The number of dice, or `⊤` for any number.
+
+# Examples
+```lean
+#guard (ChainShape.dice
+    { middles := [{ results := {6}, least := 1, greatest := 3 }],
+      last := {1} }) == 4
+#guard (ChainShape.dice
+    { middles := [{ results := {6}, least := 0, greatest := ⊤ }],
+      last := {1} }) == ⊤
+```
+-/
+def ChainShape.dice (S : ChainShape) : ℕ∞ :=
+  S.middles.foldl (fun dice run => dice + run.greatest) 1
+
+/--
+The most kept dice of a chain of a shape that may show one of some results:
+its last die, if it may, and the most dice of each run that may. Mirrors
+`ChainShape::matching` in `evaluator.rs`. It bounds the dice of every chain of
+the shape that show one of the results (`ChainShape.countP_le_matching`).
+
+# Parameters
+- `S`: The shape.
+- `R`: The results.
+
+# Returns
+The number of dice, or `⊤` for any number.
+
+# Examples
+```lean
+-- A six, then up to two more sixes, and a last die of one to five: at most
+-- three sixes, and one five.
+#guard (ChainShape.matching
+    { middles := [{ results := {6}, least := 1, greatest := 3 }],
+      last := {1, 2, 3, 4, 5} } {6}) == 3
+#guard (ChainShape.matching
+    { middles := [{ results := {6}, least := 1, greatest := 3 }],
+      last := {1, 2, 3, 4, 5} } {5}) == 1
+```
+-/
+def ChainShape.matching (S : ChainShape) (R : Finset Int) : ℕ∞ :=
+  (S.middles.filter fun run => decide (run.results ∩ R).Nonempty).foldl
+    (fun dice run => dice + run.greatest)
+    (if (S.last ∩ R).Nonempty then 1 else 0)
+
+/-- Adding the most dice of each run adds their sum. -/
+private theorem foldl_add_greatest :
+    ∀ (runs : List Segment) (init : ℕ∞),
+      runs.foldl (fun dice run => dice + run.greatest) init =
+        init + (runs.map (·.greatest)).sum
+  | [], init => by simp
+  | run :: runs, init => by
+    rw [List.foldl_cons, foldl_add_greatest runs, List.map_cons,
+      List.sum_cons, add_assoc]
+
+/-- The kept dice of a chain that may still grow are its last die and its
+body. -/
+private theorem length_dice_live (body : List Int) (last : Int) :
+    (Chain.live body last).dice.length = body.length + 1 := by
+  simp [Chain.dice, List.length_mergeSort]
+
+/--
+A chain of a shape holds no more kept dice than the shape's most.
+
+# Parameters
+- `S`: The shape.
+- `ch`: The chain.
+
+# Hypotheses
+- `h`: The chain has the shape.
+-/
+theorem ChainShape.length_le_dice {S : ChainShape} {ch : Chain}
+    (h : S.Has ch) : (ch.dice.length : ℕ∞) ≤ S.dice := by
+  cases ch with
+  | saturated v => exact h.elim
+  | live body last =>
+    obtain ⟨-, parts, hp, hb⟩ := h
+    rw [length_dice_live, ChainShape.dice, foldl_add_greatest, hb.length_eq,
+      Nat.cast_add, Nat.cast_one, add_comm]
+    exact add_le_add le_rfl (holds_sum hp).2
+
+/-- The dice that runs hold that show one of some results number no more
+than the most dice of the runs that may show one. -/
+private theorem countP_flatten_le {R : Finset Int} :
+    ∀ {runs : List Segment} {parts : List (List Int)},
+      List.Forall₂ Segment.Holds runs parts →
+        ((parts.flatten.countP fun x => decide (x ∈ R) : ℕ) : ℕ∞) ≤
+          ((runs.filter fun run => decide (run.results ∩ R).Nonempty).map
+            (·.greatest)).sum
+  | _, _, .nil => by simp
+  | run :: _, part :: _, .cons hr hl => by
+    rw [List.flatten_cons, List.countP_append, Nat.cast_add, List.filter_cons]
+    by_cases hm : (run.results ∩ R).Nonempty
+    · simp only [hm, decide_true, ↓reduceIte, List.map_cons, List.sum_cons]
+      exact add_le_add ((Nat.cast_le.mpr List.countP_le_length).trans hr.2.1)
+        (countP_flatten_le hl)
+    · simp only [hm, decide_false, Bool.false_eq_true, ↓reduceIte]
+      have h0 : part.countP (fun x => decide (x ∈ R)) = 0 :=
+        List.countP_eq_zero.mpr fun x hx hxR =>
+          hm ⟨x, Finset.mem_inter.mpr ⟨hr.2.2 x hx, of_decide_eq_true hxR⟩⟩
+      rw [h0, Nat.cast_zero, zero_add]
+      exact countP_flatten_le hl
+
+/--
+A chain of a shape holds no more kept dice that show one of some results than
+the shape's most that may.
+
+# Parameters
+- `S`: The shape.
+- `R`: The results.
+- `ch`: The chain.
+
+# Hypotheses
+- `h`: The chain has the shape.
+-/
+theorem ChainShape.countP_le_matching {S : ChainShape} {R : Finset Int}
+    {ch : Chain} (h : S.Has ch) :
+    ((ch.dice.countP fun x => decide (x ∈ R) : ℕ) : ℕ∞) ≤ S.matching R := by
+  cases ch with
+  | saturated v => exact h.elim
+  | live body last =>
+    obtain ⟨hl, parts, hp, hb⟩ := h
+    rw [Chain.dice, (List.mergeSort_perm _ _).countP_eq, List.countP_cons,
+      (hb.countP_eq _), ChainShape.matching, foldl_add_greatest, Nat.cast_add,
+      add_comm]
+    refine add_le_add ?_ (countP_flatten_le hp)
+    by_cases hR : last ∈ R
+    · have hn : (S.last ∩ R).Nonempty := ⟨last, Finset.mem_inter.mpr ⟨hl, hR⟩⟩
+      simp [hR, hn]
+    · simp [hR]
+
+/--
+The most times that a reroll or explode under some bounds of its limit may
+roll for one die or chain: the greatest limit, or `0` if it is negative, or,
+without limit, any number. Mirrors `limit.map_or(u64::MAX, |limit|
+dice(limit.max))` in `evaluator.rs`.
+
+# Parameters
+- `limit`: The bounds of the limit, or `none` for no limit.
+
+# Returns
+The number of times, or `⊤` for any number.
+-/
+def times : Option (Int × Int) → ℕ∞
+  | some (_, hi) => hi.toNat
+  | none => ⊤
+
+/--
+The most dice that a reroll by any of some criteria may roll for one chain
+still kept: for each criteria that do not block it, if the limit may reroll
+some die, the most dice of a chain of each shape that may match, each rolled
+the most times. Mirrors the dice that `DieChains::reroll` in `evaluator.rs`
+answers. They bound the dice that the reroll draws for every chain that the
+chains cover (`DieChains.rerollDraws_le`).
+
+# Parameters
+- `D`: The chains.
+- `criteria`: The criteria, each of which the predicate may resolve to, or one
+  that stands for every one.
+- `limit`: The bounds of the limit, or `none` for no limit.
+
+# Returns
+The number of dice, or `⊤` for any number.
+-/
+def DieChains.rerollRolls (D : DieChains) (criteria : List Criteria)
+    (limit : Option (Int × Int)) : ℕ∞ :=
+  (criteria.flatMap fun cr =>
+    if !D.blocked limit cr && proceeds limit then
+      D.live.map fun S => S.matching cr.possible * times limit
+    else []).foldr emax 0
+
+/--
+The most dice that an explode by any of some criteria may roll for one chain
+still kept: for each criteria that do not block it, if the limit may extend
+some chain, and some criterion may match the last die of some chain, the most
+times. Mirrors the extensions that `DieChains::explode` in `evaluator.rs`
+answers. They bound the dice that the explode draws for every chain that the
+chains cover (`DieChains.explodeDraws_le`).
+
+# Parameters
+- `D`: The chains.
+- `criteria`: The criteria, each of which the predicate may resolve to, or one
+  that stands for every one.
+- `limit`: The bounds of the limit, or `none` for no limit.
+
+# Returns
+The number of dice, or `⊤` for any number.
+-/
+def DieChains.extensions (D : DieChains) (criteria : List Criteria)
+    (limit : Option (Int × Int)) : ℕ∞ :=
+  (criteria.map fun cr =>
+    if !D.blocked limit cr && proceeds limit && D.mayExtend cr then times limit
+    else 0).foldr emax 0
+
+/--
+Whether some criterion of some criteria may match some kept die of a chain
+still kept that no saturated die decides. Mirrors `DieChains::may_match` in
+`evaluator.rs`. If it may not, then a reroll leaves every chain that the
+chains cover as it was (`DieChains.rerollBecomes_of_not_mayMatch`).
+
+# Parameters
+- `D`: The chains.
+- `cr`: The criteria.
+-/
+def DieChains.mayMatch (D : DieChains) (cr : Criteria) : Bool :=
+  D.live.any fun S => decide (0 < S.matching cr.possible)
+
+/--
+The most kept dice of a chain still kept that no saturated die decides, of a
+record rolled, by the chains of each die that it may roll: the most of any
+shape, and at least `1`. Mirrors `RollingRecordBounds::length` in
+`evaluator.rs`, which answers `0` for a record never rolled. It bounds the
+kept dice of every such chain that the chains of some die cover
+(`le_lengthOf`), and so of every such chain still kept after any sequence of
+clauses (`DieChains.run_length`).
+
+# Parameters
+- `dice`: The chains of each die.
+
+# Returns
+The number of dice, or `⊤` for any number.
+-/
+def lengthOf (dice : List DieChains) : ℕ∞ :=
+  (dice.flatMap fun D => D.live.map ChainShape.dice).foldr emax 1
+
+/-- The greatest of some numbers, and a start, is no less than any of them. -/
+private theorem le_foldr_emax_of_mem {l : List ℕ∞} {a : ℕ∞} (init : ℕ∞)
+    (h : a ∈ l) : a ≤ l.foldr emax init := by
+  induction l with
+  | nil => simp at h
+  | cons b l ih =>
+    rw [List.foldr_cons, emax_eq]
+    rcases List.mem_cons.mp h with rfl | h
+    · exact le_max_left _ _
+    · exact (ih h).trans (le_max_right _ _)
+
+/--
+The chains of some die bound the kept dice of every chain that they cover that
+no saturated die decides.
+
+# Parameters
+- `dice`: The chains of each die.
+- `D`: The chains of one die.
+- `ch`: The chain.
+
+# Hypotheses
+- `hD`: `D` is among the chains of each die.
+- `hc`: The chains cover the chain.
+- `hs`: No saturated die decides the chain.
+-/
+theorem le_lengthOf {dice : List DieChains} {D : DieChains} {ch : Chain}
+    (hD : D ∈ dice) (hc : D.Covers ch) (hs : ch.saturates = false) :
+    (ch.dice.length : ℕ∞) ≤ lengthOf dice := by
+  cases ch with
+  | saturated v => simp [Chain.saturates] at hs
+  | live body last =>
+    obtain ⟨S, hS, h⟩ := hc
+    exact (ChainShape.length_le_dice h).trans (le_foldr_emax_of_mem _
+      (List.mem_flatMap.mpr ⟨D, hD, List.mem_map_of_mem hS⟩))
+
+/--
+The bounds of a rolling record bound the kept dice of every chain still kept
+that no saturated die decides, after any sequence of rerolls, explodes,
+drops, and keeps: if the bounds of each clause stand for it, then every such
+chain of every record that the clauses may lead to from a record that the
+chains tracked holds no more kept dice than the length of the chains of each
+die, among them the chains after the bounds.
+
+# Parameters
+- `D`: The chains.
+- `d`: The die.
+- `bs`: The bounds of the clauses.
+- `cls`: The clauses.
+- `r`, `r'`: The record, and a record that the clauses may lead to.
+- `dice`: The chains of each die.
+
+# Hypotheses
+- `hF`: The faces of the die lie within the `i32` range.
+- `hD`: The chains stand for the die.
+- `hb`: The bounds of each clause stand for it.
+- `ht`: The chains track the record.
+- `hr`: The clauses may lead to `r'`.
+- `hm`: The chains after the bounds are among those of each die.
+-/
+theorem DieChains.run_length {D : DieChains} {d : Die}
+    {bs : List ClauseBounds} {cls : List Clause} {r r' : Record}
+    {dice : List DieChains}
+    (hF : ∀ x ∈ d.faces, i32Min ≤ x ∧ x ≤ i32Max) (hD : D.Represents d)
+    (hb : List.Forall₂ (ClauseBounds.Admits D.covers d) bs cls)
+    (ht : D.Tracks d r) (hr : Reaches r cls r')
+    (hm : (runBounds D bs).1 ∈ dice) :
+    ∀ ch ∈ r'.keptChains, ch.saturates = false →
+      (ch.dice.length : ℕ∞) ≤ lengthOf dice :=
+  fun ch hch hs => le_lengthOf hm
+    ((DieChains.run_tracks hF hD hb ht hr).covers ch hch) hs
+
+/-! ## Counting draws -/
+
+/--
+Redraw a die while it matches, as `redraw` in `XdySpec/Semantics.lean` does,
+counting the draws: a die that the criterion matches is replaced by a draw from
+the die, one draw more, and any other stays.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `p`: The law of the die before, and of its draws so far.
+
+# Returns
+The law of the die after, and of its draws.
+-/
+noncomputable def countedRedraw (c : Criterion) (die : PMF Int)
+    (p : PMF (Int × Nat)) : PMF (Int × Nat) :=
+  p.bind fun xk => if c.matches xk.1 then die.map (·, xk.2 + 1) else PMF.pure xk
+
+/--
+The law of the replacement of a die that a reroll limited to `limit` times
+crosses out, beside the number of draws that it takes, as `reroll_within` in
+`primitives.rs` meters them: one draw, and then one more for each redraw.
+Mirrors `limitedReplacement` in `XdySpec/Semantics.lean`, which forgets the
+draws (`countedReplacement_fst`), and never takes more than `limit` draws
+(`countedReplacement_le`).
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The number of times that each die may be rerolled, which is
+  positive if any die is rerolled.
+
+# Returns
+The law of the replacement, and of its draws.
+-/
+noncomputable def countedReplacement (c : Criterion) (die : PMF Int)
+    (limit : Nat) : PMF (Int × Nat) :=
+  (limit - 1).repeat (countedRedraw c die) (die.map (·, 1))
+
+/-- Counting the draws of a redraw changes nothing else. -/
+private theorem map_fst_countedRedraw (c : Criterion) (die : PMF Int)
+    (p : PMF (Int × Nat)) :
+    (countedRedraw c die p).map Prod.fst = redraw c die (p.map Prod.fst) := by
+  unfold countedRedraw redraw
+  rw [PMF.map_bind, PMF.bind_map]
+  congr 1
+  funext xk
+  simp only [Function.comp]
+  split
+  · rw [PMF.map_comp]
+    exact PMF.map_id die
+  · rw [PMF.pure_map]
+
+/--
+The law of the counted replacement of a die, its draws forgotten, is the
+specification's.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The limit.
+-/
+theorem countedReplacement_fst (c : Criterion) (die : PMF Int) (limit : Nat) :
+    (countedReplacement c die limit).map Prod.fst =
+      limitedReplacement c die limit := by
+  unfold countedReplacement limitedReplacement
+  induction limit - 1 with
+  | zero =>
+    simp only [Nat.repeat, PMF.map_comp]
+    exact PMF.map_id die
+  | succ n ih => rw [Nat.repeat, Nat.repeat, map_fst_countedRedraw, ih]
+
+/--
+The replacement of a die that a reroll limited to `limit` times crosses out
+takes no more than `limit` draws, or one if `limit` is `0`, which rerolls
+nothing.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The limit.
+- `xk`: A replacement, and its draws.
+
+# Hypotheses
+- `h`: The counted replacement may answer `xk`.
+-/
+theorem countedReplacement_le {c : Criterion} {die : PMF Int} {limit : Nat}
+    {xk : Int × Nat} (h : xk ∈ (countedReplacement c die limit).support) :
+    xk.2 ≤ Max.max limit 1 := by
+  have key : ∀ n : Nat, ∀ xk ∈ (n.repeat (countedRedraw c die)
+      (die.map (·, 1))).support, xk.2 ≤ n + 1 := by
+    intro n
+    induction n with
+    | zero =>
+      intro xk hxk
+      obtain ⟨y, -, rfl⟩ := (PMF.mem_support_map_iff _ _ _).mp hxk
+      exact le_rfl
+    | succ n ih =>
+      intro xk hxk
+      rw [Nat.repeat, countedRedraw, PMF.mem_support_bind_iff] at hxk
+      obtain ⟨xk₀, h₀, hxk⟩ := hxk
+      have := ih xk₀ h₀
+      split at hxk
+      · obtain ⟨y, -, rfl⟩ := (PMF.mem_support_map_iff _ _ _).mp hxk
+        exact Nat.succ_le_succ this
+      · rw [PMF.mem_support_pure_iff] at hxk
+        subst hxk
+        omega
+  have := key _ xk h
+  omega
+
+/--
+The law of the replacement of a die that an unlimited reroll crosses out, when
+its criterion does not match every face of the die, beside the number of draws
+that it takes: draws from the die while they match, and then one that does
+not. The number of matching draws is `geometric`, in the probability that a
+draw matches, `matchedFaces`, and the last draw falls as the die given that it
+does not match, independently of their number, as `unlimitedExtension` in
+`XdySpec/Semantics.lean` argues of the draws of an explode. Its draws
+forgotten, it is the specification's replacement
+(`countedUnlimited_fst`).
+
+# Parameters
+- `c`: The criterion.
+- `d`: The die.
+- `h`: `c` does not match every face of `d`, so some draw ends the reroll.
+
+# Returns
+The law of the replacement, and of its draws.
+-/
+noncomputable def countedUnlimited (c : Criterion) (d : Die)
+    (h : ¬d.facesWithin c = true) : PMF (Int × Nat) :=
+  (geometric (matchedFaces d c) (matchedFaces_lt_one h)).bind fun k =>
+    (PMF.ofMultiset _ (unmatched_ne_zero h)).map (·, k + 1)
+
+/--
+The law of the counted replacement of a die that an unlimited reroll crosses
+out, its draws forgotten, is the specification's.
+
+# Parameters
+- `c`: The criterion.
+- `d`: The die.
+- `h`: `c` does not match every face of `d`.
+-/
+theorem countedUnlimited_fst (c : Criterion) (d : Die)
+    (h : ¬d.facesWithin c = true) :
+    (countedUnlimited c d h).map Prod.fst =
+      PMF.ofMultiset _ (unmatched_ne_zero h) := by
+  unfold countedUnlimited
+  rw [PMF.map_bind]
+  simp only [PMF.map_comp]
+  exact (congrArg _ (funext fun _ => PMF.map_id _)).trans (PMF.bind_const _ _)
+
+/--
+Reroll each die of a chain, as `rerollChain` in `XdySpec/Semantics.lean` does,
+counting the draws: each rerolled die takes the draws of its replacement, and
+every other none. A saturated chain draws nothing. Its draws forgotten, it is
+`rerollChain` (`countedRerollChain_fst`).
+
+# Parameters
+- `rerolled`: Whether the reroll rerolls a result.
+- `replacement`: The law of the replacement of a rerolled result, and of its
+  draws.
+- `ch`: The chain.
+
+# Returns
+The law of the chain after the reroll, and of the draws that it took.
+-/
+noncomputable def countedRerollChain (rerolled : Int → Bool)
+    (replacement : PMF (Int × Nat)) : Chain → PMF (Chain × Nat)
+  | .live body last =>
+    let draw (x : Int) : PMF (Int × Nat) :=
+      if rerolled x then replacement else PMF.pure (x, 0)
+    (body.foldl (fun (p : PMF (List Int × Nat)) x => p.bind fun bn =>
+        (draw x).map fun yk => ((yk.1 :: bn.1).mergeSort, bn.2 + yk.2))
+      (PMF.pure ([], 0))).bind fun bn =>
+      (draw last).map fun yk => (.live bn.1 yk.1, bn.2 + yk.2)
+  | c => PMF.pure (c, 0)
+
+/--
+The law of a chain after a counted reroll, its draws forgotten, is the law of
+the chain after the specification's reroll.
+
+# Parameters
+- `rerolled`: Whether the reroll rerolls a result.
+- `R`: The law of the replacement of a rerolled result, and of its draws.
+- `ch`: The chain.
+-/
+theorem countedRerollChain_fst (rerolled : Int → Bool) (R : PMF (Int × Nat))
+    (ch : Chain) :
+    (countedRerollChain rerolled R ch).map Prod.fst =
+      rerollChain rerolled (R.map Prod.fst) ch := by
+  have hdraw : ∀ x, (if rerolled x then R else PMF.pure (x, 0)).map
+      Prod.fst = if rerolled x then R.map Prod.fst else PMF.pure x := by
+    intro x
+    split <;> simp [PMF.pure_map]
+  have key : ∀ (xs : List Int) (p : PMF (List Int × Nat)),
+      (xs.foldl (fun (p : PMF (List Int × Nat)) x => p.bind fun bn =>
+          (if rerolled x then R else PMF.pure (x, 0)).map fun yk =>
+            ((yk.1 :: bn.1).mergeSort, bn.2 + yk.2)) p).map Prod.fst =
+        xs.foldl (fun (p : PMF (List Int)) x => p.bind fun b =>
+          (if rerolled x then R.map Prod.fst else PMF.pure x).map fun y =>
+            (y :: b).mergeSort) (p.map Prod.fst) := by
+    intro xs
+    induction xs with
+    | nil => intro p; rfl
+    | cons x xs ih =>
+      intro p
+      rw [List.foldl_cons, List.foldl_cons, ih]
+      congr 1
+      rw [PMF.map_bind, PMF.bind_map]
+      congr 1
+      funext bn
+      rw [PMF.map_comp, ← hdraw, Function.comp_apply, PMF.map_comp]
+      rfl
+  cases ch with
+  | saturated v => simp [countedRerollChain, rerollChain, PMF.pure_map]
+  | live body last =>
+    simp only [countedRerollChain, rerollChain]
+    rw [PMF.map_bind, ← PMF.pure_map Prod.fst ([], 0), ← key, PMF.bind_map]
+    congr 1
+    funext bn
+    rw [PMF.map_comp, ← hdraw]
+    exact (PMF.map_comp Prod.fst _ _).symm
+
+/-- A counted reroll of a chain draws no more than the draws of a replacement
+for each die that it rerolls. -/
+private theorem countedRerollChain_le {rerolled : Int → Bool}
+    {R : PMF (Int × Nat)} {B : ℕ∞} (hR : ∀ yk ∈ R.support, (yk.2 : ℕ∞) ≤ B)
+    {ch : Chain} {chk : Chain × Nat}
+    (h : chk ∈ (countedRerollChain rerolled R ch).support) :
+    (chk.2 : ℕ∞) ≤ (ch.dice.countP rerolled : ℕ∞) * B := by
+  -- Each die draws no more than a replacement does, if rerolled, and
+  -- otherwise none.
+  have hdraw : ∀ x, ∀ yk ∈ (if rerolled x then R else PMF.pure (x, 0)).support,
+      (yk.2 : ℕ∞) ≤ (([x].countP rerolled : ℕ) : ℕ∞) * B := by
+    intro x yk hyk
+    by_cases hx : rerolled x = true
+    · simp only [hx, ↓reduceIte] at hyk
+      simpa [hx] using hR yk hyk
+    · simp only [hx, Bool.false_eq_true, ↓reduceIte,
+        PMF.mem_support_pure_iff] at hyk
+      simp [hyk]
+  have key : ∀ (xs : List Int) (p : PMF (List Int × Nat)) (a : ℕ∞),
+      (∀ bn ∈ p.support, (bn.2 : ℕ∞) ≤ a) →
+      ∀ bn ∈ (xs.foldl (fun (p : PMF (List Int × Nat)) x => p.bind fun bn =>
+          (if rerolled x then R else PMF.pure (x, 0)).map fun yk =>
+            ((yk.1 :: bn.1).mergeSort, bn.2 + yk.2)) p).support,
+        (bn.2 : ℕ∞) ≤ a + (xs.countP rerolled : ℕ∞) * B := by
+    intro xs
+    induction xs with
+    | nil => intro p a hp bn hbn; simpa using hp bn hbn
+    | cons x xs ih =>
+      intro p a hp bn hbn
+      rw [List.foldl_cons] at hbn
+      refine (ih _ (a + (([x].countP rerolled : ℕ) : ℕ∞) * B) ?_ bn hbn).trans
+        (le_of_eq ?_)
+      · intro bn' hbn'
+        simp only [PMF.mem_support_bind_iff, PMF.mem_support_map_iff] at hbn'
+        obtain ⟨bn₀, h₀, yk, hyk, rfl⟩ := hbn'
+        rw [Nat.cast_add]
+        exact add_le_add (hp bn₀ h₀) (hdraw x yk hyk)
+      · simp only [List.countP_cons, List.countP_nil]
+        push_cast
+        ring
+  cases ch with
+  | saturated v =>
+    simp only [countedRerollChain, PMF.mem_support_pure_iff] at h
+    simp [h]
+  | live body last =>
+    simp only [countedRerollChain, PMF.mem_support_bind_iff,
+      PMF.mem_support_map_iff] at h
+    obtain ⟨bn, hbn, yk, hyk, rfl⟩ := h
+    have hb := key body _ 0 (fun bn h => by
+      simp only [PMF.mem_support_pure_iff] at h
+      simp [h]) bn hbn
+    rw [Chain.dice, (List.mergeSort_perm _ _).countP_eq, List.countP_cons,
+      Nat.cast_add]
+    refine (add_le_add hb (hdraw last yk hyk)).trans (le_of_eq ?_)
+    simp only [List.countP_cons, List.countP_nil]
+    push_cast
+    ring
+
+/--
+The law of the number of dice that a reroll draws for one chain still kept,
+as `reroll_within` in `primitives.rs` meters them: those of each replacement,
+counted as `countedReplacement` or `countedUnlimited` counts them, of each die
+that it rerolls, as `countedRerollChain` rerolls them, whose chains, their
+draws forgotten, are those of the specification's `reroll`
+(`countedRerollChain_fst`, `countedReplacement_fst`,
+`countedUnlimited_fst`). An unlimited reroll that matches every face of the
+die draws nothing. The dice that `DieChains.rerollRolls` answers bound them
+(`DieChains.rerollDraws_le`).
+
+# Parameters
+- `d`: The die.
+- `c`: The criterion.
+- `limit`: The limit, or `none` for no limit.
+- `ch`: The chain.
+
+# Returns
+The law of the number of dice drawn.
+-/
+noncomputable def rerollDraws (d : Die) (c : Criterion) :
+    Option Nat → Chain → PMF Nat
+  | some n, ch =>
+    (countedRerollChain (fun x => 0 < n && c.matches x)
+      (countedReplacement c (customDie d.faces) n) ch).map Prod.snd
+  | none, ch =>
+    if h : d.facesWithin c = true then PMF.pure 0
+    else (countedRerollChain c.matches (countedUnlimited c d h) ch).map
+      Prod.snd
+
+/--
+The law of the extension of a chain whose last die an explode limited to
+`limit` times matches, as `extension` in `XdySpec/Semantics.lean` draws it,
+beside the number of draws that it takes, as `explode_within` in
+`primitives.rs` meters them: one draw, and then one more for each further
+draw. Its draws forgotten, it is `extension` (`countedExtension_fst`), and it
+never takes more than `limit` draws (`countedExtension_le`).
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The number of times that each chain may be exploded, which is
+  positive if any chain grows.
+
+# Returns
+The law of the dice drawn but the last, sorted, and of the last die drawn, and
+of the number of draws.
+-/
+noncomputable def countedExtension (c : Criterion) (die : PMF Int)
+    (limit : Nat) : PMF ((List Int × Int) × Nat) :=
+  (limit - 1).repeat
+    (fun p => p.bind fun tk =>
+      if c.matches tk.1.2 then
+        die.map fun y => (((tk.1.2 :: tk.1.1).mergeSort, y), tk.2 + 1)
+      else PMF.pure tk)
+    (die.map fun y => (([], y), 1))
+
+/--
+The law of the counted extension of a chain, its draws forgotten, is the
+specification's.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The limit.
+-/
+theorem countedExtension_fst (c : Criterion) (die : PMF Int) (limit : Nat) :
+    (countedExtension c die limit).map Prod.fst = extension c die limit := by
+  unfold countedExtension extension
+  induction limit - 1 with
+  | zero => simp only [Nat.repeat, PMF.map_comp]; rfl
+  | succ n ih =>
+    rw [Nat.repeat, Nat.repeat, ← ih, PMF.map_bind, PMF.bind_map]
+    congr 1
+    funext tk
+    simp only [Function.comp]
+    split
+    · rw [PMF.map_comp]
+      rfl
+    · rw [PMF.pure_map]
+
+/--
+The extension of a chain that an explode limited to `limit` times grows takes
+no more than `limit` draws, or one if `limit` is `0`, which grows nothing.
+
+# Parameters
+- `c`: The criterion.
+- `die`: The law of the die.
+- `limit`: The limit.
+- `tk`: An extension, and its draws.
+
+# Hypotheses
+- `h`: The counted extension may answer `tk`.
+-/
+theorem countedExtension_le {c : Criterion} {die : PMF Int} {limit : Nat}
+    {tk : (List Int × Int) × Nat}
+    (h : tk ∈ (countedExtension c die limit).support) :
+    tk.2 ≤ Max.max limit 1 := by
+  have key : ∀ n : Nat, ∀ tk ∈ (n.repeat
+      (fun (p : PMF ((List Int × Int) × Nat)) => p.bind fun tk =>
+        if c.matches tk.1.2 then
+          die.map fun y => (((tk.1.2 :: tk.1.1).mergeSort, y), tk.2 + 1)
+        else PMF.pure tk)
+      (die.map fun y => (([], y), 1))).support, tk.2 ≤ n + 1 := by
+    intro n
+    induction n with
+    | zero =>
+      intro tk htk
+      obtain ⟨y, -, rfl⟩ := (PMF.mem_support_map_iff _ _ _).mp htk
+      exact le_rfl
+    | succ n ih =>
+      intro tk htk
+      rw [Nat.repeat, PMF.mem_support_bind_iff] at htk
+      obtain ⟨tk₀, h₀, htk⟩ := htk
+      have := ih tk₀ h₀
+      split at htk
+      · obtain ⟨y, -, rfl⟩ := (PMF.mem_support_map_iff _ _ _).mp htk
+        exact Nat.succ_le_succ this
+      · rw [PMF.mem_support_pure_iff] at htk
+        subst htk
+        omega
+  have := key _ tk h
+  omega
+
+/--
+The law of the extension of a chain whose last die an unlimited explode
+matches, when the explode does not match every face of the die, as
+`unlimitedExtension` in `XdySpec/Semantics.lean` draws it, beside the number of
+draws that it takes: its matching draws, and the last. Its draws forgotten, it
+is `unlimitedExtension` (`countedUnlimitedExtension_fst`).
+
+# Parameters
+- `c`: The criterion.
+- `d`: The die.
+- `h`: `c` does not match every face of `d`, so some draw ends the chain.
+
+# Returns
+The law of the dice drawn but the last, sorted, and of the last die drawn, and
+of the number of draws.
+-/
+noncomputable def countedUnlimitedExtension (c : Criterion) (d : Die)
+    (h : ¬d.facesWithin c = true) : PMF ((List Int × Int) × Nat) :=
+  (geometric (matchedFaces d c) (matchedFaces_lt_one h)).bind fun k =>
+    ((k.repeat
+      (fun (p : PMF (List Int)) => p.bind fun drawn =>
+        (customDie (d.faces.filter c.matches)).map fun x =>
+          (x :: drawn).mergeSort)
+      (PMF.pure [])).bind fun drawn =>
+      (PMF.ofMultiset _ (unmatched_ne_zero h)).map (drawn, ·)).map (·, k + 1)
+
+/--
+The law of the counted extension of a chain that an unlimited explode grows,
+its draws forgotten, is the specification's.
+
+# Parameters
+- `c`: The criterion.
+- `d`: The die.
+- `h`: `c` does not match every face of `d`.
+-/
+theorem countedUnlimitedExtension_fst (c : Criterion) (d : Die)
+    (h : ¬d.facesWithin c = true) :
+    (countedUnlimitedExtension c d h).map Prod.fst =
+      unlimitedExtension c d h := by
+  unfold countedUnlimitedExtension unlimitedExtension
+  rw [PMF.map_bind]
+  simp only [PMF.map_comp]
+  exact congrArg _ (funext fun _ => PMF.map_id _)
+
+/--
+The law of the number of dice that an explode draws for one chain still kept,
+as `explode_within` in `primitives.rs` meters them: those of its extension,
+counted as `countedExtension` or `countedUnlimitedExtension` counts them, if
+the explode grows it, whose extensions, their draws forgotten, are those of
+the specification's `explode` (`countedExtension_fst`,
+`countedUnlimitedExtension_fst`), and otherwise none. An unlimited explode
+that matches every face of the die saturates the chain instead, drawing
+nothing. The extensions that `DieChains.extensions` answers bound them
+(`DieChains.explodeDraws_le`).
+
+# Parameters
+- `d`: The die.
+- `c`: The criterion.
+- `limit`: The limit, or `none` for no limit.
+- `ch`: The chain.
+
+# Returns
+The law of the number of dice drawn.
+-/
+noncomputable def explodeDraws (d : Die) (c : Criterion) :
+    Option Nat → Chain → PMF Nat
+  | some n, ch =>
+    if 0 < n && ch.grows c then
+      (countedExtension c (customDie d.faces) n).map Prod.snd
+    else PMF.pure 0
+  | none, ch =>
+    if h : d.facesWithin c = true then PMF.pure 0
+    else if ch.grows c then
+      (countedUnlimitedExtension c d h).map Prod.snd
+    else PMF.pure 0
+
+/-- The dice of a chain that a reroll by a criterion rerolls number no more
+than the most dice of a chain of its shape that criteria that stand for the
+criterion may match. -/
+private theorem countP_le_matching_of_admits {D : DieChains} {d : Die}
+    {cr : Criteria} {c : Criterion} {rerolled : Int → Bool}
+    (ha : Admits D.covers d cr c)
+    (hr : ∀ x, rerolled x = true → c.matches x = true) {ch : Chain}
+    (hf : Fine d ch) {S : ChainShape} (hS : S.Has ch) :
+    ((ch.dice.countP rerolled : ℕ) : ℕ∞) ≤ S.matching cr.possible := by
+  have hs : ch.saturates = false := by
+    cases ch with
+    | live => rfl
+    | saturated => exact hS.elim
+  refine (Nat.cast_le.mpr (List.countP_mono_left fun x hx hx' =>
+    decide_eq_true (ha.possible x (hf.2 hs x hx) (hr x hx')))).trans
+    (ChainShape.countP_le_matching hS)
+
+/--
+The dice that a reroll draws for every chain that some chains cover number no
+more than the most that the chains find that it may roll for one, if they
+stand for the die, some criteria of the reroll stand for its criterion, and
+the bounds of the limit admit its limit.
+
+# Parameters
+- `D`: The chains.
+- `d`: The die.
+- `criteria`: The criteria of the reroll.
+- `cr`: The criteria that stand for the criterion.
+- `c`: The criterion.
+- `limit`: The bounds of the limit.
+- `l`: The limit.
+- `ch`: The chain.
+- `k`: A number of dice that the reroll may draw for it.
+
+# Hypotheses
+- `hD`: The chains stand for the die.
+- `hcr`: The criteria are among those of the reroll.
+- `ha`: The criteria stand for the criterion.
+- `hL`: The bounds admit the limit.
+- `hf`: The chain is one that a record of the die may keep.
+- `hc`: The chains cover the chain.
+- `hk`: The reroll may draw `k` dice for the chain.
+-/
+theorem DieChains.rerollDraws_le {D : DieChains} {d : Die}
+    {criteria : List Criteria} {cr : Criteria} {c : Criterion}
+    {limit : Option (Int × Int)} {l : Option Nat} {ch : Chain} {k : Nat}
+    (hD : D.Represents d) (hcr : cr ∈ criteria) (ha : Admits D.covers d cr c)
+    (hL : Limits limit l) (hf : Fine d ch) (hc : D.Covers ch)
+    (hk : k ∈ (rerollDraws d c l ch).support) :
+    (k : ℕ∞) ≤ D.rerollRolls criteria limit := by
+  cases ch with
+  | saturated v =>
+    -- A reroll leaves a saturated chain alone, drawing nothing.
+    have h0 : rerollDraws d c l (.saturated v) = PMF.pure 0 := by
+      cases l with
+      | some n => simp [rerollDraws, countedRerollChain, PMF.pure_map]
+      | none =>
+        by_cases hw : d.facesWithin c = true
+        · simp only [rerollDraws, hw, ↓reduceDIte]
+        · simp [rerollDraws, hw, countedRerollChain, PMF.pure_map]
+    rw [h0, PMF.mem_support_pure_iff] at hk
+    simp [hk]
+  | live body last =>
+    obtain ⟨S, hS, hSc⟩ := hc
+    -- The chains find that the reroll may roll each die of a chain of the
+    -- shape that it may match the most times.
+    have hmem : D.blocked limit cr = false → proceeds limit = true →
+        S.matching cr.possible * times limit ≤ D.rerollRolls criteria limit :=
+      fun hb hp => le_foldr_emax_of_mem _ (List.mem_flatMap.mpr ⟨cr, hcr, by
+        simp only [hb, hp, Bool.not_false, Bool.and_self, ↓reduceIte]
+        exact List.mem_map_of_mem hS⟩)
+    cases l with
+    | some n =>
+      obtain ⟨lo, hi, j, rfl, -, hhi, rfl⟩ := limits_some hL
+      simp only [rerollDraws, PMF.mem_support_map_iff] at hk
+      obtain ⟨chk, hchk, rfl⟩ := hk
+      have hle := countedRerollChain_le (B := (Max.max j.toNat 1 : ℕ))
+        (fun yk hyk => Nat.cast_le.mpr (countedReplacement_le hyk)) hchk
+      have hcount := countP_le_matching_of_admits ha
+        (rerolled := fun x => 0 < j.toNat && c.matches x)
+        (fun x hx => by simp only [Bool.and_eq_true] at hx; exact hx.2) hf hSc
+      rcases Nat.eq_zero_or_pos ((Chain.live body last).dice.countP
+          fun x => 0 < j.toNat && c.matches x) with h0 | hpos
+      · rw [h0, Nat.cast_zero, zero_mul] at hle
+        exact hle.trans (by simp)
+      · -- Some die is rerolled, so the limit is positive.
+        obtain ⟨x, -, hx⟩ := List.countP_pos_iff.mp hpos
+        have hj : 0 < j.toNat := by
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at hx
+          exact hx.1
+        have hp : proceeds (some (lo, hi)) = true := by
+          simp only [proceeds, decide_eq_true_eq]
+          omega
+        refine hle.trans ((mul_le_mul' hcount ?_).trans
+          (hmem (by simp [DieChains.blocked]) hp))
+        simp only [times, Nat.cast_le]
+        omega
+    | none =>
+      have hlim := limits_none hL
+      subst hlim
+      by_cases hw : d.facesWithin c = true
+      · simp only [rerollDraws, hw, ↓reduceDIte, PMF.mem_support_pure_iff] at hk
+        simp [hk]
+      · simp only [rerollDraws, hw, Bool.false_eq_true, ↓reduceDIte,
+          PMF.mem_support_map_iff] at hk
+        obtain ⟨chk, hchk, rfl⟩ := hk
+        have hle := countedRerollChain_le (B := ⊤) (fun _ _ => le_top) hchk
+        have hcount := countP_le_matching_of_admits ha
+          (rerolled := c.matches) (fun _ hx => hx) hf hSc
+        exact hle.trans ((mul_le_mul' hcount le_rfl).trans
+          (hmem (not_blocked hD ha hw none) rfl))
+
+/--
+The dice that an explode draws for every chain that some chains cover number
+no more than the most that the chains find that it may roll for one, if they
+stand for the die, some criteria of the explode stand for its criterion, and
+the bounds of the limit admit its limit.
+
+# Parameters
+- `D`: The chains.
+- `d`: The die.
+- `criteria`: The criteria of the explode.
+- `cr`: The criteria that stand for the criterion.
+- `c`: The criterion.
+- `limit`: The bounds of the limit.
+- `l`: The limit.
+- `ch`: The chain.
+- `k`: A number of dice that the explode may draw for it.
+
+# Hypotheses
+- `hD`: The chains stand for the die.
+- `hcr`: The criteria are among those of the explode.
+- `ha`: The criteria stand for the criterion.
+- `hL`: The bounds admit the limit.
+- `hf`: The chain is one that a record of the die may keep.
+- `hc`: The chains cover the chain.
+- `hk`: The explode may draw `k` dice for the chain.
+-/
+theorem DieChains.explodeDraws_le {D : DieChains} {d : Die}
+    {criteria : List Criteria} {cr : Criteria} {c : Criterion}
+    {limit : Option (Int × Int)} {l : Option Nat} {ch : Chain} {k : Nat}
+    (hD : D.Represents d) (hcr : cr ∈ criteria) (ha : Admits D.covers d cr c)
+    (hL : Limits limit l) (hf : Fine d ch) (hc : D.Covers ch)
+    (hk : k ∈ (explodeDraws d c l ch).support) :
+    (k : ℕ∞) ≤ D.extensions criteria limit := by
+  -- The explode draws only for a chain that it grows, whose last die some
+  -- criterion may match, so that the chains find that it may extend some.
+  have hmem : ch.grows c = true → D.blocked limit cr = false →
+      proceeds limit = true → times limit ≤ D.extensions criteria limit := by
+    intro hg hb hp
+    cases ch with
+    | saturated v => simp [Chain.grows, Chain.saturates] at hg
+    | live body last =>
+      obtain ⟨S, hS, hSc⟩ := hc
+      have hlast : last ∈ cr.possible := ha.possible last
+        (hf.2 rfl last (by simp [Chain.dice, (List.mergeSort_perm _ _).mem_iff]))
+        (by simpa [Chain.grows, Chain.saturates, Chain.last] using hg)
+      have he : D.mayExtend cr = true := List.any_eq_true.mpr
+        ⟨S, hS, decide_eq_true ⟨last, Finset.mem_inter.mpr ⟨hSc.1, hlast⟩⟩⟩
+      exact le_foldr_emax_of_mem _ (List.mem_map.mpr ⟨cr, hcr, by
+        simp [hb, hp, he]⟩)
+  cases l with
+  | some n =>
+    obtain ⟨lo, hi, j, rfl, -, hhi, rfl⟩ := limits_some hL
+    rw [explodeDraws] at hk
+    split at hk
+    · rename_i hg
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hg
+      rw [PMF.mem_support_map_iff] at hk
+      obtain ⟨tk, htk, rfl⟩ := hk
+      have hle := countedExtension_le htk
+      have hp : proceeds (some (lo, hi)) = true := by
+        simp only [proceeds, decide_eq_true_eq]
+        omega
+      refine le_trans ?_ (hmem hg.2 (by simp [DieChains.blocked]) hp)
+      simp only [times, Nat.cast_le]
+      omega
+    · rw [PMF.mem_support_pure_iff] at hk
+      simp [hk]
+  | none =>
+    have hlim := limits_none hL
+    subst hlim
+    by_cases hw : d.facesWithin c = true
+    · simp only [explodeDraws, hw, ↓reduceDIte, PMF.mem_support_pure_iff] at hk
+      simp [hk]
+    · by_cases hg : ch.grows c = true
+      · exact le_top.trans_eq (hmem hg (not_blocked hD ha hw none) rfl
+          |> top_le_iff.mp).symm
+      · simp only [explodeDraws, hw, hg, Bool.false_eq_true, ↓reduceDIte,
+          ↓reduceIte, PMF.mem_support_pure_iff] at hk
+        simp [hk]
+
+/--
+A reroll leaves every chain that some chains cover as it was, if no criterion
+of criteria that stand for its criterion may match any kept die of a chain of
+theirs that no saturated die decides, as the Rust finds them: a chain that may
+still grow holds no die that the reroll matches, so it rerolls none, nor
+crosses out the chain, and the reroll leaves every saturated chain alone.
+
+# Parameters
+- `D`: The chains.
+- `d`: The die.
+- `cr`: The criteria that stand for the criterion.
+- `c`: The criterion.
+- `l`: The limit.
+- `ch`, `ch'`: The chain, and a chain.
+
+# Hypotheses
+- `hm`: No criterion may match any kept die of a chain of the chains.
+- `ha`: The criteria stand for the criterion.
+- `hf`: The chain is one that a record of the die may keep.
+- `hc`: The chains cover the chain.
+-/
+theorem DieChains.rerollBecomes_of_not_mayMatch {D : DieChains} {d : Die}
+    {cr : Criteria} {c : Criterion} {l : Option Nat} {ch ch' : Chain}
+    (hm : D.mayMatch cr = false) (ha : Admits D.covers d cr c)
+    (hf : Fine d ch) (hc : D.Covers ch) :
+    RerollBecomes d c l ch ch' ↔ ch' = ch := by
+  cases ch with
+  | saturated v =>
+    cases l with
+    | some n => exact Iff.rfl
+    | none =>
+      by_cases hw : d.facesWithin c = true
+      · simp [RerollBecomes, hw, Chain.saturates]
+      · simp only [RerollBecomes, hw, Bool.false_eq_true, ↓reduceIte]
+        exact Iff.rfl
+  | live body last =>
+    obtain ⟨S, hS, hSc⟩ := hc
+    -- No die of the chain matches the criterion.
+    have h0 : S.matching cr.possible = 0 := by
+      have := List.any_eq_false.mp hm S hS
+      simpa using this
+    have hno : ∀ x ∈ last :: body, c.matches x = false := by
+      intro x hx
+      by_contra hx'
+      have hpos := countP_le_matching_of_admits ha (rerolled := c.matches)
+        (fun _ h => h) hf hSc
+      rw [h0, nonpos_iff_eq_zero, Nat.cast_eq_zero, List.countP_eq_zero] at hpos
+      exact hpos x ((List.mergeSort_perm _ _).mem_iff.mpr hx)
+        (by simpa using hx')
+    have hsorted := mergeSort_eq_self hf.1.1
+    -- A reroll that rerolls no die of the chain leaves it.
+    have hstay : ∀ {rerolled : Int → Bool} {P : Int → Prop},
+        (∀ x ∈ last :: body, rerolled x = false) →
+        (Rerolled rerolled P (.live body last) ch' ↔
+          ch' = .live body last) := by
+      intro rerolled P hr
+      constructor
+      · rintro ⟨ys, y, hys, hy, rfl⟩
+        rw [forall₂_redraw_stays (fun x hx => hr x (List.mem_cons_of_mem _ hx))
+          hys, hsorted]
+        simp only [Redraw, hr last List.mem_cons_self, Bool.false_eq_true,
+          ↓reduceIte] at hy
+        rw [hy]
+      · rintro rfl
+        have := rerolled_self (P := P) hr
+        rwa [hsorted] at this
+    cases l with
+    | some n =>
+      exact hstay fun x hx => by simp [hno x hx]
+    | none =>
+      by_cases hw : d.facesWithin c = true
+      · -- Every face matches, so the last die does.
+        have hlast : last ∈ d.faces := hf.2 rfl last
+          (by simp [Chain.dice, (List.mergeSort_perm _ _).mem_iff])
+        have := List.all_eq_true.mp hw last hlast
+        rw [hno last List.mem_cons_self] at this
+        exact absurd this Bool.false_ne_true
+      · simp only [RerollBecomes, hw, Bool.false_eq_true, ↓reduceIte]
+        exact hstay hno
 
 
 end Bounds
