@@ -151,7 +151,8 @@ fn test_optimized_programs()
 fn test_optimized_rerolls()
 {
 	let dice = [
-		"3D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}", "[2:2]"
+		"3D1", "{x}D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}",
+		"[2:2]"
 	];
 	let predicates = [
 		"= 1",
@@ -216,7 +217,8 @@ fn test_optimized_rerolls()
 fn test_optimized_explodes()
 {
 	let dice = [
-		"3D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}", "[2:2]"
+		"3D1", "{x}D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}",
+		"[2:2]"
 	];
 	let predicates = [
 		"= 1",

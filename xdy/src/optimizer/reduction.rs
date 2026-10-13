@@ -8,19 +8,25 @@
 //! transforming `1D6` into `[1:6]` instead (as range expressions are cheaper
 //! because they don't have to loop), and a roll of dice that all show one face,
 //! e.g., `{x}D1 keep highest 2`, with its count of dice, which its drops reduce
-//! and its keeps cap with a [minimum](Min). It eliminates rerolls that cannot
-//! change any die: those limited to zero times or fewer, limited rerolls of
-//! dice with one face, and rerolls whose predicates match none of the results
-//! that the dice still kept may show, which it tracks through the clauses of
-//! each roll, e.g., the second reroll of `3D6 reroll = 1 ∞ times reroll = 1`.
-//! It eliminates explodes that cannot extend any chain: those limited to zero
-//! times or fewer, and those whose predicates match none of the results that
-//! the dice still kept may show, e.g., the explode of `3D6 explode = 7`. An
-//! unlimited explode that surely matches every face saturates every chain
-//! still kept, which later rerolls and explodes leave alone, so it eliminates
-//! every one of them, e.g., the reroll of `{x}D6 explode ≥ 1 ∞ times reroll =
-//! 1`, though not a drop or keep. It does not reduce a roll that an explode
-//! extends to its count of dice.
+//! and its keeps cap with a [minimum](Min). Each die of such a roll begins a
+//! chain, and every chain is alike, so its rerolls and explodes change only the
+//! total of each chain, and its sum is the count times that total, whenever
+//! they leave it known: an explode that matches the face a constant number of
+//! times lengthens every chain, e.g., `{x}D1 explode = 1 2 times` is
+//! `max(x, 0) * 3`; an unlimited one saturates every chain, so the count times
+//! the saturated value saturates too, unless the count is `0`; and an unlimited
+//! reroll that matches the face crosses out every chain, leaving `0`. It
+//! eliminates rerolls that cannot change any die: those limited to zero times
+//! or fewer, limited rerolls of dice with one face, and rerolls whose
+//! predicates match none of the results that the dice still kept may show,
+//! which it tracks through the clauses of each roll, e.g., the second reroll of
+//! `3D6 reroll = 1 ∞ times reroll = 1`. It eliminates explodes that cannot
+//! extend any chain: those limited to zero times or fewer, and those whose
+//! predicates match none of the results that the dice still kept may show,
+//! e.g., the explode of `3D6 explode = 7`. An unlimited explode that surely
+//! matches every face saturates every chain still kept, which later rerolls
+//! and explodes leave alone, so it eliminates every one of them, e.g., the
+//! reroll of `{x}D6 explode ≥ 1 ∞ times reroll = 1`, though not a drop or keep.
 //!
 //! The strength reducer knows the bounds of every register, as the [bounds
 //! evaluator](crate::evaluator::BoundsEvaluator) computes them over every
@@ -40,8 +46,8 @@ use crate::{
 	DropHighest, DropLowest, EvaluationBounds, Exp, Explode, Function,
 	Immediate, Instruction, InstructionVisitor, KeepHighest, KeepLowest, Limit,
 	Max, Min, Mod, Mul, Neg, ProgramCounter, RegisterIndex, Reroll, Return,
-	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex, Sub,
-	SumRollingRecord, evaluator::ResultSet
+	RollCustomDice, RollRange, RollStandardDice, RollingRecordIndex,
+	RollingRecordKind, Sub, SumRollingRecord, evaluator::ResultSet
 };
 
 use super::{criteria, faces, register_bounds};
@@ -74,11 +80,12 @@ pub struct StrengthReducer
 	/// or reroll can remove that value, and an explode can add to it.
 	dropped: HashSet<RollingRecordIndex>,
 
-	/// The rolling records that reroll or explode instructions target,
-	/// relative to the original function. A roll into one of them is never
-	/// [reduced to its count of dice](Self::reduce_to_count), since the
-	/// reduction accounts for drops and keeps but not for rerolls or explodes.
-	rerolled: HashSet<RollingRecordIndex>,
+	/// The reroll and explode instructions that target each rolling record,
+	/// relative to the original function, in order. A roll of dice that all
+	/// show one face is [reduced to its count of dice](Self::reduce_to_count)
+	/// only if these leave the [total](Self::chain_total) of each chain still
+	/// kept known.
+	rerolls: HashMap<RollingRecordIndex, Vec<Instruction>>,
 
 	/// The bounds of each register of the original function, over every
 	/// binding, by index. A replacement holds the same value as its original,
@@ -91,12 +98,13 @@ pub struct StrengthReducer
 	/// unconstrained.
 	bounds: HashMap<RegisterIndex, EvaluationBounds>,
 
-	/// The sole face of each rolling record, relative to the original
-	/// function, that was reduced to its count of dice, which is never
-	/// negative. Every die shows the same face, so a drop subtracts from the
-	/// count and a keep caps it, whichever dice they cross out, and the sum is
-	/// the count times the face.
-	faces: HashMap<RollingRecordIndex, i32>,
+	/// The total of each chain still kept of each rolling record, relative to
+	/// the original function, that was reduced to its count of chains, which
+	/// is never negative. Every die shows the same face, so every chain still
+	/// kept has the same total, a drop subtracts from the count and a keep
+	/// caps it, whichever chains they cross out, and the sum is the count
+	/// times the total.
+	totals: HashMap<RollingRecordIndex, i32>,
 
 	/// The results that the dice of each rolling record may show, relative to
 	/// the original function, for each roll that remains a roll.
@@ -133,16 +141,17 @@ impl Optimizer<()> for StrengthReducer
 					_ => None
 				})
 				.collect();
-			self.rerolled = function
-				.instructions
-				.iter()
-				.filter_map(|inst| match inst
+			self.rerolls.clear();
+			for inst in &function.instructions
+			{
+				let target = match inst
 				{
-					Instruction::Reroll(reroll) => Some(reroll.dest),
-					Instruction::Explode(explode) => Some(explode.dest),
-					_ => None
-				})
-				.collect();
+					Instruction::Reroll(reroll) => reroll.dest,
+					Instruction::Explode(explode) => explode.dest,
+					_ => continue
+				};
+				self.rerolls.entry(target).or_default().push(inst.clone());
+			}
 			// Visit each instruction in the function body.
 			for instruction in &function.instructions
 			{
@@ -161,7 +170,7 @@ impl Optimizer<()> for StrengthReducer
 			// Reset the optimizer state.
 			self.replacements.clear();
 			self.bounds.clear();
-			self.faces.clear();
+			self.totals.clear();
 			self.results.clear();
 			self.next_register = RegisterIndex(start_register);
 			self.next_rolling_record = RollingRecordIndex::default();
@@ -203,7 +212,8 @@ impl InstructionVisitor<()> for StrengthReducer
 	{
 		// If the die has only one face, then every die shows 1, so we can
 		// replace the roll with its count of dice, or zero if the count is
-		// negative.
+		// negative, provided that its rerolls and explodes leave the total of
+		// each chain known.
 		// Resolve the operands once, as for arithmetic instructions. The
 		// helpers take the operands of the original function, and resolve them
 		// themselves.
@@ -215,9 +225,15 @@ impl InstructionVisitor<()> for StrengthReducer
 			faces
 		});
 		if let AddressingMode::Immediate(Immediate(1)) = faces
-			&& !self.rerolled.contains(&roll.dest)
+			&& let Some(total) = self.chain_total(
+				roll.dest,
+				1,
+				// The count of dice does not decide the saturated value.
+				RollingRecordKind::Standard { count: 0, faces: 1 }
+					.saturated_value()
+			)
 		{
-			self.reduce_to_count(roll.dest, roll.count, 1);
+			self.reduce_to_count(roll.dest, roll.count, total);
 			return Ok(());
 		}
 		// If the count is exactly one, then we can replace the roll with a
@@ -249,10 +265,22 @@ impl InstructionVisitor<()> for StrengthReducer
 		self.track_roll(roll.clone());
 		// If the die has only one distinct face, then every die shows it, so
 		// we can replace the roll with its count of dice, or zero if the count
-		// is negative. The sum multiplies the count by the face.
-		if roll.distinct_faces() == 1 && !self.rerolled.contains(&roll.dest)
+		// is negative, provided that its rerolls and explodes leave the total
+		// of each chain known. The sum multiplies the count by the total.
+		if roll.distinct_faces() == 1
+			&& let Some(total) = self.chain_total(
+				roll.dest,
+				roll.faces[0],
+				// The count of dice does not decide the saturated value, but
+				// every face does, however often it repeats.
+				RollingRecordKind::Custom {
+					count: 0,
+					faces: roll.faces.clone()
+				}
+				.saturated_value()
+			)
 		{
-			self.reduce_to_count(roll.dest, roll.count, roll.faces[0]);
+			self.reduce_to_count(roll.dest, roll.count, total);
 			return Ok(());
 		}
 		// Organize the faces to determine whether they form a contiguous
@@ -319,8 +347,8 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
 			{
-				// The roll was reduced to its count of dice, which all show the
-				// same face, so dropping dice subtracts from the count.
+				// The roll was reduced to its count of chains, which all have
+				// the same total, so dropping chains subtracts from the count.
 				self.drop_from_count(drop.dest, drop.count);
 				Ok(())
 			},
@@ -388,8 +416,8 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
 			{
-				// The roll was reduced to its count of dice, which all show the
-				// same face, so dropping dice subtracts from the count.
+				// The roll was reduced to its count of chains, which all have
+				// the same total, so dropping chains subtracts from the count.
 				self.drop_from_count(drop.dest, drop.count);
 				Ok(())
 			},
@@ -457,8 +485,8 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
 			{
-				// The roll was reduced to its count of dice, which all show the
-				// same face, so keeping dice caps the count.
+				// The roll was reduced to its count of chains, which all have
+				// the same total, so keeping chains caps the count.
 				self.keep_from_count(keep.dest, keep.count);
 				Ok(())
 			},
@@ -481,8 +509,8 @@ impl InstructionVisitor<()> for StrengthReducer
 		{
 			AddressingMode::Register(_) | AddressingMode::Immediate(_) =>
 			{
-				// The roll was reduced to its count of dice, which all show the
-				// same face, so keeping dice caps the count.
+				// The roll was reduced to its count of chains, which all have
+				// the same total, so keeping chains caps the count.
 				self.keep_from_count(keep.dest, keep.count);
 				Ok(())
 			},
@@ -501,12 +529,16 @@ impl InstructionVisitor<()> for StrengthReducer
 
 	fn visit_reroll(&mut self, reroll: &Reroll) -> Result<(), ()>
 	{
-		// A roll that rerolls is never reduced to a value, so its record
-		// remains a record.
+		// A roll reduced to its count of chains has a total for each chain
+		// that already accounts for its rerolls, so we can eliminate them.
 		let AddressingMode::RollingRecord(dest) = self.replacement(reroll.dest)
 		else
 		{
-			unreachable!("a reroll of a roll reduced to a value")
+			debug_assert!(
+				self.totals.contains_key(&reroll.dest),
+				"a reroll of a value that is not a count of chains"
+			);
+			return Ok(())
 		};
 		let new = reroll.map(dest, |op| self.replacement(op));
 		let criteria = criteria(&new.predicate);
@@ -552,13 +584,17 @@ impl InstructionVisitor<()> for StrengthReducer
 
 	fn visit_explode(&mut self, explode: &Explode) -> Result<(), ()>
 	{
-		// A roll that explodes is never reduced to a value, so its record
-		// remains a record.
+		// A roll reduced to its count of chains has a total for each chain
+		// that already accounts for its explodes, so we can eliminate them.
 		let AddressingMode::RollingRecord(dest) =
 			self.replacement(explode.dest)
 		else
 		{
-			unreachable!("an explode of a roll reduced to a value")
+			debug_assert!(
+				self.totals.contains_key(&explode.dest),
+				"an explode of a value that is not a count of chains"
+			);
+			return Ok(())
 		};
 		let new = explode.map(dest, |op| self.replacement(op));
 		let criteria = criteria(&new.predicate);
@@ -610,27 +646,31 @@ impl InstructionVisitor<()> for StrengthReducer
 			{
 				// The rolling record has been replaced with a value, so we can
 				// eliminate the instruction altogether. If the value is a count
-				// of dice that all show some other face than 1, then the sum
-				// is the count times the face.
-				let sum_value = match self.faces.get(&sum.src)
+				// of chains whose total is some other value than 1, then the
+				// sum is the count times the total. The chains share the sign
+				// of their total, so the ascending saturating fold of their
+				// totals saturates only where the product does, and a count of
+				// saturated chains, which is never negative, multiplies to
+				// their saturated value, or to `0` if it is `0`.
+				let sum_value = match self.totals.get(&sum.src)
 				{
-					Some(&face) if face != 1 => match src
+					Some(&total) if total != 1 => match src
 					{
 						AddressingMode::Immediate(Immediate(count)) =>
 						{
-							Immediate(count.saturating_mul(face)).into()
+							Immediate(count.saturating_mul(total)).into()
 						},
 						count =>
 						{
 							let dest = self.next_register();
 							self.bound(
 								dest,
-								self.operand_bounds(count) * face.into()
+								self.operand_bounds(count) * total.into()
 							);
 							self.emit(Mul {
 								dest,
 								op1: count,
-								op2: Immediate(face).into()
+								op2: Immediate(total).into()
 							});
 							dest.into()
 						}
@@ -1209,36 +1249,159 @@ impl StrengthReducer
 		);
 	}
 
+	/// Answer the total of each chain still kept of a roll of dice that all
+	/// show the same face, if its rerolls and explodes leave it known. Every
+	/// die shows the face, so every chain still kept is alike, and the drops
+	/// and keeps of the roll, which cross out whole chains, change only how
+	/// many there are; the rerolls and explodes apply in order:
+	///
+	/// - A limited reroll replaces each die that it crosses out with the same
+	///   face, so it changes no chain.
+	/// - An unlimited reroll that surely matches the face crosses out every
+	///   chain that is not saturated, since no reroll could ever stop.
+	/// - An explode limited to zero times or fewer extends nothing.
+	/// - An unlimited explode that surely matches the face saturates every
+	///   chain, and one limited to a constant number of times extends every
+	///   chain by exactly that many dice, since every extension matches too.
+	/// - A reroll or explode that surely misses the face changes no chain.
+	/// - Rerolls and explodes leave saturated chains alone.
+	///
+	/// Any other reroll or explode, whose predicate or limit is not constant,
+	/// may act on the chains in ways that its operands decide, so the total is
+	/// not known, unless an earlier reroll or explode has crossed out or
+	/// saturated every chain.
+	///
+	/// # Parameters
+	/// - `dest`: The rolling record of the roll, relative to the original
+	///   function.
+	/// - `face`: The face that every die shows.
+	/// - `saturated`: The value of a saturated die of the roll.
+	///
+	/// # Returns
+	/// The total of each chain still kept: the face times the dice of the
+	/// chain, the saturated value, or `0` if no chain is still kept; or `None`
+	/// if it is not known.
+	fn chain_total(
+		&self,
+		dest: RollingRecordIndex,
+		face: i32,
+		saturated: i32
+	) -> Option<i32>
+	{
+		let faces = ResultSet::of([face]);
+		// Each die begins a chain of its own, which no explode has saturated.
+		let mut chains = Chains::Kept { length: 1 };
+		for clause in self.rerolls.get(&dest).into_iter().flatten()
+		{
+			// Once every chain is crossed out or saturated, no later reroll or
+			// explode changes any.
+			let Chains::Kept { length } = chains
+			else
+			{
+				break
+			};
+			// The operands of a later clause have no replacements yet, unless
+			// earlier instructions compute them, but only immediates decide
+			// the criteria, so an operand of the original function is as good
+			// as unknown.
+			let (predicate, limit) = match clause
+			{
+				// A limited reroll changes no chain, whatever its predicate and
+				// its limit.
+				Instruction::Reroll(Reroll {
+					limit: Limit::Times(_),
+					..
+				}) => continue,
+				Instruction::Reroll(reroll) =>
+				{
+					(&reroll.predicate, &reroll.limit)
+				},
+				Instruction::Explode(explode) =>
+				{
+					(&explode.predicate, &explode.limit)
+				},
+				_ => unreachable!("not a reroll or explode: {}", clause)
+			};
+			// A limit of zero or less explodes nothing.
+			if let Limit::Times(limit) = limit
+				&& let AddressingMode::Immediate(Immediate(..=0)) =
+					self.replacement(*limit)
+			{
+				continue
+			}
+			let criteria = criteria(&predicate.map(|op| self.replacement(op)));
+			if !faces.meets(&criteria.possible)
+			{
+				// The predicate surely misses the face.
+				continue
+			}
+			if !faces.is_subset(&criteria.certain)
+			{
+				// The operands decide whether the predicate matches the face.
+				return None
+			}
+			chains = match (clause, limit)
+			{
+				// Only an unlimited reroll gets here.
+				(Instruction::Reroll(_), _) => Chains::CrossedOut,
+				(_, Limit::Unlimited) => Chains::Saturated,
+				(_, Limit::Times(limit)) => match self.replacement(*limit)
+				{
+					AddressingMode::Immediate(Immediate(limit)) =>
+					{
+						Chains::Kept {
+							length: length.saturating_add(limit)
+						}
+					},
+					// The operands decide how many dice the explode adds.
+					_ => return None
+				}
+			};
+		}
+		Some(match chains
+		{
+			// The dice of a chain share their sign, so the ascending
+			// saturating fold of its dice saturates only where their product
+			// does.
+			Chains::Kept { length } => length.saturating_mul(face),
+			Chains::Saturated => saturated,
+			Chains::CrossedOut => 0
+		})
+	}
+
 	/// Replace a roll of dice that all show the same face with its count of
-	/// dice, or zero if the count is negative, which rolls nothing. The drops
-	/// from the rolling record then subtract from the count, its keeps cap the
-	/// count, and its sum multiplies the count by the face.
+	/// dice, or zero if the count is negative, which rolls nothing. Each die
+	/// begins a chain, so the count of dice is the count of chains, every one
+	/// of which has the same total. The drops from the rolling record then
+	/// subtract from the count, its keeps cap the count, its rerolls and
+	/// explodes, which the total accounts for, vanish, and its sum multiplies
+	/// the count by the total.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record of the roll, relative to the original
 	///   function.
 	/// - `count`: The count of dice, relative to the original function.
-	/// - `face`: The face that every die shows.
+	/// - `total`: The [total](Self::chain_total) of each chain still kept.
 	fn reduce_to_count(
 		&mut self,
 		dest: RollingRecordIndex,
 		count: AddressingMode,
-		face: i32
+		total: i32
 	)
 	{
 		let count = self.at_least_zero(self.replacement(count));
 		self.replace(dest, count);
-		self.faces.insert(dest, face);
+		self.totals.insert(dest, total);
 	}
 
-	/// Drop dice from a rolling record that was [reduced to its count of
-	/// dice](Self::reduce_to_count). Every die shows the same face, so
-	/// whichever dice the drop drops, it subtracts its count, or nothing if
-	/// that is negative, from the count of dice, which stays at least zero.
+	/// Drop chains from a rolling record that was [reduced to its count of
+	/// chains](Self::reduce_to_count). Every chain has the same total, so
+	/// whichever chains the drop drops, it subtracts its count, or nothing if
+	/// that is negative, from the count of chains, which stays at least zero.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record, relative to the original function.
-	/// - `dropped`: The count of dice to drop, relative to the original
+	/// - `dropped`: The count of chains to drop, relative to the original
 	///   function.
 	fn drop_from_count(
 		&mut self,
@@ -1247,8 +1410,8 @@ impl StrengthReducer
 	)
 	{
 		debug_assert!(
-			self.faces.contains_key(&dest),
-			"a drop from a value that is not a count of dice"
+			self.totals.contains_key(&dest),
+			"a drop from a value that is not a count of chains"
 		);
 		let count = self.replacement(dest);
 		let dropped = self.at_least_zero(self.replacement(dropped));
@@ -1277,14 +1440,15 @@ impl StrengthReducer
 		self.replace(dest, remaining);
 	}
 
-	/// Keep dice of a rolling record that was [reduced to its count of
-	/// dice](Self::reduce_to_count). Every die shows the same face, so
-	/// whichever dice the keep keeps, it caps the count of dice at its count,
-	/// or at zero if that is negative.
+	/// Keep chains of a rolling record that was [reduced to its count of
+	/// chains](Self::reduce_to_count). Every chain has the same total, so
+	/// whichever chains the keep keeps, it caps the count of chains at its
+	/// count, or at zero if that is negative.
 	///
 	/// # Parameters
 	/// - `dest`: The rolling record, relative to the original function.
-	/// - `kept`: The count of dice to keep, relative to the original function.
+	/// - `kept`: The count of chains to keep, relative to the original
+	///   function.
 	fn keep_from_count(
 		&mut self,
 		dest: RollingRecordIndex,
@@ -1292,8 +1456,8 @@ impl StrengthReducer
 	)
 	{
 		debug_assert!(
-			self.faces.contains_key(&dest),
-			"a keep from a value that is not a count of dice"
+			self.totals.contains_key(&dest),
+			"a keep from a value that is not a count of chains"
 		);
 		let count = self.replacement(dest);
 		let kept = self.at_least_zero(self.replacement(kept));
@@ -1332,4 +1496,28 @@ struct Results
 	/// Drops and keeps leave them as they were, since they leave some of the
 	/// same dice.
 	live: ResultSet
+}
+
+/// What a [strength reducer](StrengthReducer) knows of the chains still kept
+/// of a roll of dice that all show the same face, as its rerolls and explodes
+/// leave them, to find their [total](StrengthReducer::chain_total). Every
+/// chain still kept is alike, since every reroll and explode acts on each
+/// alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Chains
+{
+	/// Every chain still kept holds the same number of kept dice, none of
+	/// them saturated.
+	Kept
+	{
+		/// The number of kept dice of each chain.
+		length: i32
+	},
+
+	/// An unlimited explode that matches the face saturated every chain still
+	/// kept, which later rerolls and explodes leave alone.
+	Saturated,
+
+	/// An unlimited reroll that matches the face crossed out every chain.
+	CrossedOut
 }

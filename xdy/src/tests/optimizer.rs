@@ -570,6 +570,90 @@ fn test_keeps_reduce_to_counts()
 	}
 }
 
+/// Test that strength reduction reduces a roll of dice that show one face to
+/// its count of dice even when rerolls and explodes follow, if they leave the
+/// total of each chain known: when explodes match the face a constant number of
+/// times, or saturate every chain, which later rerolls and explodes leave
+/// alone; when an unlimited reroll crosses out every chain; and when rerolls
+/// and explodes miss the face, or are limited rerolls. The reduced function
+/// agrees with the original, distribution for distribution, for every count
+/// from negative to beyond the dice rolled.
+#[test]
+fn test_explodes_reduce_to_counts()
+{
+	for source in [
+		"{x}: {x}D1 explode = 1 2 times",
+		"{x}: {x}D[3, 3] explode = 3 1 times keep highest 2",
+		"{x}: 4D1 explode = 1 1 times keep highest {x}",
+		"{x}: {x}D1 explode = 1 ∞ times",
+		"{x}: {x}D[-2, -2] explode = -2 ∞ times drop lowest 1",
+		"{x}: {x}D[0, 0] explode = 0 ∞ times",
+		"{x}: {x}D1 explode = 1 1 times reroll = 1 ∞ times",
+		"{x}: {x}D1 explode ≥ 1 ∞ times reroll = 1 ∞ times explode = {x}",
+		"{x}: {x}D1 reroll = 1 {x} times explode = 1 2 times",
+		"{x}: {x}D1 explode = 2 ∞ times explode = 3 {x} times"
+	]
+	{
+		let unoptimized = compile_valid(source);
+		for passes in [Pass::StrengthReduction.into(), Passes::all()]
+		{
+			let optimized = optimize(unoptimized.clone(), passes);
+			assert!(
+				!optimized.to_string().contains("roll"),
+				"{}: {:?}\n{}",
+				source,
+				passes,
+				optimized
+			);
+			for x in -2..=6
+			{
+				let distribution = |function: &crate::Function| {
+					Evaluator::new(function.clone())
+						.plan_distribution([x])
+						.unwrap()
+						.build(Budget::UNLIMITED, &Unobserved)
+						.unwrap()
+				};
+				assert!(
+					agree(
+						&distribution(&unoptimized),
+						&distribution(&optimized)
+					),
+					"{} at {}: {:?}\noptimized:\n{}",
+					source,
+					x,
+					passes,
+					optimized
+				);
+			}
+		}
+	}
+}
+
+/// Test that strength reduction declines to reduce a roll of dice that show
+/// one face to its count of dice whenever an operand that is not constant
+/// decides whether a reroll or explode matches the face, or how many dice an
+/// explode adds to a chain.
+#[test]
+fn test_explodes_do_not_reduce_when_their_totals_are_unknown()
+{
+	for source in [
+		"{x}: {x}D1 explode = {x} 2 times",
+		"{x}: {x}D1 explode = 1 {x} times",
+		"{x}: {x}D1 reroll = {x} ∞ times",
+		"{x}: {x}D1 explode = 1 1 times explode = {x} ∞ times"
+	]
+	{
+		let optimized = optimize(compile_valid(source), Passes::all());
+		assert!(
+			optimized.to_string().contains("roll"),
+			"{}\n{}",
+			source,
+			optimized
+		);
+	}
+}
+
 /// Test that constant folding applies the drops and keeps of a roll, in order,
 /// to its count of dice, when every count is constant, and folds the roll if
 /// they keep none of its dice or its dice show only one face. A keep counts
