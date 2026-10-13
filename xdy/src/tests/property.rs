@@ -142,17 +142,27 @@ fn test_optimized_programs()
 }
 
 /// Ensure that optimization never changes the distribution of a reroll, for
-/// every combination of a die, ordinary or with one face, constant or not; a
-/// predicate of every form, constant or not, that matches some faces, every
-/// face, or none; a limit of every form; and the clauses around it, of every
-/// kind, before it or after it, over values of the parameter that make every
-/// operand that is not constant match differently.
+/// every combination of a die, ordinary or with one face, constant or not,
+/// whose faces are positive, negative, or of mean zero; a predicate of every
+/// form, constant or not, that matches some faces, every face, or none; a limit
+/// of every form; and the clauses around it, of every kind, before it or after
+/// it, over values of the parameter that make every operand that is not
+/// constant match differently.
 #[test]
 fn test_optimized_rerolls()
 {
 	let dice = [
-		"3D1", "{x}D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}",
-		"[2:2]"
+		"3D1",
+		"{x}D1",
+		"2D[5, 5]",
+		"3D[2, 4]",
+		"2D3",
+		"{x}D2",
+		"2D{x}",
+		"[2:2]",
+		"2D[-2, -1]",
+		"2D[-1, 0, 1]",
+		"2D[0, 0]"
 	];
 	let predicates = [
 		"= 1",
@@ -205,20 +215,30 @@ fn test_optimized_rerolls()
 }
 
 /// Ensure that optimization never widens the bounds of an explode, for every
-/// combination of a die, ordinary or with one face, constant or not; a
-/// predicate of every form, constant or not, that matches some faces, every
-/// face, or none; a limit of every form; and the clauses around it, of every
-/// kind, before it or after it, among them rerolls and other explodes, and
-/// after an explode that saturates every chain of a die whose faces are
-/// positive, over values of the parameter that make every operand that is not
-/// constant match differently, and that their distributions agree, unless the
-/// forward pass refuses an explode without limit.
+/// combination of a die, ordinary or with one face, constant or not, whose
+/// faces are positive, negative, or of mean zero, so that a chain may saturate
+/// toward either bound or to zero; a predicate of every form, constant or not,
+/// that matches some faces, every face, or none; a limit of every form; and the
+/// clauses around it, of every kind, before it or after it, among them rerolls
+/// and other explodes, and after an explode that saturates every chain of a die
+/// whose faces are positive, over values of the parameter that make every
+/// operand that is not constant match differently, and that their distributions
+/// agree, unless the forward pass refuses an explode without limit.
 #[test]
 fn test_optimized_explodes()
 {
 	let dice = [
-		"3D1", "{x}D1", "2D[5, 5]", "3D[2, 4]", "2D3", "{x}D2", "2D{x}",
-		"[2:2]"
+		"3D1",
+		"{x}D1",
+		"2D[5, 5]",
+		"3D[2, 4]",
+		"2D3",
+		"{x}D2",
+		"2D{x}",
+		"[2:2]",
+		"2D[-2, -1]",
+		"2D[-1, 0, 1]",
+		"2D[0, 0]"
 	];
 	let predicates = [
 		"= 1",

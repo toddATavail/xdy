@@ -3137,6 +3137,1067 @@ Function {
     },
 }
 
+3D6 explode ≠ 6 1 time
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Ne(
+                    Constant(
+                        Constant {
+                            value: 6,
+                            span: SourceSpan {
+                                start: 16,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Times(
+                        Constant(
+                            Constant {
+                                value: 1,
+                                span: SourceSpan {
+                                    start: 18,
+                                    end: 19,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 24,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 24,
+    },
+}
+
+3D6 explode < 3
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Lt(
+                    Constant(
+                        Constant {
+                            value: 3,
+                            span: SourceSpan {
+                                start: 14,
+                                end: 15,
+                            },
+                        },
+                    ),
+                ),
+                limit: None,
+                span: SourceSpan {
+                    start: 0,
+                    end: 15,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 15,
+    },
+}
+
+3D6 explode > 5 unlimited times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Gt(
+                    Constant(
+                        Constant {
+                            value: 5,
+                            span: SourceSpan {
+                                start: 14,
+                                end: 15,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Unlimited,
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 31,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 31,
+    },
+}
+
+3D6 explode ≥ 5 3 times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Ge(
+                    Constant(
+                        Constant {
+                            value: 5,
+                            span: SourceSpan {
+                                start: 16,
+                                end: 17,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Times(
+                        Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 18,
+                                    end: 19,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 25,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 25,
+    },
+}
+
+3D6 explode in [] ∞ times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: In(
+                    [],
+                ),
+                limit: Some(
+                    Unlimited,
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 27,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 27,
+    },
+}
+
+3D6 explode in 1..=2 2 times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: InRangeInclusive {
+                    start: Constant(
+                        Constant {
+                            value: 1,
+                            span: SourceSpan {
+                                start: 15,
+                                end: 16,
+                            },
+                        },
+                    ),
+                    end: Constant(
+                        Constant {
+                            value: 2,
+                            span: SourceSpan {
+                                start: 19,
+                                end: 20,
+                            },
+                        },
+                    ),
+                },
+                limit: Some(
+                    Times(
+                        Constant(
+                            Constant {
+                                value: 2,
+                                span: SourceSpan {
+                                    start: 21,
+                                    end: 22,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 28,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 28,
+    },
+}
+
+{n}: 4D6 explode in ({n} - 1)..=({n} + 1) {n} times
+=
+Function {
+    parameters: Some(
+        [
+            Parameter {
+                name: "n",
+                span: SourceSpan {
+                    start: 1,
+                    end: 2,
+                },
+            },
+        ],
+    ),
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 4,
+                                span: SourceSpan {
+                                    start: 5,
+                                    end: 6,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 7,
+                                    end: 8,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 5,
+                            end: 8,
+                        },
+                    },
+                ),
+                predicate: InRangeInclusive {
+                    start: Group(
+                        Group {
+                            expression: Arithmetic(
+                                Sub(
+                                    Sub {
+                                        left: Variable(
+                                            Variable {
+                                                name: "n",
+                                                span: SourceSpan {
+                                                    start: 21,
+                                                    end: 24,
+                                                },
+                                            },
+                                        ),
+                                        right: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 27,
+                                                    end: 28,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 21,
+                                            end: 28,
+                                        },
+                                    },
+                                ),
+                            ),
+                            span: SourceSpan {
+                                start: 20,
+                                end: 29,
+                            },
+                        },
+                    ),
+                    end: Group(
+                        Group {
+                            expression: Arithmetic(
+                                Add(
+                                    Add {
+                                        left: Variable(
+                                            Variable {
+                                                name: "n",
+                                                span: SourceSpan {
+                                                    start: 33,
+                                                    end: 36,
+                                                },
+                                            },
+                                        ),
+                                        right: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 39,
+                                                    end: 40,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 33,
+                                            end: 40,
+                                        },
+                                    },
+                                ),
+                            ),
+                            span: SourceSpan {
+                                start: 32,
+                                end: 41,
+                            },
+                        },
+                    ),
+                },
+                limit: Some(
+                    Times(
+                        Variable(
+                            Variable {
+                                name: "n",
+                                span: SourceSpan {
+                                    start: 42,
+                                    end: 45,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 5,
+                    end: 51,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 51,
+    },
+}
+
+3D6 explode = (1D4) 1 time
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Eq(
+                    Group(
+                        Group {
+                            expression: Dice(
+                                Standard(
+                                    StandardDice {
+                                        count: Constant(
+                                            Constant {
+                                                value: 1,
+                                                span: SourceSpan {
+                                                    start: 15,
+                                                    end: 16,
+                                                },
+                                            },
+                                        ),
+                                        faces: Constant(
+                                            Constant {
+                                                value: 4,
+                                                span: SourceSpan {
+                                                    start: 17,
+                                                    end: 18,
+                                                },
+                                            },
+                                        ),
+                                        span: SourceSpan {
+                                            start: 15,
+                                            end: 18,
+                                        },
+                                    },
+                                ),
+                            ),
+                            span: SourceSpan {
+                                start: 14,
+                                end: 19,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Times(
+                        Constant(
+                            Constant {
+                                value: 1,
+                                span: SourceSpan {
+                                    start: 20,
+                                    end: 21,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 26,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 26,
+    },
+}
+
+4D6 explode = 1 drop lowest
+=
+Function {
+    parameters: None,
+    body: Dice(
+        DropLowest(
+            DropLowest {
+                dice: Explode(
+                    Explode {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 4,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 6,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        predicate: Eq(
+                            Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                        ),
+                        limit: None,
+                        span: SourceSpan {
+                            start: 0,
+                            end: 15,
+                        },
+                    },
+                ),
+                drop: None,
+                span: SourceSpan {
+                    start: 0,
+                    end: 27,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 27,
+    },
+}
+
+4D6 keep highest 3 explode < 3 ∞ times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: KeepHighest(
+                    KeepHighest {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 4,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 6,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        keep: Some(
+                            Constant(
+                                Constant {
+                                    value: 3,
+                                    span: SourceSpan {
+                                        start: 17,
+                                        end: 18,
+                                    },
+                                },
+                            ),
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 18,
+                        },
+                    },
+                ),
+                predicate: Lt(
+                    Constant(
+                        Constant {
+                            value: 3,
+                            span: SourceSpan {
+                                start: 29,
+                                end: 30,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Unlimited,
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 40,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 40,
+    },
+}
+
+2D6 explode = 1 explode = 2
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Explode(
+                    Explode {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 2,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 6,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        predicate: Eq(
+                            Constant(
+                                Constant {
+                                    value: 1,
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                        ),
+                        limit: None,
+                        span: SourceSpan {
+                            start: 0,
+                            end: 15,
+                        },
+                    },
+                ),
+                predicate: Eq(
+                    Constant(
+                        Constant {
+                            value: 2,
+                            span: SourceSpan {
+                                start: 26,
+                                end: 27,
+                            },
+                        },
+                    ),
+                ),
+                limit: None,
+                span: SourceSpan {
+                    start: 0,
+                    end: 27,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 27,
+    },
+}
+
+3D1 explode = 1 ∞ times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 1,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Eq(
+                    Constant(
+                        Constant {
+                            value: 1,
+                            span: SourceSpan {
+                                start: 14,
+                                end: 15,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Unlimited,
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 25,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 25,
+    },
+}
+
+3D6 explode = 1 0 times
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Explode(
+            Explode {
+                dice: Standard(
+                    StandardDice {
+                        count: Constant(
+                            Constant {
+                                value: 3,
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 1,
+                                },
+                            },
+                        ),
+                        faces: Constant(
+                            Constant {
+                                value: 6,
+                                span: SourceSpan {
+                                    start: 2,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        span: SourceSpan {
+                            start: 0,
+                            end: 3,
+                        },
+                    },
+                ),
+                predicate: Eq(
+                    Constant(
+                        Constant {
+                            value: 1,
+                            span: SourceSpan {
+                                start: 14,
+                                end: 15,
+                            },
+                        },
+                    ),
+                ),
+                limit: Some(
+                    Times(
+                        Constant(
+                            Constant {
+                                value: 0,
+                                span: SourceSpan {
+                                    start: 16,
+                                    end: 17,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                span: SourceSpan {
+                    start: 0,
+                    end: 23,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 23,
+    },
+}
+
+2D6 explode = 6 reroll = 1
+=
+Function {
+    parameters: None,
+    body: Dice(
+        Reroll(
+            Reroll {
+                dice: Explode(
+                    Explode {
+                        dice: Standard(
+                            StandardDice {
+                                count: Constant(
+                                    Constant {
+                                        value: 2,
+                                        span: SourceSpan {
+                                            start: 0,
+                                            end: 1,
+                                        },
+                                    },
+                                ),
+                                faces: Constant(
+                                    Constant {
+                                        value: 6,
+                                        span: SourceSpan {
+                                            start: 2,
+                                            end: 3,
+                                        },
+                                    },
+                                ),
+                                span: SourceSpan {
+                                    start: 0,
+                                    end: 3,
+                                },
+                            },
+                        ),
+                        predicate: Eq(
+                            Constant(
+                                Constant {
+                                    value: 6,
+                                    span: SourceSpan {
+                                        start: 14,
+                                        end: 15,
+                                    },
+                                },
+                            ),
+                        ),
+                        limit: None,
+                        span: SourceSpan {
+                            start: 0,
+                            end: 15,
+                        },
+                    },
+                ),
+                predicate: Eq(
+                    Constant(
+                        Constant {
+                            value: 1,
+                            span: SourceSpan {
+                                start: 25,
+                                end: 26,
+                            },
+                        },
+                    ),
+                ),
+                limit: None,
+                span: SourceSpan {
+                    start: 0,
+                    end: 26,
+                },
+            },
+        ),
+    ),
+    span: SourceSpan {
+        start: 0,
+        end: 26,
+    },
+}
+
 highest(1, 2)
 =
 Function {

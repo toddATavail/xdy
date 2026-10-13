@@ -5039,6 +5039,50 @@ fn test_saturated_reroll_estimates()
 	}
 }
 
+/// Ensure that the estimate of an explode of enormously many dice, or with an
+/// enormous limit, saturates, promptly, and exceeds any small budget, whether
+/// it rewrites the dice, pools them, or keeps their chains whole for a later
+/// reroll, and however wide its die.
+#[test]
+fn test_saturated_explode_estimates()
+{
+	for (roll, clauses) in [
+		(
+			"roll standard dice 2147483647D6",
+			&["explode = 6 up to 1 times"][..]
+		),
+		(
+			"roll standard dice 2147483647D6",
+			&["drop lowest 1", "explode = 6 up to 1 times"]
+		),
+		(
+			"roll standard dice 2147483647D6",
+			&["explode = 6 up to 1 times", "reroll = 1 up to 1 times"]
+		),
+		(
+			"roll standard dice 2147483647D2147483647",
+			&["drop highest 3", "explode >= 1 unlimited times"]
+		),
+		(
+			"roll standard dice 3D2147483647",
+			&["explode != 7 up to 2147483647 times"]
+		),
+		(
+			"roll custom dice 2147483647D[1, 5, 9]",
+			&["keep highest 1000", "explode in [9] up to 3 times"]
+		)
+	]
+	{
+		let assembly = rerolled(roll, clauses);
+		let evaluator = Evaluator::new(Assembler::assemble(&assembly).unwrap());
+		let cost = estimate(&evaluator, []).unwrap();
+		assert!(
+			cost.steps > SMALL.steps || cost.cells > SMALL.cells,
+			"{assembly}{cost:?}"
+		);
+	}
+}
+
 /// Answer the assembly of a function that rolls `roll` into `⚅0`, applies the
 /// specified clauses to it, sums it, and returns the sum.
 ///

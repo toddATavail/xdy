@@ -1366,6 +1366,63 @@ fn test_reject_reroll_register_out_of_bounds()
 	}
 }
 
+/// A rolling record may not serve as a threshold, an endpoint, or a limit of
+/// an explode, and a list of an explode holds only literals, so each yields
+/// [`AssemblyError::Syntax`]; and an explode without a limit, or with a
+/// malformed comparator, does too.
+#[test]
+fn test_reject_malformed_explode()
+{
+	for clause in [
+		"= ⚅0 up to 1 times",
+		"in ⚅0..2 up to 1 times",
+		"in 1..=⚅0 unlimited times",
+		"= 1 up to ⚅0 times",
+		"in [@0] up to 1 times",
+		"= 1",
+		"== 1 up to 1 times",
+		"in 1...2 up to 1 times",
+		"= 1 up to 1",
+		"= 1 unlimited"
+	]
+	{
+		let text = format!(
+			"Function({{a}}@0) r#2 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅0 <- explode {} from ⚅0\n\t\t@1 <- sum rolling record ⚅0\n\t\treturn @1\n",
+			clause
+		);
+		assert!(
+			matches!(assert_rejects(&text), AssemblyError::Syntax { .. }),
+			"{}",
+			clause
+		);
+	}
+}
+
+/// A register out of bounds in the predicate or the limit of an explode yields
+/// [`FunctionError::RegisterOutOfBounds`].
+#[test]
+fn test_reject_explode_register_out_of_bounds()
+{
+	for clause in [
+		"= @5 up to 1 times",
+		"in 1..@5 unlimited times",
+		"= 1 up to @5 times"
+	]
+	{
+		let text = format!(
+			"Function() r#1 ⚅#1\n\textern[]\n\tbody:\n\t\t⚅0 <- roll standard dice 3D6\n\t\t⚅0 <- explode {} from ⚅0\n\t\t@0 <- sum rolling record ⚅0\n\t\treturn @0\n",
+			clause
+		);
+		let e = assert_invalid(&text);
+		assert!(
+			matches!(e, FunctionError::RegisterOutOfBounds { index: 5, .. }),
+			"{}: {:?}",
+			clause,
+			e
+		);
+	}
+}
+
 /// Non-whitespace content following the final instruction yields
 /// [`AssemblyError::Syntax`]. The trailing-garbage check catches stray tokens
 /// that might otherwise be silently discarded, which would hide regressions in
@@ -1691,6 +1748,15 @@ fn test_assembly_error_display_and_location()
 			},
 			"assembly error at line 10, column 10 (byte 10): reroll \
 			 destination ⚅5 disagrees with its `from` source ⚅6"
+		),
+		(
+			AssemblyError::ExplodeSourceMismatch {
+				destination: 7,
+				source: 8,
+				location: loc(11)
+			},
+			"assembly error at line 11, column 11 (byte 11): explode \
+			 destination ⚅7 disagrees with its `from` source ⚅8"
 		),
 		(
 			AssemblyError::Invalid {

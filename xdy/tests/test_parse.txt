@@ -718,6 +718,72 @@
 =
 (function [] (sub (explode (standard-dice 3 6) (eq 6)) 1))
 
+3D6 explode = 1
+=
+(function [] (explode (standard-dice 3 6) (eq 1)))
+
+3D6 explode ≠ 6 1 time
+=
+(function [] (explode (standard-dice 3 6) (ne 6) (times 1)))
+
+3D6 explode < 3
+=
+(function [] (explode (standard-dice 3 6) (lt 3)))
+
+3D6 explode <= 2 ∞ times
+=
+(function [] (explode (standard-dice 3 6) (le 2) (unlimited)))
+
+3D6 explode in 1..=2 2 times
+=
+(function [] (explode (standard-dice 3 6) (in-range-inclusive 1 2) (times 2)))
+
+{x}: 3D6 explode in 1..={x} ∞ times
+=
+(function [{x}]
+	(explode (standard-dice 3 6) (in-range-inclusive 1 {x}) (unlimited)))
+
+{n}: 4D6 explode in ({n} - 1)..=({n} + 1) {n} times
+=
+(function [{n}]
+	(explode
+		(standard-dice 4 6)
+		(in-range-inclusive (sub {n} 1) (add {n} 1))
+		(times {n})))
+
+3D6 explode = (1D4) 1 time
+=
+(function [] (explode (standard-dice 3 6) (eq (standard-dice 1 4)) (times 1)))
+
+3D6 explode ≤ {a}@(2) + {a}
+=
+(function [] (add (explode (standard-dice 3 6) (le (binding {a} 2))) {a}))
+
+4D6 drop lowest explode = 1 keep highest 2
+=
+(function []
+	(keep-highest (explode (drop-lowest (standard-dice 4 6)) (eq 1)) 2))
+
+4D6 explode = 1 drop lowest
+=
+(function [] (drop-lowest (explode (standard-dice 4 6) (eq 1))))
+
+4D6 keep highest 3 explode < 3 ∞ times
+=
+(function [] (explode (keep-highest (standard-dice 4 6) 3) (lt 3) (unlimited)))
+
+2D6 explode = 1 explode = 2
+=
+(function [] (explode (explode (standard-dice 2 6) (eq 1)) (eq 2)))
+
+3D6 explode = 1 0 times
+=
+(function [] (explode (standard-dice 3 6) (eq 1) (times 0)))
+
+3D6 explode = 1 - 1
+=
+(function [] (sub (explode (standard-dice 3 6) (eq 1)) 1))
+
 highest(1, 2)
 =
 (function [] (highest 1 2))

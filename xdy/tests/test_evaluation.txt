@@ -3738,6 +3738,30 @@ value ∈ [2, 24], count = 46656, dice = 6
 =
 value ∈ [2, 24], count = 7776, dice = 5
 
+1D6 explode in 5..=6
+=
+value ∈ [1, 12], count = 36, dice = 2
+
+1D6 explode in (1D2)..=(1D3)
+=
+value ∈ [1, 9], count = None, dice = 4
+
+2D1 explode = 1 ∞ times
+=
+value ∈ [2147483647, 2147483647], count = 1, dice = 0
+
+2D1 explode = 1 2 times
+=
+value ∈ [6, 6], count = 1, dice = 0
+
+{x}: 1D[-3, -2, -1, 0, 1] explode in -3..={x} ∞ times
+=
+args: -1
+value ∈ [-2147483648, 1], count = None, dice = 18446744073709551615
+=
+args: 1
+value ∈ [-2147483648, -2147483648], count = 5, dice = 1
+
 highest(1, 2)
 =
 value ∈ [2, 2], count = 1, dice = 0

@@ -1116,6 +1116,33 @@ Function() r#2 ⚅#1
 		@1 <- @0 - 1
 		return @1
 
+3D6 explode = 6 0 times
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode = 6 up to 0 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D6 explode = 7
+=
+Function() r#1 ⚅#1
+	extern[]
+	body:
+		⚅0 <- roll standard dice 3D6
+		⚅0 <- explode = 7 up to 1 times from ⚅0
+		@0 <- sum rolling record ⚅0
+		return @0
+
+3D[-2, -1] explode ≤ -1 ∞ times
+=
+Function() r#0 ⚅#0
+	extern[]
+	body:
+		return -2147483648
+
 3D1 reroll = 1
 =
 Function() r#0 ⚅#0

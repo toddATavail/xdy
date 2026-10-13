@@ -1126,6 +1126,11 @@ pub(super) const FAMILIES: &[Family] = &[
 		repairs: |n| n
 	},
 	Family {
+		name: "missing explode range operators",
+		source: |n| format!("3d6{}", " explode in 5 6".repeat(n)),
+		repairs: |n| n
+	},
+	Family {
 		name: "missing explode times",
 		source: |n| format!("3d6{}", " explode = 6 2".repeat(n)),
 		repairs: |n| n

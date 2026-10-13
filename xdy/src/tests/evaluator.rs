@@ -3563,7 +3563,8 @@ fn chain_hull(
 /// Answer the faces of a die of the exhaustive explode bounds grid and the
 /// number of dice that it rolls, given the values of its parameters, as the
 /// evaluator rolls them: those of the [reroll bounds grid](grid_faces),
-/// followed by `1D[1, 4]` and `1D[-4, -1]`.
+/// followed by `1D[1, 4]`, `1D[-4, -1]`, and `@2D[-1, 1, 3]`, which rolls no
+/// dice for a count of zero or less.
 ///
 /// # Parameters
 /// - `die`: The index of the die among those of the grid.
@@ -3578,6 +3579,7 @@ fn explode_grid_faces(die: usize, c: i32, d: i32) -> (Vec<i32>, i32)
 	{
 		3 => (vec![1, 4], 1),
 		4 => (vec![-4, -1], 1),
+		5 => (vec![-1, 1, 3], c.max(0)),
 		die => grid_faces(die, c, d)
 	}
 }
@@ -3674,12 +3676,12 @@ fn explode_grid_truth(
 }
 
 /// Test that the bounds of the sum of an exploded record are exact over an
-/// exhaustive grid of dice, unlimited rerolls before the explode, predicates,
-/// limits, and intervals of their operands, against the brute-force extrema of
-/// every assignment of their operands, found by enumerating the chains of
-/// each. Without limit, the enumeration ends at a fixed depth, so the bounds
-/// must agree with it where its extrema have settled, and saturate where they
-/// still grow.
+/// exhaustive grid of dice, among them a count of dice that varies, unlimited
+/// rerolls before the explode, predicates, limits, and intervals of their
+/// operands, against the brute-force extrema of every assignment of their
+/// operands, found by enumerating the chains of each. Without limit, the
+/// enumeration ends at a fixed depth, so the bounds must agree with it where
+/// its extrema have settled, and saturate where they still grow.
 #[test]
 fn test_explode_bounds_exhaustive()
 {
@@ -3688,7 +3690,8 @@ fn test_explode_bounds_exhaustive()
 		("roll range @2:@3", 2),
 		("roll custom dice 2D[-1, 1, 1, 3]", 0),
 		("roll custom dice 1D[1, 4]", 0),
-		("roll custom dice 1D[-4, -1]", 0)
+		("roll custom dice 1D[-4, -1]", 0),
+		("roll custom dice @2D[-1, 1, 3]", 1)
 	];
 	let preludes = [
 		None,
