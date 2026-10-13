@@ -113,8 +113,10 @@
 //! So the estimate prices every function that the pass builds. It saturates
 //! every quantity of a function in which an explode without limit may grow a
 //! chain without bound, which the pass [refuses](crate::BuildError::Unbounded)
-//! before it begins. The pass still meters every explode, so a finite budget
-//! refuses one only when the pass would exceed it.
+//! before it begins, but still classifies it, as one that
+//! [explodes](Class::explodes), among its other traits. The pass still meters
+//! every explode, so a finite budget refuses one only when the pass would
+//! exceed it.
 
 use std::{
 	cmp::Reverse,
@@ -263,19 +265,7 @@ fn observe(
 		})
 	}
 	let plan = Plan::new(&function.instructions);
-	// The pass refuses a function in which an explode may grow a chain without
-	// bound, whatever its budget, so price such a function beyond every budget
-	// but the unlimited one.
-	if unbounded(evaluator, &args)
-	{
-		return Ok(Cost {
-			steps: u64::MAX,
-			cells: u64::MAX,
-			worlds: u64::MAX,
-			bits: u64::MAX,
-			class: Class::default()
-		})
-	}
+	let unbounded = unbounded(evaluator, &args);
 	// The pass fixes every binding, and an unbound external variable holds
 	// zero, so every binding is a degenerate interval.
 	let mut bounds = BoundsEvaluator::new(function);
@@ -337,7 +327,25 @@ fn observe(
 	}
 	debug_assert!(lane.fork.is_none(), "every split merges by the end");
 	consumed.charge(lane.shadow.finish());
-	Ok(lane.shadow.cost(&consumed))
+	let cost = lane.shadow.cost(&consumed);
+	// The pass refuses a function in which an explode may grow a chain without
+	// bound, whatever its budget, so price such a function beyond every budget
+	// but the unlimited one. The shadow deems such an explode idle, since the
+	// pass never runs it, but it may extend a chain, so the function explodes.
+	match unbounded
+	{
+		true => Ok(Cost {
+			steps: u64::MAX,
+			cells: u64::MAX,
+			worlds: u64::MAX,
+			bits: u64::MAX,
+			class: Class {
+				explodes: true,
+				..cost.class
+			}
+		}),
+		false => Ok(cost)
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

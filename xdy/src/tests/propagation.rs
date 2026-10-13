@@ -3257,6 +3257,26 @@ fn test_classes()
 				correlated: true,
 				..none
 			}
+		),
+		// The pass refuses a function in which an explode may grow a chain
+		// without bound, but the estimate still classifies it.
+		(
+			"1D6 explode = 6 ∞ times",
+			&[],
+			Class {
+				explodes: true,
+				..none
+			}
+		),
+		(
+			"{x}@(1D6) + {x} * (1D6 explode = 6 ∞ times)",
+			&[],
+			Class {
+				correlated: true,
+				pairwise: true,
+				explodes: true,
+				..none
+			}
 		)
 	]
 	{
@@ -3418,6 +3438,24 @@ fn test_classes()
 				rerolls: true,
 				..none
 			}
+		),
+		// An explode that may grow a chain without bound explodes, and the
+		// clauses around it keep their traits.
+		(
+			rerolled(
+				"roll standard dice 4D6",
+				&[
+					"drop lowest 1",
+					"explode = 6 unlimited times",
+					"reroll = 1 up to 1 times"
+				]
+			),
+			Class {
+				drops: true,
+				explodes: true,
+				rerolls: true,
+				..none
+			}
 		)
 	]
 	{
@@ -3543,17 +3581,22 @@ fn test_build_refusals()
 /// charges anything, so that the build answers
 /// [`Unbounded`](BuildError::Unbounded) whatever its budget, rather than
 /// [`BudgetExhausted`](BuildError::BudgetExhausted); that the estimate of
-/// such a function exceeds every budget but the unlimited one; and that the
-/// pass accepts limited and saturating explodes, whose estimates bound it.
+/// such a function exceeds every budget but the unlimited one, yet still
+/// classifies it as one that explodes; and that the pass accepts limited and
+/// saturating explodes, whose estimates bound it.
 #[test]
 fn test_build_refuses_unbounded_explodes()
 {
-	let saturated = Cost {
+	let saturated = |dynamic| Cost {
 		steps: u64::MAX,
 		cells: u64::MAX,
 		worlds: u64::MAX,
 		bits: u64::MAX,
-		class: Class::default()
+		class: Class {
+			dynamic,
+			explodes: true,
+			..Class::default()
+		}
 	};
 	for (clause, unbounded) in [
 		("= 6 unlimited times", true),
@@ -3575,7 +3618,11 @@ fn test_build_refuses_unbounded_explodes()
 		let plan = evaluator.plan_distribution([]).unwrap();
 		match unbounded
 		{
-			true => assert_eq!(plan.estimate(), saturated, "{clause}"),
+			true => assert_eq!(
+				plan.estimate(),
+				saturated(clause.contains('@')),
+				"{clause}"
+			),
 			false =>
 			{
 				let (distribution, usage) =
@@ -6592,6 +6639,9 @@ proptest! {
 								"{}",
 								assembly
 							);
+							let cost = estimate(&evaluator, []).unwrap();
+							prop_assert_eq!(cost.steps, u64::MAX, "{}", assembly);
+							prop_assert!(cost.class.explodes, "{}", assembly);
 							continue
 						},
 						result => result.unwrap()
