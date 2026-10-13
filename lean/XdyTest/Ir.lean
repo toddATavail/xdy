@@ -59,6 +59,10 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
 #guard reads (include_str "Fixtures/explode.json")
 #guard reads (include_str "Fixtures/explode_after_keep.json")
 #guard reads (include_str "Fixtures/explode_limited.json")
+#guard reads (include_str "Fixtures/explode_list.json")
+#guard reads (include_str "Fixtures/explode_ne.json")
+#guard reads (include_str "Fixtures/explode_parameter.json")
+#guard reads (include_str "Fixtures/explode_range.json")
 #guard reads (include_str "Fixtures/explode_saturate.json")
 #guard reads (include_str "Fixtures/explode_ties.json")
 #guard reads (include_str "Fixtures/reroll.json")
@@ -229,6 +233,52 @@ private def ret : String := "{\"Return\": {\"src\": {\"Immediate\": 0}}}"
   instructions := #[
     .rollStandardDice 0 (.immediate 2) (.immediate 6),
     .explode 0 (.ge (.register 0)) .unlimited,
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `2D[1, 3, 5] explode in [1, 5]`: a list, of custom dice.
+#guard read (include_str "Fixtures/explode_list.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollCustomDice 0 (.immediate 2) [1, 3, 5],
+    .explode 0 (.in [1, 5]) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `2D4 explode ≠ 2`: a comparator that matches the faces on both sides of one.
+#guard read (include_str "Fixtures/explode_ne.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 2) (.immediate 4),
+    .explode 0 (.ne (.immediate 2)) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `{x}: 2D6 explode ≥ {x}`: a limited explode, whose threshold is a parameter.
+#guard read (include_str "Fixtures/explode_parameter.json") == some {
+  parameters := #["x"], externals := #[]
+  registerCount := 1, rollingRecordCount := 1
+  instructions := #[
+    .rollStandardDice 0 (.immediate 2) (.immediate 6),
+    .explode 0 (.ge (.register 0)) (.times (.immediate 1)),
+    .sumRollingRecord 0 0,
+    .return (.register 0)] }
+
+-- `1D6 explode in (1D2)..=(1D3)`: an inclusive range whose endpoints are
+-- registers.
+#guard read (include_str "Fixtures/explode_range.json") == some {
+  parameters := #[], externals := #[]
+  registerCount := 2, rollingRecordCount := 3
+  instructions := #[
+    .rollRange 0 (.immediate 1) (.immediate 6),
+    .rollRange 1 (.immediate 1) (.immediate 2),
+    .sumRollingRecord 0 1,
+    .rollRange 2 (.immediate 1) (.immediate 3),
+    .sumRollingRecord 1 2,
+    .explode 0 (.inRangeInclusive (.register 0) (.register 1))
+      (.times (.immediate 1)),
     .sumRollingRecord 0 0,
     .return (.register 0)] }
 

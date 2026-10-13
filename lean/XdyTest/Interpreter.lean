@@ -692,6 +692,27 @@ private def sortedDice (n : Nat) (die : Dist Int) : Dist (List Int) :=
 #guard reduced (fixture (include_str "Fixtures/explode_limited.json")) ==
   .ok [(1, 64), (2, 64), (3, 64), (5, 16), (6, 16), (7, 16), (9, 4), (10, 4),
     (11, 4), (13, 1), (14, 1), (15, 1), (16, 1)]
+-- `2D[1, 3, 5] explode in [1, 5]`.
+#guard reduced (fixture (include_str "Fixtures/explode_list.json")) ==
+  lowest (sumDice 2 (chainTotal (customDie [1, 3, 5]) ([1, 5].contains ·) 1))
+-- `2D4 explode ≠ 2`.
+#guard reduced (fixture (include_str "Fixtures/explode_ne.json")) ==
+  lowest (sumDice 2 (chainTotal (d 4) (· != 2) 1))
+-- `{x}: 2D6 explode ≥ {x}`, which explodes every die once if every face
+-- matches, and none if none does.
+#guard (reduced (fixture (include_str "Fixtures/explode_parameter.json")) ·)
+    [1] ==
+  lowest (sumDice 2 (chainTotal (d 6) (· ≥ 1) 1))
+#guard (reduced (fixture (include_str "Fixtures/explode_parameter.json")) ·)
+    [5] ==
+  lowest (sumDice 2 (chainTotal (d 6) (· ≥ 5) 1))
+#guard (reduced (fixture (include_str "Fixtures/explode_parameter.json")) ·)
+    [7] ==
+  lowest (sumDice 2 (d 6))
+-- `1D6 explode in (1D2)..=(1D3)`.
+#guard reduced (fixture (include_str "Fixtures/explode_range.json")) ==
+  lowest ((d 2).bind fun a => (d 3).bind fun b =>
+    chainTotal (d 6) (fun x => a ≤ x && x ≤ b) 1)
 -- `{x}: 2D6 explode ≥ {x} ∞ times`, which saturates if every face matches,
 -- grows nothing if none does, and is refused otherwise.
 #guard (reduced (fixture (include_str "Fixtures/explode_saturate.json")) ·)

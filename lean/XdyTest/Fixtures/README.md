@@ -32,6 +32,10 @@ The test's `FIXTURES` table mirrors the one below; add a fixture to both.
 | `explode` | `2D4 explode = 4` | `Explode`, limited to once |
 | `explode_after_keep` | `3D4 keep highest 2 explode = 4` | an explode of the dice that a keep kept |
 | `explode_limited` | `1D4 explode = 4 3 times` | an explode of a range, three times |
+| `explode_list` | `2D[1, 3, 5] explode in [1, 5]` | an explode of custom dice by a list |
+| `explode_ne` | `2D4 explode ≠ 2` | an explode by `≠`, which matches faces on both sides of its threshold |
+| `explode_parameter` | `{x}: 2D6 explode ≥ {x}` | a limited explode, whose threshold is a parameter |
+| `explode_range` | `1D6 explode in (1D2)..=(1D3)` | an inclusive range whose endpoints are registers |
 | `explode_saturate` | `{x}: 2D6 explode ≥ {x} ∞ times` | an unlimited explode, whose threshold is a parameter: it saturates if every face matches, grows nothing if none does, and is refused otherwise |
 | `explode_ties` | `2D4 explode ≥ 3 drop lowest reroll = 2` | a drop between chains of equal totals, which their contents order, and a reroll of the chain that it keeps |
 | `external` | `1D6 + {y}` | an external variable |
