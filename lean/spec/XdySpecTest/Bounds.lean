@@ -9,9 +9,9 @@ monotonicity in each die and its copies, and the saturation of
 `unboundedDice` copies. The tails and the chains that rerolls and explodes
 leave; the shapes of chains, their totals, and their normalization, union,
 and coarsening; the chains of a die through runs of rerolls, explodes, and
-drops, mirroring examples of the Rust; the exactness of their totals; and the
-dice that they count: the kept dice of each chain, and the dice that each
-reroll and explode may draw for one chain.
+drops, mirroring examples of the Rust; the exactness of their totals, over
+chains and over records; and the dice that they count: the kept dice of each
+chain, and the dice that each reroll and explode may draw for one chain.
 -/
 
 namespace Xdy.Spec.Test.Bounds
@@ -416,7 +416,8 @@ example : ∀ b ∈ sixFive, b.Exact (.custom d6) := by
 
 -- The greatest total, `17`, is the total of a six that explodes into a five,
 -- which explodes into a six.
-example : ReachesChain (.custom d6) sixFive (.single 6) (.live [5, 6] 6) := by
+private theorem sixFive_seventeen :
+    ReachesChain (.custom d6) sixFive (.single 6) (.live [5, 6] 6) := by
   refine ⟨.live [6] 5, ⟨_, List.mem_singleton_self _, .within 6 6,
       ⟨rfl, by decide⟩, some 1, ⟨1, le_rfl, le_rfl, rfl⟩, ?_⟩,
     .live [5, 6] 6, ⟨_, List.mem_singleton_self _, .within 5 5,
@@ -441,6 +442,44 @@ example (bs : List ClauseBounds) (he : ∀ b ∈ bs, b.Exact (.custom d6))
     ∃ x ∈ d6, ∃ ch, ReachesChain (.custom d6) bs (.single x) ch ∧
       ch.total = p.2 :=
   ((DieChains.run_exact (by decide) (by decide) he hc).hull hp).2
+
+-- A roll of a six keeps it alone, a chain that a record of a six-sided die may
+-- keep.
+#guard ({ results := [6], die := .custom d6 } : Record).keptChains
+  == [.single 6]
+private theorem keptChains_six :
+    ({ results := [6], die := .custom d6 } : Record).keptChains =
+      [.single 6] := by
+  simp [Record.keptChains, Record.kept, Record.sorted]
+private theorem fine_six : Fine (.custom d6) (.single 6) :=
+  ⟨⟨by simp, by decide⟩, fun _ y hy => by
+    simp only [Chain.single, Chain.dice, List.mergeSort_singleton,
+      List.mem_singleton] at hy
+    subst hy
+    decide⟩
+
+-- So a record of `1D6` that explodes once by `= 6` and once by `= 5` may keep
+-- the chain of `17`.
+example : ∃ cls, List.Forall₂ (ClauseBounds.Admits
+    (DieChains.ofDie (.custom d6)).covers (.custom d6)) sixFive cls ∧
+      ∃ r', Reaches { results := [6], die := .custom d6 } cls r' ∧
+        Chain.live [5, 6] 6 ∈ r'.keptChains :=
+  ReachesChain.reaches (by decide) rfl
+    (fun ch h => by
+      rw [keptChains_six, List.mem_singleton] at h
+      exact h ▸ fine_six)
+    (keptChains_six ▸ List.mem_singleton_self _) sixFive_seventeen
+
+-- Over records, the least and greatest totals are those of chains still kept
+-- by records that the clauses may lead to from a roll of one face.
+example (bs : List ClauseBounds) (he : ∀ b ∈ bs, b.Exact (.custom d6))
+    (hc : (runBounds (.ofDie (.custom d6)) bs).2 = false) {p : Int × Int}
+    (hp : hull (runBounds (.ofDie (.custom d6)) bs).1.totals = some p) :
+    ∃ x ∈ d6, ∃ cls, List.Forall₂ (ClauseBounds.Admits
+      (DieChains.ofDie (.custom d6)).covers (.custom d6)) bs cls ∧
+        ∃ r', Reaches { results := [x], die := .custom d6 } cls r' ∧
+          ∃ ch ∈ r'.keptChains, ch.total = p.2 :=
+  ((DieChains.run_exact_records (by decide) (by decide) he hc).hull hp).2
 
 /-! ## Counting dice -/
 

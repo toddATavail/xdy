@@ -53,7 +53,13 @@ of dice that the bounds take of the shapes sound:
   chains of one die (`DieChains.ofDie`), whose clauses enumerate exact
   criteria and never coarsen the shapes, the least and greatest totals are
   those of chains that the clauses may make of a chain of one face
-  (`DieChains.run_exact`, `Exact.hull`).
+  (`DieChains.run_exact`, `Exact.hull`). Every such chain is still kept by a
+  record that clauses that the bounds stand for may lead to from a roll of one
+  face (`ReachesChain.reaches`): a reroll or explode by the criterion and under
+  the limit that made it, by the backward directions of `mem_reroll_iff` and
+  `mem_explode_iff`, or a drop of no results. So the hull is exactly that of
+  the totals of the chains still kept by such records
+  (`DieChains.run_exact_records`).
 - `ChainShape.dice` and `ChainShape.matching` mirror the Rust, and bound the
   kept dice of every chain of a shape, and those that show one of some results
   (`ChainShape.length_le_dice`, `ChainShape.countP_le_matching`), so
@@ -83,6 +89,8 @@ flowchart TD
     R["corner_new, unite_realized,<br/>rerollShapes_realized,<br/>explodeShapes_realized"]
     T["ChainShape.totals_realized:<br/>extremes are corners"]
     E["DieChains.run_exact:<br/>the hull is exact"]
+    W["ReachesChain.reaches:<br/>records keep the chains"]
+    X["DieChains.run_exact_records:<br/>the hull is exact over records"]
     N["length_le_dice,<br/>countP_le_matching:<br/>a shape bounds its dice"]
     D["counted laws, *_fst:<br/>the draws of a clause"]
     L["DieChains.run_length:<br/>the length holds every chain"]
@@ -96,6 +104,10 @@ flowchart TD
     R --> E
     T --> E
     S --> E
+    B --> W
+    E --> X
+    W --> X
+    S --> X
     N --> L
     C --> L
     N --> K
@@ -4088,6 +4100,63 @@ theorem ClauseBounds.apply_fixed (b : ClauseBounds) (D : DieChains) :
   cases b <;> exact ⟨rfl, rfl, rfl⟩
 
 /--
+Every record that a clause may leave of a record of a die, each of whose kept
+chains a record of the die may keep, holds the die, and keeps only such
+chains.
+
+# Parameters
+- `d`: The die.
+- `cl`: The clause.
+- `r`, `r'`: The record, and a record that the clause may leave of it.
+
+# Hypotheses
+- `hF`: The faces of the die lie within the `i32` range.
+- `hd`: The record holds the die.
+- `hf`: Every kept chain is one that a record of the die may keep.
+- `hr`: The clause may leave `r'`.
+-/
+private theorem Clause.fine {d : Die} {cl : Clause} {r r' : Record}
+    (hF : ∀ x ∈ d.faces, i32Min ≤ x ∧ x ≤ i32Max) (hd : r.die = d)
+    (hf : ∀ ch ∈ r.keptChains, Fine d ch) (hr : r' ∈ (cl.apply r).support) :
+    r'.die = d ∧ ∀ ch ∈ r'.keptChains, Fine d ch := by
+  have hF' : ∀ x ∈ r.die.faces, i32Min ≤ x ∧ x ≤ i32Max := hd ▸ hF
+  have hk : ∀ ch ∈ r.keptChains, NormalChain ch ∧
+      (ch.saturates = false → ∀ x ∈ ch.dice, x ∈ r.die.faces) :=
+    fun ch hch => by rw [hd]; exact hf ch hch
+  -- A drop or keep keeps a subset of the chains, and the die.
+  have hdrop : ∀ r'' : Record, r''.die = r.die →
+      (∀ ch ∈ r''.keptChains, ch ∈ r.keptChains) →
+        r''.die = d ∧ ∀ ch ∈ r''.keptChains, Fine d ch :=
+    fun r'' hd' hsub => ⟨hd'.trans hd, fun ch h => hf ch (hsub ch h)⟩
+  cases cl with
+  | reroll c l =>
+    refine ⟨(die_of_mem_reroll hr).trans hd, fun ch' hch' => ?_⟩
+    obtain ⟨ch, hch, hbe⟩ := (mem_reroll_iff hF' hk ch').mp ⟨r', hr, hch'⟩
+    rw [hd] at hbe
+    exact Fine.rerollBecomes hF (hf ch hch) hbe
+  | explode c l =>
+    refine ⟨(die_of_mem_explode hr).trans hd, fun ch' hch' => ?_⟩
+    obtain ⟨ch, hch, hbe⟩ := (mem_explode_iff hF' hk ch').mp ⟨r', hr, hch'⟩
+    rw [hd] at hbe
+    exact Fine.becomes hF (hf ch hch) hbe
+  | dropLowest n =>
+    rw [Clause.apply, PMF.mem_support_pure_iff] at hr
+    subst hr
+    exact hdrop _ rfl fun ch => mem_keptChains_dropLowest
+  | dropHighest n =>
+    rw [Clause.apply, PMF.mem_support_pure_iff] at hr
+    subst hr
+    exact hdrop _ rfl fun ch => mem_keptChains_dropHighest
+  | keepLowest n =>
+    rw [Clause.apply, PMF.mem_support_pure_iff] at hr
+    subst hr
+    exact hdrop _ rfl fun ch => mem_keptChains_dropHighest
+  | keepHighest n =>
+    rw [Clause.apply, PMF.mem_support_pure_iff] at hr
+    subst hr
+    exact hdrop _ rfl fun ch => mem_keptChains_dropLowest
+
+/--
 The bounds of a clause that stand for it track every record that it may
 leave of a record that the chains tracked.
 
@@ -4114,56 +4183,47 @@ theorem ClauseBounds.tracks {D : DieChains} {d : Die} {b : ClauseBounds}
       (ch.saturates = false → ∀ x ∈ ch.dice, x ∈ r.die.faces) :=
     fun ch hch => ht.die ▸ ht.fine ch hch
   have hF' : ∀ x ∈ r.die.faces, i32Min ≤ x ∧ x ≤ i32Max := ht.die ▸ hF
-  -- A drop or keep keeps a subset of the chains, and the chains alone.
-  have hdrop : ∀ r'' : Record, r''.die = r.die →
-      (∀ ch ∈ r''.keptChains, ch ∈ r.keptChains) → D.Tracks d r'' :=
-    fun r'' hd hsub => ⟨hd.trans ht.die, fun ch h => ht.fine ch (hsub ch h),
-      fun ch h => ht.covers ch (hsub ch h)⟩
+  obtain ⟨hd', hf'⟩ := Clause.fine hF ht.die ht.fine hr
+  refine ⟨hd', hf', fun ch' hch' => ?_⟩
   cases b with
   | reroll criteria limit =>
     cases cl with
     | reroll c l =>
       obtain ⟨⟨cr, hcr, ha⟩, hL⟩ := hb
-      refine ⟨(die_of_mem_reroll hr).trans ht.die, fun ch' hch' => ?_,
-        fun ch' hch' => ?_⟩ <;>
-      obtain ⟨ch, hch, hbe⟩ :=
-        (mem_reroll_iff hF' hk ch').mp ⟨r', hr, hch'⟩ <;>
+      obtain ⟨ch, hch, hbe⟩ := (mem_reroll_iff hF' hk ch').mp ⟨r', hr, hch'⟩
       rw [ht.die] at hbe
-      · exact Fine.rerollBecomes hF (ht.fine ch hch) hbe
-      · exact D.reroll_covers hD hcr ha hL (ht.fine ch hch) (ht.covers ch hch)
-          hbe
+      exact D.reroll_covers hD hcr ha hL (ht.fine ch hch) (ht.covers ch hch)
+        hbe
     | _ => exact hb.elim
   | explode criteria limit =>
     cases cl with
     | explode c l =>
       obtain ⟨⟨cr, hcr, ha⟩, hL⟩ := hb
-      refine ⟨(die_of_mem_explode hr).trans ht.die, fun ch' hch' => ?_,
-        fun ch' hch' => ?_⟩ <;>
       obtain ⟨ch, hch, hbe⟩ :=
-        (mem_explode_iff hF' hk ch').mp ⟨r', hr, hch'⟩ <;>
+        (mem_explode_iff hF' hk ch').mp ⟨r', hr, hch'⟩
       rw [ht.die] at hbe
-      · exact Fine.becomes hF (ht.fine ch hch) hbe
-      · exact D.explode_covers hD hcr ha hL (ht.fine ch hch) (ht.covers ch hch)
-          hbe
+      exact D.explode_covers hD hcr ha hL (ht.fine ch hch) (ht.covers ch hch)
+        hbe
     | _ => exact hb.elim
   | drop =>
+    -- A drop or keep keeps a subset of the chains, which they covered.
     cases cl with
     | dropLowest n =>
       rw [Clause.apply, PMF.mem_support_pure_iff] at hr
       subst hr
-      exact hdrop _ rfl fun ch => mem_keptChains_dropLowest
+      exact ht.covers ch' (mem_keptChains_dropLowest hch')
     | dropHighest n =>
       rw [Clause.apply, PMF.mem_support_pure_iff] at hr
       subst hr
-      exact hdrop _ rfl fun ch => mem_keptChains_dropHighest
+      exact ht.covers ch' (mem_keptChains_dropHighest hch')
     | keepLowest n =>
       rw [Clause.apply, PMF.mem_support_pure_iff] at hr
       subst hr
-      exact hdrop _ rfl fun ch => mem_keptChains_dropHighest
+      exact ht.covers ch' (mem_keptChains_dropHighest hch')
     | keepHighest n =>
       rw [Clause.apply, PMF.mem_support_pure_iff] at hr
       subst hr
-      exact hdrop _ rfl fun ch => mem_keptChains_dropLowest
+      exact ht.covers ch' (mem_keptChains_dropLowest hch')
     | _ => exact hb.elim
 
 /-- Running the bounds of some clauses after others runs them after the
@@ -5990,6 +6050,149 @@ theorem DieChains.run_exact {d : Die} {bs : List ClauseBounds}
       obtain ⟨x₂, hx₂, h₂'⟩ := hreach _ hc₂
       exact ⟨⟨_, ⟨x₁, hx₁, ch₁, h₁', rfl⟩, he₁ ▸ h₁⟩,
         ⟨_, ⟨x₂, hx₂, ch₂, h₂', rfl⟩, he₂ ▸ h₂⟩⟩
+
+/-! ## Exactness over records -/
+
+/-- A drop of no results keeps every chain that the record kept. -/
+private theorem mem_keptChains_dropLowest_zero {r : Record} {ch : Chain}
+    (h : ch ∈ r.keptChains) : ch ∈ (r.dropLowest 0).keptChains := by
+  have hl : (r.dropLowest 0).lowest =
+      Min.min (r.lowest + (0 : Int).toNat) r.results.length := rfl
+  refine mem_keptChains_of_drops (r := r.dropLowest 0) (r' := r) rfl rfl ?_ h
+  have : (r.dropLowest 0).highest = r.highest := rfl
+  simp only [Int.toNat_zero, Nat.add_zero] at hl
+  omega
+
+/--
+Every chain that clauses whose bounds are some bounds may make of a chain that
+a record keeps, some record keeps that clauses may lead to from it, each of
+which the bounds of its clause stand for: a reroll or explode by the criterion
+and under the limit by which it makes the chain, or a drop of no results,
+which keeps every chain.
+
+# Parameters
+- `d`: The die.
+- `bs`: The bounds of the clauses.
+- `r`: The record.
+- `ch`, `ch'`: A chain that the record keeps, and what the clauses make of it.
+
+# Hypotheses
+- `hF`: The faces of the die lie within the `i32` range.
+- `hd`: The record holds the die.
+- `hf`: Every kept chain is one that a record of the die may keep.
+- `hch`: The record keeps `ch`.
+- `h`: The clauses may make `ch'` of `ch`.
+-/
+theorem ReachesChain.reaches {d : Die}
+    (hF : ∀ x ∈ d.faces, i32Min ≤ x ∧ x ≤ i32Max) :
+    ∀ {bs : List ClauseBounds} {r : Record} {ch ch' : Chain}, r.die = d →
+      (∀ ch ∈ r.keptChains, Fine d ch) → ch ∈ r.keptChains →
+      ReachesChain d bs ch ch' → ∃ cls,
+        List.Forall₂ (ClauseBounds.Admits (DieChains.ofDie d).covers d) bs
+          cls ∧ ∃ r', Reaches r cls r' ∧ ch' ∈ r'.keptChains
+  | [], r, ch, ch', _, _, hch, h =>
+    ⟨[], .nil, r, rfl, (show ch' = ch from h) ▸ hch⟩
+  | b :: bs, r, ch, ch'', hd, hf, hch, ⟨ch', hstep, hrest⟩ => by
+    have hF' : ∀ x ∈ r.die.faces, i32Min ≤ x ∧ x ≤ i32Max := hd ▸ hF
+    have hk : ∀ ch ∈ r.keptChains, NormalChain ch ∧
+        (ch.saturates = false → ∀ x ∈ ch.dice, x ∈ r.die.faces) :=
+      fun ch hch => by rw [hd]; exact hf ch hch
+    -- The exact criteria stand for their criterion.
+    have hadm : ∀ cr c, cr.Matches d c →
+        Admits (DieChains.ofDie d).covers d cr c :=
+      fun cr c hm => ⟨fun y hy h => (hm.mem hy).1.mpr h,
+        fun y hy h => (hm.mem hy).2.mp h,
+        fun hw => decide_eq_true (hm.facesWithin.mp hw)⟩
+    -- A clause that may make `ch'` of `ch`, and a record that it may leave,
+    -- which keeps `ch'`.
+    obtain ⟨cl, hbc, r₁, hr₁, hch₁⟩ : ∃ cl,
+        b.Admits (DieChains.ofDie d).covers d cl ∧
+          ∃ r₁ ∈ (cl.apply r).support, ch' ∈ r₁.keptChains := by
+      cases b with
+      | reroll criteria limit =>
+        obtain ⟨cr, hcr, c, hm, l, hL, hb⟩ := hstep
+        rw [← hd] at hb
+        exact ⟨.reroll c l, ⟨⟨cr, hcr, hadm cr c hm⟩, hL⟩,
+          (mem_reroll_iff hF' hk ch').mpr ⟨ch, hch, hb⟩⟩
+      | explode criteria limit =>
+        obtain ⟨cr, hcr, c, hm, l, hL, hb⟩ := hstep
+        rw [← hd] at hb
+        exact ⟨.explode c l, ⟨⟨cr, hcr, hadm cr c hm⟩, hL⟩,
+          (mem_explode_iff hF' hk ch').mpr ⟨ch, hch, hb⟩⟩
+      | drop =>
+        exact ⟨.dropLowest 0, trivial, r.dropLowest 0,
+          (PMF.mem_support_pure_iff _ _).mpr rfl,
+          (show ch' = ch from hstep) ▸ mem_keptChains_dropLowest_zero hch⟩
+    obtain ⟨hd₁, hf₁⟩ := Clause.fine hF hd hf hr₁
+    obtain ⟨cls, hcls, r', hr', hch'⟩ :=
+      ReachesChain.reaches hF hd₁ hf₁ hch₁ hrest
+    exact ⟨cl :: cls, .cons hbc hcls, r', ⟨r₁, hr₁, hr'⟩, hch'⟩
+
+/--
+The bounds of a rolling record are exact within the budget over records, for
+each die that the record may roll: if the bounds of each clause enumerate
+exact criteria, under bounds of their limits in order, and never coarsen the
+shapes, then the totals of the chains after them bound exactly in their hull
+the totals of the chains still kept of the records that clauses whose bounds
+they are may lead to from a roll of one face of the die, so that its least and
+greatest are the totals of some such chains (`Exact.hull`). Exact relative to
+the criteria and limits, each of which, in each clause, is taken to be
+possible, as the bounds of their operands admit.
+
+# Parameters
+- `d`: The die.
+- `bs`: The bounds of the clauses.
+
+# Hypotheses
+- `hF`: The faces of the die lie within the `i32` range.
+- `hd`: The die has faces.
+- `he`: The bounds of each clause are exact for the die.
+- `hc`: The bounds never coarsen the shapes.
+-/
+theorem DieChains.run_exact_records {d : Die} {bs : List ClauseBounds}
+    (hF : ∀ x ∈ d.faces, i32Min ≤ x ∧ x ≤ i32Max) (hd : d.faces ≠ [])
+    (he : ∀ b ∈ bs, b.Exact d)
+    (hc : (runBounds (DieChains.ofDie d) bs).2 = false) :
+    Exact (runBounds (DieChains.ofDie d) bs).1.totals
+      {v | ∃ x ∈ d.faces, ∃ cls,
+        List.Forall₂ (ClauseBounds.Admits (DieChains.ofDie d).covers d) bs
+          cls ∧ ∃ r', Reaches { results := [x], die := d } cls r' ∧
+            ∃ ch ∈ r'.keptChains, ch.total = v} := by
+  -- A roll of one face keeps that face alone.
+  have hone : ∀ x, ({ results := [x], die := d } : Record).keptChains =
+      [.single x] := fun x => by
+    simp [Record.keptChains, Record.kept, Record.sorted]
+  -- Every chain that the clauses may make of one face, some record keeps.
+  have hlift : ∀ v ∈ {v | ∃ x ∈ d.faces, ∃ ch,
+      ReachesChain d bs (.single x) ch ∧ ch.total = v},
+      ∃ x ∈ d.faces, ∃ cls,
+        List.Forall₂ (ClauseBounds.Admits (DieChains.ofDie d).covers d) bs
+          cls ∧ ∃ r', Reaches { results := [x], die := d } cls r' ∧
+            ∃ ch ∈ r'.keptChains, ch.total = v := by
+    rintro _ ⟨x, hx, ch, hch, rfl⟩
+    have hfine : Fine d (.single x) :=
+      ⟨⟨by simp, by simpa using hF x hx⟩, fun _ y hy => by
+        simp only [Chain.single, Chain.dice, List.mergeSort_singleton,
+          List.mem_singleton] at hy
+        exact hy ▸ hx⟩
+    obtain ⟨cls, hcls, r', hr', hch'⟩ := ReachesChain.reaches hF rfl
+      (fun ch' h => by
+        rw [hone, List.mem_singleton] at h
+        exact h ▸ hfine)
+      (by rw [hone]; exact List.mem_singleton_self _) hch
+    exact ⟨x, hx, cls, hcls, r', hr', ch, hch', rfl⟩
+  refine ⟨?_, fun v hv => ?_⟩
+  · rintro _ ⟨x, hx, cls, hcls, r', hr', ch, hch, rfl⟩
+    have hD : (DieChains.ofDie d).Represents d :=
+      ⟨fun y hy => List.mem_toFinset.mpr hy, Finset.mem_singleton_self _⟩
+    have ht : (DieChains.ofDie d).Tracks d { results := [x], die := d } :=
+      DieChains.rolled_tracks
+        (fun y hy => ⟨hF y hy, List.mem_toFinset.mpr hy⟩) rfl
+        fun ch h => ⟨x, hx, by rwa [hone, List.mem_singleton] at h⟩
+    exact .of_mem (DieChains.run_sound hF hD hcls ht hr' ch hch)
+  · obtain ⟨⟨a, ha, h₁⟩, ⟨b, hb, h₂⟩⟩ :=
+      (DieChains.run_exact hF hd he hc).2 v hv
+    exact ⟨⟨a, hlift a ha, h₁⟩, ⟨b, hlift b hb, h₂⟩⟩
 
 /-! ## Counting dice -/
 

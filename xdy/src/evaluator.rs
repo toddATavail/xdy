@@ -3569,7 +3569,9 @@ impl RollingRecordBounds
 	/// kept after any sequence of rerolls, explodes, drops, and keeps, and
 	/// `DieChains.run_exact` that, for exact criteria and shapes never
 	/// coarsened, their hull is exactly that of the totals of the chains that
-	/// the clauses may make of one face.
+	/// the clauses may make of one face, and `DieChains.run_exact_records`
+	/// that it is exactly that of the totals of the chains still kept by the
+	/// records that the clauses may lead to from a roll of one face.
 	fn totals(&self) -> ResultSet
 	{
 		self.dice.iter().fold(ResultSet::default(), |totals, die| {
