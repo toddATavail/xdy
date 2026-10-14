@@ -23,10 +23,13 @@ test *args:
     cargo test --workspace {{args}}
 
 # Run the stress tests, which are ignored by default: deep nesting, which needs
-# gigabytes of memory, and wall-clock linearity. Pass --release to stress the
-# release build. Skips the oracle tests, which need Lean; see `oracle`.
+# gigabytes of memory, and wall-clock linearity. The linearity tests run last,
+# one at a time, since the deep tests beside them would slow their larger
+# inputs more than their smaller ones. Pass --release to stress the release
+# build. Skips the oracle tests, which need Lean; see `oracle`.
 stress *args:
-    cargo test --workspace {{args}} -- --ignored --skip oracle
+    cargo test --workspace {{args}} -- --ignored --skip oracle --skip _is_linear
+    cargo test --workspace {{args}} -- --ignored _is_linear --test-threads=1
 
 # Run doc-tests only.
 doc-test *args:

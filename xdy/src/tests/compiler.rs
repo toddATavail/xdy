@@ -672,8 +672,10 @@ const FAMILIES: &[(&str, Member)] = &[
 /// Ensure that [`compile`], which optimizes fully, takes time linear in the
 /// depth of its input, for chains that fold away and chains that cannot. The
 /// optimizer's passes each once took time quadratic in the length of such a
-/// chain. Wall-clock time is noisy under a busy machine, so the
-/// test is ignored by default; `just stress` runs it.
+/// chain. Wall-clock time is noisy under a busy machine, so the test is
+/// ignored by default; `just stress` runs it alone, after the other stress
+/// tests, whose memory traffic would slow its larger inputs more than its
+/// smaller ones.
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_compile_is_linear()

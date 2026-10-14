@@ -2045,7 +2045,8 @@ const DIAGNOSE_FAMILIES: &[(&str, Member)] = &[
 /// linearity test counts its steps, which do not include the doctor's
 /// inspection of the source, so this test measures time instead. Wall-clock
 /// time is noisy under a busy machine, so the test is ignored by default;
-/// `just stress` runs it.
+/// `just stress` runs it alone, after the other stress tests, whose memory
+/// traffic would slow its larger inputs more than its smaller ones.
 #[test]
 #[ignore = "stress: run with just stress"]
 fn test_diagnose_is_linear()
