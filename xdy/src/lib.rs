@@ -1002,6 +1002,7 @@ struct ReadmeDoctests;
 
 mod assembler;
 pub mod ast;
+pub mod classify;
 mod compiler;
 pub mod diagnostics;
 mod distribution;
