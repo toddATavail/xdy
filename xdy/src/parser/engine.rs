@@ -5177,12 +5177,12 @@ pub(crate) enum Repair
 	/// [position](FailureSite::position) of the failure to `end`, e.g., a
 	/// closing delimiter that nothing opened, and parse the goal again after
 	/// it. The goal that the engine parses again is that of the nearest
-	/// [cutting](Role::Cut) frame, as for [`Fix`](Repair::Fix), so the failure
-	/// must lie at the start of its input, past any whitespace; otherwise, and
-	/// elsewhere, this is the same as [`Stop`](Repair::Stop). If the goal is
-	/// the body of a function without formal parameters, the engine parses the
-	/// whole function again, since formal parameters may follow the discarded
-	/// source.
+	/// [cutting](Disposition::Cut) frame, as for [`Fix`](Repair::Fix), so the
+	/// failure must lie at the start of its input, past any whitespace;
+	/// otherwise, and elsewhere, this is the same as [`Stop`](Repair::Stop).
+	/// If the goal is the body of a function without formal parameters, the
+	/// engine parses the whole function again, since formal parameters may
+	/// follow the discarded source.
 	///
 	/// # Panics
 	/// If `end` is not a character boundary of the source.
@@ -5585,7 +5585,7 @@ impl<'src> FailureSite<'src>
 /// How a [frame](Frame) treats a recoverable error of the subproduction that it
 /// awaits.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Role
+enum Disposition
 {
 	/// It recovers by trying another alternative, or by treating the
 	/// subproduction as optional.
@@ -5600,15 +5600,15 @@ enum Role
 	Pass
 }
 
-impl Role
+impl Disposition
 {
-	/// Answer the role of the specified frame.
+	/// Answer the disposition of the specified frame.
 	///
 	/// # Parameters
 	/// - `frame`: The frame.
 	///
 	/// # Returns
-	/// The role.
+	/// The disposition.
 	fn of(frame: &Frame<'_>) -> Self
 	{
 		match frame
@@ -5620,7 +5620,7 @@ impl Role
 			| Frame::DiceFaces { .. }
 			| Frame::DiceDrop { .. }
 			| Frame::DropExpression { .. }
-			| Frame::LimitCount { .. } => Role::Catch,
+			| Frame::LimitCount { .. } => Disposition::Catch,
 			Frame::BinaryRight { .. }
 			| Frame::ExponentPower(_)
 			| Frame::PredicateFirst { .. }
@@ -5629,7 +5629,7 @@ impl Role
 			| Frame::GroupExpression { .. }
 			| Frame::BindingExpression { .. }
 			| Frame::RangeStart { .. }
-			| Frame::RangeEnd { .. } => Role::Cut,
+			| Frame::RangeEnd { .. } => Disposition::Cut,
 			Frame::FunctionBody { .. }
 			| Frame::BinaryFirst(_)
 			| Frame::UnaryExponent { .. }
@@ -5640,7 +5640,7 @@ impl Role
 			| Frame::DiceCount { .. }
 			| Frame::StandardCount(_)
 			| Frame::StandardFaces(_)
-			| Frame::CustomCount(_) => Role::Pass
+			| Frame::CustomCount(_) => Disposition::Pass
 		}
 	}
 }
@@ -5721,9 +5721,10 @@ enum Overlay<'src>
 /// every production in progress. An unrecoverable error is certain where it is
 /// created, at one of the sites that [`repair`](Recoverer::repair) guards. A
 /// recoverable error is certain once no frame between the top of the stack and
-/// the nearest frame that [cuts](Role::Cut) can [catch](Role::Catch) it. The
-/// recoverer keeps a stack of the frames that catch or cut, alongside the stack
-/// of frames, so that it can tell in constant time.
+/// the nearest frame that [cuts](Disposition::Cut) can
+/// [catch](Disposition::Catch) it. The recoverer keeps a stack of the frames
+/// that catch or cut, alongside the stack of frames, so that it can tell in
+/// constant time.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
@@ -5822,7 +5823,7 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 		{
 			self.calls.truncate(index);
 		}
-		else if Role::of(&stack[index]) != Role::Pass
+		else if Disposition::of(&stack[index]) != Disposition::Pass
 		{
 			self.barriers.push(index);
 		}
@@ -5861,10 +5862,9 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	{
 		self.recovering()
 			&& matches!(outcome, Err(nom::Err::Error(_)))
-			&& self
-				.barriers
-				.last()
-				.is_none_or(|&index| Role::of(&stack[index]) == Role::Cut)
+			&& self.barriers.last().is_none_or(|&index| {
+				Disposition::of(&stack[index]) == Disposition::Cut
+			})
 	}
 
 	/// Consult the policy about a [goal](Site::Goal) that failed with
@@ -5875,10 +5875,10 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	/// frames been popped, e.g., the negation in `- x`, whose operand fails at
 	/// `x`, after which the unary expression tries an exponentiation at `-`. So
 	/// to repair the failure, the engine parses again from the goal that the
-	/// nearest [cutting](Role::Cut) frame awaits, or the bottom frame if none
-	/// cuts, with the repair's token [overlaid](Overlay) at the position of the
-	/// failure. Every frame above that one awaits the start of its own goal, so
-	/// this parses again only the input of the failed attempt. A
+	/// nearest [cutting](Disposition::Cut) frame awaits, or the bottom frame if
+	/// none cuts, with the repair's token [overlaid](Overlay) at the position
+	/// of the failure. Every frame above that one awaits the start of its own
+	/// goal, so this parses again only the input of the failed attempt. A
 	/// [skip](Repair::Skip) instead parses the goal again after the discarded
 	/// source, which is possible only if the failure lies at the start of the
 	/// goal. A [variable](Repair::Variable) at the start of the body of a
@@ -6514,7 +6514,7 @@ fn leading(error: &ParseError<'_>) -> usize
 ///
 /// # Parameters
 /// - `frame`: The frame. If the error is recoverable, it must not
-///   [catch](Role::Catch) it.
+///   [catch](Disposition::Catch) it.
 /// - `payload`: The payload of the frame, if it [carries](Frame::carries) one.
 /// - `e`: The error.
 ///
@@ -6530,7 +6530,8 @@ fn unwind<'src>(
 ) -> nom::Err<ParseError<'src>>
 {
 	debug_assert!(
-		matches!(e, nom::Err::Failure(_)) || Role::of(frame) != Role::Catch,
+		matches!(e, nom::Err::Failure(_))
+			|| Disposition::of(frame) != Disposition::Catch,
 		"a frame that catches the error cannot unwind it"
 	);
 	match frame
