@@ -1153,6 +1153,15 @@ fn test_diagnose_deep_explode_threshold()
 }
 
 /// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
+/// deep chain of the ends of explode ranges on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_diagnose_deep_explode_range_end()
+{
+	diagnose_deep(Nesting::ExplodeRangeEnd)
+}
+
+/// Ensure that [`diagnose`](diagnostics::diagnose) suggests renames past a
 /// deep chain of explode counts on a small stack.
 #[test]
 #[ignore = "stress: run with just stress"]

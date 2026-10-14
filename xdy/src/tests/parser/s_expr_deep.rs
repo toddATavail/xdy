@@ -143,6 +143,12 @@ fn test_read_deep_reroll_clauses() { read_deep(Nesting::RerollClauses) }
 #[ignore = "stress: run with just stress"]
 fn test_read_deep_explode_threshold() { read_deep(Nesting::ExplodeThreshold) }
 
+/// Ensure that a deep chain of the ends of explode ranges reads on a small
+/// stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_read_deep_explode_range_end() { read_deep(Nesting::ExplodeRangeEnd) }
+
 /// Ensure that a deep chain of explode counts reads on a small stack.
 #[test]
 #[ignore = "stress: run with just stress"]

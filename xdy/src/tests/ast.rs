@@ -1086,6 +1086,15 @@ fn test_deep_explode_threshold()
 	exercise_on_small_stack(Nesting::ExplodeThreshold)
 }
 
+/// Ensure that a deep chain of the ends of explode ranges survives every trait
+/// on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_deep_explode_range_end()
+{
+	exercise_on_small_stack(Nesting::ExplodeRangeEnd)
+}
+
 /// Ensure that a deep chain of explode counts survives every trait on a small
 /// stack.
 #[test]
@@ -1271,6 +1280,7 @@ fn test_miri_explode_clauses()
 {
 	exercise(|leaf| nest(Nesting::ExplodeClauses, 40, leaf));
 	exercise(|leaf| nest(Nesting::ExplodeThreshold, 20, leaf));
+	exercise(|leaf| nest(Nesting::ExplodeRangeEnd, 20, leaf));
 	exercise(|leaf| nest(Nesting::ExplodeCount, 20, leaf));
 }
 
@@ -1466,6 +1476,9 @@ pub(super) enum Nesting
 	/// `1D6 explode ≥ (e)`.
 	ExplodeThreshold,
 
+	/// `1D6 explode in 1..(e)`.
+	ExplodeRangeEnd,
+
 	/// `1D6 explode = 6 (e) times`.
 	ExplodeCount,
 
@@ -1488,7 +1501,7 @@ pub(super) enum Nesting
 impl Nesting
 {
 	/// The constructs through which [`Mixed`](Self::Mixed) rotates.
-	pub(super) const ROTATION: [Nesting; 27] = [
+	pub(super) const ROTATION: [Nesting; 28] = [
 		Nesting::Group,
 		Nesting::Binding,
 		Nesting::RangeStart,
@@ -1512,6 +1525,7 @@ impl Nesting
 		Nesting::RerollCount,
 		Nesting::RerollClauses,
 		Nesting::ExplodeThreshold,
+		Nesting::ExplodeRangeEnd,
 		Nesting::ExplodeCount,
 		Nesting::ExplodeClauses,
 		Nesting::ExtremumFirst,
@@ -1703,6 +1717,7 @@ pub(super) fn nest_parsable(
 			| Nesting::RerollCount
 			| Nesting::RerollClauses
 			| Nesting::ExplodeThreshold
+			| Nesting::ExplodeRangeEnd
 			| Nesting::ExplodeCount
 			| Nesting::ExplodeClauses => !atomic,
 			Nesting::Negation => matches!(expression, Expression::Constant(_)),
@@ -1944,6 +1959,18 @@ fn wrap(nesting: Nesting, inner: Expression<'static>) -> Expression<'static>
 			Expression::Dice(DiceExpression::Explode(Explode {
 				dice: Box::new(standard_dice(constant(1))),
 				predicate: Predicate::Ge(inner),
+				limit: None,
+				span
+			}))
+		},
+		Nesting::ExplodeRangeEnd =>
+		{
+			Expression::Dice(DiceExpression::Explode(Explode {
+				dice: Box::new(standard_dice(constant(1))),
+				predicate: Predicate::InRange {
+					start: Box::new(constant(1)),
+					end: inner
+				},
 				limit: None,
 				span
 			}))
