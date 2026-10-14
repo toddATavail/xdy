@@ -5083,6 +5083,55 @@ fn test_saturated_explode_estimates()
 	}
 }
 
+/// Ensure that the estimate of an explode of a random limit, which a later
+/// reroll or explode reads, bounds the pass. Each outcome of the limit pads
+/// the chains by its own power of the branches of the die, so the setups of
+/// its outcomes hold distinct laws, even where their chains show the same
+/// faces, and their totals share no convolution powers.
+#[test]
+fn test_random_limit_explode_estimates()
+{
+	for (roll, clauses) in [
+		(
+			"roll custom dice 1D[0, 0]",
+			&["explode != 1 up to @0 times", "explode = 1 up to 0 times"][..]
+		),
+		(
+			"roll custom dice 2D[0, 0]",
+			&["explode != 1 up to @0 times", "reroll = 1 up to 1 times"]
+		),
+		(
+			"roll custom dice 2D[0, 0]",
+			&["explode != 1 up to @0 times", "explode = 0 up to 1 times"]
+		),
+		(
+			"roll custom dice 2D[0, 0]",
+			&[
+				"explode != 1 up to @0 times",
+				"explode = 1 up to 0 times",
+				"keep lowest 1"
+			]
+		),
+		(
+			"roll standard dice 2D2",
+			&["explode = 2 up to @0 times", "explode = 2 up to 1 times"]
+		)
+	]
+	{
+		let mut assembly = format!(
+			"Function() r#2 ⚅#2\n\textern[]\n\tbody:\n\t\t⚅1 <- roll \
+			 standard dice 1D2\n\t\t@0 <- sum rolling record ⚅1\n\t\t⚅0 <- \
+			 {roll}\n"
+		);
+		for clause in clauses
+		{
+			assembly.push_str(&format!("\t\t⚅0 <- {clause} from ⚅0\n"));
+		}
+		assembly.push_str("\t\t@1 <- sum rolling record ⚅0\n\t\treturn @1\n");
+		estimated_assembly(&assembly);
+	}
+}
+
 /// Answer the assembly of a function that rolls `roll` into `⚅0`, applies the
 /// specified clauses to it, sums it, and returns the sum.
 ///

@@ -3106,7 +3106,8 @@ fn costliest(tallies: impl Iterator<Item = (Tally, u128)>, n: u128) -> Tally
 /// - `part`: The part.
 fn absorb(parts: &mut Vec<Part>, part: Part)
 {
-	// Dice of distinct laws merge, and their laws add up.
+	// Dice or i.i.d. chains of distinct laws merge, and their laws add up, as
+	// when the outcomes of a random limit pad their chains differently.
 	let alike = |a: &Kind, b: &Kind| match (a, b)
 	{
 		(
@@ -3120,6 +3121,31 @@ fn absorb(parts: &mut Vec<Part>, part: Part)
 				..
 			}
 		) => count == other_count && die == other_die && exact == other_exact,
+		(
+			Kind::Chains {
+				count,
+				law,
+				length,
+				inner,
+				totals,
+				..
+			},
+			Kind::Chains {
+				count: other_count,
+				law: other_law,
+				length: other_length,
+				inner: other_inner,
+				totals: other_totals,
+				..
+			}
+		) =>
+		{
+			count == other_count
+				&& law == other_law
+				&& length == other_length
+				&& inner == other_inner
+				&& totals == other_totals
+		},
 		(a, b) => a == b
 	};
 	match parts.iter_mut().find(|other| {
@@ -3133,6 +3159,12 @@ fn absorb(parts: &mut Vec<Part>, part: Part)
 			if let (
 				Kind::Custom { laws, .. },
 				Kind::Custom {
+					laws: other_laws, ..
+				}
+			)
+			| (
+				Kind::Chains { laws, .. },
+				Kind::Chains {
 					laws: other_laws, ..
 				}
 			) = (&part.kind, &mut other.kind)
