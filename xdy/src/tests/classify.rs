@@ -12,15 +12,27 @@
 //! totality of classification over the whole [corpus](corpus), which `just
 //! stress` runs. That classification is total over random sources, and over
 //! every prefix of a random program, is a [property](super::property) test.
+//!
+//! Herein too are the tests of name resolution and delimiter depth: a table of
+//! sources that, between them, reach every outcome of resolution, a table of
+//! depths, in clean and malformed sources, the closing of delimiters whose
+//! closers are missing, and resolution past deep nesting, which `just stress`
+//! runs. That resolution and depth agree with the tree of every random program
+//! is a [property](super::property) test.
 
 use pretty_assertions::assert_eq;
 
 use crate::{
 	Parser,
-	classify::{Role, Token, classify},
+	classify::{Role, Token, classify, resolve},
 	parser::{Strict, TokenSink as _},
 	span::SourceSpan,
-	tests::{corpus::corpus, property::check_classification}
+	support::on_small_stack,
+	tests::{
+		ast::{Nesting, nest_parsable},
+		corpus::corpus,
+		property::{check_classification, check_resolution}
+	}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -365,12 +377,12 @@ fn test_recovered_roles()
 		),
 		// A missing `}`, at the end, and where the name breaks early, before
 		// stray whitespace.
-		("{x", &[("{", NameBrace), ("x", Unresolved)]),
+		("{x", &[("{", NameBrace), ("x", External)]),
 		(
 			"{x\u{a0}+ 2",
 			&[
 				("{", NameBrace),
-				("x", Unresolved),
+				("x", External),
 				("\u{a0}", Unrecognized),
 				("+", Additive),
 				("2", Constant)
@@ -399,7 +411,7 @@ fn test_recovered_roles()
 				("}", NameBrace),
 				(":", Separator),
 				("{", NameBrace),
-				("x", Unresolved),
+				("x", ParameterReference),
 				("}", NameBrace)
 			]
 		),
@@ -409,7 +421,7 @@ fn test_recovered_roles()
 			"{y} + x",
 			&[
 				("{", NameBrace),
-				("y", Unresolved),
+				("y", External),
 				("}", NameBrace),
 				("+", Additive),
 				("x", Unrecognized)
@@ -564,7 +576,7 @@ fn test_recovered_roles()
 				("lowest", Call),
 				("(", Parenthesis),
 				("{", NameBrace),
-				("x", Unresolved),
+				("x", External),
 				("}", NameBrace),
 				(",", Separator),
 				("2", Constant),
@@ -738,4 +750,267 @@ fn test_classified_corpus()
 			panic!("{}", e);
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                Resolution.                                 //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Ensure that classification resolves each name of each source as expected,
+/// by the scoping rules of the compiler.
+#[test]
+fn test_resolved_names()
+{
+	use Role::*;
+	let cases: &[(&str, &[(&str, Role)])] = &[
+		// Parameters, and an external variable.
+		(
+			"{x}, {y}: {x} + {y} + {z}",
+			&[
+				("x", ParameterDeclaration),
+				("y", ParameterDeclaration),
+				("x", ParameterReference),
+				("y", ParameterReference),
+				("z", External)
+			]
+		),
+		// A binding, referred to before, within, and after it.
+		(
+			"{x} + {x}@(1D6 + {x}) + {x}",
+			&[
+				("x", Unresolved),
+				("x", BindingDeclaration),
+				("x", Unresolved),
+				("x", BindingReference)
+			]
+		),
+		// Bindings as the count and the faces of dice, and as the count of a
+		// drop clause.
+		(
+			"{n}@(2)D{f}@(6) drop lowest {n}",
+			&[
+				("n", BindingDeclaration),
+				("f", BindingDeclaration),
+				("n", BindingReference)
+			]
+		),
+		// Names that differ only in their whitespace.
+		(
+			"{hit points}@(1) + { hit\tpoints }",
+			&[
+				("hit points", BindingDeclaration),
+				("hit\tpoints", BindingReference)
+			]
+		),
+		// A parameter declared again.
+		(
+			"{x}, {x}: {x}",
+			&[
+				("x", ParameterDeclaration),
+				("x", Unresolved),
+				("x", ParameterReference)
+			]
+		),
+		// A binding of the name of a parameter.
+		(
+			"{x}: {x}@(1) + {x}",
+			&[
+				("x", ParameterDeclaration),
+				("x", Unresolved),
+				("x", ParameterReference)
+			]
+		),
+		// A binding of the name of an earlier binding, after it and within
+		// it. The later binding never binds the name.
+		(
+			"{x}@(1) + {x}@(2) + {x}",
+			&[
+				("x", BindingDeclaration),
+				("x", Unresolved),
+				("x", BindingReference)
+			]
+		),
+		(
+			"{x}@({x}@(1) + {x}) + {x}",
+			&[
+				("x", BindingDeclaration),
+				("x", Unresolved),
+				("x", Unresolved),
+				("x", BindingReference)
+			]
+		),
+		// Malformed sources: a binding that lacks its `)`, within a group that
+		// lacks its own, and on its own.
+		(
+			"({x}@(1D6) + {x}",
+			&[("x", BindingDeclaration), ("x", BindingReference)]
+		),
+		(
+			"{x}@(1D6 + {x}",
+			&[("x", BindingDeclaration), ("x", Unresolved)]
+		),
+		// A broken name that becomes the first formal parameter.
+		(
+			"{x, {y}: {x} + {y}",
+			&[
+				("x", ParameterDeclaration),
+				("y", ParameterDeclaration),
+				("x", ParameterReference),
+				("y", ParameterReference)
+			]
+		)
+	];
+	for &(source, expected) in cases
+	{
+		let actual = classify(source)
+			.iter()
+			.filter(|token| {
+				matches!(
+					token.role,
+					ParameterDeclaration
+						| ParameterReference
+						| BindingDeclaration
+						| BindingReference
+						| External
+						| Unresolved
+				)
+			})
+			.map(|token| {
+				(&source[token.span.start..token.span.end], token.role)
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(actual, expected, "{:?}", source);
+	}
+}
+
+/// Ensure that classification gives each delimiter of each source the expected
+/// depth, and no other token any.
+#[test]
+fn test_depths()
+{
+	let cases: &[(&str, &[(&str, usize)])] = &[
+		// Every kind of delimiter, nested and in sequence.
+		(
+			"((1) + [1:(2)]) * highest(1D[1, 2], 3D6 reroll in [1, 2])",
+			&[
+				("(", 0),
+				("(", 1),
+				(")", 1),
+				("[", 1),
+				("(", 2),
+				(")", 2),
+				("]", 1),
+				(")", 0),
+				("(", 0),
+				("[", 1),
+				("]", 1),
+				("[", 1),
+				("]", 1),
+				(")", 0)
+			]
+		),
+		// A binding.
+		("{x}@((1)) + {x}", &[("(", 0), ("(", 1), (")", 1), (")", 0)]),
+		// Openers whose closers are missing.
+		("((1D6", &[("(", 0), ("(", 1)]),
+		("(3D[1, 2", &[("(", 0), ("[", 1)]),
+		// A closer that nothing opened has no depth.
+		(")(1)", &[("(", 0), (")", 0)]),
+		("[1:(2]", &[("[", 0), ("(", 1)])
+	];
+	for &(source, expected) in cases
+	{
+		let tokens = classify(source);
+		let actual = tokens
+			.iter()
+			.filter_map(|token| {
+				token.depth.map(|depth| {
+					(&source[token.span.start..token.span.end], depth)
+				})
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(actual, expected, "{:?}", source);
+	}
+}
+
+/// Ensure that resolution closes every delimiter opened since the delimiter
+/// that a closer pairs with, as though a repair had supplied their closers,
+/// and gives a closer that pairs with nothing depth `0`. The engine reports
+/// neither, so the tokens are made by hand.
+#[test]
+fn test_resolve_unbalanced()
+{
+	let source = "([(]) )";
+	let roles = [
+		Role::Parenthesis,
+		Role::FacesBracket,
+		Role::Parenthesis,
+		Role::FacesBracket,
+		Role::Parenthesis,
+		Role::RangeBracket
+	];
+	let offsets = [0, 1, 2, 3, 4, 6];
+	let mut tokens = offsets
+		.iter()
+		.zip(roles)
+		.map(|(&start, role)| Token {
+			span: SourceSpan {
+				start,
+				end: start + 1
+			},
+			role,
+			depth: None
+		})
+		.collect::<Vec<_>>();
+	resolve(source, &mut tokens);
+	let depths = tokens.iter().map(|token| token.depth).collect::<Vec<_>>();
+	assert_eq!(
+		depths,
+		[Some(0), Some(1), Some(2), Some(1), Some(0), Some(0)]
+	);
+}
+
+/// Ensure that classification [resolves](check_resolution) past a deep chain of
+/// groups on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_resolve_deep_group() { resolve_deep(Nesting::Group) }
+
+/// Ensure that classification [resolves](check_resolution) past a deep chain of
+/// bindings, each of the same name, on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_resolve_deep_binding() { resolve_deep(Nesting::Binding) }
+
+/// Ensure that classification [resolves](check_resolution) past a deep chain of
+/// range starts on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_resolve_deep_range_start() { resolve_deep(Nesting::RangeStart) }
+
+/// Ensure that classification [resolves](check_resolution) past a deep chain of
+/// every nesting construct on a small stack.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_resolve_deep_mixed() { resolve_deep(Nesting::Mixed) }
+
+/// Check that classification [resolves names and counts
+/// depths](check_resolution) past a deep chain of a nesting construct, between
+/// a binding and references to it and to a parameter, on a small stack.
+///
+/// # Parameters
+/// - `nesting`: The way to nest.
+///
+/// # Panics
+/// If a property fails.
+fn resolve_deep(nesting: Nesting)
+{
+	on_small_stack(|| {
+		let nest = nest_parsable(nesting, nesting.depth(), 1).to_string();
+		let source = format!("{{p}}: {{b}}@({{p}}) + {} + {{b}} + {{p}}", nest);
+		if let Err(e) = check_resolution(&source)
+		{
+			panic!("{:?}: {}", nesting, e);
+		}
+	});
 }

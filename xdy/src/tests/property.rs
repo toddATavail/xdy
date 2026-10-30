@@ -16,7 +16,9 @@
 //! Every program must also parse, render as a source that parses and renders
 //! the same, and write as an S-expression that reads back to it. The tokens
 //! that the parser reports as it parses a program, or a mutation that still
-//! parses, must tile the source. Every program
+//! parses, must tile the source. The classification of every program must
+//! resolve its names by the scoping rules of the validator, and give its
+//! delimiters the depths of the nesting of its tree. Every program
 //! that compiles must also [evaluate](Evaluator::evaluate_metered), over
 //! arguments and externals that include the extremes of [`i32`], within a
 //! [dice budget](EvaluationError::DiceBudgetExhausted), and so return promptly
@@ -39,7 +41,11 @@
 //! shrunk by `proptest`, and records it under `proptest-regressions`, so that
 //! later runs try it first.
 
-use std::{panic::resume_unwind, thread};
+use std::{
+	collections::{HashMap, HashSet},
+	panic::resume_unwind,
+	thread
+};
 
 use proptest::{
 	option,
@@ -52,8 +58,11 @@ use rand::{SeedableRng, rngs::StdRng};
 use crate::{
 	Budget, BuildError, Distribution, EvaluationError, Evaluator, Explode,
 	Function as IrFunction, Instruction, Limit, Optimizer as _, Parser, Passes,
-	StandardOptimizer, Unobserved,
-	ast::Function,
+	StandardOptimizer, Unobserved, Validator,
+	ast::{
+		DiceExpression, Event, Expression, Extremum, Function, Group, Node,
+		Range, Walk
+	},
 	classify::{Role, Token, classify},
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
@@ -140,6 +149,21 @@ fn test_classified_prefixes()
 				.char_indices()
 				.try_for_each(|(at, _)| check_classification(&source[..at]))
 		})
+	});
+}
+
+/// Ensure that the classification of every random [program](program), and of
+/// every random [mutation](Mutation) of one that still parses,
+/// [resolves its names and counts its depths](check_resolution) as the tree of
+/// the parse does.
+#[test]
+fn test_resolved_programs()
+{
+	on_small_stack(|| {
+		check(
+			|| prop_oneof![program(), mutated_program()],
+			|source| check_resolution(&source)
+		)
 	});
 }
 
@@ -589,8 +613,10 @@ fn check_tokens(source: &str) -> Result<(), TestCaseError>
 /// are non-empty, in source order, and disjoint, each fits its
 /// [role](fits_role), and only [whitespace between tokens](is_token_space)
 /// lies between them, or any whitespace between the braces of a name and its
-/// identifier. If the source parses, they must be exactly the tokens that the
-/// parse reports.
+/// identifier. Just the parentheses and brackets have depths, none greater than
+/// the number of those that open before them. If the source parses, they must
+/// be exactly the tokens that the parse reports, but for the roles of names,
+/// which only classification resolves, and depths, which only it counts.
 ///
 /// # Parameters
 /// - `source`: The source.
@@ -603,15 +629,32 @@ pub(super) fn check_classification(source: &str) -> Result<(), TestCaseError>
 	let mut parsed = Vec::<Token>::new();
 	if Parser::parse_recovering(source, &mut Strict, &mut parsed).is_ok()
 	{
+		let unresolved = |tokens: &[Token]| {
+			tokens
+				.iter()
+				.map(|token| {
+					let role = if is_name(token.role)
+					{
+						Role::Unresolved
+					}
+					else
+					{
+						token.role
+					};
+					(token.span, role)
+				})
+				.collect::<Vec<_>>()
+		};
 		prop_assert_eq!(
-			&tokens,
-			&parsed,
+			unresolved(&tokens),
+			unresolved(&parsed),
 			"classification is not the parse of {:?}",
 			source
 		);
 	}
 	let mut end = 0;
 	let mut opened = false;
+	let mut openers = 0;
 	for token in &tokens
 	{
 		let span = token.span;
@@ -655,7 +698,30 @@ pub(super) fn check_classification(source: &str) -> Result<(), TestCaseError>
 			token.role,
 			source
 		);
-		prop_assert_eq!(token.depth, None);
+		let delimiter = matches!(
+			token.role,
+			Role::Parenthesis
+				| Role::RangeBracket
+				| Role::FacesBracket
+				| Role::ListBracket
+		);
+		prop_assert_eq!(
+			token.depth.is_some(),
+			delimiter,
+			"depth of {:?} in {:?}",
+			token,
+			source
+		);
+		prop_assert!(
+			token.depth.is_none_or(|depth| depth <= openers),
+			"{:?} is deeper than the delimiters before it in {:?}",
+			token,
+			source
+		);
+		if delimiter && matches!(text, "(" | "[")
+		{
+			openers += 1;
+		}
 		opened = token.role == Role::NameBrace && text == "{";
 		end = span.end;
 	}
@@ -663,6 +729,199 @@ pub(super) fn check_classification(source: &str) -> Result<(), TestCaseError>
 		source[end..].chars().all(is_token_space),
 		"{:?} after the last token belongs to no token in {:?}",
 		&source[end..],
+		source
+	);
+	Ok(())
+}
+
+/// Answer whether a role is that of the identifier of a name.
+///
+/// # Parameters
+/// - `role`: The role.
+///
+/// # Returns
+/// `true` if the role is that of an identifier, `false` otherwise.
+fn is_name(role: Role) -> bool
+{
+	matches!(
+		role,
+		Role::ParameterDeclaration
+			| Role::ParameterReference
+			| Role::BindingDeclaration
+			| Role::BindingReference
+			| Role::External
+			| Role::Unresolved
+	)
+}
+
+/// Check that the [classification](classify) of a source that parses resolves
+/// every name, and counts the depth of every delimiter, as an independent walk
+/// of the tree of the parse does. The walk resolves names by the rules of the
+/// [validator](Validator): the first declaration of a parameter, or of a
+/// binding whose name no parameter has, is a declaration, and every other is
+/// unresolved; a reference to a parameter is a parameter reference, one to a
+/// binding that it follows the end of is a binding reference, one to another
+/// binding is unresolved, and every other reference is external. A name is
+/// unresolved just when the validator rejects the function. The walk counts
+/// as the depth of the closing delimiter of each group, binding, call, range,
+/// and custom dice the number of groups, bindings, calls, and ranges that
+/// enclose it, and each opening delimiter must have the depth of the closing
+/// delimiter that it pairs with. A source that fails to parse passes.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Errors
+/// [`TestCaseError`] if a property fails.
+pub(super) fn check_resolution(source: &str) -> Result<(), TestCaseError>
+{
+	let Ok(function) = Parser::parse(source)
+	else
+	{
+		return Ok(());
+	};
+	let tokens = classify(source);
+	// The roles of the identifiers, by their offsets, and the depths of the
+	// closing delimiters, by theirs.
+	let mut names = HashMap::<usize, Role>::new();
+	let mut depths = HashMap::<usize, usize>::new();
+	let mut parameters = HashSet::<&str>::new();
+	for parameter in function.parameters.iter().flatten()
+	{
+		let role = if parameters.insert(&parameter.name)
+		{
+			Role::ParameterDeclaration
+		}
+		else
+		{
+			Role::Unresolved
+		};
+		names.insert(parameter.span.start, role);
+	}
+	let mut bindings = HashSet::<&str>::new();
+	let mut declarations = HashSet::<usize>::new();
+	for event in Walk::new(Node::Expression(&function.body))
+	{
+		if let Event::Enter(Node::Expression(Expression::Binding(binding))) =
+			event
+			&& !parameters.contains(&*binding.name)
+			&& bindings.insert(&binding.name)
+		{
+			declarations.insert(binding.name_span.start);
+		}
+	}
+	let mut bound = HashSet::<&str>::new();
+	let mut depth = 0;
+	for event in Walk::new(Node::Expression(&function.body))
+	{
+		match event
+		{
+			Event::Enter(Node::Expression(Expression::Variable(variable))) =>
+			{
+				let name = &*variable.name;
+				let role = if parameters.contains(name)
+				{
+					Role::ParameterReference
+				}
+				else if bound.contains(name)
+				{
+					Role::BindingReference
+				}
+				else if bindings.contains(name)
+				{
+					Role::Unresolved
+				}
+				else
+				{
+					Role::External
+				};
+				let braced = &source[variable.span.start + 1..];
+				let padding = braced.len() - braced.trim_start().len();
+				names.insert(variable.span.start + 1 + padding, role);
+			},
+			Event::Enter(Node::Expression(Expression::Binding(binding))) =>
+			{
+				let start = binding.name_span.start;
+				let role = if declarations.contains(&start)
+				{
+					Role::BindingDeclaration
+				}
+				else
+				{
+					Role::Unresolved
+				};
+				names.insert(start, role);
+				depths.insert(binding.span.end - 1, depth);
+				depth += 1;
+			},
+			Event::Leave(Node::Expression(Expression::Binding(binding))) =>
+			{
+				depth -= 1;
+				if declarations.contains(&binding.name_span.start)
+				{
+					bound.insert(&binding.name);
+				}
+			},
+			Event::Enter(Node::Expression(
+				Expression::Group(Group { span, .. })
+				| Expression::Extremum(Extremum { span, .. })
+				| Expression::Range(Range { span, .. })
+			)) =>
+			{
+				depths.insert(span.end - 1, depth);
+				depth += 1;
+			},
+			Event::Leave(Node::Expression(
+				Expression::Group(_)
+				| Expression::Extremum(_)
+				| Expression::Range(_)
+			)) => depth -= 1,
+			Event::Enter(Node::Dice(DiceExpression::Custom(custom))) =>
+			{
+				depths.insert(custom.span.end - 1, depth);
+			},
+			_ =>
+			{}
+		}
+	}
+	let mut resolved = HashMap::<usize, Role>::new();
+	let mut counted = HashMap::<usize, usize>::new();
+	let mut open = Vec::new();
+	for token in &tokens
+	{
+		if is_name(token.role)
+		{
+			resolved.insert(token.span.start, token.role);
+		}
+		else if let Some(depth) = token.depth
+		{
+			// The source parses, so its delimiters nest.
+			if matches!(source.as_bytes()[token.span.start], b'(' | b'[')
+			{
+				open.push(token);
+				continue;
+			}
+			let opener = open.pop();
+			prop_assert_eq!(
+				opener.map(|opener| (opener.role, opener.depth)),
+				Some((token.role, token.depth)),
+				"{:?} pairs with no opener of its depth in {:?}",
+				token,
+				source
+			);
+			if depths.contains_key(&token.span.start)
+			{
+				counted.insert(token.span.start, depth);
+			}
+		}
+	}
+	prop_assert!(open.is_empty(), "unclosed delimiters in {:?}", source);
+	prop_assert_eq!(&resolved, &names, "names of {:?}", source);
+	prop_assert_eq!(&counted, &depths, "depths of {:?}", source);
+	prop_assert_eq!(
+		Validator::validate(&function).is_ok(),
+		!names.values().any(|&role| role == Role::Unresolved),
+		"the validator disagrees with resolution of {:?}",
 		source
 	);
 	Ok(())

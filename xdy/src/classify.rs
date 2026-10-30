@@ -21,9 +21,11 @@
 //! it derives every token from the parser itself, so that it never disagrees
 //! with the language.
 
+use std::{borrow::Cow, collections::HashSet};
+
 use crate::{
 	Parser, diagnostics,
-	parser::{Strict, is_token_space},
+	parser::{Strict, canonical_name, is_token_space},
 	span::SourceSpan
 };
 
@@ -220,10 +222,17 @@ pub enum Role
 	External,
 
 	/// The identifier of a name that the scoping rules of the compiler cannot
-	/// place, e.g., a reference to a binding that precedes the binding.
+	/// place: a reference to a binding that precedes the end of the binding,
+	/// whether it precedes the binding or lies within its bound expression; a
+	/// formal parameter declared again; or a binding of the name of a formal
+	/// parameter or of an earlier binding. The compiler rejects every function
+	/// with an unresolved name. Only the later of two clashing declarations
+	/// is unresolved, and references to the name resolve to the earlier.
 	///
 	/// # Examples
-	/// The first `x` in `{x} + {x}@(1D6)`
+	/// The first `x` in `{x} + {x}@(1D6)`, the second `x` in `{x}@({x})`,
+	/// the second `x` in `{x}, {x}: {x}`, and the second `x` in
+	/// `{x}@(1) + {x}@(2)`
 	Unresolved,
 
 	/// Source text that is not a token of the grammar where it occurs, e.g.,
@@ -259,6 +268,12 @@ pub struct Token
 	/// an outermost pair, so that a surface may color delimiters by depth.
 	/// Both delimiters of a pair have the same depth. `None` for every other
 	/// role, including [braces](Role::NameBrace), which never nest.
+	///
+	/// In malformed text, delimiters pair as the text nests them: a closer
+	/// pairs with the nearest open delimiter of its own role, and closes every
+	/// delimiter opened since, whose closers are missing. An opener whose
+	/// closer is missing has a depth all the same. A closer that nothing
+	/// opened is [unrecognized](Role::Unrecognized), and has no depth.
 	pub depth: Option<usize>
 }
 
@@ -282,6 +297,12 @@ pub struct Token
 /// failure that the doctor cannot fix. Each run of such text between
 /// whitespace that may separate tokens is a token of its own.
 ///
+/// Every name is resolved by the scoping rules of the compiler, as a formal
+/// parameter, a local binding, or an external variable, and as a declaration
+/// or a reference, or else is [unresolved](Role::Unresolved). Resolution of a
+/// function that compiles agrees with the compiler. Every parenthesis and
+/// bracket has its [depth](Token::depth), even in malformed text.
+///
 /// # Parameters
 /// - `source`: The source text: the whole of an expression, which a host that
 ///   embeds expressions has already delimited.
@@ -293,7 +314,8 @@ pub struct Token
 ///
 /// # Performance
 /// Classification parses the source at most twice, cleanly and then
-/// recovering, and neither compiles nor optimizes. It takes time linear in the
+/// recovering, and neither compiles nor optimizes, and then resolves names and
+/// counts depths in two passes over the tokens. It takes time linear in the
 /// length of the source, and consumes no more of the machine stack for deeply
 /// nested input than for shallow input, so it may run on every keystroke.
 ///
@@ -322,11 +344,184 @@ pub fn classify(source: &str) -> Vec<Token>
 	let mut tokens = Vec::new();
 	if Parser::parse_recovering(source, &mut Strict, &mut tokens).is_ok()
 	{
+		resolve(source, &mut tokens);
 		return tokens;
 	}
 	tokens.clear();
 	diagnostics::recover(source, &mut tokens);
+	resolve(source, &mut tokens);
 	fill(source, tokens)
+}
+
+/// Resolve the names among the tokens that a parse reported, and give each
+/// delimiter its depth. The engine reports every reference as
+/// [unresolved](Role::Unresolved), and every declaration as it reads it, so
+/// resolution places each by the scoping rules of the
+/// [validator](crate::Validator), in source order:
+///
+/// - The first declaration of a formal parameter is a [parameter
+///   declaration](Role::ParameterDeclaration), and every later one is
+///   unresolved.
+/// - A binding is a [binding declaration](Role::BindingDeclaration), unless its
+///   name is that of a formal parameter, or of an earlier binding, when it is
+///   unresolved.
+/// - A reference to a formal parameter is a [parameter
+///   reference](Role::ParameterReference).
+/// - A reference to a binding is a [binding reference](Role::BindingReference)
+///   once the binding is complete, i.e., after the `)` that matches the `(`
+///   just after its `@`, and is unresolved before then, whether it precedes the
+///   binding or lies within its bound expression. A binding whose `(` or `)` a
+///   repair supplied is never complete.
+/// - Every other reference is [external](Role::External).
+///
+/// Names are compared [canonically](canonical_name).
+///
+/// A parenthesis or bracket that opens takes the count of those that are open,
+/// and one that closes matches the nearest open delimiter of its own role,
+/// which it closes, along with every delimiter opened since, whose closers a
+/// repair supplied. A closer that matches no open delimiter, which the engine
+/// never reports, takes depth `0`.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `tokens`: The tokens that the parse reported, in source order.
+pub(crate) fn resolve(source: &str, tokens: &mut [Token])
+{
+	let name = |token: &Token| {
+		canonical_name(&source[token.span.start..token.span.end])
+	};
+	// Gather the names that the declarations declare, and the declarations
+	// that resolution cannot place.
+	let mut parameters = HashSet::<Cow<str>>::new();
+	let mut bindings = HashSet::<Cow<str>>::new();
+	let mut rejected = HashSet::<usize>::new();
+	for (index, token) in tokens.iter().enumerate()
+	{
+		let declared = match token.role
+		{
+			Role::ParameterDeclaration => parameters.insert(name(token)),
+			Role::BindingDeclaration =>
+			{
+				let name = name(token);
+				!parameters.contains(&name) && bindings.insert(name)
+			},
+			_ => continue
+		};
+		if !declared
+		{
+			rejected.insert(index);
+		}
+	}
+	// Place the names, and give the delimiters their depths. The name of a
+	// binding awaits its `@`, and then its `(`, just after the `@`.
+	let mut open = Vec::<Delimiter>::new();
+	let mut counts = [0usize; 4];
+	let mut bound = HashSet::<Cow<str>>::new();
+	let mut binding = None;
+	let mut awaiting = None;
+	for (index, token) in tokens.iter_mut().enumerate()
+	{
+		let awaited = awaiting.take();
+		match token.role
+		{
+			Role::ParameterDeclaration | Role::BindingDeclaration
+				if rejected.contains(&index) =>
+			{
+				token.role = Role::Unresolved;
+				binding = None;
+			},
+			Role::BindingDeclaration => binding = Some(name(token)),
+			Role::Bind => awaiting = binding.take(),
+			Role::Unresolved =>
+			{
+				let name = name(token);
+				token.role = if parameters.contains(&name)
+				{
+					Role::ParameterReference
+				}
+				else if bound.contains(&name)
+				{
+					Role::BindingReference
+				}
+				else if bindings.contains(&name)
+				{
+					Role::Unresolved
+				}
+				else
+				{
+					Role::External
+				};
+			},
+			Role::Parenthesis
+			| Role::RangeBracket
+			| Role::FacesBracket
+			| Role::ListBracket =>
+			{
+				let slot = kind(token.role);
+				if matches!(source.as_bytes()[token.span.start], b'(' | b'[')
+				{
+					token.depth = Some(open.len());
+					counts[slot] += 1;
+					open.push(Delimiter {
+						role: token.role,
+						binding: awaited
+							.filter(|_| token.role == Role::Parenthesis)
+					});
+				}
+				else if counts[slot] == 0
+				{
+					token.depth = Some(0);
+				}
+				else
+				{
+					// Close every delimiter opened since the match, whose
+					// closers a repair supplied, and then the match.
+					while let Some(delimiter) = open.pop()
+					{
+						counts[kind(delimiter.role)] -= 1;
+						if delimiter.role == token.role
+						{
+							token.depth = Some(open.len());
+							bound.extend(delimiter.binding);
+							break;
+						}
+					}
+				}
+			},
+			_ =>
+			{}
+		}
+	}
+}
+
+/// An open delimiter, during [resolution](resolve).
+struct Delimiter<'src>
+{
+	/// The role of the delimiter.
+	role: Role,
+
+	/// The name of the binding whose bound expression the delimiter opens, if
+	/// any. The binding is complete once the delimiter closes.
+	binding: Option<Cow<'src, str>>
+}
+
+/// Answer the index of the kind of a delimiter, for counting the open
+/// delimiters of each kind.
+///
+/// # Parameters
+/// - `role`: The role of the delimiter, a parenthesis or a bracket.
+///
+/// # Returns
+/// The index, below `4`.
+fn kind(role: Role) -> usize
+{
+	match role
+	{
+		Role::Parenthesis => 0,
+		Role::RangeBracket => 1,
+		Role::FacesBracket => 2,
+		_ => 3
+	}
 }
 
 /// Fill the gaps between the tokens that a recovering parse reported with
