@@ -5,14 +5,22 @@
 //! every role that the engine reports, and the retraction of the tokens of an
 //! alternative that a catching frame abandons. That the tokens of every clean
 //! parse tile the source is a [property](super::property) test.
+//!
+//! Herein too are the tests of [classification](classify) of malformed
+//! sources, through the recovering parse: a table of sources that, between
+//! them, take every path of recovery that the doctor's repairs reach, and the
+//! totality of classification over the whole [corpus](corpus), which `just
+//! stress` runs. That classification is total over random sources, and over
+//! every prefix of a random program, is a [property](super::property) test.
 
 use pretty_assertions::assert_eq;
 
 use crate::{
 	Parser,
-	classify::{Role, Token},
+	classify::{Role, Token, classify},
 	parser::{Strict, TokenSink as _},
-	span::SourceSpan
+	span::SourceSpan,
+	tests::{corpus::corpus, property::check_classification}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -304,5 +312,430 @@ fn test_retract_negation()
 		let parsed = Parser::parse_recovering(source, &mut Strict, &mut tokens);
 		assert!(parsed.is_err(), "{:?}", source);
 		assert_eq!(tokens, [], "{:?}", source);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 Recovery.                                  //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Ensure that classification of each malformed source answers the expected
+/// tokens: the tokens of the source that the recovering parse read, but none
+/// that a repair supplied, and [unrecognized](Role::Unrecognized) text wherever
+/// a repair discarded the source, read it as something else, or declined to
+/// repair it.
+#[test]
+fn test_recovered_roles()
+{
+	use Role::*;
+	let cases: &[(&str, &[(&str, Role)])] = &[
+		// An unopened delimiter, skipped where an operand is missing, and at
+		// the start of the body.
+		(
+			"3D6 + )",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("+", Additive),
+				(")", Unrecognized)
+			]
+		),
+		(
+			")))3D6",
+			&[
+				(")))", Unrecognized),
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face)
+			]
+		),
+		// A missing `)`, and a missing operand.
+		(
+			"(3D6 + + 1",
+			&[
+				("(", Parenthesis),
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("+", Additive),
+				("+", Additive),
+				("1", Constant)
+			]
+		),
+		// A missing `}`, at the end, and where the name breaks early, before
+		// stray whitespace.
+		("{x", &[("{", NameBrace), ("x", Unresolved)]),
+		(
+			"{x\u{a0}+ 2",
+			&[
+				("{", NameBrace),
+				("x", Unresolved),
+				("\u{a0}", Unrecognized),
+				("+", Additive),
+				("2", Constant)
+			]
+		),
+		// A missing name.
+		(
+			"{ }D6",
+			&[
+				("{", NameBrace),
+				("}", NameBrace),
+				("D", DiceOperator),
+				("6", Face)
+			]
+		),
+		// A broken name that becomes the first formal parameter, so that the
+		// function is parsed again.
+		(
+			"{x, {y}: {x}",
+			&[
+				("{", NameBrace),
+				("x", ParameterDeclaration),
+				(",", Separator),
+				("{", NameBrace),
+				("y", ParameterDeclaration),
+				("}", NameBrace),
+				(":", Separator),
+				("{", NameBrace),
+				("x", Unresolved),
+				("}", NameBrace)
+			]
+		),
+		// Bare words, read as names: as a variable, as the first formal
+		// parameter, and as a later one.
+		(
+			"{y} + x",
+			&[
+				("{", NameBrace),
+				("y", Unresolved),
+				("}", NameBrace),
+				("+", Additive),
+				("x", Unrecognized)
+			]
+		),
+		(
+			"x, y: 1",
+			&[
+				("x", Unrecognized),
+				(",", Separator),
+				("y", Unrecognized),
+				(":", Separator),
+				("1", Constant)
+			]
+		),
+		(
+			"{x}, y: 1",
+			&[
+				("{", NameBrace),
+				("x", ParameterDeclaration),
+				("}", NameBrace),
+				(",", Separator),
+				("y", Unrecognized),
+				(":", Separator),
+				("1", Constant)
+			]
+		),
+		// Retracted commas of formal parameters.
+		(
+			"{x}, , {y}: 1",
+			&[
+				("{", NameBrace),
+				("x", ParameterDeclaration),
+				("}", NameBrace),
+				(",", Unrecognized),
+				(",", Separator),
+				("{", NameBrace),
+				("y", ParameterDeclaration),
+				("}", NameBrace),
+				(":", Separator),
+				("1", Constant)
+			]
+		),
+		// Formal parameters without their `:`.
+		(
+			"{x}, {y}",
+			&[
+				("{", NameBrace),
+				("x", ParameterDeclaration),
+				("}", NameBrace),
+				(",", Separator),
+				("{", NameBrace),
+				("y", ParameterDeclaration),
+				("}", NameBrace)
+			]
+		),
+		// A misnamed call, a lone argument, unwrapped or kept, a trailing
+		// comma, and a missing comma.
+		(
+			"max(1, 2)",
+			&[
+				("max", Unrecognized),
+				("(", Parenthesis),
+				("1", Constant),
+				(",", Separator),
+				("2", Constant),
+				(")", Parenthesis)
+			]
+		),
+		(
+			"highest(1 + 2) * 3",
+			&[
+				("highest", Call),
+				("(", Parenthesis),
+				("1", Constant),
+				("+", Additive),
+				("2", Constant),
+				(")", Parenthesis),
+				("*", Multiplicative),
+				("3", Constant)
+			]
+		),
+		(
+			"highest(4D6)",
+			&[
+				("highest", Call),
+				("(", Parenthesis),
+				("4", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				(")", Parenthesis)
+			]
+		),
+		(
+			"highest(1, 2,)",
+			&[
+				("highest", Call),
+				("(", Parenthesis),
+				("1", Constant),
+				(",", Separator),
+				("2", Constant),
+				(",", Unrecognized),
+				(")", Parenthesis)
+			]
+		),
+		(
+			"highest(1 2)",
+			&[
+				("highest", Call),
+				("(", Parenthesis),
+				("1", Constant),
+				("2", Constant),
+				(")", Parenthesis)
+			]
+		),
+		// Ungrouped calls, as faces, as a dice count, and as the count of a
+		// drop clause.
+		(
+			"3Dhighest(1, 2)",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("highest", Call),
+				("(", Parenthesis),
+				("1", Constant),
+				(",", Separator),
+				("2", Constant),
+				(")", Parenthesis)
+			]
+		),
+		(
+			"highest(1, 2)D6",
+			&[
+				("highest", Call),
+				("(", Parenthesis),
+				("1", Constant),
+				(",", Separator),
+				("2", Constant),
+				(")", Parenthesis),
+				("D", DiceOperator),
+				("6", Face)
+			]
+		),
+		(
+			"4D6 drop lowest lowest({x}, 2)",
+			&[
+				("4", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("drop", Selection),
+				("lowest", Direction),
+				("lowest", Call),
+				("(", Parenthesis),
+				("{", NameBrace),
+				("x", Unresolved),
+				("}", NameBrace),
+				(",", Separator),
+				("2", Constant),
+				(")", Parenthesis)
+			]
+		),
+		// Misplaced clauses: a drop, whose `d` is read again, and a reroll.
+		(
+			"3 drop lowest",
+			&[("3", Constant), ("drop", Selection), ("lowest", Direction)]
+		),
+		(
+			"3 reroll = 1",
+			&[
+				("3", Constant),
+				("reroll", Reroll),
+				("=", Predicate),
+				("1", Face)
+			]
+		),
+		// Incomplete clauses: a missing direction, predicate, range
+		// operator, range end, and `times`.
+		(
+			"3D6 drop",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("drop", Selection)
+			]
+		),
+		(
+			"3D6 reroll",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("reroll", Reroll)
+			]
+		),
+		(
+			"3D6 reroll in 1 3",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("reroll", Reroll),
+				("in", Predicate),
+				("1", Face),
+				("3", Face)
+			]
+		),
+		(
+			"3D6 explode in 5..",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("explode", Explode),
+				("in", Predicate),
+				("5", Face),
+				("..", RangeOperator)
+			]
+		),
+		(
+			"3D6 reroll = 1 unlimited",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("reroll", Reroll),
+				("=", Predicate),
+				("1", Face),
+				("unlimited", Limit)
+			]
+		),
+		// Unclosed lists, of custom faces and of a predicate, and a missing
+		// first face.
+		(
+			"3D[",
+			&[("3", Constant), ("D", DiceOperator), ("[", FacesBracket)]
+		),
+		(
+			"3D6 reroll in [1, 2",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("reroll", Reroll),
+				("in", Predicate),
+				("[", ListBracket),
+				("1", Face),
+				(",", Separator),
+				("2", Face)
+			]
+		),
+		// Unfixable failures, after which nothing is recognized, but what was
+		// read before them is.
+		(
+			"3D[1,",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("[", FacesBracket),
+				("1", Face),
+				(",", Unrecognized)
+			]
+		),
+		(
+			"3D6 $ 2",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("$", Unrecognized),
+				("2", Unrecognized)
+			]
+		),
+		// Trailing input, and stray whitespace.
+		(
+			"3D6 + 1 2",
+			&[
+				("3", Constant),
+				("D", DiceOperator),
+				("6", Face),
+				("+", Additive),
+				("1", Constant),
+				("2", Unrecognized)
+			]
+		),
+		(
+			"1\u{a0}+ 2",
+			&[
+				("1", Constant),
+				("\u{a0}", Unrecognized),
+				("+", Additive),
+				("2", Constant)
+			]
+		),
+		// A negation whose operand is missing, or is a bare word.
+		(
+			"1 + - ",
+			&[("1", Constant), ("+", Additive), ("-", Negation)]
+		),
+		("- x", &[("-", Negation), ("x", Unrecognized)])
+	];
+	for &(source, expected) in cases
+	{
+		let tokens = classify(source);
+		let actual = tokens
+			.iter()
+			.map(|token| {
+				(&source[token.span.start..token.span.end], token.role)
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(actual, expected, "{:?}", source);
+	}
+}
+
+/// Ensure that classification of every input of the [corpus](corpus) is
+/// [total](check_classification). The corpus is large, so the test is ignored
+/// by default; `just stress` runs it.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_classified_corpus()
+{
+	for input in corpus()
+	{
+		if let Err(e) = check_classification(input)
+		{
+			panic!("{}", e);
+		}
 	}
 }

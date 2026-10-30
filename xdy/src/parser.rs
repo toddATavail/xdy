@@ -156,11 +156,11 @@ mod errors;
 pub use combinators::*;
 pub(crate) use engine::{
 	FailureSite, LoneArgument, Operand, PLACEHOLDER_OPERAND, PredicatedKind,
-	Recovery, Repair, Silent, Site, TokenSink
+	Recovery, Repair, Silent, Site, Strict, TokenSink
 };
 #[cfg(test)]
 pub(crate) use engine::{
-	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, Strict, steps
+	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, steps
 };
 pub use errors::*;
 
@@ -228,8 +228,8 @@ impl Parser
 	/// With a policy that repairs nothing, the result is exactly that of
 	/// [`parse`](Parser::parse).
 	///
-	/// The parse reports every token that it reads to a [sink](TokenSink),
-	/// in source order.
+	/// The parse reports every token of the source that it reads to a
+	/// [sink](TokenSink), in source order, but none that a repair supplies.
 	///
 	/// # Type parameters
 	/// - `'src`: The lifetime of the source text.

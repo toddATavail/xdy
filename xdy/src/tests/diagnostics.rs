@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{
 	Parser, SourceSpan,
+	classify::classify,
 	diagnostics::{self, DiagnoseResult, DiagnosticKind, Edit},
 	support::{on_small_stack, read_error_test_cases}
 };
@@ -2074,6 +2075,53 @@ fn test_diagnose_is_linear()
 		assert!(
 			sizes[1] <= (SCALE + 1) * sizes[0],
 			"{} produced {} bytes, then {} for {} times the input",
+			name,
+			sizes[0],
+			sizes[1],
+			SCALE
+		);
+		assert!(
+			times[1] <= TIME_SCALE * times[0].max(TIME_FLOOR),
+			"{} took {:?}, then {:?} for {} times the input",
+			name,
+			times[0],
+			times[1],
+			SCALE
+		);
+	}
+}
+
+/// Ensure that [classification](classify) takes time and produces tokens linear
+/// in the length of the input, for the same families of inputs as
+/// [`test_diagnose_is_linear`], since classification of a malformed source
+/// recovers with the doctor's repairs, and by the same measures. It is ignored
+/// by default, and run alone by `just stress`, for the same reasons.
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_classify_is_linear()
+{
+	let families = FAMILIES
+		.iter()
+		.map(|family| (family.name, family.source))
+		.chain(DIAGNOSE_FAMILIES.iter().copied());
+	for (name, source) in families
+	{
+		let sources = [WIDTH, SCALE * WIDTH].map(source);
+		let mut times = [Duration::MAX; 2];
+		let mut sizes = [0; 2];
+		for _ in 0..RUNS
+		{
+			for (i, source) in sources.iter().enumerate()
+			{
+				let start = Instant::now();
+				let tokens = classify(source);
+				times[i] = times[i].min(start.elapsed());
+				sizes[i] = tokens.len();
+			}
+		}
+		assert!(
+			sizes[1] <= (SCALE + 1) * sizes[0],
+			"{} produced {} tokens, then {} for {} times the input",
 			name,
 			sizes[0],
 			sizes[1],

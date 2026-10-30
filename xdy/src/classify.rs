@@ -15,8 +15,17 @@
 //! Whitespace that may separate tokens, i.e., spaces, horizontal tabs, line
 //! feeds, and carriage returns, belongs to no token. Every other byte of the
 //! source belongs to exactly one, if only as [`Role::Unrecognized`].
+//!
+//! [`classify`] is the entry point. It is total: it classifies any text, even
+//! malformed or unfinished text, such as an editor's buffer mid-keystroke, and
+//! it derives every token from the parser itself, so that it never disagrees
+//! with the language.
 
-use crate::span::SourceSpan;
+use crate::{
+	Parser, diagnostics,
+	parser::{Strict, is_token_space},
+	span::SourceSpan
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                   Roles.                                   //
@@ -251,4 +260,186 @@ pub struct Token
 	/// Both delimiters of a pair have the same depth. `None` for every other
 	/// role, including [braces](Role::NameBrace), which never nest.
 	pub depth: Option<usize>
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                              Classification.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// Classify the tokens of an expression's source text.
+///
+/// The parser reports each token as it reads it. If the source parses cleanly,
+/// the classification is exactly the tokens of the parse. Otherwise, the
+/// parser reads the source in the recovery mode of the
+/// [doctor](diagnostics::diagnose), which repairs each failure that it can
+/// fix as though the source had been edited by the fix, e.g., as though a
+/// missing `)` were present, and parses on. A token that a repair supplies is
+/// not in the source, so it is not classified. Every region of the source that
+/// the parse could not make sense of is [unrecognized](Role::Unrecognized):
+/// text that a repair discards, such as a closing delimiter that nothing
+/// opened, or input after a complete expression; text that a repair reads as
+/// something else, such as a name without its braces; and everything after a
+/// failure that the doctor cannot fix. Each run of such text between
+/// whitespace that may separate tokens is a token of its own.
+///
+/// # Parameters
+/// - `source`: The source text: the whole of an expression, which a host that
+///   embeds expressions has already delimited.
+///
+/// # Returns
+/// The tokens, in source order, which do not overlap, and which cover every
+/// byte of the source but whitespace between tokens and the whitespace that
+/// pads a name within its braces.
+///
+/// # Performance
+/// Classification parses the source at most twice, cleanly and then
+/// recovering, and neither compiles nor optimizes. It takes time linear in the
+/// length of the source, and consumes no more of the machine stack for deeply
+/// nested input than for shallow input, so it may run on every keystroke.
+///
+/// # Examples
+/// ```rust
+/// use xdy::classify::{Role, classify};
+///
+/// let source = "3D6 + )";
+/// let roles = classify(source)
+///     .iter()
+///     .map(|token| (&source[token.span.start..token.span.end], token.role))
+///     .collect::<Vec<_>>();
+/// assert_eq!(
+///     roles,
+///     [
+///         ("3", Role::Constant),
+///         ("D", Role::DiceOperator),
+///         ("6", Role::Face),
+///         ("+", Role::Additive),
+///         (")", Role::Unrecognized)
+///     ]
+/// );
+/// ```
+pub fn classify(source: &str) -> Vec<Token>
+{
+	let mut tokens = Vec::new();
+	if Parser::parse_recovering(source, &mut Strict, &mut tokens).is_ok()
+	{
+		return tokens;
+	}
+	tokens.clear();
+	diagnostics::recover(source, &mut tokens);
+	fill(source, tokens)
+}
+
+/// Fill the gaps between the tokens that a recovering parse reported with
+/// [unrecognized](Role::Unrecognized) tokens, one for each run of text between
+/// whitespace that may separate tokens. Between a `{` and the identifier after
+/// it, or between an identifier and the `}` after it, any whitespace pads the
+/// name.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `parsed`: The tokens that the parse reported, in source order.
+///
+/// # Returns
+/// The tokens, gaps filled.
+///
+/// # Panics
+/// In debug builds only, if a parsed token is empty, out of order, overlaps
+/// another, or splits a character, which the engine must never report. In
+/// release builds, such a token is dropped instead.
+fn fill(source: &str, parsed: Vec<Token>) -> Vec<Token>
+{
+	let mut tokens = Vec::with_capacity(parsed.len() + 1);
+	let mut end = 0;
+	let mut opened = false;
+	for token in parsed
+	{
+		let SourceSpan {
+			start,
+			end: token_end
+		} = token.span;
+		if start < end
+			|| token_end <= start
+			|| !source.is_char_boundary(start)
+			|| !source.is_char_boundary(token_end)
+		{
+			debug_assert!(
+				false,
+				"token {:?} is empty, out of order, or not whole in {:?}",
+				token, source
+			);
+			continue;
+		}
+		let brace =
+			|b| token.role == Role::NameBrace && source.as_bytes()[start] == b;
+		unrecognized(source, end, start, opened || brace(b'}'), &mut tokens);
+		opened = brace(b'{');
+		tokens.push(token);
+		end = token_end;
+	}
+	unrecognized(source, end, source.len(), false, &mut tokens);
+	tokens
+}
+
+/// Classify each run of text within a gap between tokens, between whitespace
+/// that may separate tokens, as [unrecognized](Role::Unrecognized).
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `start`: The byte offset of the start of the gap.
+/// - `end`: The byte offset of the end of the gap.
+/// - `padding`: Whether the gap pads a name within its braces, where any
+///   whitespace may separate the braces from the identifier.
+/// - `tokens`: The tokens, to which the unrecognized tokens are appended.
+fn unrecognized(
+	source: &str,
+	start: usize,
+	end: usize,
+	padding: bool,
+	tokens: &mut Vec<Token>
+)
+{
+	let space = |c: char| {
+		if padding
+		{
+			c.is_whitespace()
+		}
+		else
+		{
+			is_token_space(c)
+		}
+	};
+	let mut run = None;
+	for (at, c) in source[start..end].char_indices()
+	{
+		let at = start + at;
+		match (space(c), run)
+		{
+			(true, Some(run_start)) =>
+			{
+				tokens.push(Token {
+					span: SourceSpan {
+						start: run_start,
+						end: at
+					},
+					role: Role::Unrecognized,
+					depth: None
+				});
+				run = None;
+			},
+			(false, None) => run = Some(at),
+			_ =>
+			{}
+		}
+	}
+	if let Some(run_start) = run
+	{
+		tokens.push(Token {
+			span: SourceSpan {
+				start: run_start,
+				end
+			},
+			role: Role::Unrecognized,
+			depth: None
+		});
+	}
 }

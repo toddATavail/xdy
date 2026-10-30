@@ -1653,7 +1653,8 @@ pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 ///     X --> E(["the error of the failure"])
 /// ```
 ///
-/// The engine reports every token that it reads to a [sink](TokenSink).
+/// The engine reports every token of the source that it reads to a
+/// [sink](TokenSink), but none that a repair supplies.
 ///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
@@ -2922,6 +2923,7 @@ fn resume_primary_call<'src, R: Recovery<'src>, S: TokenSink>(
 		Ok(count) => count,
 		Err(e) => return fail(e)
 	};
+	rec.report_before(after, Role::DiceOperator);
 	rec.operator = Some(skip_whitespace(rest));
 	let faces = skip_whitespace(after);
 	call_with(
@@ -4275,7 +4277,12 @@ fn read_values<'src, R: Recovery<'src>, S: TokenSink>(
 				opener,
 				closer: ']'
 			};
-			rec.repair(site, e, stack)?
+			// The supplied `]` is not in the source, so is not reported, but
+			// the values were read, even if the parse fails.
+			let repaired = rec.repair(site, e, stack);
+			let end = *repaired.as_ref().unwrap_or(&after);
+			rec.report_literals(input, end, Role::ListBracket);
+			repaired?
 		}
 	};
 	Ok((rest, values))
@@ -4957,7 +4964,12 @@ fn recover_separator<'src, R: Recovery<'src>, S: TokenSink>(
 		},
 		// The supplied `)` ends the call at the failure.
 		(Ok((Repair::Fix, at)), _) => finish_call(*call, at),
-		(Ok((repair, at)), _) => unwrap_call(*call, repair == Repair::Keep, at)
+		(Ok((repair, at)), _) =>
+		{
+			// The `)` of the call is in the source, and still closes its `(`.
+			rec.report_before(at.take_from(1), Role::Parenthesis);
+			unwrap_call(*call, repair == Repair::Keep, at)
+		}
 	}
 }
 
@@ -5369,9 +5381,13 @@ impl<'src> Recovery<'src> for Strict
 /// frame then abandons is [retracted](Self::retract), so that the tokens of a
 /// clean parse are exactly those of the source as parsed.
 ///
-/// # Notes
-/// The leaves that only a repair reads, and the retractions where a repair
-/// parses a goal or the function again, are not yet reported.
+/// While recovering, the engine reports only the tokens of the source: never
+/// one that a [repair](Repair) supplied, nor source that a repair discarded,
+/// or read as something else, such as a name without its braces. Where a
+/// repair parses a goal or the function again, the engine retracts the tokens
+/// of the attempt that failed, and reports them again as it reads them again.
+/// Where the policy declines a repair, the tokens read before the failure
+/// remain.
 pub(crate) trait TokenSink
 {
 	/// Whether the sink receives tokens at all. Only [`Silent`], the sink of
@@ -6190,21 +6206,50 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 	/// Report a braced name to the sink, unless the sink is [`Silent`]: its
 	/// braces, and its identifier, exactly the span of the name, so that any
 	/// whitespace that pads the identifier within the braces belongs to no
-	/// token.
+	/// token. A repair may have supplied a part of the name, which is not in
+	/// the source, and so is not reported: the identifier, whose span is then
+	/// empty, or the `}`. A name that a repair read without its braces, as
+	/// though the source enclosed it in them, is not reported at all, since
+	/// the source has no braced name there.
 	///
 	/// # Parameters
-	/// - `braced`: The span of the braced name, from its `{` through its `}`.
+	/// - `braced`: The span of the braced name, from its `{` through its `}`,
+	///   or through the end of the identifier if the `}` was supplied; or just
+	///   the identifier, if a repair read it without its braces.
 	/// - `name`: The span of the identifier.
 	/// - `role`: The role of the identifier.
 	#[inline(always)]
 	fn report_name(&mut self, braced: SourceSpan, name: SourceSpan, role: Role)
 	{
-		if S::ENABLED
+		if !S::ENABLED || self.byte_at(braced.start) != Some(b'{')
 		{
-			self.report(braced.start, braced.start + 1, Role::NameBrace);
-			self.report(name.start, name.end, role);
-			self.report(braced.end - 1, braced.end, Role::NameBrace);
+			return;
 		}
+		self.report(braced.start, braced.start + 1, Role::NameBrace);
+		if name.start < name.end
+		{
+			self.report(name.start, name.end, role);
+		}
+		let closer = braced.end - 1;
+		if closer > braced.start
+			&& closer >= name.end
+			&& self.byte_at(closer) == Some(b'}')
+		{
+			self.report(closer, braced.end, Role::NameBrace);
+		}
+	}
+
+	/// Answer the byte of the source at an offset.
+	///
+	/// # Parameters
+	/// - `offset`: The byte offset.
+	///
+	/// # Returns
+	/// The byte, or `None` if the offset lies outside of the input of the run.
+	fn byte_at(&self, offset: usize) -> Option<u8>
+	{
+		let index = offset.checked_sub(self.root.location_offset())?;
+		self.root.fragment().as_bytes().get(index).copied()
 	}
 
 	/// Report a bracketed list of literals to the sink, unless the sink is
@@ -6439,6 +6484,9 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 				if end > at
 					&& skip_whitespace(input).location_offset() == at =>
 			{
+				// The discarded source begins the goal, so it is the goal's
+				// failed attempt that is retracted.
+				self.retract(at);
 				let input =
 					skip_whitespace(skip_whitespace(input).take_from(end - at));
 				// Formal parameters may follow the discarded source at the
@@ -6454,6 +6502,9 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 			},
 			_ => return self.stop(outcome)
 		}
+		// The engine parses the goal again, so the tokens of the failed
+		// attempt are read again.
+		self.retract(input.location_offset());
 		stack.truncate(anchor + 1);
 		self.calls.truncate(anchor + 1);
 		Step::Call(goal, input)
@@ -6474,6 +6525,7 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 		stack: &mut Stack<'src>
 	) -> Step<'src>
 	{
+		self.retract(input.location_offset());
 		stack.clear();
 		self.calls.clear();
 		self.barriers.clear();
@@ -6720,14 +6772,17 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 	) -> Option<(Span<'src>, Parameter<'src>)>
 	{
 		let start = input.location_offset();
-		let (name, end) = match self.overlay?
+		// The name ends before any whitespace before the break, but the input
+		// after it begins at the break.
+		let (name, name_end, end) = match self.overlay?
 		{
-			Overlay::Variable { at, end } if at == start => (start, end),
+			Overlay::Variable { at, end } if at == start => (start, end, end),
 			Overlay::Brace { opener, end } if opener == start =>
 			{
-				// Skip the `{`, and the whitespace before the name.
-				let after = &input.fragment()[1..end - start];
-				(end - after.trim_start().len(), end)
+				// Skip the `{`, and the whitespace around the name.
+				let name = input.fragment()[1..end - start].trim_start();
+				let name_start = end - name.len();
+				(name_start, name_start + name.trim_end().len(), end)
 			},
 			_ => return None
 		};
@@ -6736,9 +6791,12 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 			input.take_from(end - start),
 			Parameter {
 				name: canonical_name(
-					&input.fragment()[name - start..end - start]
+					&input.fragment()[name - start..name_end - start]
 				),
-				span: SourceSpan { start: name, end }
+				span: SourceSpan {
+					start: name,
+					end: name_end
+				}
 			}
 		))
 	}
@@ -6857,10 +6915,15 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 					&& at == start + 1
 					&& input.fragment().starts_with('-') =>
 			{
+				// The sign is in the source, and begins the literal.
+				self.report(start, at, Role::Face);
 				(input.take_from(1), at, -value)
 			},
 			Overlay::Reread { at, operator } if at == start =>
 			{
+				// The engine reads the source again from the dice operator,
+				// which it already reported as such.
+				self.retract(operator.location_offset());
 				(operator, at, PLACEHOLDER_FACES)
 			},
 			_ => return None
@@ -6904,6 +6967,9 @@ impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 			return None;
 		}
 		self.overlay = None;
+		// The sign is in the source, and is negation.
+		let start = input.location_offset();
+		self.report(start, start + 1, Role::Negation);
 		Some((
 			rest,
 			Expression::Constant(Constant {
@@ -7378,11 +7444,13 @@ fn recover_variable<'src, R: Recovery<'src>, S: TokenSink>(
 							Some(Overlay::Brace { opener: start, end });
 						rec.restart = Some(input);
 					}
-					let written =
-						&input.fragment()[name_span.start - start..end - start];
+					// The name ends before any whitespace before the break.
+					let written = input.fragment()
+						[name_span.start - start..end - start]
+						.trim_end();
 					let name_span = SourceSpan {
 						start: name_span.start,
-						end
+						end: name_span.start + written.len()
 					};
 					(rest, canonical_name(written), name_span)
 				}
@@ -7437,10 +7505,16 @@ fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 		Err(e) =>
 		{
 			let site = Site::FaceValue { opener };
-			(
-				rec.repair(site, within(cut_error(e)), stack)?,
-				PLACEHOLDER_FACE
-			)
+			match rec.repair(site, within(cut_error(e)), stack)
+			{
+				Ok(at) => (at, PLACEHOLDER_FACE),
+				Err(e) =>
+				{
+					// The `[` was read, even though the parse fails.
+					rec.report_literals(input, after, Role::FacesBracket);
+					return Err(e);
+				}
+			}
 		}
 	};
 	let (after, rest) =
@@ -7463,9 +7537,21 @@ fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 				opener,
 				closer: ']'
 			};
-			rec.repair(site, within(e), stack)?
+			match rec.repair(site, within(e), stack)
+			{
+				Ok(rest) => rest,
+				Err(e) =>
+				{
+					// The faces were read, even though the parse fails.
+					rec.report_literals(input, after, Role::FacesBracket);
+					return Err(e);
+				}
+			}
 		}
 	};
+	// The supplied first face or `]` is not in the source, so is not
+	// reported.
+	rec.report_literals(input, rest, Role::FacesBracket);
 	Ok((rest, faces))
 }
 
@@ -7491,31 +7577,38 @@ fn recover_parameters<'src, R: Recovery<'src>, S: TokenSink>(
 ) -> IResult<Span<'src>, Option<Vec<Parameter<'src>>>, ParseError<'src>>
 {
 	let comma = || preceded(multispace0, char(','));
-	let name = || preceded(multispace0, parameter);
-	let formal = |name: Span<'src>| Parameter {
-		name: canonical_name(name.fragment()),
-		span: SourceSpan {
-			start: name.location_offset(),
-			end: name.location_offset() + name.fragment().len()
-		}
-	};
 	let (mut rest, mut parameters) = match rec.take_parameter(input)
 	{
 		Some((rest, first)) =>
 		{
+			// The `{` of an overlaid braced name is in the source, but its
+			// `}` is not; an overlaid variable has no braces at all.
+			let braced = SourceSpan {
+				start: input.location_offset(),
+				end: first.span.end
+			};
+			rec.report_name(braced, first.span, Role::ParameterDeclaration);
 			// Continue the list after the overlaid parameter, as
 			// `separated_list0` would.
-			let (rest, names) =
-				many0(preceded(comma(), name())).parse_complete(rest)?;
 			let mut parameters = vec![first];
-			parameters.extend(names.into_iter().map(formal));
+			let rest = read_parameters(rest, &mut parameters, rec)?;
 			(rest, parameters)
 		},
 		None =>
 		{
-			let (rest, names) =
-				separated_list0(comma(), name()).parse_complete(input)?;
-			(rest, names.into_iter().map(formal).collect::<Vec<_>>())
+			// As `separated_list0`.
+			let mut parameters = Vec::new();
+			let rest = match read_parameter(input)?
+			{
+				Some((rest, first)) =>
+				{
+					report_parameter(input, rest, &first, rec);
+					parameters.push(first);
+					read_parameters(rest, &mut parameters, rec)?
+				},
+				None => input
+			};
+			(rest, parameters)
 		}
 	};
 	loop
@@ -7584,13 +7677,18 @@ fn recover_parameters<'src, R: Recovery<'src>, S: TokenSink>(
 				},
 				_ => None
 			})?;
+		// The comma is in the source, unless the repair retracted it. A
+		// parameter that the repair supplied, or read from a bare word, is
+		// not reported, since the source has no braced name there.
+		if supplied.is_some()
+		{
+			let (after, _) = comma().parse_complete(rest)?;
+			rec.report_before(after, Role::Separator);
+		}
 		parameters.extend(supplied);
 		// Continue the list after the supplied parameter, or the retracted
 		// comma, as `separated_list0` would.
-		let (after, names) =
-			many0(preceded(comma(), name())).parse_complete(at)?;
-		parameters.extend(names.into_iter().map(formal));
-		rest = after;
+		rest = read_parameters(at, &mut parameters, rec)?;
 	}
 	if parameters.is_empty()
 	{
@@ -7601,14 +7699,114 @@ fn recover_parameters<'src, R: Recovery<'src>, S: TokenSink>(
 			.parse_complete(rest);
 	let rest = match colon
 	{
-		Ok((rest, _)) => rest,
+		Ok((rest, _)) =>
+		{
+			rec.report_before(rest, Role::Separator);
+			rest
+		},
 		// A lone braced name without a `:` after it begins the body, as in
 		// `parameters`. An overlaid parameter is never lone, since the engine
 		// overlays one only where a `,` or `:` follows it.
-		Err(_) if parameters.len() == 1 => return Ok((input, None)),
+		Err(_) if parameters.len() == 1 =>
+		{
+			rec.retract(input.location_offset());
+			return Ok((input, None));
+		},
 		Err(e) => rec.repair(Site::ParameterColon, e, stack)?
 	};
 	Ok((rest, Some(parameters)))
+}
+
+/// Read a formal parameter, as `preceded(multispace0, parameter)`.
+///
+/// # Parameters
+/// - `input`: The input.
+///
+/// # Returns
+/// The remaining input and the parameter, which [`report_parameter`] reports,
+/// or `None` if no parameter begins at the input, after any whitespace.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the parameter fails unrecoverably.
+fn read_parameter<'src>(
+	input: Span<'src>
+) -> Result<Option<(Span<'src>, Parameter<'src>)>, nom::Err<ParseError<'src>>>
+{
+	match preceded(multispace0, parameter).parse_complete(input)
+	{
+		Ok((rest, name)) => Ok(Some((
+			rest,
+			Parameter {
+				name: canonical_name(name.fragment()),
+				span: span_of(name)
+			}
+		))),
+		Err(nom::Err::Error(_)) => Ok(None),
+		Err(e) => Err(e)
+	}
+}
+
+/// Report a formal parameter that [`read_parameter`] read: its braces and its
+/// identifier.
+///
+/// # Parameters
+/// - `input`: The input of the parameter, perhaps at whitespace.
+/// - `rest`: The input after the parameter.
+/// - `parameter`: The parameter.
+/// - `rec`: The recovery state.
+fn report_parameter<'src, R: Recovery<'src>, S: TokenSink>(
+	input: Span<'src>,
+	rest: Span<'src>,
+	parameter: &Parameter<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
+)
+{
+	let braced = SourceSpan {
+		start: skip_whitespace(input).location_offset(),
+		end: rest.location_offset()
+	};
+	rec.report_name(braced, parameter.span, Role::ParameterDeclaration);
+}
+
+/// Read the formal parameters that follow another, each after a `,`, as
+/// `many0(preceded(comma, preceded(multispace0, parameter)))`, and report each
+/// `,` and parameter.
+///
+/// # Parameters
+/// - `input`: The input after the parameter that they follow.
+/// - `parameters`: The parameters, to which those read are appended.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The remaining input.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if a parameter fails unrecoverably.
+fn read_parameters<'src, R: Recovery<'src>, S: TokenSink>(
+	mut input: Span<'src>,
+	parameters: &mut Vec<Parameter<'src>>,
+	rec: &mut Recoverer<'src, '_, R, S>
+) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
+{
+	loop
+	{
+		let comma: IResult<Span, char, ParseError> =
+			preceded(multispace0, char(',')).parse_complete(input);
+		let Ok((after, _)) = comma
+		else
+		{
+			return Ok(input);
+		};
+		let Some((rest, read)) = read_parameter(after)?
+		else
+		{
+			return Ok(input);
+		};
+		rec.report_before(after, Role::Separator);
+		report_parameter(after, rest, &read, rec);
+		parameters.push(read);
+		input = rest;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

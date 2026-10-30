@@ -69,7 +69,7 @@ use crate::{
 	ast::{Direction, Event, Expression, Function, Node, Walk},
 	parser::{
 		FailureSite, LoneArgument, NomErrorKind, Operand, PLACEHOLDER_OPERAND,
-		PredicatedKind, Recovery, Repair, Silent, Site, Span,
+		PredicatedKind, Recovery, Repair, Silent, Site, Span, TokenSink,
 		begins_misplaced_clause, begins_operand, begins_verb, canonical_name,
 		is_bare_word_continue, is_bare_word_start, is_token_space, token,
 		unclosed_name_ends
@@ -4474,6 +4474,44 @@ pub fn diagnose(source: &str) -> DiagnoseResult
 
 	// The parser reads the stray whitespace as spaces, and the doctor
 	// diagnoses it instead.
+	let (text, strays) = blank_strays(source);
+	let mut doctor = Doctor::new(&text, source, strays);
+	let recovered =
+		Parser::parse_recovering(&text, &mut doctor, &mut Silent).is_ok();
+	doctor.finish(recovered)
+}
+
+/// Parse a source in recovery mode, as [`diagnose`] does, with the doctor as
+/// the policy, so that the parse repairs every failure that the doctor can
+/// fix, and report every token that the parse reads to a sink. The parser
+/// reads the [stray whitespace](stray_whitespace) of the source as spaces of
+/// the same length, so every span is a span of the source.
+///
+/// # Type parameters
+/// - `S`: The type of the sink.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `sink`: The sink of the tokens that the parse reads.
+pub(crate) fn recover<S: TokenSink>(source: &str, sink: &mut S)
+{
+	let (text, strays) = blank_strays(source);
+	let mut doctor = Doctor::new(&text, source, strays);
+	// The tokens are the product; the diagnosis and the outcome are not.
+	let _ = Parser::parse_recovering(&text, &mut doctor, sink);
+}
+
+/// Replace the [stray whitespace](stray_whitespace) of a source with spaces of
+/// the same length, so that the parser reads it as whitespace between tokens.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Returns
+/// The source with its stray whitespace replaced, and the byte offsets of the
+/// start and end of each character of stray whitespace, in order.
+fn blank_strays(source: &str) -> (String, Vec<(usize, usize)>)
+{
 	let strays = stray_whitespace(source);
 	let mut text = source.as_bytes().to_vec();
 	for &(start, end) in &strays
@@ -4482,8 +4520,5 @@ pub fn diagnose(source: &str) -> DiagnoseResult
 	}
 	let text = String::from_utf8(text)
 		.expect("replacing whole characters with spaces preserves UTF-8");
-	let mut doctor = Doctor::new(&text, source, strays);
-	let recovered =
-		Parser::parse_recovering(&text, &mut doctor, &mut Silent).is_ok();
-	doctor.finish(recovered)
+	(text, strays)
 }

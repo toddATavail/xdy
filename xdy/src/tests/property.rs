@@ -54,7 +54,7 @@ use crate::{
 	Function as IrFunction, Instruction, Limit, Optimizer as _, Parser, Passes,
 	StandardOptimizer, Unobserved,
 	ast::Function,
-	classify::{Role, Token},
+	classify::{Role, Token, classify},
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
 	parser::{Strict, is_token_space},
@@ -103,6 +103,43 @@ fn test_program_tokens()
 			|| prop_oneof![program(), mutated_program()],
 			|source| check_tokens(&source)
 		)
+	});
+}
+
+/// Ensure that the [classification](check_classification) of every random
+/// [program](program), [mutation](Mutation) of one, string of
+/// [tokens](token_string), and arbitrary string is total, and exactly the
+/// tokens of the parse where the source parses.
+#[test]
+fn test_classified_sources()
+{
+	on_small_stack(|| {
+		check(
+			|| {
+				prop_oneof![
+					program(),
+					mutated_program(),
+					token_string(),
+					any::<String>()
+				]
+			},
+			|source| check_classification(&source)
+		)
+	});
+}
+
+/// Ensure that the [classification](check_classification) of every prefix of
+/// every random [program](program) is total, as an editor's buffer is
+/// classified while the program is typed.
+#[test]
+fn test_classified_prefixes()
+{
+	on_small_stack(|| {
+		check(program, |source| {
+			source
+				.char_indices()
+				.try_for_each(|(at, _)| check_classification(&source[..at]))
+		})
 	});
 }
 
@@ -546,6 +583,152 @@ fn check_tokens(source: &str) -> Result<(), TestCaseError>
 		&source[end..]
 	);
 	Ok(())
+}
+
+/// Check that the [classification](classify) of a source is total: its tokens
+/// are non-empty, in source order, and disjoint, each fits its
+/// [role](fits_role), and only [whitespace between tokens](is_token_space)
+/// lies between them, or any whitespace between the braces of a name and its
+/// identifier. If the source parses, they must be exactly the tokens that the
+/// parse reports.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Errors
+/// [`TestCaseError`] if a property fails.
+pub(super) fn check_classification(source: &str) -> Result<(), TestCaseError>
+{
+	let tokens = classify(source);
+	let mut parsed = Vec::<Token>::new();
+	if Parser::parse_recovering(source, &mut Strict, &mut parsed).is_ok()
+	{
+		prop_assert_eq!(
+			&tokens,
+			&parsed,
+			"classification is not the parse of {:?}",
+			source
+		);
+	}
+	let mut end = 0;
+	let mut opened = false;
+	for token in &tokens
+	{
+		let span = token.span;
+		prop_assert!(
+			end <= span.start && span.start < span.end,
+			"token {:?} is empty or out of order in {:?}",
+			token,
+			source
+		);
+		let gap = source.get(end..span.start);
+		let text = source.get(span.start..span.end);
+		let (Some(gap), Some(text)) = (gap, text)
+		else
+		{
+			return Err(TestCaseError::fail(format!(
+				"token {:?} splits a character of {:?}",
+				token, source
+			)));
+		};
+		let padding = opened || (token.role == Role::NameBrace && text == "}");
+		prop_assert!(
+			gap.chars().all(|c| {
+				if padding
+				{
+					c.is_whitespace()
+				}
+				else
+				{
+					is_token_space(c)
+				}
+			}),
+			"{:?} before token {:?} belongs to no token in {:?}",
+			gap,
+			token,
+			source
+		);
+		prop_assert!(
+			fits_role(text, token.role),
+			"{:?} is no {:?} in {:?}",
+			text,
+			token.role,
+			source
+		);
+		prop_assert_eq!(token.depth, None);
+		opened = token.role == Role::NameBrace && text == "{";
+		end = span.end;
+	}
+	prop_assert!(
+		source[end..].chars().all(is_token_space),
+		"{:?} after the last token belongs to no token in {:?}",
+		&source[end..],
+		source
+	);
+	Ok(())
+}
+
+/// Answer whether the text of a token could be a token of its role, by its
+/// spelling alone. A face may be a lone sign, whose digits a repair supplied.
+/// An identifier is any text without braces that neither
+/// begins nor ends with whitespace, and unrecognized text any text without
+/// whitespace between tokens.
+///
+/// # Parameters
+/// - `text`: The text of the token.
+/// - `role`: The role of the token.
+///
+/// # Returns
+/// `true` if the text fits the role, `false` otherwise.
+fn fits_role(text: &str, role: Role) -> bool
+{
+	let digits = |text: &str| {
+		!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+	};
+	match role
+	{
+		Role::Constant => digits(text),
+		// The sign of a face whose digits a repair supplied stands alone.
+		Role::Face =>
+		{
+			text == "-" || digits(text.strip_prefix('-').unwrap_or(text))
+		},
+		Role::DiceOperator => matches!(text, "d" | "D"),
+		Role::Selection => matches!(text, "drop" | "keep"),
+		Role::Reroll => text == "reroll",
+		Role::Explode => text == "explode",
+		Role::Direction | Role::Call => matches!(text, "lowest" | "highest"),
+		Role::Predicate => matches!(
+			text,
+			"=" | "!=" | "≠" | "<" | "<=" | "≤" | ">" | ">=" | "≥" | "in"
+		),
+		Role::RangeOperator => matches!(text, ".." | "..=" | ":"),
+		Role::Limit => matches!(text, "time" | "times" | "unlimited" | "∞"),
+		Role::Additive => matches!(text, "+" | "-"),
+		Role::Multiplicative => matches!(text, "*" | "×" | "/" | "÷" | "%"),
+		Role::Exponent => text == "^",
+		Role::Negation => text == "-",
+		Role::Bind => text == "@",
+		Role::Separator => matches!(text, "," | ":"),
+		Role::Parenthesis => matches!(text, "(" | ")"),
+		Role::RangeBracket | Role::FacesBracket | Role::ListBracket =>
+		{
+			matches!(text, "[" | "]")
+		},
+		Role::NameBrace => matches!(text, "{" | "}"),
+		Role::ParameterDeclaration
+		| Role::ParameterReference
+		| Role::BindingDeclaration
+		| Role::BindingReference
+		| Role::External
+		| Role::Unresolved =>
+		{
+			!text.contains(['{', '}'])
+				&& !text.starts_with(char::is_whitespace)
+				&& !text.ends_with(char::is_whitespace)
+		},
+		Role::Unrecognized => !text.contains(is_token_space)
+	}
 }
 
 /// Check the properties of every source: [`compile`] fails to parse just when
@@ -1345,6 +1528,22 @@ fn mutation() -> impl Strategy<Value = Mutation>
 			.prop_map(|(index, token)| Mutation::Replace(index, token)),
 		1 => any::<Index>().prop_map(Mutation::Truncate)
 	]
+}
+
+/// Answer a strategy that generates strings of up to 24 [tokens](TOKENS) of
+/// the corpus, each perhaps followed by a space.
+///
+/// # Returns
+/// The strategy.
+fn token_string() -> impl Strategy<Value = String>
+{
+	prop::collection::vec((select(TOKENS), select(&["", " "][..])), 0..=24)
+		.prop_map(|parts| {
+			parts
+				.into_iter()
+				.flat_map(|(token, space)| [token, space])
+				.collect()
+		})
 }
 
 /// Answer a strategy that generates [programs](program) with one to three

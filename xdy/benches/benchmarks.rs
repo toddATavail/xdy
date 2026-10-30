@@ -1,9 +1,10 @@
 //! # Benchmarks
 //!
 //! Herein are benchmarks for the dice expression pipeline: parsing,
-//! compilation and optimization, [`diagnose`], evaluation, bounds, and the
-//! estimation and building of distributions, including some whose weights
-//! need arbitrary precision.
+//! compilation and optimization, [`diagnose`], [`classify`], evaluation,
+//! bounds, and the
+//! estimation and building of distributions, including some whose weights need
+//! arbitrary precision.
 
 #[cfg(feature = "bench")]
 use std::time::Duration;
@@ -19,7 +20,9 @@ use rand::{SeedableRng, rngs::StdRng};
 
 #[cfg(feature = "bench")]
 use xdy::{
-	Budget, Evaluator, Parser, Passes, Unobserved, compile,
+	Budget, Evaluator, Parser, Passes, Unobserved,
+	classify::classify,
+	compile,
 	diagnostics::diagnose,
 	support::{
 		compile_valid, optimize, read_compilation_test_cases,
@@ -256,6 +259,75 @@ fn bench_failing_diagnose<M: Measurement>(g: &mut BenchmarkGroup<M>)
 	}
 }
 
+/// Benchmark [`classify`] on the [failing families](FAILURES) at each of the
+/// [sizes](FAILURE_SIZES), whose malformed members it classifies through the
+/// recovering parse, as [`diagnose`] diagnoses them.
+///
+/// # Parameters
+/// - `g`: The benchmark group to which the benchmarks will be added.
+#[cfg(feature = "bench")]
+fn bench_failing_classify<M: Measurement>(g: &mut BenchmarkGroup<M>)
+{
+	for failure in FAILURES
+	{
+		for &size in FAILURE_SIZES
+		{
+			let source = (failure.source)(size);
+			g.bench_with_input(
+				BenchmarkId::new(failure.name, size),
+				&source,
+				|b, source| b.iter(|| classify(source))
+			);
+		}
+	}
+}
+
+/// Expressions whose typing the [keystroke benchmark](bench_keystrokes)
+/// simulates, between them using most of the grammar.
+#[cfg(feature = "bench")]
+const TYPED: &[&str] = &[
+	"4D6 drop lowest 1 + 1D20 + {STR}",
+	"(1D20 + {STR} - 10) / 2 ^ 2 % 7 - -3",
+	"3D6 reroll in [1, 2] 2 times + {bonus}@(1D4 + 1) * {bonus}",
+	"{x}, {y}: highest({x}D6 explode = 6 unlimited times, {y}D[-1, 0, 1] + 2)"
+];
+
+/// Benchmark [`classify`] as an editor runs it on every keystroke, while an
+/// expression is [typed](TYPED) from start to end: one iteration classifies
+/// every prefix of the expression that ends at a character boundary, most of
+/// which are malformed, and the expression itself. Divide the time of an
+/// iteration by the number of characters of the expression for the cost per
+/// keystroke.
+///
+/// # Parameters
+/// - `g`: The benchmark group to which the benchmarks will be added.
+///
+/// # Panics
+/// If a typed expression fails to parse.
+#[cfg(feature = "bench")]
+fn bench_keystrokes<M: Measurement>(g: &mut BenchmarkGroup<M>)
+{
+	for &source in TYPED
+	{
+		assert!(Parser::parse(source).is_ok(), "{}", source);
+		let prefixes = source
+			.char_indices()
+			.map(|(at, _)| &source[..at])
+			.skip(1)
+			.chain([source])
+			.collect::<Vec<_>>();
+		let label = format!("{} keystrokes: {}", prefixes.len(), source);
+		g.bench_function(label, |b| {
+			b.iter(|| {
+				prefixes
+					.iter()
+					.map(|prefix| classify(prefix).len())
+					.sum::<usize>()
+			})
+		});
+	}
+}
+
 /// Benchmark the evaluation test cases.
 ///
 /// # Parameters
@@ -462,6 +534,15 @@ fn main()
 	group.measurement_time(Duration::from_secs(1));
 	group.sampling_mode(SamplingMode::Flat);
 	bench_failing_diagnose(&mut group);
+	group.finish();
+	let mut group = criterion.benchmark_group("failing classify");
+	group.measurement_time(Duration::from_secs(1));
+	group.sampling_mode(SamplingMode::Flat);
+	bench_failing_classify(&mut group);
+	group.finish();
+	let mut group = criterion.benchmark_group("keystrokes classify");
+	group.measurement_time(Duration::from_secs(1));
+	bench_keystrokes(&mut group);
 	group.finish();
 	let mut group = criterion.benchmark_group("evaluations");
 	group.measurement_time(Duration::from_secs(1));
