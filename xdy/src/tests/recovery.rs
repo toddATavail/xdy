@@ -22,8 +22,8 @@ use crate::{
 	parser::{
 		FailureSite, LoneArgument, Operand, PLACEHOLDER_FACE,
 		PLACEHOLDER_FACES, PLACEHOLDER_NAME, PLACEHOLDER_OPERAND,
-		PredicatedKind, Recovery, Repair, Site, bare_word, is_token_space,
-		steps, unclosed_name_ends
+		PredicatedKind, Recovery, Repair, Silent, Site, bare_word,
+		is_token_space, steps, unclosed_name_ends
 	}
 };
 
@@ -426,8 +426,9 @@ fn test_canonical_repairs()
 	]
 	{
 		let mut policy = Canonical::new(source);
-		let recovered = Parser::parse_recovering(source, &mut policy)
-			.unwrap_or_else(|e| panic!("{:?} failed: {}", source, e));
+		let recovered =
+			Parser::parse_recovering(source, &mut policy, &mut Silent)
+				.unwrap_or_else(|e| panic!("{:?} failed: {}", source, e));
 		let corrected = policy.corrected();
 		assert_eq!(corrected, expected, "source: {:?}", source);
 		let parsed = Parser::parse(&corrected).unwrap_or_else(|e| {
@@ -452,7 +453,7 @@ fn test_leading_comma_stops()
 {
 	let mut policy = Canonical::new(", 1");
 	assert_eq!(
-		Parser::parse_recovering(", 1", &mut policy),
+		Parser::parse_recovering(", 1", &mut policy, &mut Silent),
 		Parser::parse(", 1")
 	);
 	assert!(matches!(
@@ -507,7 +508,7 @@ fn recover<'src>(
 		decide,
 		sites: Vec::new()
 	};
-	let recovered = Parser::parse_recovering(source, &mut policy)
+	let recovered = Parser::parse_recovering(source, &mut policy, &mut Silent)
 		.ok()
 		.map(|f| f.to_string());
 	(recovered, policy.sites)
@@ -1223,7 +1224,8 @@ fn test_recovery_is_linear()
 			let source = (family.source)(width);
 			let mut policy = Canonical::new(&source);
 			let before = steps();
-			let recovered = Parser::parse_recovering(&source, &mut policy);
+			let recovered =
+				Parser::parse_recovering(&source, &mut policy, &mut Silent);
 			let taken = steps() - before;
 			assert!(recovered.is_ok(), "{} failed", family.name);
 			assert_eq!(

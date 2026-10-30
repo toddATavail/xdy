@@ -8,6 +8,7 @@
 mod assembler;
 mod ast;
 mod bounds;
+mod classify;
 mod compiler;
 mod corpus;
 mod diagnostics;

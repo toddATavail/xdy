@@ -60,6 +60,7 @@ use crate::{
 		Mod, Mul, Neg, Parameter, Predicate, Range, Reroll, StandardDice, Sub,
 		Variable
 	},
+	classify::{Role, Token},
 	span::{SourceSpan, Spanned}
 };
 
@@ -486,6 +487,19 @@ impl Level
 			Level::Multiplicative => Goal::Unary
 		}
 	}
+
+	/// Answer the role of the operators of the level.
+	///
+	/// # Returns
+	/// The role.
+	fn role(self) -> Role
+	{
+		match self
+		{
+			Level::Additive => Role::Additive,
+			Level::Multiplicative => Role::Multiplicative
+		}
+	}
 }
 
 /// The kind of a drop or keep clause.
@@ -639,6 +653,19 @@ impl PredicatedKind
 		{
 			PredicatedKind::Reroll => "reroll",
 			PredicatedKind::Explode => "explode"
+		}
+	}
+
+	/// Answer the role of the verb of a clause of this kind.
+	///
+	/// # Returns
+	/// [`Role::Reroll`] or [`Role::Explode`].
+	const fn role(self) -> Role
+	{
+		match self
+		{
+			PredicatedKind::Reroll => Role::Reroll,
+			PredicatedKind::Explode => Role::Explode
 		}
 	}
 
@@ -1075,6 +1102,35 @@ impl Frame<'_>
 			| Frame::StandardCount(_)
 			| Frame::CustomCount(_) => false
 		}
+	}
+
+	/// Answer where a frame that [catches](Disposition::Catch) a recoverable
+	/// error began the alternative that it abandons, from which the engine
+	/// [retracts](TokenSink::retract) the tokens that the alternative read.
+	///
+	/// # Returns
+	/// The byte offset of the input of the frame, if the frame catches, or
+	/// `None` otherwise.
+	fn catches_from(&self) -> Option<usize>
+	{
+		let from = match self
+		{
+			Frame::UnaryNegation(input)
+			| Frame::PrimaryRange(input)
+			| Frame::PrimaryDice(input)
+			| Frame::PrimaryGroup(input)
+			| Frame::DiceFaces { input, .. }
+			| Frame::DiceDrop { input, .. }
+			| Frame::DropExpression { input, .. }
+			| Frame::LimitCount { input, .. } => Some(input.location_offset()),
+			_ => None
+		};
+		debug_assert_eq!(
+			from.is_some(),
+			Disposition::of(self) == Disposition::Catch,
+			"every frame that catches, and only those, retracts"
+		);
+		from
 	}
 }
 
@@ -1550,7 +1606,11 @@ impl<'src> std::ops::Index<usize> for Stack<'src>
 #[cfg_attr(doc, aquamarine::aquamarine)]
 pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 {
-	drive(goal, input, &mut Recoverer::new(&mut Strict, input))
+	drive(
+		goal,
+		input,
+		&mut Recoverer::new(&mut Strict, &mut Silent, input)
+	)
 }
 
 /// Parse a [function](Goal::Function) at the specified input, without leading
@@ -1593,13 +1653,17 @@ pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 ///     X --> E(["the error of the failure"])
 /// ```
 ///
+/// The engine reports every token that it reads to a [sink](TokenSink).
+///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
 /// - `R`: The type of the policy.
+/// - `S`: The type of the sink.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
 /// - `policy`: The recovery policy.
+/// - `sink`: The sink of the tokens that the engine reads.
 ///
 /// # Returns
 /// The remaining input and the [function](Value::Function), in which every
@@ -1608,12 +1672,17 @@ pub(super) fn run(goal: Goal, input: Span<'_>) -> Outcome<'_>
 /// # Errors
 /// * [`Err`](nom::Err) if the policy declined to repair a failure.
 #[cfg_attr(doc, aquamarine::aquamarine)]
-pub(super) fn run_recovering<'src, R: Recovery<'src>>(
+pub(super) fn run_recovering<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
-	policy: &mut R
+	policy: &mut R,
+	sink: &mut S
 ) -> Outcome<'src>
 {
-	drive(Goal::Function, input, &mut Recoverer::new(policy, input))
+	drive(
+		Goal::Function,
+		input,
+		&mut Recoverer::new(policy, sink, input)
+	)
 }
 
 /// Drive the engine, as described by [`run`] and, when recovering, by
@@ -1623,6 +1692,8 @@ pub(super) fn run_recovering<'src, R: Recovery<'src>>(
 /// - `'src`: The lifetime of the source text being parsed.
 /// - `R`: The type of the recovery policy. For [`Strict`], every recovery hook
 ///   compiles away, so the run is exactly the ordinary one.
+/// - `S`: The type of the sink of tokens. For [`Silent`], every report compiles
+///   away.
 ///
 /// # Parameters
 /// - `goal`: The goal.
@@ -1634,10 +1705,10 @@ pub(super) fn run_recovering<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
-fn drive<'src, R: Recovery<'src>>(
+fn drive<'src, R: Recovery<'src>, S: TokenSink>(
 	goal: Goal,
 	input: Span<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Outcome<'src>
 {
 	let mut stack = Stack::new();
@@ -1699,11 +1770,11 @@ pub(crate) fn steps() -> usize { STEPS.with(std::cell::Cell::get) }
 ///
 /// # Returns
 /// The next step.
-fn start<'src, R: Recovery<'src>>(
+fn start<'src, R: Recovery<'src>, S: TokenSink>(
 	goal: Goal,
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match goal
@@ -1730,9 +1801,9 @@ fn start<'src, R: Recovery<'src>>(
 		{
 			call(stack, Frame::PrimaryRange(input), Goal::Range, input)
 		},
-		Goal::Group => start_group(input, stack),
+		Goal::Group => start_group(input, stack, rec),
 		Goal::Binding => start_binding(input, stack, rec),
-		Goal::Range => start_range(input, stack),
+		Goal::Range => start_range(input, stack, rec),
 		Goal::Dice => call(
 			stack,
 			Frame::DiceCount {
@@ -1761,10 +1832,22 @@ fn start<'src, R: Recovery<'src>>(
 		},
 		Goal::Atom => start_atom(input, false, stack, rec),
 		Goal::Faces => start_atom(input, true, stack, rec),
-		Goal::DropLowest => start_drop(input, ClauseKind::DropLowest, stack),
-		Goal::DropHighest => start_drop(input, ClauseKind::DropHighest, stack),
-		Goal::KeepLowest => start_drop(input, ClauseKind::KeepLowest, stack),
-		Goal::KeepHighest => start_drop(input, ClauseKind::KeepHighest, stack),
+		Goal::DropLowest =>
+		{
+			start_drop(input, ClauseKind::DropLowest, stack, rec)
+		},
+		Goal::DropHighest =>
+		{
+			start_drop(input, ClauseKind::DropHighest, stack, rec)
+		},
+		Goal::KeepLowest =>
+		{
+			start_drop(input, ClauseKind::KeepLowest, stack, rec)
+		},
+		Goal::KeepHighest =>
+		{
+			start_drop(input, ClauseKind::KeepHighest, stack, rec)
+		},
 		Goal::Reroll =>
 		{
 			start_predicated(PredicatedKind::Reroll, input, stack, rec)
@@ -1788,13 +1871,21 @@ fn start<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume<'src, R: Recovery<'src>>(
+fn resume<'src, R: Recovery<'src>, S: TokenSink>(
 	frame: Frame<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
+	// A catching frame abandons the alternative that failed recoverably, so
+	// retract every token that the alternative read.
+	if S::ENABLED
+		&& matches!(outcome, Err(nom::Err::Error(_)))
+		&& let Some(from) = frame.catches_from()
+	{
+		rec.retract(from);
+	}
 	match frame
 	{
 		Frame::FunctionBody { start, input, .. } =>
@@ -1806,7 +1897,7 @@ fn resume<'src, R: Recovery<'src>>(
 		{
 			Ok((rest, left)) =>
 			{
-				binary_continue(level, left.into_expression(), rest, stack)
+				binary_continue(level, left.into_expression(), rest, stack, rec)
 			},
 			Err(e) => Step::Return(Err(e))
 		},
@@ -1817,7 +1908,9 @@ fn resume<'src, R: Recovery<'src>>(
 		} =>
 		{
 			let left = stack.pop_payload().into_expression();
-			resume_binary_right(level, left, operator, input, outcome, stack)
+			resume_binary_right(
+				level, left, operator, input, outcome, stack, rec
+			)
 		},
 		Frame::UnaryNegation(input) =>
 		{
@@ -1828,7 +1921,7 @@ fn resume<'src, R: Recovery<'src>>(
 			let error = merged.then(|| stack.pop_payload().into_error());
 			resume_unary_exponent(input, error, outcome)
 		},
-		Frame::ExponentBase => resume_exponent_base(outcome, stack),
+		Frame::ExponentBase => resume_exponent_base(outcome, stack, rec),
 		Frame::ExponentPower(input) =>
 		{
 			let base = stack.pop_payload().into_expression();
@@ -1900,14 +1993,14 @@ fn resume<'src, R: Recovery<'src>>(
 		},
 		Frame::StandardCount(input) =>
 		{
-			resume_standard_count(input, outcome, stack)
+			resume_standard_count(input, outcome, stack, rec)
 		},
 		Frame::StandardFaces(input) =>
 		{
 			let count = stack.pop_payload().into_expression();
 			resume_standard_faces(count, input, outcome)
 		},
-		Frame::CustomCount(input) => resume_custom_count(input, outcome),
+		Frame::CustomCount(input) => resume_custom_count(input, outcome, rec),
 		Frame::DropExpression { kind, input } =>
 		{
 			let rest = stack.pop_payload().into_rest();
@@ -2212,17 +2305,24 @@ fn atom_error(input: Span<'_>, signed: bool) -> ParseError<'_>
 ///
 /// # Returns
 /// The next step.
-fn start_function<'src, R: Recovery<'src>>(
+fn start_function<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let start = input.location_offset();
 	let overlaid = rec.recovering() && rec.overlays_parameter(input);
 	let (rest, parameters) = match parameters.parse_complete(input)
 	{
-		Ok(parsed) if !overlaid => parsed,
+		Ok((rest, parameters)) if !overlaid =>
+		{
+			if let Some(parameters) = &parameters
+			{
+				report_parameters(input, parameters, rec);
+			}
+			(rest, parameters)
+		},
 		Err(e) if !rec.recovering() => return fail(e),
 		_ => match recover_parameters(input, stack, rec)
 		{
@@ -2242,6 +2342,58 @@ fn start_function<'src, R: Recovery<'src>>(
 		Goal::AddSub,
 		input
 	)
+}
+
+/// Report the formal parameters of a function, which [`parameters`] has just
+/// read, by scanning them again, so that no path of the parse changes: the
+/// braces and identifier of each, the `,` after each but the last, and the `:`
+/// after the last, all [separators](Role::Separator).
+///
+/// # Parameters
+/// - `input`: The input of the function.
+/// - `parameters`: The formal parameters.
+/// - `rec`: The recovery state.
+///
+/// # Panics
+/// If a parameter lacks a brace, which [`parameters`] never answers.
+fn report_parameters<'src, R: Recovery<'src>, S: TokenSink>(
+	input: Span<'src>,
+	parameters: &[Parameter<'src>],
+	rec: &mut Recoverer<'src, '_, R, S>
+)
+{
+	if !S::ENABLED
+	{
+		return;
+	}
+	let base = input.location_offset();
+	let source = *input.fragment();
+	let mut from = 0;
+	for parameter in parameters
+	{
+		let name = parameter.span;
+		// Only whitespace separates the identifier from its braces, and only
+		// token space separates the `}` from the `,` or `:`.
+		let opener = source[from..name.start - base]
+			.rfind('{')
+			.expect("a parameter has a `{`")
+			+ from;
+		let closer = source[name.end - base..]
+			.find('}')
+			.expect("a parameter has a `}`")
+			+ name.end
+			- base;
+		let after = &source[closer + 1..];
+		let separator = closer + 1 + after.len()
+			- after.trim_start_matches(is_token_space).len();
+		let braced = SourceSpan {
+			start: base + opener,
+			end: base + closer + 1
+		};
+		rec.report_name(braced, name, Role::ParameterDeclaration);
+		rec.report(base + separator, base + separator + 1, Role::Separator);
+		from = separator + 1;
+	}
 }
 
 /// Resume [`Goal::Function`] with the outcome of the body.
@@ -2290,14 +2442,16 @@ fn resume_function_body<'src>(
 /// - `left`: The fold of the operands so far.
 /// - `rest`: The input after the last operand.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn binary_continue<'src>(
+fn binary_continue<'src, R: Recovery<'src>, S: TokenSink>(
 	level: Level,
 	left: Expression<'src>,
 	rest: Span<'src>,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let operator: IResult<Span, char, ParseError> =
@@ -2306,6 +2460,7 @@ fn binary_continue<'src>(
 	{
 		Ok((after, operator)) =>
 		{
+			rec.report_read(rest, after, level.role());
 			let input = skip_whitespace(after);
 			call_with(
 				stack,
@@ -2335,16 +2490,18 @@ fn binary_continue<'src>(
 /// - `input`: The input of the right operand.
 /// - `outcome`: The outcome of the right operand.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn resume_binary_right<'src>(
+fn resume_binary_right<'src, R: Recovery<'src>, S: TokenSink>(
 	level: Level,
 	left: Expression<'src>,
 	operator: char,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match outcome
@@ -2377,7 +2534,8 @@ fn resume_binary_right<'src>(
 				level,
 				Expression::Arithmetic(arithmetic),
 				rest,
-				stack
+				stack,
+				rec
 			)
 		},
 		Err(e) => fail(cut_error(with_context(input, RIGHT_OPERAND_CONTEXT, e)))
@@ -2397,10 +2555,10 @@ fn resume_binary_right<'src>(
 ///
 /// # Returns
 /// The next step.
-fn start_unary<'src, R: Recovery<'src>>(
+fn start_unary<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match parse_negative_constant(input, rec)
@@ -2418,6 +2576,8 @@ fn start_unary<'src, R: Recovery<'src>>(
 	{
 		Ok((after, _)) =>
 		{
+			// A catching frame retracts the sign if the negation fails.
+			rec.report_read(input, after, Role::Negation);
 			let operand = skip_whitespace(after);
 			call(stack, Frame::UnaryNegation(input), Goal::Unary, operand)
 		},
@@ -2564,12 +2724,14 @@ fn resume_unary_exponent<'src>(
 /// # Parameters
 /// - `outcome`: The outcome of the base.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn resume_exponent_base<'src>(
+fn resume_exponent_base<'src, R: Recovery<'src>, S: TokenSink>(
 	outcome: Outcome<'src>,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, base) = match outcome
@@ -2583,6 +2745,7 @@ fn resume_exponent_base<'src>(
 	{
 		Ok((after, _)) =>
 		{
+			rec.report_read(rest, after, Role::Exponent);
 			let input = skip_whitespace(after);
 			call_with(
 				stack,
@@ -2672,11 +2835,11 @@ fn resume_exponent_power<'src>(
 ///
 /// # Returns
 /// The next step.
-fn resume_primary_range<'src, R: Recovery<'src>>(
+fn resume_primary_range<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &Recoverer<'src, '_, R>
+	rec: &Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match with_context_on_error(input, RANGE_CONTEXT, outcome)
@@ -2720,11 +2883,11 @@ fn resume_primary_range<'src, R: Recovery<'src>>(
 /// # Returns
 /// The next step. Where the repair made the call a dice count, the dice
 /// expression, as a [`Value::Dice`], stands for the primary expression.
-fn resume_primary_call<'src, R: Recovery<'src>>(
+fn resume_primary_call<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, call) = match outcome
@@ -2822,12 +2985,12 @@ fn resume_primary_dice<'src>(
 ///
 /// # Returns
 /// The next step.
-fn resume_primary_group<'src, R: Recovery<'src>>(
+fn resume_primary_group<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	error: ParseError<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let error = match with_context_on_error(input, GROUP_CONTEXT, outcome)
@@ -2881,13 +3044,13 @@ fn resume_primary_group<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn variable_or_binding<'src, R: Recovery<'src>>(
+fn variable_or_binding<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	rest: Span<'src>,
 	variable: Variable<'src>,
 	name_span: SourceSpan,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let at: IResult<Span, char, ParseError> =
@@ -2896,6 +3059,8 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 	{
 		Ok((after_at, _)) =>
 		{
+			rec.report_name(variable.span, name_span, Role::BindingDeclaration);
+			rec.report_before(after_at, Role::Bind);
 			let head = BindingHead {
 				start: variable.span.start,
 				name: variable.name,
@@ -2906,8 +3071,10 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 		},
 		Err(_) =>
 		{
+			// Name resolution will tell references apart.
+			rec.report_name(variable.span, name_span, Role::Unresolved);
 			succeed(rest, Value::Expression(Expression::Variable(variable)))
-		},
+		}
 	}
 }
 
@@ -2928,11 +3095,11 @@ fn variable_or_binding<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn start_atom<'src, R: Recovery<'src>>(
+fn start_atom<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	signed: bool,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	// A call that stands ungrouped where only an atom may fails here, as no
@@ -3023,11 +3190,11 @@ fn resume_atom_group<'src>(
 ///
 /// # Returns
 /// The next step.
-fn resume_atom_call<'src, R: Recovery<'src>>(
+fn resume_atom_call<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, call) = match outcome
@@ -3058,12 +3225,12 @@ fn resume_atom_call<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Failure`](nom::Err::Failure) if the policy declines to supply the `)`.
-fn group_call<'src, R: Recovery<'src>>(
+fn group_call<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	call: Expression<'src>,
 	rest: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Result<Expression<'src>, nom::Err<ParseError<'src>>>
 {
 	let start = input.location_offset();
@@ -3109,10 +3276,15 @@ fn offered(input: Span<'_>) -> nom::Err<ParseError<'_>>
 /// # Parameters
 /// - `input`: The input of the production.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn start_group<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
+fn start_group<'src, R: Recovery<'src>, S: TokenSink>(
+	input: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
+) -> Step<'src>
 {
 	let start = input.location_offset();
 	let paren: IResult<Span, char, ParseError> = char('(')(input);
@@ -3120,6 +3292,7 @@ fn start_group<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 	{
 		Ok((after, _)) =>
 		{
+			rec.report_before(after, Role::Parenthesis);
 			let input = skip_whitespace(after);
 			call(
 				stack,
@@ -3143,12 +3316,12 @@ fn start_group<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 ///
 /// # Returns
 /// The next step.
-fn resume_group_expression<'src, R: Recovery<'src>>(
+fn resume_group_expression<'src, R: Recovery<'src>, S: TokenSink>(
 	start: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, expression) = match outcome
@@ -3165,7 +3338,11 @@ fn resume_group_expression<'src, R: Recovery<'src>>(
 	};
 	let rest = match close(')', CLOSING_PAREN_CONTEXT, rest)
 	{
-		Ok(rest) => rest,
+		Ok(rest) =>
+		{
+			rec.report_before(rest, Role::Parenthesis);
+			rest
+		},
 		Err(e) => match rec.repair(site, e, stack)
 		{
 			Ok(at) => at,
@@ -3193,10 +3370,10 @@ fn resume_group_expression<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn start_binding<'src, R: Recovery<'src>>(
+fn start_binding<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (after_name, name) = match braced_name(input)
@@ -3210,6 +3387,12 @@ fn start_binding<'src, R: Recovery<'src>>(
 	{
 		Ok((after_at, _)) =>
 		{
+			let braced = SourceSpan {
+				start: input.location_offset(),
+				end: after_name.location_offset()
+			};
+			rec.report_name(braced, span_of(name), Role::BindingDeclaration);
+			rec.report_before(after_at, Role::Bind);
 			let head = BindingHead {
 				start: input.location_offset(),
 				name: canonical_name(name.fragment()),
@@ -3237,18 +3420,22 @@ fn start_binding<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn bind<'src, R: Recovery<'src>>(
+fn bind<'src, R: Recovery<'src>, S: TokenSink>(
 	head: BindingHead<'src>,
 	after_at: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let paren: IResult<Span, char, ParseError> =
 		cut(preceded(multispace0, char('('))).parse_complete(after_at);
 	let (paren, after) = match paren
 	{
-		Ok((after, _)) => (after.location_offset() - 1, after),
+		Ok((after, _)) =>
+		{
+			rec.report_before(after, Role::Parenthesis);
+			(after.location_offset() - 1, after)
+		},
 		Err(e) =>
 		{
 			let e = within_binding(head.atom, e);
@@ -3282,13 +3469,13 @@ fn bind<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_binding_expression<'src, R: Recovery<'src>>(
+fn resume_binding_expression<'src, R: Recovery<'src>, S: TokenSink>(
 	head: BindingHead<'src>,
 	paren: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, expression) = match outcome
@@ -3308,7 +3495,11 @@ fn resume_binding_expression<'src, R: Recovery<'src>>(
 	};
 	let rest = match close(')', CLOSING_PAREN_CONTEXT, rest)
 	{
-		Ok(rest) => rest,
+		Ok(rest) =>
+		{
+			rec.report_before(rest, Role::Parenthesis);
+			rest
+		},
 		Err(e) => match rec.repair(site, within_binding(head.atom, e), stack)
 		{
 			Ok(at) => at,
@@ -3344,10 +3535,15 @@ fn resume_binding_expression<'src, R: Recovery<'src>>(
 /// # Parameters
 /// - `input`: The input of the production.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn start_range<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
+fn start_range<'src, R: Recovery<'src>, S: TokenSink>(
+	input: Span<'src>,
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
+) -> Step<'src>
 {
 	let start = input.location_offset();
 	let bracket: IResult<Span, char, ParseError> = char('[')(input);
@@ -3355,6 +3551,7 @@ fn start_range<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 	{
 		Ok((after, _)) =>
 		{
+			rec.report_before(after, Role::RangeBracket);
 			let input = skip_whitespace(after);
 			call(
 				stack,
@@ -3378,12 +3575,12 @@ fn start_range<'src>(input: Span<'src>, stack: &mut Stack<'src>) -> Step<'src>
 ///
 /// # Returns
 /// The next step.
-fn resume_range_start<'src, R: Recovery<'src>>(
+fn resume_range_start<'src, R: Recovery<'src>, S: TokenSink>(
 	start: usize,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, first) = match outcome
@@ -3398,7 +3595,11 @@ fn resume_range_start<'src, R: Recovery<'src>>(
 		cut(preceded(multispace0, char(':'))).parse_complete(rest);
 	let after = match colon
 	{
-		Ok((after, _)) => after,
+		Ok((after, _)) =>
+		{
+			rec.report_before(after, Role::RangeOperator);
+			after
+		},
 		Err(e) => match rec.repair(Site::Colon { opener: start }, e, stack)
 		{
 			Ok(at) => at,
@@ -3427,13 +3628,13 @@ fn resume_range_start<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_range_end<'src, R: Recovery<'src>>(
+fn resume_range_end<'src, R: Recovery<'src>, S: TokenSink>(
 	start: usize,
 	first: Expression<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, last) = match outcome
@@ -3450,7 +3651,11 @@ fn resume_range_end<'src, R: Recovery<'src>>(
 	};
 	let rest = match close(']', CLOSING_BRACKET_CONTEXT, rest)
 	{
-		Ok(rest) => rest,
+		Ok(rest) =>
+		{
+			rec.report_before(rest, Role::RangeBracket);
+			rest
+		},
 		Err(e) => match rec.repair(site, e, stack)
 		{
 			Ok(at) => at,
@@ -3488,12 +3693,12 @@ fn resume_range_end<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_dice_count<'src, R: Recovery<'src>>(
+fn resume_dice_count<'src, R: Recovery<'src>, S: TokenSink>(
 	primary: bool,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, count) =
@@ -3508,6 +3713,7 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 	{
 		Ok((after, _)) =>
 		{
+			rec.report_before(after, Role::DiceOperator);
 			if rec.recovering()
 			{
 				rec.operator = Some(skip_whitespace(rest));
@@ -3569,13 +3775,13 @@ fn resume_dice_count<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_dice_faces<'src, R: Recovery<'src>>(
+fn resume_dice_faces<'src, R: Recovery<'src>, S: TokenSink>(
 	start: usize,
 	count: Expression<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let error =
@@ -3596,6 +3802,11 @@ fn resume_dice_faces<'src, R: Recovery<'src>>(
 		Err(nom::Err::Failure(_)) if rec.recovering() =>
 		{
 			recover_custom_faces(input, stack, rec)
+		},
+		Ok((rest, faces)) =>
+		{
+			rec.report_literals(input, rest, Role::FacesBracket);
+			Ok((rest, faces))
 		},
 		custom => custom
 	};
@@ -3721,12 +3932,12 @@ fn highest_face(dice: &DiceExpression<'_>) -> Option<i32>
 ///
 /// # Returns
 /// The next step.
-fn dice_continue<'src, R: Recovery<'src>>(
+fn dice_continue<'src, R: Recovery<'src>, S: TokenSink>(
 	dice: DiceExpression<'src>,
 	highest: Option<i32>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let verb: IResult<Span, PredicatedKind, ParseError> = preceded(
@@ -3739,6 +3950,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	.parse_complete(rest);
 	if let Ok((after_keyword, kind)) = verb
 	{
+		rec.report_read(rest, after_keyword, kind.role());
 		let clause = PredicatedClause {
 			dice: Some((dice, highest)),
 			start: None,
@@ -3759,7 +3971,11 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	.parse_complete(rest);
 	let (after_keyword, keep) = match keyword
 	{
-		Ok(parsed) => parsed,
+		Ok((after_keyword, keep)) =>
+		{
+			rec.report_read(rest, after_keyword, Role::Selection);
+			(after_keyword, keep)
+		},
 		// `fold_many0` stops at the first recoverable error, and discards it.
 		// The keyword cannot fail unrecoverably.
 		Err(_) => return succeed(rest, Value::Dice(dice))
@@ -3784,6 +4000,7 @@ fn dice_continue<'src, R: Recovery<'src>>(
 	{
 		Ok((after_direction, lowest)) =>
 		{
+			rec.report_read(after_keyword, after_direction, Role::Direction);
 			(after_direction, ClauseKind::of(keep, lowest))
 		},
 		// The repair supplies the commonest direction of the verb: `drop
@@ -3835,14 +4052,14 @@ fn dice_continue<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_dice_drop<'src, R: Recovery<'src>>(
+fn resume_dice_drop<'src, R: Recovery<'src>, S: TokenSink>(
 	(dice, highest): (DiceExpression<'src>, Option<i32>),
 	kind: ClauseKind,
 	rest: Span<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match optional_drop(kind, rest, input, outcome)
@@ -3869,14 +4086,14 @@ fn resume_dice_drop<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn finish_drop_clause<'src, R: Recovery<'src>>(
+fn finish_drop_clause<'src, R: Recovery<'src>, S: TokenSink>(
 	dice: DiceExpression<'src>,
 	highest: Option<i32>,
 	kind: ClauseKind,
 	rest: Span<'src>,
 	drop: Option<Box<Expression<'src>>>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let span = SourceSpan {
@@ -3915,12 +4132,12 @@ fn finish_drop_clause<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn read_predicate<'src, R: Recovery<'src>>(
+fn read_predicate<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	clause: Box<PredicatedClause<'src>>,
 	after_keyword: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let comparator: IResult<Span, Comparison, ParseError> = preceded(
@@ -3937,6 +4154,7 @@ fn read_predicate<'src, R: Recovery<'src>>(
 	.parse_complete(after_keyword);
 	if let Ok((after, comparison)) = comparator
 	{
+		rec.report_read(after_keyword, after, Role::Predicate);
 		let input = skip_whitespace(after);
 		return call_with(
 			stack,
@@ -3954,6 +4172,7 @@ fn read_predicate<'src, R: Recovery<'src>>(
 		preceded(multispace0, keyword("in")).parse_complete(after_keyword);
 	if let Ok((after, _)) = within
 	{
+		rec.report_read(after_keyword, after, Role::Predicate);
 		let input = skip_whitespace(after);
 		if input.fragment().starts_with('[')
 		{
@@ -4027,10 +4246,10 @@ fn read_predicate<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the list could not be parsed, or repaired.
-fn read_values<'src, R: Recovery<'src>>(
+fn read_values<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, Vec<i32>, ParseError<'src>>
 {
 	let opener = input.location_offset();
@@ -4045,7 +4264,11 @@ fn read_values<'src, R: Recovery<'src>>(
 	.parse_complete(after)?;
 	let rest = match close(']', CLOSING_BRACKET_CONTEXT, after)
 	{
-		Ok(rest) => rest,
+		Ok(rest) =>
+		{
+			rec.report_literals(input, rest, Role::ListBracket);
+			rest
+		},
 		Err(e) =>
 		{
 			let site = Site::Closer {
@@ -4073,14 +4296,14 @@ fn read_values<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_predicate_first<'src, R: Recovery<'src>>(
+fn resume_predicate_first<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	mut clause: Box<PredicatedClause<'src>>,
 	comparison: Option<Comparison>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let label = first_context(kind, comparison);
@@ -4106,7 +4329,11 @@ fn resume_predicate_first<'src, R: Recovery<'src>>(
 	// two endpoints most likely means to include both.
 	let (after, inclusive) = match operator
 	{
-		Ok(parsed) => parsed,
+		Ok((after, inclusive)) =>
+		{
+			rec.report_read(rest, after, Role::RangeOperator);
+			(after, inclusive)
+		},
 		Err(e) => match rec.repair(Site::RangeOperator { kind }, e, stack)
 		{
 			Ok(at) => (at, true),
@@ -4165,14 +4392,14 @@ const fn first_context(
 ///
 /// # Returns
 /// The next step.
-fn resume_predicate_end<'src, R: Recovery<'src>>(
+fn resume_predicate_end<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	mut clause: Box<PredicatedClause<'src>>,
 	inclusive: bool,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, end) = match outcome
@@ -4219,13 +4446,13 @@ fn resume_predicate_end<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn read_limit<'src, R: Recovery<'src>>(
+fn read_limit<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	mut clause: Box<PredicatedClause<'src>>,
 	predicate: Predicate<Box<Expression<'src>>>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let unlimited: IResult<Span, Span, ParseError> =
@@ -4233,6 +4460,7 @@ fn read_limit<'src, R: Recovery<'src>>(
 			.parse_complete(rest);
 	if let Ok((after, _)) = unlimited
 	{
+		rec.report_read(rest, after, Role::Limit);
 		return match times(kind, after, false, stack, rec)
 		{
 			Ok(after) => finish_predicated(
@@ -4283,13 +4511,13 @@ fn read_limit<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn resume_limit_count<'src, R: Recovery<'src>>(
+fn resume_limit_count<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	clause: PredicatedClause<'src>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let PredicatedClause {
@@ -4347,12 +4575,12 @@ fn resume_limit_count<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Failure`](nom::Err::Failure) if it is missing, and not repaired.
-fn times<'src, R: Recovery<'src>>(
+fn times<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	input: Span<'src>,
 	singular: bool,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
 {
 	let parsed: IResult<Span, Span, ParseError> = cut(preceded(
@@ -4365,7 +4593,11 @@ fn times<'src, R: Recovery<'src>>(
 	.parse_complete(input);
 	match parsed
 	{
-		Ok((after, _)) => Ok(after),
+		Ok((after, _)) =>
+		{
+			rec.report_read(input, after, Role::Limit);
+			Ok(after)
+		},
 		Err(e) => rec.repair(Site::Times { kind, singular }, e, stack)
 	}
 }
@@ -4387,14 +4619,14 @@ fn times<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn finish_predicated<'src, R: Recovery<'src>>(
+fn finish_predicated<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	dice: Option<(DiceExpression<'src>, Option<i32>)>,
 	predicate: Predicate<Box<Expression<'src>>>,
 	limit: Option<Limit<Box<Expression<'src>>>>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let Some((dice, highest)) = dice
@@ -4422,11 +4654,11 @@ fn finish_predicated<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn start_predicated<'src, R: Recovery<'src>>(
+fn start_predicated<'src, R: Recovery<'src>, S: TokenSink>(
 	kind: PredicatedKind,
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let verb: IResult<Span, Span, ParseError> =
@@ -4435,6 +4667,7 @@ fn start_predicated<'src, R: Recovery<'src>>(
 	{
 		Ok((after_keyword, _)) =>
 		{
+			rec.report_read(input, after_keyword, kind.role());
 			let clause = PredicatedClause {
 				dice: None,
 				start: None,
@@ -4461,10 +4694,10 @@ fn start_predicated<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn start_extremum<'src, R: Recovery<'src>>(
+fn start_extremum<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let overlaid = if rec.recovering()
@@ -4493,6 +4726,12 @@ fn start_extremum<'src, R: Recovery<'src>>(
 			ErrorKind::Tag
 		)));
 	};
+	if overlaid.is_none()
+	{
+		let start = input.location_offset();
+		rec.report(start, start + direction.keyword().len(), Role::Call);
+	}
+	rec.report_before(after, Role::Parenthesis);
 	let opener = after.location_offset() - 1;
 	let call = Call {
 		start: input.location_offset(),
@@ -4542,12 +4781,12 @@ fn argument<'src>(
 ///
 /// # Returns
 /// The next step.
-fn resume_call_argument<'src, R: Recovery<'src>>(
+fn resume_call_argument<'src, R: Recovery<'src>, S: TokenSink>(
 	mut call: Box<Call<'src>>,
 	input: Span<'src>,
 	outcome: Outcome<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	match outcome
@@ -4589,11 +4828,11 @@ fn resume_call_argument<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn call_continue<'src, R: Recovery<'src>>(
+fn call_continue<'src, R: Recovery<'src>, S: TokenSink>(
 	call: Box<Call<'src>>,
 	rest: Span<'src>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let separator: IResult<Span, char, ParseError> = if call.arguments.len() < 2
@@ -4624,9 +4863,14 @@ fn call_continue<'src, R: Recovery<'src>>(
 				// Continue as though the source lacked the comma.
 				return call_continue(call, next, stack, rec);
 			}
+			rec.report_before(after, Role::Separator);
 			argument(call, next, stack)
 		},
-		Ok((after, _)) => finish_call(*call, after),
+		Ok((after, _)) =>
+		{
+			rec.report_before(after, Role::Parenthesis);
+			finish_call(*call, after)
+		},
 		Err(e) => recover_separator(call, rest, e, stack, rec)
 	}
 }
@@ -4643,12 +4887,12 @@ fn call_continue<'src, R: Recovery<'src>>(
 ///
 /// # Returns
 /// The next step.
-fn recover_separator<'src, R: Recovery<'src>>(
+fn recover_separator<'src, R: Recovery<'src>, S: TokenSink>(
 	call: Box<Call<'src>>,
 	rest: Span<'src>,
 	e: nom::Err<ParseError<'src>>,
 	stack: &mut Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	if !rec.recovering()
@@ -4846,13 +5090,15 @@ fn stands_bare(expression: &Expression<'_>) -> bool
 /// - `input`: The input of the dice expression.
 /// - `outcome`: The outcome of the dice count.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn resume_standard_count<'src>(
+fn resume_standard_count<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	outcome: Outcome<'src>,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, count) =
@@ -4867,6 +5113,7 @@ fn resume_standard_count<'src>(
 	{
 		Ok((after, _)) =>
 		{
+			rec.report_before(after, Role::DiceOperator);
 			let input = skip_whitespace(after);
 			call_with(
 				stack,
@@ -4927,12 +5174,14 @@ fn resume_standard_faces<'src>(
 /// # Parameters
 /// - `input`: The input of the dice expression.
 /// - `outcome`: The outcome of the dice count.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn resume_custom_count<'src>(
+fn resume_custom_count<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
-	outcome: Outcome<'src>
+	outcome: Outcome<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (rest, count) =
@@ -4949,8 +5198,12 @@ fn resume_custom_count<'src>(
 		.parse_complete(rest);
 	match faces
 	{
-		Ok((rest, (_, faces))) =>
+		Ok((after, (_, faces))) =>
 		{
+			let faces_input = skip_whitespace(rest).take_from(1);
+			rec.report_before(faces_input, Role::DiceOperator);
+			rec.report_literals(faces_input, after, Role::FacesBracket);
+			let rest = after;
 			let start = input.location_offset();
 			let end = rest.location_offset();
 			succeed(
@@ -4976,13 +5229,15 @@ fn resume_custom_count<'src>(
 /// - `input`: The input of the production.
 /// - `kind`: The kind of the clause.
 /// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
 ///
 /// # Returns
 /// The next step.
-fn start_drop<'src>(
+fn start_drop<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	kind: ClauseKind,
-	stack: &mut Stack<'src>
+	stack: &mut Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Step<'src>
 {
 	let (verb, direction) = kind.keywords();
@@ -4992,8 +5247,11 @@ fn start_drop<'src>(
 			.parse_complete(input);
 	match keywords
 	{
-		Ok((rest, _)) =>
+		Ok((rest, (verb, direction))) =>
 		{
+			let (verb, direction) = (span_of(verb), span_of(direction));
+			rec.report(verb.start, verb.end, Role::Selection);
+			rec.report(direction.start, direction.end, Role::Direction);
 			let input = skip_whitespace(rest);
 			if begins_with_minus(input)
 			{
@@ -5093,13 +5351,79 @@ pub(crate) trait Recovery<'src>
 }
 
 /// The policy of the ordinary parse, which repairs nothing.
-struct Strict;
+pub(crate) struct Strict;
 
 impl<'src> Recovery<'src> for Strict
 {
 	const ENABLED: bool = false;
 
 	fn repair(&mut self, _site: &FailureSite<'src>) -> Repair { Repair::Stop }
+}
+
+/// A receiver of the [tokens](Token) that the engine reads, each tagged with
+/// its [role](Role), for [source classification](crate::classify).
+///
+/// The engine reports each token where a leaf of the grammar reads it, once
+/// the alternative that reads it has committed, so the tokens arrive in source
+/// order. A token read by an alternative that a [catching](Disposition::Catch)
+/// frame then abandons is [retracted](Self::retract), so that the tokens of a
+/// clean parse are exactly those of the source as parsed.
+///
+/// # Notes
+/// The leaves that only a repair reads, and the retractions where a repair
+/// parses a goal or the function again, are not yet reported.
+pub(crate) trait TokenSink
+{
+	/// Whether the sink receives tokens at all. Only [`Silent`], the sink of
+	/// the ordinary parse and of the doctor, opts out, which removes every
+	/// report from the engine at compile time.
+	const ENABLED: bool = true;
+
+	/// Receive a token.
+	///
+	/// # Parameters
+	/// - `span`: The span of the token.
+	/// - `role`: The role of the token.
+	fn token(&mut self, span: SourceSpan, role: Role);
+
+	/// Discard every token that begins at or after a byte offset, i.e., every
+	/// token reported since the engine read past the offset.
+	///
+	/// # Parameters
+	/// - `from`: The byte offset.
+	fn retract(&mut self, from: usize);
+}
+
+/// The sink of the ordinary parse, which receives nothing.
+pub(crate) struct Silent;
+
+impl TokenSink for Silent
+{
+	const ENABLED: bool = false;
+
+	fn token(&mut self, _span: SourceSpan, _role: Role) {}
+
+	fn retract(&mut self, _from: usize) {}
+}
+
+impl TokenSink for Vec<Token>
+{
+	fn token(&mut self, span: SourceSpan, role: Role)
+	{
+		self.push(Token {
+			span,
+			role,
+			depth: None
+		});
+	}
+
+	fn retract(&mut self, from: usize)
+	{
+		while self.last().is_some_and(|token| token.span.start >= from)
+		{
+			self.pop();
+		}
+	}
 }
 
 /// A repair of a [failure](FailureSite), as decided by a [policy](Recovery).
@@ -5726,14 +6050,23 @@ enum Overlay<'src>
 /// that catch or cut, alongside the stack of frames, so that it can tell in
 /// constant time.
 ///
+/// The recoverer also holds the [sink](TokenSink) of the run, to which the
+/// leaves of the grammar report the tokens that they read. For [`Strict`] and
+/// [`Silent`], the policy and the sink of the ordinary parse, every hook of
+/// recovery and every report compiles away.
+///
 /// # Type parameters
 /// - `'src`: The lifetime of the source text being parsed.
-/// - `'p`: The lifetime of the policy.
+/// - `'p`: The lifetime of the policy and of the sink.
 /// - `R`: The type of the policy.
-struct Recoverer<'src, 'p, R>
+/// - `S`: The type of the sink.
+struct Recoverer<'src, 'p, R, S>
 {
 	/// The policy.
 	policy: &'p mut R,
+
+	/// The sink of the tokens that the engine reads.
+	sink: &'p mut S,
 
 	/// Whether the policy is still consulted: not after it declines a repair.
 	active: bool,
@@ -5770,20 +6103,22 @@ struct Recoverer<'src, 'p, R>
 	comma: Option<(usize, usize)>
 }
 
-impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
+impl<'src, 'p, R: Recovery<'src>, S: TokenSink> Recoverer<'src, 'p, R, S>
 {
 	/// Create the state of recovery for a run.
 	///
 	/// # Parameters
 	/// - `policy`: The policy.
+	/// - `sink`: The sink of the tokens that the engine reads.
 	/// - `root`: The input of the run.
 	///
 	/// # Returns
 	/// The state.
-	fn new(policy: &'p mut R, root: Span<'src>) -> Self
+	fn new(policy: &'p mut R, sink: &'p mut S, root: Span<'src>) -> Self
 	{
 		Self {
 			policy,
+			sink,
 			active: R::ENABLED,
 			root,
 			overlay: None,
@@ -5802,6 +6137,138 @@ impl<'src, 'p, R: Recovery<'src>> Recoverer<'src, 'p, R>
 	/// `true` if the engine is recovering, `false` otherwise.
 	#[inline(always)]
 	fn recovering(&self) -> bool { R::ENABLED && self.active }
+
+	/// Report a token to the sink, unless the sink is [`Silent`].
+	///
+	/// # Parameters
+	/// - `start`: The byte offset of the start of the token.
+	/// - `end`: The byte offset of the end of the token.
+	/// - `role`: The role of the token.
+	#[inline(always)]
+	fn report(&mut self, start: usize, end: usize, role: Role)
+	{
+		if S::ENABLED
+		{
+			self.sink.token(SourceSpan { start, end }, role);
+		}
+	}
+
+	/// Report the token that a leaf just read to the sink, unless the sink is
+	/// [`Silent`]: the source from the end of any whitespace at one input to
+	/// another, as a leaf preceded by `multispace0` reads it.
+	///
+	/// # Parameters
+	/// - `before`: The input of the leaf, perhaps at whitespace.
+	/// - `after`: The input after the token.
+	/// - `role`: The role of the token.
+	#[inline(always)]
+	fn report_read(&mut self, before: Span<'src>, after: Span<'src>, role: Role)
+	{
+		if S::ENABLED
+		{
+			let start = skip_whitespace(before).location_offset();
+			self.report(start, after.location_offset(), role);
+		}
+	}
+
+	/// Report the delimiter that ends just before an input to the sink, unless
+	/// the sink is [`Silent`].
+	///
+	/// # Parameters
+	/// - `after`: The input after the delimiter, a single byte.
+	/// - `role`: The role of the delimiter.
+	#[inline(always)]
+	fn report_before(&mut self, after: Span<'src>, role: Role)
+	{
+		if S::ENABLED
+		{
+			let end = after.location_offset();
+			self.report(end - 1, end, role);
+		}
+	}
+
+	/// Report a braced name to the sink, unless the sink is [`Silent`]: its
+	/// braces, and its identifier, exactly the span of the name, so that any
+	/// whitespace that pads the identifier within the braces belongs to no
+	/// token.
+	///
+	/// # Parameters
+	/// - `braced`: The span of the braced name, from its `{` through its `}`.
+	/// - `name`: The span of the identifier.
+	/// - `role`: The role of the identifier.
+	#[inline(always)]
+	fn report_name(&mut self, braced: SourceSpan, name: SourceSpan, role: Role)
+	{
+		if S::ENABLED
+		{
+			self.report(braced.start, braced.start + 1, Role::NameBrace);
+			self.report(name.start, name.end, role);
+			self.report(braced.end - 1, braced.end, Role::NameBrace);
+		}
+	}
+
+	/// Report a bracketed list of literals to the sink, unless the sink is
+	/// [`Silent`]: the custom faces of dice, or the list of a predicate, which
+	/// a flat combinator has just read, and which the engine scans again only
+	/// to report its tokens, so that no path of the parse changes. The brackets
+	/// take the specified role, each `,` is a [separator](Role::Separator), and
+	/// each literal, with its sign, a [face](Role::Face).
+	///
+	/// # Parameters
+	/// - `input`: The input of the list, perhaps at whitespace before its `[`.
+	/// - `rest`: The input after the list.
+	/// - `bracket`: The role of the brackets.
+	fn report_literals(
+		&mut self,
+		input: Span<'src>,
+		rest: Span<'src>,
+		bracket: Role
+	)
+	{
+		if !S::ENABLED
+		{
+			return;
+		}
+		let base = input.location_offset();
+		// The list is ASCII, so every byte is a character.
+		let list =
+			&input.fragment().as_bytes()[..rest.location_offset() - base];
+		let mut at = 0;
+		while at < list.len()
+		{
+			let start = at;
+			at += 1;
+			let role = match list[start]
+			{
+				b'[' | b']' => bracket,
+				b',' => Role::Separator,
+				b'-' | b'0'..=b'9' =>
+				{
+					while list.get(at).is_some_and(u8::is_ascii_digit)
+					{
+						at += 1;
+					}
+					Role::Face
+				},
+				_ => continue
+			};
+			self.report(base + start, base + at, role);
+		}
+	}
+
+	/// Retract every token that begins at or after a byte offset from the
+	/// sink, unless the sink is [`Silent`].
+	///
+	/// # Parameters
+	/// - `from`: The byte offset.
+	#[inline(always)]
+	fn retract(&mut self, from: usize)
+	{
+		if S::ENABLED
+		{
+			self.sink.retract(from);
+		}
+	}
 
 	/// Record that a goal is called. Unless the stack is empty, its outcome
 	/// returns to the frame on top of the stack, which is either new or, if the
@@ -6670,10 +7137,10 @@ fn exhausted<'src>(
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
 #[inline(always)]
-fn parse_constant<'src, R: Recovery<'src>>(
+fn parse_constant<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	signed: bool,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, Constant, ParseError<'src>>
 {
 	if rec.recovering()
@@ -6681,7 +7148,14 @@ fn parse_constant<'src, R: Recovery<'src>>(
 	{
 		return Ok(parsed);
 	}
-	context(CONSTANT_CONTEXT, literal(signed)).parse_complete(input)
+	let parsed =
+		context(CONSTANT_CONTEXT, literal(signed)).parse_complete(input);
+	if let Ok((_, constant)) = &parsed
+	{
+		let role = if signed { Role::Face } else { Role::Constant };
+		rec.report(constant.span.start, constant.span.end, role);
+	}
+	parsed
 }
 
 /// Answer the parser of a literal: a signed [`integer`], as the faces of dice
@@ -6718,9 +7192,9 @@ fn literal<'src>(
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed.
 #[inline(always)]
-fn parse_negative_constant<'src, R: Recovery<'src>>(
+fn parse_negative_constant<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, Expression<'src>, ParseError<'src>>
 {
 	if rec.recovering()
@@ -6742,7 +7216,20 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 				ErrorKind::Digit
 			)))
 		},
-		parsed => parsed
+		parsed =>
+		{
+			if let Ok((rest, _)) = &parsed
+			{
+				// The sign is negation, and the digits an unsigned constant.
+				let start = input.location_offset();
+				let end = rest.location_offset();
+				let digits = input.fragment()[1..end - start]
+					.trim_start_matches(is_token_space);
+				rec.report(start, start + 1, Role::Negation);
+				rec.report(end - digits.len(), end, Role::Constant);
+			}
+			parsed
+		}
 	}
 }
 
@@ -6761,10 +7248,10 @@ fn parse_negative_constant<'src, R: Recovery<'src>>(
 /// # Errors
 /// * [`Err`](nom::Err) if the input could not be parsed, or repaired.
 #[inline(always)]
-fn parse_variable<'src, R: Recovery<'src>>(
+fn parse_variable<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, (Variable<'src>, SourceSpan), ParseError<'src>>
 {
 	if rec.recovering()
@@ -6811,10 +7298,10 @@ fn parse_variable<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the policy declined a repair.
-fn recover_variable<'src, R: Recovery<'src>>(
+fn recover_variable<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, (Variable<'src>, SourceSpan), ParseError<'src>>
 {
 	let start = input.location_offset();
@@ -6926,10 +7413,10 @@ fn recover_variable<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the policy declined a repair.
-fn recover_custom_faces<'src, R: Recovery<'src>>(
+fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, Vec<i32>, ParseError<'src>>
 {
 	let opener = input.location_offset();
@@ -6997,10 +7484,10 @@ fn recover_custom_faces<'src, R: Recovery<'src>>(
 ///
 /// # Errors
 /// * [`Err`](nom::Err) if the policy declined a repair.
-fn recover_parameters<'src, R: Recovery<'src>>(
+fn recover_parameters<'src, R: Recovery<'src>, S: TokenSink>(
 	input: Span<'src>,
 	stack: &Stack<'src>,
-	rec: &mut Recoverer<'src, '_, R>
+	rec: &mut Recoverer<'src, '_, R, S>
 ) -> IResult<Span<'src>, Option<Vec<Parameter<'src>>>, ParseError<'src>>
 {
 	let comma = || preceded(multispace0, char(','));

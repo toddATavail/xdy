@@ -17,7 +17,7 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	Parser,
-	parser::{FailureSite, Recovery, Repair, Site},
+	parser::{FailureSite, Recovery, Repair, Silent, Site},
 	tests::{corpus::corpus, recovery::Canonical}
 };
 
@@ -60,7 +60,7 @@ fn test_declining_recovery_matches_parse()
 	{
 		let expected = Parser::parse(input);
 		let mut policy = Decline::default();
-		let actual = Parser::parse_recovering(input, &mut policy);
+		let actual = Parser::parse_recovering(input, &mut policy, &mut Silent);
 		assert_eq!(actual, expected, "input: {:?}", input);
 		match expected
 		{
@@ -103,7 +103,7 @@ fn test_canonical_recovery_matches_edited_parse()
 	for input in corpus()
 	{
 		let mut policy = Canonical::new(input);
-		match Parser::parse_recovering(input, &mut policy)
+		match Parser::parse_recovering(input, &mut policy, &mut Silent)
 		{
 			Ok(recovered) =>
 			{

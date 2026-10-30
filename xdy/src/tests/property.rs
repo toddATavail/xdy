@@ -14,7 +14,9 @@
 //!   sources that parse.
 //!
 //! Every program must also parse, render as a source that parses and renders
-//! the same, and write as an S-expression that reads back to it. Every program
+//! the same, and write as an S-expression that reads back to it. The tokens
+//! that the parser reports as it parses a program, or a mutation that still
+//! parses, must tile the source. Every program
 //! that compiles must also [evaluate](Evaluator::evaluate_metered), over
 //! arguments and externals that include the extremes of [`i32`], within a
 //! [dice budget](EvaluationError::DiceBudgetExhausted), and so return promptly
@@ -52,8 +54,10 @@ use crate::{
 	Function as IrFunction, Instruction, Limit, Optimizer as _, Parser, Passes,
 	StandardOptimizer, Unobserved,
 	ast::Function,
+	classify::{Role, Token},
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
+	parser::{Strict, is_token_space},
 	s_expr::{SExpressible, SExpressibleOptions, read_s_expr},
 	support::{SMALL_STACK_SIZE, on_small_stack},
 	tests::corpus::{TOKENS, sources}
@@ -86,6 +90,20 @@ fn test_programs()
 fn test_mutated_programs()
 {
 	on_small_stack(|| check(mutated_program, |source| check_source(&source)));
+}
+
+/// Ensure that the tokens that the parser reports, as it parses every random
+/// [program](program), and every random [mutation](Mutation) of one that still
+/// parses, [tile](check_tokens) the source.
+#[test]
+fn test_program_tokens()
+{
+	on_small_stack(|| {
+		check(
+			|| prop_oneof![program(), mutated_program()],
+			|source| check_tokens(&source)
+		)
+	});
 }
 
 /// Ensure that every random [program](program) that compiles satisfies the
@@ -456,6 +474,78 @@ fn reparse(rendered: &str) -> Result<Function<'_>, TestCaseError>
 	Parser::parse(rendered).map_err(|e| {
 		TestCaseError::fail(format!("rendering {:?} fails:\n{}", rendered, e))
 	})
+}
+
+/// Check that the tokens that the parser reports, as it parses a source, tile
+/// it, if it parses: they are non-empty, in source order, and disjoint, and
+/// only [whitespace between tokens](is_token_space) lies between them, or any
+/// whitespace between the braces of a name and its identifier.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Errors
+/// [`TestCaseError`] if a property fails.
+fn check_tokens(source: &str) -> Result<(), TestCaseError>
+{
+	if Parser::parse(source).is_err()
+	{
+		return Ok(());
+	}
+	let mut tokens = Vec::<Token>::new();
+	prop_assert!(
+		Parser::parse_recovering(source, &mut Strict, &mut tokens).is_ok(),
+		"recovery mode fails a source that parses"
+	);
+	let mut end = 0;
+	let mut braced = false;
+	for token in &tokens
+	{
+		let span = token.span;
+		prop_assert!(
+			end <= span.start && span.start < span.end,
+			"token {:?} is empty or out of order in {:?}",
+			token,
+			source
+		);
+		let gap = source.get(end..span.start);
+		let text = source.get(span.start..span.end);
+		let (Some(gap), Some(text)) = (gap, text)
+		else
+		{
+			return Err(TestCaseError::fail(format!(
+				"token {:?} splits a character of {:?}",
+				token, source
+			)));
+		};
+		prop_assert!(
+			gap.chars().all(|c| {
+				if braced
+				{
+					c.is_whitespace()
+				}
+				else
+				{
+					is_token_space(c)
+				}
+			}),
+			"{:?} before token {:?} belongs to no token in {:?}",
+			gap,
+			token,
+			source
+		);
+		if token.role == Role::NameBrace
+		{
+			braced = text == "{";
+		}
+		end = span.end;
+	}
+	prop_assert!(
+		source[end..].chars().all(is_token_space),
+		"{:?} after the last token belongs to no token",
+		&source[end..]
+	);
+	Ok(())
 }
 
 /// Check the properties of every source: [`compile`] fails to parse just when

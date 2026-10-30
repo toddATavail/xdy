@@ -69,9 +69,10 @@ use crate::{
 	ast::{Direction, Event, Expression, Function, Node, Walk},
 	parser::{
 		FailureSite, LoneArgument, NomErrorKind, Operand, PLACEHOLDER_OPERAND,
-		PredicatedKind, Recovery, Repair, Site, Span, begins_misplaced_clause,
-		begins_operand, begins_verb, canonical_name, is_bare_word_continue,
-		is_bare_word_start, is_token_space, token, unclosed_name_ends
+		PredicatedKind, Recovery, Repair, Silent, Site, Span,
+		begins_misplaced_clause, begins_operand, begins_verb, canonical_name,
+		is_bare_word_continue, is_bare_word_start, is_token_space, token,
+		unclosed_name_ends
 	},
 	span::SourceSpan
 };
@@ -4482,6 +4483,7 @@ pub fn diagnose(source: &str) -> DiagnoseResult
 	let text = String::from_utf8(text)
 		.expect("replacing whole characters with spaces preserves UTF-8");
 	let mut doctor = Doctor::new(&text, source, strays);
-	let recovered = Parser::parse_recovering(&text, &mut doctor).is_ok();
+	let recovered =
+		Parser::parse_recovering(&text, &mut doctor, &mut Silent).is_ok();
 	doctor.finish(recovered)
 }

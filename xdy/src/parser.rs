@@ -156,11 +156,11 @@ mod errors;
 pub use combinators::*;
 pub(crate) use engine::{
 	FailureSite, LoneArgument, Operand, PLACEHOLDER_OPERAND, PredicatedKind,
-	Recovery, Repair, Site
+	Recovery, Repair, Silent, Site, TokenSink
 };
 #[cfg(test)]
 pub(crate) use engine::{
-	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, steps
+	PLACEHOLDER_FACE, PLACEHOLDER_FACES, PLACEHOLDER_NAME, Strict, steps
 };
 pub use errors::*;
 
@@ -228,13 +228,18 @@ impl Parser
 	/// With a policy that repairs nothing, the result is exactly that of
 	/// [`parse`](Parser::parse).
 	///
+	/// The parse reports every token that it reads to a [sink](TokenSink),
+	/// in source order.
+	///
 	/// # Type parameters
 	/// - `'src`: The lifetime of the source text.
 	/// - `R`: The type of the policy.
+	/// - `S`: The type of the sink.
 	///
 	/// # Parameters
 	/// - `input`: The input text to parse.
 	/// - `policy`: The recovery policy.
+	/// - `sink`: The sink of the tokens that the parse reads.
 	///
 	/// # Returns
 	/// The parsed function definition, in which every repair appears as the
@@ -242,16 +247,17 @@ impl Parser
 	///
 	/// # Errors
 	/// * [`ParseError`] if the policy declined to repair a failure.
-	pub(crate) fn parse_recovering<'src, R: Recovery<'src>>(
+	pub(crate) fn parse_recovering<'src, R: Recovery<'src>, S: TokenSink>(
 		input: &'src str,
-		policy: &mut R
+		policy: &mut R,
+		sink: &mut S
 	) -> Result<Function<'src>, ParseError<'src>>
 	{
 		let input = Span::new(input);
 		let skipped: IResult<Span, Span, ParseError> = multispace0(input);
 		// `multispace0` accepts the empty string, so it cannot fail.
 		let input = skipped.map_or(input, |(rest, _)| rest);
-		let (rest, function) = match engine::run_recovering(input, policy)
+		let (rest, function) = match engine::run_recovering(input, policy, sink)
 		{
 			Ok((rest, value)) => (rest, value.into_function()),
 			Err(nom::Err::Error(e) | nom::Err::Failure(e)) =>
