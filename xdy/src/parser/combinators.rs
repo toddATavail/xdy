@@ -43,7 +43,8 @@ use crate::{
 
 use super::{
 	CLOSING_BRACE_CONTEXT, CLOSING_BRACKET_CONTEXT, CONSTANT_CONTEXT,
-	IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT, PARAMETER_CONTEXT, ParseError,
+	DIGITS_CONTEXT, IDENTIFIER_CONTEXT, NEXT_PARAMETER_CONTEXT,
+	PARAMETER_CONTEXT, ParseError,
 	engine::{Goal, begins_with_minus, run}
 };
 
@@ -868,13 +869,22 @@ pub fn constant(input: Span) -> IResult<Span, Constant, ParseError>
 /// * [`Err`](nom::Err) if the input could not be parsed.
 pub fn integer(input: Span) -> IResult<Span, Constant, ParseError>
 {
-	let (input, recognized) =
-		recognize(pair(opt(char('-')), digit1)).parse_complete(input)?;
-	// `recognize(pair(opt(char('-')), digit1))` only produces strings of
-	// optional `-` followed by digits, so parsing as `i32` can only fail
-	// with `PosOverflow` or `NegOverflow`. The first arm handles positive
-	// overflow explicitly; any remaining `Err` must therefore be
-	// negative overflow and saturates at `i32::MIN`.
+	// Only digits may follow a sign, so a sign without them expects a digit
+	// where they should begin. Unsigned, the digits need no context of their
+	// own: the caller's context is at the same position.
+	let (input, recognized) = recognize(|input| {
+		let (input, sign) = opt(char('-')).parse_complete(input)?;
+		match sign
+		{
+			Some(_) => context(DIGITS_CONTEXT, digit1).parse_complete(input),
+			None => digit1.parse_complete(input)
+		}
+	})
+	.parse_complete(input)?;
+	// The recognized text is only ever an optional `-` followed by digits, so
+	// parsing as `i32` can only fail with `PosOverflow` or `NegOverflow`. The
+	// first arm handles positive overflow explicitly; any remaining `Err` must
+	// therefore be negative overflow and saturates at `i32::MIN`.
 	let value = match recognized.fragment().parse::<i32>()
 	{
 		Ok(value) => value,

@@ -139,6 +139,20 @@ fn test_unbraced_characters()
 	});
 }
 
+/// Ensure that the parse error of every random [mutation](Mutation) of a random
+/// [program](program), string of [tokens](token_string), and arbitrary string
+/// that fails to parse [renders](check_rendered_error) without panicking.
+#[test]
+fn test_rendered_errors()
+{
+	on_small_stack(|| {
+		check(
+			|| prop_oneof![mutated_program(), token_string(), any::<String>()],
+			|source| check_rendered_error(&source)
+		)
+	});
+}
+
 /// Ensure that the [classification](check_classification) of every random
 /// [program](program), [mutation](Mutation) of one, string of
 /// [tokens](token_string), and arbitrary string is total, and exactly the
@@ -629,6 +643,33 @@ fn check_tokens(source: &str) -> Result<(), TestCaseError>
 		source[end..].chars().all(is_token_space),
 		"{:?} after the last token belongs to no token",
 		&source[end..]
+	);
+	Ok(())
+}
+
+/// Check that the parse error of the source, if any, renders without panicking,
+/// as a message that states what the parser expected or what it found
+/// unexpectedly.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Errors
+/// [`TestCaseError`] if the message says neither.
+fn check_rendered_error(source: &str) -> Result<(), TestCaseError>
+{
+	let Err(error) = Parser::parse(source)
+	else
+	{
+		return Ok(());
+	};
+	// A panic fails the case, as `proptest` catches it.
+	let rendered = error.to_string();
+	prop_assert!(
+		rendered.contains("expected") || rendered.contains("unexpected"),
+		"{:?} renders as {:?}",
+		source,
+		rendered
 	);
 	Ok(())
 }

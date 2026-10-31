@@ -1737,3 +1737,75 @@ fn test_drop_expression()
 		);
 	}
 }
+
+/// Ensure that a parse error renders, rather than panics, when a `-` after a
+/// die's `d` begins no face count, and that it expects a digit where the
+/// digits should begin.
+#[test]
+fn test_dangling_sign_messages()
+{
+	for (input, expected) in [
+		(
+			"4d-",
+			"Parse error @ 1:4 (byte 3): expected digit, but found end of input"
+		),
+		(
+			"1d-∞",
+			"Parse error @ 1:4 (byte 3): expected digit, but found `∞`"
+		),
+		(
+			"4d-x",
+			"Parse error @ 1:4 (byte 3): expected digit, but found `x`"
+		),
+		(
+			"4d-é",
+			"Parse error @ 1:4 (byte 3): expected digit, but found `é`"
+		),
+		(
+			"4d-?",
+			"Parse error @ 1:4 (byte 3): expected digit, but found `?`"
+		),
+		(
+			"4d--",
+			"Parse error @ 1:4 (byte 3): expected digit, but found `-`"
+		),
+		(
+			"4 d -∞",
+			"Parse error @ 1:6 (byte 5): expected digit, but found `∞`"
+		),
+		(
+			"-4 d -∞",
+			"Parse error @ 1:7 (byte 6): expected digit, but found `∞`"
+		),
+		(
+			"3/-4 d -∞",
+			"Parse error @ 1:9 (byte 8): expected digit, but found `∞`"
+		),
+		(
+			"3/-4d-∞",
+			"Parse error @ 1:7 (byte 6): expected digit, but found `∞`"
+		),
+		// Without a sign, the digits expect nothing of their own.
+		(
+			"4d∞",
+			"Parse error @ 1:3 (byte 2): expected `(`, `[`, `{`, or integer, but \
+			 found `∞`"
+		),
+		(
+			"d -∞",
+			"Parse error @ 1:1 (byte 0): expected `(`, `-`, `[`, `highest(`, \
+			 `lowest(`, `{`, dice expression, integer, or parameter definition, \
+			 but found `d -`"
+		)
+	]
+	{
+		let error = Parser::parse(input).expect_err(input);
+		let rendered = error.to_string();
+		assert_eq!(
+			rendered.lines().next(),
+			Some(expected),
+			"Failed for input: {}",
+			input
+		);
+	}
+}

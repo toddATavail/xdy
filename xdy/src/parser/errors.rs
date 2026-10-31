@@ -236,7 +236,7 @@ impl Display for ParseError<'_>
 		let column = rightmost.get_column();
 		write!(
 			f,
-			"Parse error @ {}:{} (byte {}): expected ",
+			"Parse error @ {}:{} (byte {}): ",
 			rightmost.location_line(),
 			column,
 			rightmost.location_offset()
@@ -249,16 +249,21 @@ impl Display for ParseError<'_>
 			})
 			.flat_map(|(_, kind)| kind.expectations())
 			.collect::<Vec<_>>();
-		writeln!(
-			f,
-			"{}, but found {}",
-			// The `unwrap` is safe because `expectations` is guaranteed to be
-			// nonempty.
-			expected(&expectations).unwrap(),
-			token(rightmost).map_or(Cow::Borrowed("end of input"), |t| {
+		let found = token(rightmost)
+			.map_or(Cow::Borrowed("end of input"), |t| {
 				Cow::Owned(format!("`{}`", t.fragment()))
-			})
-		)?;
+			});
+		// Every error should carry an expectation at its rightmost position,
+		// but rendering must never panic, so an error that carries none merely
+		// reports what it found.
+		match expected(&expectations)
+		{
+			Some(expected) =>
+			{
+				writeln!(f, "expected {}, but found {}", expected, found)?
+			},
+			None => writeln!(f, "unexpected {}", found)?
+		}
 		// Output the full line containing the error.
 		let line = String::from_utf8_lossy(rightmost.get_line_beginning());
 		writeln!(f, "  {}", line)?;
@@ -380,6 +385,7 @@ fn expected_for_classifier(classifier: &str) -> &'static [&'static str]
 		BINDING_EXPRESSION_CONTEXT => EXPRESSION_EXPECTATIONS,
 		IDENTIFIER_CONTEXT => &["identifier"],
 		CONSTANT_CONTEXT => &["integer"],
+		DIGITS_CONTEXT => &["digit"],
 		CLOSING_PAREN_CONTEXT => &["`)`"],
 		CLOSING_BRACKET_CONTEXT => &["`]`"],
 		CLOSING_BRACE_CONTEXT => &["`}`"],
@@ -489,6 +495,9 @@ pub(crate) const IDENTIFIER_CONTEXT: &str = "identifier";
 
 /// Context classifier for the `CONSTANT` production rule.
 pub(crate) const CONSTANT_CONTEXT: &str = "constant";
+
+/// Context classifier for the digits after the sign of a signed integer.
+pub(crate) const DIGITS_CONTEXT: &str = "digits";
 
 /// Context classifier for a missing closing parenthesis.
 pub(crate) const CLOSING_PAREN_CONTEXT: &str = "closing paren";
