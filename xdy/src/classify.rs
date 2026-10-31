@@ -19,7 +19,9 @@
 //! [`classify`] is the entry point. It is total: it classifies any text, even
 //! malformed or unfinished text, such as an editor's buffer mid-keystroke, and
 //! it derives every token from the parser itself, so that it never disagrees
-//! with the language.
+//! with the language. A host that embeds expressions need not classify one to
+//! find where it ends, which the [embedding guarantee](crate::parser#embedding)
+//! settles by lexis alone.
 
 use std::{borrow::Cow, collections::HashSet};
 

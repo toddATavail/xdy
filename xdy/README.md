@@ -7,6 +7,7 @@ This document covers the internal architecture for contributors and curious powe
 * [Architecture](#architecture)
 	* [Compilation pipeline](#compilation-pipeline)
 	* [Source spans](#source-spans)
+	* [Embedding guarantee](#embedding-guarantee)
 	* [Semantic validation](#semantic-validation)
 	* [Intermediate representation](#intermediate-representation)
 	* [Evaluator](#evaluator)
@@ -59,6 +60,12 @@ graph LR
 Every AST node carries a `SourceSpan { start, end }` byte range referencing the original source text. The `Spanned` trait provides uniform access to these spans (`span()`) and an `untethered()` operation that zeroes every span throughout a value, enabling position-independent structural comparison for tests and round-trip fidelity checks.
 
 Spans flow end-to-end: parser combinators compute them from `nom_locate::LocatedSpan` positions; semantic errors (the `CompilationError` variants in the table below) carry the spans of both occurrences that conflict; diagnostics (`Diagnostic`, `RelatedLabel`) surface them as byte ranges in the original source. This layer is a prerequisite for the planned `xdy!` procedural macro (which translates compiler errors to `compile_error!` at token-precise spans) and for editor integrations that want to underline or gutter-highlight errors.
+
+### Embedding guarantee
+
+A host that embeds expressions in text of its own must find where each one ends, and the language guarantees, permanently, that it can do so by lexis alone. Outside braces, an expression contains only printable ASCII, the tab, the line feed, the carriage return, and the characters of `parser::UNBRACED_NON_ASCII`: `× ÷ ≠ ≤ ≥ ∞`, which the language spells today, and `−` (U+2212), `∈` (U+2208), and `⚀` through `⚅`, which it reserves for notation to come. Braces never nest, so a `{` always closes at the next `}`, and every other character occurs only between them. `parser::is_unbraced_char` states the guarantee in code, and the `parser` module's Rustdoc shows a host how to scan for the end of an expression.
+
+The guarantee binds every later version of the grammar. A new production may use only the characters that `is_unbraced_char` admits, outside braces; notation that needs any other character belongs inside braces, as names do. Braced text that begins with `#` is reserved for such notation, which must end at the first `}` too, so a name may not begin with `#`. Three tests enforce the guarantee: `test_unbraced_char` checks the predicate; `test_unbraced_characters` scans every random program, mutation, token string, and arbitrary string that parses, and checks that the braces that a lexical scan finds are those that the parser reports, and that every character outside them is admitted; and eight stress tests, which `just stress` runs, try every rejected code point wherever the grammar reads an operator, a keyword, a delimiter, or a separator, or begins an operand, and find that none parses.
 
 ### Semantic validation
 

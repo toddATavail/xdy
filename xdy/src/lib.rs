@@ -390,6 +390,19 @@
 //! single namespace with formal parameters and environmental variables, so a
 //! binding may not reuse any of their names.
 //!
+//! An expression may be embedded in a host's own text, such as a chat message,
+//! and found there without parsing it. Outside braces, an expression uses only
+//! printable ASCII, tabs, line breaks, and `× ÷ ≠ ≤ ≥ ∞`, with `−`, `∈`, and
+//! `⚀` through `⚅` reserved for notation to come. Braces never nest, so a `{`
+//! always closes at the next `}`. A host may therefore delimit expressions with
+//! any other character, as in `«4D6 drop lowest»`, and find the end of one at
+//! the first such character outside braces. This is a permanent guarantee of
+//! the language, which [`parser::is_unbraced_char`] states in code. Braced text
+//! that begins with `#`, as in `{#x}`, is reserved for notation other than
+//! names, which will also end at the first `}`, so a name may contain `#`, as
+//! in `{tag#a}`, but may not begin with one. See the
+//! [parser](parser#embedding) for details.
+//!
 //! Names have been braced everywhere since `0.13.0`. Sources in the earlier
 //! syntax, such as `x, y: {x} + {y}` and `x@(3D6) + {x}`, no longer parse, but
 //! the [diagnostics](#diagnostics-and-validation) migrate them.

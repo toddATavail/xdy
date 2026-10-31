@@ -154,6 +154,58 @@
 //! stack on the heap, so parsing consumes no more of the machine stack for
 //! deeply nested input than for shallow input. Parse time is linear in the
 //! length of the input.
+//!
+//! ## Embedding
+//!
+//! A host may embed expressions in text of its own, such as a chat message or
+//! a template, and must then find where each one ends. The language
+//! guarantees, permanently, that a host can do so by lexis alone, without
+//! parsing:
+//!
+//! - Outside braces, an expression contains only printable ASCII (U+0020 SPACE
+//!   through U+007E TILDE), the tab, the line feed, the carriage return, and
+//!   the [`UNBRACED_NON_ASCII`] characters: `×`, `÷`, `≠`, `≤`, `≥`, and `∞`,
+//!   which the language spells today, and `−` (U+2212 MINUS SIGN), `∈` (U+2208
+//!   ELEMENT OF), and the die faces `⚀` through `⚅` (U+2680–U+2685), which it
+//!   reserves for notation to come. [`is_unbraced_char`] answers whether a
+//!   character is one of these. The set is frozen.
+//! - Braces never nest: a `{` always closes at the next `}`. Every other
+//!   character, including every other ASCII control character, may occur only
+//!   between them.
+//! - Every braced notation, not only a name, obeys this rule, so braced text
+//!   that begins with `#`, which is reserved for notation other than names,
+//!   will also end at the first `}`.
+//!
+//! So a host may delimit expressions with any character that
+//! [`is_unbraced_char`] rejects, such as `«` and `»`, NUL, or U+001E RECORD
+//! SEPARATOR, and find the end of an expression at the first such character
+//! outside braces. Every character that [`is_unbraced_char`] admits may occur
+//! outside braces, so none of them can delimit an expression.
+//!
+//! ```rust
+//! use xdy::parser::is_unbraced_char;
+//!
+//! /// Answer the length of the expression that begins `text`, which ends at
+//! /// the first character outside braces that may not occur there.
+//! fn expression_len(text: &str) -> usize
+//! {
+//! 	let mut braced = false;
+//! 	for (i, c) in text.char_indices()
+//! 	{
+//! 		match c
+//! 		{
+//! 			'{' => braced = true,
+//! 			'}' => braced = false,
+//! 			_ if !braced && !is_unbraced_char(c) => return i,
+//! 			_ => {}
+//! 		}
+//! 	}
+//! 	text.len()
+//! }
+//!
+//! let text = "4D6 + {«bonus»}» for strength";
+//! assert_eq!(&text[..expression_len(text)], "4D6 + {«bonus»}");
+//! ```
 
 mod combinators;
 mod engine;
