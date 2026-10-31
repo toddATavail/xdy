@@ -189,18 +189,18 @@
 //! /// the first character outside braces that may not occur there.
 //! fn expression_len(text: &str) -> usize
 //! {
-//! 	let mut braced = false;
-//! 	for (i, c) in text.char_indices()
-//! 	{
-//! 		match c
-//! 		{
-//! 			'{' => braced = true,
-//! 			'}' => braced = false,
-//! 			_ if !braced && !is_unbraced_char(c) => return i,
-//! 			_ => {}
-//! 		}
-//! 	}
-//! 	text.len()
+//!     let mut braced = false;
+//!     for (i, c) in text.char_indices()
+//!     {
+//!         match c
+//!         {
+//!             '{' => braced = true,
+//!             '}' => braced = false,
+//!             _ if !braced && !is_unbraced_char(c) => return i,
+//!             _ => {}
+//!         }
+//!     }
+//!     text.len()
 //! }
 //!
 //! let text = "4D6 + {«bonus»}» for strength";

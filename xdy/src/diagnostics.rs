@@ -1895,98 +1895,97 @@ impl<'src> Doctor<'src>
 		};
 		let (last, last_pos) = self.preceding(pos)?;
 		let before_end = last_pos + last.len_utf8();
-		let diagnostic = match site.site
-		{
-			Site::Predicate { threshold, .. } =>
+		let diagnostic =
+			match site.site
 			{
-				make_missing_predicate(source, kind, threshold, before_end, pos)
-			},
-			Site::RangeOperator { .. } =>
-			{
-				make_missing_range_operator(source, kind, pos, at_eof)
-			},
-			Site::Times { singular, .. } => make_missing_times(
-				source, kind, before_end, pos, at_eof, singular
-			),
-			_ =>
-			{
-				// The token before the operand, past its sign, if any.
-				let before = source[..pos].trim_end_matches(is_token_space);
-				let signed = before.ends_with('-');
-				let before = if signed
+				Site::Predicate { threshold, .. } => make_missing_predicate(
+					source, kind, threshold, before_end, pos
+				),
+				Site::RangeOperator { .. } =>
 				{
-					before[..before.len() - 1].trim_end_matches(is_token_space)
-				}
-				else
+					make_missing_range_operator(source, kind, pos, at_eof)
+				},
+				Site::Times { singular, .. } => make_missing_times(
+					source, kind, before_end, pos, at_eof, singular
+				),
+				_ =>
 				{
-					before
-				};
-				// The context of the operand tells which it is, if the failure
-				// lies at its start. Otherwise, the failure lies after its
-				// sign, and the token before the sign tells.
-				let within = |label: &'static str| {
-					site.error
-						.errors
-						.iter()
-						.any(|(_, kind)| *kind == NomErrorKind::Context(label))
-				};
-				let threshold = ClausePart::Threshold;
-				let tokens = [
-					("..=", ClausePart::RangeEnd),
-					("..", ClausePart::RangeEnd),
-					("<=", threshold),
-					(">=", threshold),
-					("!=", threshold),
-					("≤", threshold),
-					("≥", threshold),
-					("≠", threshold),
-					("<", threshold),
-					(">", threshold),
-					("=", threshold),
-					("in", ClausePart::RangeStart)
-				];
-				let token = tokens
-					.into_iter()
-					.find(|(token, _)| before.ends_with(token));
-				let contexts = kind.contexts();
-				let part = if within(contexts.threshold)
-				{
-					threshold
-				}
-				else if within(contexts.range_start)
-				{
-					ClausePart::RangeStart
-				}
-				else if within(contexts.range_end)
-				{
-					ClausePart::RangeEnd
-				}
-				else
-				{
-					// Only a fix supplies the token before an operand: the
-					// operator before the end of a range.
-					token.map_or(ClausePart::RangeEnd, |(_, part)| part)
-				};
-				// Name the token before the operand only if it belongs to the
-				// operand, and so is not one that a fix supplied.
-				let token =
-					token.filter(|(_, of)| *of == part).map(|(token, _)| {
-						SourceSpan {
+					// The token before the operand, past its sign, if any.
+					let before = source[..pos].trim_end_matches(is_token_space);
+					let signed = before.ends_with('-');
+					let before = if signed
+					{
+						before[..before.len() - 1]
+							.trim_end_matches(is_token_space)
+					}
+					else
+					{
+						before
+					};
+					// The context of the operand tells which it is, if the
+					// failure lies at its start. Otherwise, the failure lies
+					// after its sign, and the token before the sign tells.
+					let within = |label: &'static str| {
+						site.error.errors.iter().any(|(_, kind)| {
+							*kind == NomErrorKind::Context(label)
+						})
+					};
+					let threshold = ClausePart::Threshold;
+					let tokens = [
+						("..=", ClausePart::RangeEnd),
+						("..", ClausePart::RangeEnd),
+						("<=", threshold),
+						(">=", threshold),
+						("!=", threshold),
+						("≤", threshold),
+						("≥", threshold),
+						("≠", threshold),
+						("<", threshold),
+						(">", threshold),
+						("=", threshold),
+						("in", ClausePart::RangeStart)
+					];
+					let token = tokens
+						.into_iter()
+						.find(|(token, _)| before.ends_with(token));
+					let contexts = kind.contexts();
+					let part = if within(contexts.threshold)
+					{
+						threshold
+					}
+					else if within(contexts.range_start)
+					{
+						ClausePart::RangeStart
+					}
+					else if within(contexts.range_end)
+					{
+						ClausePart::RangeEnd
+					}
+					else
+					{
+						// Only a fix supplies the token before an operand: the
+						// operator before the end of a range.
+						token.map_or(ClausePart::RangeEnd, |(_, part)| part)
+					};
+					// Name the token before the operand only if it belongs to
+					// the operand, and so is not one that a fix supplied.
+					let token = token.filter(|(_, of)| *of == part).map(
+						|(token, _)| SourceSpan {
 							start: before.len() - token.len(),
 							end: before.len()
 						}
-					});
-				make_missing_operand(
-					source,
-					kind,
-					part,
-					token,
-					token_span(source, pos, at_eof),
-					pos,
-					signed
-				)
-			}
-		};
+					);
+					make_missing_operand(
+						source,
+						kind,
+						part,
+						token,
+						token_span(source, pos, at_eof),
+						pos,
+						signed
+					)
+				}
+			};
 		Some(diagnostic)
 	}
 

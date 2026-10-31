@@ -4328,6 +4328,10 @@ fn value<'src>()
 	)
 }
 
+/// The input before and after a comma that a [repair](Site::TrailingComma)
+/// retracted from a list of values, as [`read_more_values`] answers it.
+type RetractedComma<'src> = (Span<'src>, Span<'src>);
+
 /// Parse the rest of a list of values after its first, the custom faces of
 /// dice or the list of a reroll or explode clause, as
 /// `many0(preceded(preceded(multispace0, char(',')), cut(value)))`: once a
@@ -4360,7 +4364,7 @@ fn read_more_values<'src, R: Recovery<'src>, S: TokenSink>(
 	stack: &Stack<'src>,
 	rec: &mut Recoverer<'src, '_, R, S>
 ) -> Result<
-	(Span<'src>, Option<(Span<'src>, Span<'src>)>),
+	(Span<'src>, Option<RetractedComma<'src>>),
 	(Span<'src>, nom::Err<ParseError<'src>>)
 >
 {
