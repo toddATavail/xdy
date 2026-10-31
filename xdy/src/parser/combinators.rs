@@ -907,6 +907,57 @@ pub fn d_operator(input: Span) -> IResult<Span, char, ParseError>
 	one_of("dD")(input)
 }
 
+/// The non-ASCII characters that may occur in an expression outside the braces
+/// of a [name](braced_name): `×` and `÷`, which spell multiplication and
+/// division; `≠`, `≤`, and `≥`, which spell comparisons; `∞`, which spells an
+/// unlimited limit; and, reserved for notation to come, `−` (U+2212 MINUS
+/// SIGN), `∈` (U+2208 ELEMENT OF), and the die faces `⚀` through `⚅`
+/// (U+2680–U+2685). This set is frozen, a permanent guarantee of the
+/// language, so that a host that embeds expressions in its own text can
+/// delimit them by lexis alone: beside these characters, no production of any
+/// later version will use a character outside braces but printable ASCII, the
+/// tab, the line feed, and the carriage return.
+///
+/// See [`is_unbraced_char`], which answers whether a character is one of these
+/// or one of those.
+pub const UNBRACED_NON_ASCII: [char; 14] = [
+	'×', '÷', '−', '≠', '≤', '≥', '∞', '∈', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'
+];
+
+/// Answer whether `c` may occur in an expression outside the braces of a
+/// [name](braced_name): whether it is printable ASCII (U+0020 SPACE through
+/// U+007E TILDE), the tab, the line feed, the carriage return, or one of the
+/// [`UNBRACED_NON_ASCII`] characters. Every other character, e.g., `«`, `»`,
+/// U+00A0 NO-BREAK SPACE, or an ASCII control character other than those
+/// three, occurs in an expression only between a `{` and
+/// the next `}`, which always closes it, since braces never nest. A host that
+/// embeds expressions can therefore find where one ends without parsing it,
+/// e.g., at the first `»` outside every pair of braces. This is a permanent
+/// guarantee of the language.
+///
+/// # Parameters
+/// - `c`: The character to classify.
+///
+/// # Returns
+/// `true` if `c` may occur outside braces; `false` otherwise.
+///
+/// # Examples
+/// ```rust
+/// use xdy::parser::is_unbraced_char;
+///
+/// assert!(is_unbraced_char('d'));
+/// assert!(is_unbraced_char('≤'));
+/// assert!(is_unbraced_char('\n'));
+/// assert!(!is_unbraced_char('\0'));
+/// assert!(!is_unbraced_char('»'));
+/// assert!(!is_unbraced_char('🎲'));
+/// ```
+pub fn is_unbraced_char(c: char) -> bool
+{
+	matches!(c, ' '..='~' | '\t' | '\n' | '\r')
+		|| UNBRACED_NON_ASCII.contains(&c)
+}
+
 /// Answer whether `c` may occur in an [identifier].
 ///
 /// An identifier admits every code point except the braces that delimit it,

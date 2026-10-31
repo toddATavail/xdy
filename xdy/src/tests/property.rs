@@ -16,11 +16,14 @@
 //! Every program must also parse, render as a source that parses and renders
 //! the same, and write as an S-expression that reads back to it. The tokens
 //! that the parser reports as it parses a program, or a mutation that still
-//! parses, must tile the source. The classification of every program must
-//! resolve its names by the scoping rules of the validator, and give its
-//! delimiters the depths of the nesting of its tree. Every program
-//! that compiles must also [evaluate](Evaluator::evaluate_metered), over
-//! arguments and externals that include the extremes of [`i32`], within a
+//! parses, must tile the source, and every source that parses must keep the
+//! guarantee to embedding hosts: outside its braces, which lexis alone finds,
+//! it has only the characters that [`is_unbraced_char`] admits. The
+//! classification of every program must resolve its names by the scoping rules
+//! of the validator, and give its delimiters the depths of the nesting of its
+//! tree. Every program that compiles must also
+//! [evaluate](Evaluator::evaluate_metered), over arguments and externals that
+//! include the extremes of [`i32`], within a
 //! [dice budget](EvaluationError::DiceBudgetExhausted), and so return promptly
 //! however many dice it asks for; and its distribution must
 //! [build](crate::DistributionPlan::build) within a budget of steps and cells,
@@ -66,7 +69,7 @@ use crate::{
 	classify::{Role, Token, classify},
 	compiler::{CompilationError, compile, compile_unoptimized},
 	diagnostics::diagnose,
-	parser::{Strict, is_token_space},
+	parser::{Strict, is_token_space, is_unbraced_char},
 	s_expr::{SExpressible, SExpressibleOptions, read_s_expr},
 	support::{SMALL_STACK_SIZE, on_small_stack},
 	tests::corpus::{TOKENS, sources}
@@ -111,6 +114,27 @@ fn test_program_tokens()
 		check(
 			|| prop_oneof![program(), mutated_program()],
 			|source| check_tokens(&source)
+		)
+	});
+}
+
+/// Ensure that every random [program](program), [mutation](Mutation) of one,
+/// string of [tokens](token_string), and arbitrary string that parses
+/// [keeps the guarantee to embedding hosts](check_unbraced).
+#[test]
+fn test_unbraced_characters()
+{
+	on_small_stack(|| {
+		check(
+			|| {
+				prop_oneof![
+					program(),
+					mutated_program(),
+					token_string(),
+					any::<String>()
+				]
+			},
+			|source| check_unbraced(&source)
 		)
 	});
 }
@@ -606,6 +630,98 @@ fn check_tokens(source: &str) -> Result<(), TestCaseError>
 		"{:?} after the last token belongs to no token",
 		&source[end..]
 	);
+	Ok(())
+}
+
+/// Check that a source that parses keeps the guarantee to embedding hosts, by
+/// which a host delimits an expression by lexis alone. Scanned without
+/// parsing, the source has no `}` outside braces, and no `{` within them, and
+/// each `{` closes at the next `}`; outside them, every character is one that
+/// [`is_unbraced_char`] admits. The braces so found must be exactly the
+/// [braces of names](Role::NameBrace) that the parser reports; every
+/// identifier that it reports must lie within them, and every other token
+/// outside them.
+///
+/// # Parameters
+/// - `source`: The source.
+///
+/// # Errors
+/// [`TestCaseError`] if a property fails.
+fn check_unbraced(source: &str) -> Result<(), TestCaseError>
+{
+	if Parser::parse(source).is_err()
+	{
+		return Ok(());
+	}
+	// The byte offsets of the `{` and `}` of each pair of braces.
+	let mut braces = Vec::<(usize, usize)>::new();
+	let mut open = None;
+	for (at, c) in source.char_indices()
+	{
+		match (open, c)
+		{
+			(None, '{') => open = Some(at),
+			(Some(opener), '}') =>
+			{
+				braces.push((opener, at));
+				open = None;
+			},
+			(Some(_), '{') =>
+			{
+				return Err(TestCaseError::fail(format!(
+					"`{{` at {} within braces in {:?}",
+					at, source
+				)));
+			},
+			(Some(_), _) =>
+			{},
+			(None, c) => prop_assert!(
+				c != '}' && is_unbraced_char(c),
+				"{:?} at {} outside braces in {:?}",
+				c,
+				at,
+				source
+			)
+		}
+	}
+	prop_assert!(open.is_none(), "unclosed `{{` in {:?}", source);
+	let mut tokens = Vec::<Token>::new();
+	prop_assert!(
+		Parser::parse_recovering(source, &mut Strict, &mut tokens).is_ok(),
+		"recovery mode fails a source that parses"
+	);
+	let reported = tokens
+		.iter()
+		.filter(|token| token.role == Role::NameBrace)
+		.map(|token| token.span.start)
+		.collect::<Vec<_>>();
+	let found = braces
+		.iter()
+		.flat_map(|&(opener, closer)| [opener, closer])
+		.collect::<Vec<_>>();
+	prop_assert_eq!(reported, found, "braces of {:?}", source);
+	for token in &tokens
+	{
+		let identifier = matches!(
+			token.role,
+			Role::ParameterDeclaration
+				| Role::ParameterReference
+				| Role::BindingDeclaration
+				| Role::BindingReference
+				| Role::External
+				| Role::Unresolved
+		);
+		let within = braces.iter().any(|&(opener, closer)| {
+			opener < token.span.start && token.span.end <= closer
+		});
+		prop_assert_eq!(
+			within,
+			identifier,
+			"token {:?} of {:?}",
+			token,
+			source
+		);
+	}
 	Ok(())
 }
 

@@ -475,6 +475,142 @@ fn test_identifier_start()
 	}
 }
 
+/// Ensure that [`is_unbraced_char`] admits exactly printable ASCII, the tab,
+/// the line feed, the carriage return, and the [`UNBRACED_NON_ASCII`]
+/// characters.
+#[test]
+fn test_unbraced_char()
+{
+	for c in [' ', '\t', '\n', '\r', 'a', '{', '}', '~']
+		.into_iter()
+		.chain(UNBRACED_NON_ASCII)
+	{
+		assert!(is_unbraced_char(c), "expected {:?} outside braces", c);
+	}
+	for c in [
+		'\0', '\u{1B}', '\u{1E}', '\u{1F}', '\u{0B}', '\u{0C}', '\u{7F}'
+	]
+	.into_iter()
+	.chain([
+		'\u{80}', '\u{A0}', '«', '»', '·', '…', '∉', '∧', '🎲', '\u{2679}'
+	])
+	{
+		assert!(!is_unbraced_char(c), "expected {:?} only within braces", c);
+	}
+}
+
+/// The sources that hold a character, at `◊`, where the grammar reads an
+/// operator, a comparator, a range operator, a keyword, a delimiter, or a
+/// separator, or begins an operand.
+const UNBRACED_SLOTS: &[&str] = &[
+	"◊",
+	"◊1",
+	"1◊2",
+	"1 ◊ 2",
+	"3◊6",
+	"3D◊6",
+	"[1◊2]",
+	"[1:2◊]",
+	"3D6 reroll ◊1",
+	"3D6 reroll in 1◊3",
+	"3D6 reroll in [1◊ 2]",
+	"3D6 explode = 6 ◊ times",
+	"3D6 explode = 6 1 ◊",
+	"4D6 drop lowest◊1",
+	"4D6 keep highest ◊",
+	"highest(1◊ 2)",
+	"{x}◊ {y}: 1",
+	"{x}◊(1)",
+	"{x}◊ 1"
+];
+
+/// The number of parts into which [`braced_chars_never_parse`] divides the
+/// code points, so that the parts run in parallel.
+const UNBRACED_PARTS: u32 = 8;
+
+/// Ensure that no character that [`is_unbraced_char`] rejects occurs outside
+/// braces in any source that parses: wherever the grammar reads an operator,
+/// a keyword, a delimiter, or a separator, or begins an operand, every such
+/// character fails the parse. Every code point is tried, in
+/// [`UNBRACED_PARTS`] parts, so the tests are ignored by default; `just
+/// stress` runs them.
+///
+/// # Parameters
+/// - `part`: The part of the code points to try, less than [`UNBRACED_PARTS`].
+///
+/// # Panics
+/// If a source parses with a rejected character outside braces.
+fn braced_chars_never_parse(part: u32)
+{
+	let size = (char::MAX as u32 + 1).div_ceil(UNBRACED_PARTS);
+	let start = part * size;
+	let end = (start + size).min(char::MAX as u32 + 1);
+	for c in (start..end)
+		.filter_map(char::from_u32)
+		.filter(|&c| !is_unbraced_char(c))
+	{
+		let mut buffer = [0; 4];
+		let c = &*c.encode_utf8(&mut buffer);
+		for slot in UNBRACED_SLOTS
+		{
+			let source = slot.replace('◊', c);
+			assert!(
+				Parser::parse(&source).is_err(),
+				"{:?} parses, outside braces",
+				source
+			);
+		}
+	}
+}
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 0
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_0() { braced_chars_never_parse(0) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 1
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_1() { braced_chars_never_parse(1) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 2
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_2() { braced_chars_never_parse(2) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 3
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_3() { braced_chars_never_parse(3) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 4
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_4() { braced_chars_never_parse(4) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 5
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_5() { braced_chars_never_parse(5) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 6
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_6() { braced_chars_never_parse(6) }
+
+/// Ensure that no character that [`is_unbraced_char`] rejects, among part 7
+/// of [`UNBRACED_PARTS`], [parses outside braces](braced_chars_never_parse).
+#[test]
+#[ignore = "stress: run with just stress"]
+fn test_braced_chars_never_parse_unbraced_7() { braced_chars_never_parse(7) }
+
 /// Ensure that [`canonical_name`] trims a name and collapses every run of
 /// whitespace within it to a single space, borrowing the name whenever it is
 /// already canonical.
