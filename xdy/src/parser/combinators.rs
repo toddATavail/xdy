@@ -626,12 +626,14 @@ pub fn standard_faces(input: Span) -> IResult<Span, Expression, ParseError>
 pub fn custom_faces(input: Span) -> IResult<Span, Vec<i32>, ParseError>
 {
 	let (input, _) = char('[').parse_complete(input)?;
+	// A face must follow a comma, so that a malformed face fails where it
+	// is, rather than ending the list before the comma.
 	let (input, faces) = cut(separated_list1(
 		preceded(multispace0, char(',')),
-		preceded(
+		cut(preceded(
 			multispace0,
 			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
-		)
+		))
 	))
 	.parse_complete(input)?;
 	let (input, _) = cut(preceded(

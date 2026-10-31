@@ -48,7 +48,6 @@ use nom::{
 	character::complete::{char, multispace0, one_of},
 	combinator::{cut, fail as fail_parser, map},
 	error::{ContextError, ErrorKind, ParseError as _, context},
-	multi::{many0, separated_list0},
 	sequence::{preceded, terminated}
 };
 
@@ -4233,10 +4232,12 @@ fn read_predicate<'src, R: Recovery<'src>, S: TokenSink>(
 	}
 }
 
-/// Parse the list of a reroll or explode clause, `[`, then `separated_list0(
-/// preceded(multispace0, char(',')), preceded(multispace0,
-/// context(CONSTANT_CONTEXT, integer)))`, then [a closing bracket](close),
-/// whose absence a repair may supply.
+/// Parse the list of a reroll or explode clause, `[`, then, unless `]`
+/// follows, `separated_list1(preceded(multispace0, char(',')),
+/// cut(preceded(multispace0, context(CONSTANT_CONTEXT, integer))))`, then [a
+/// closing bracket](close), whose absence a repair may supply. A value must
+/// follow a `,`, so a malformed value fails where it is, rather than ending
+/// the list before the `,`; see [`read_more_values`].
 ///
 /// # Parameters
 /// - `input`: The input of the list, which begins with `[`.
@@ -4256,21 +4257,38 @@ fn read_values<'src, R: Recovery<'src>, S: TokenSink>(
 {
 	let opener = input.location_offset();
 	let (after, _) = char('[').parse_complete(input)?;
-	let (after, values) = separated_list0(
-		preceded(multispace0, char(',')),
-		preceded(
-			multispace0,
-			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
-		)
-	)
-	.parse_complete(after)?;
+	let mut values = Vec::new();
+	let (after, retracted) =
+		if skip_whitespace(after).fragment().starts_with(']')
+		{
+			(after, None)
+		}
+		else
+		{
+			let after = match read_value(opener, after, &mut values, stack, rec)
+			{
+				Ok(after) => after,
+				Err(e) =>
+				{
+					// The `[` was read, even though the parse fails.
+					rec.report_literals(input, after, Role::ListBracket);
+					return Err(e);
+				}
+			};
+			match read_more_values(opener, after, &mut values, stack, rec)
+			{
+				Ok(more) => more,
+				Err((at, e)) =>
+				{
+					// The values were read, even though the parse fails.
+					rec.report_literals(input, at, Role::ListBracket);
+					return Err(e);
+				}
+			}
+		};
 	let rest = match close(']', CLOSING_BRACKET_CONTEXT, after)
 	{
-		Ok(rest) =>
-		{
-			rec.report_literals(input, rest, Role::ListBracket);
-			rest
-		},
+		Ok(rest) => rest,
 		Err(e) =>
 		{
 			let site = Site::Closer {
@@ -4279,13 +4297,168 @@ fn read_values<'src, R: Recovery<'src>, S: TokenSink>(
 			};
 			// The supplied `]` is not in the source, so is not reported, but
 			// the values were read, even if the parse fails.
-			let repaired = rec.repair(site, e, stack);
-			let end = *repaired.as_ref().unwrap_or(&after);
-			rec.report_literals(input, end, Role::ListBracket);
-			repaired?
+			match rec.repair(site, e, stack)
+			{
+				Ok(rest) => rest,
+				Err(e) =>
+				{
+					rec.report_literals(input, after, Role::ListBracket);
+					return Err(e);
+				}
+			}
 		}
 	};
+	report_list(input, retracted, rest, Role::ListBracket, rec);
 	Ok((rest, values))
+}
+
+/// Answer the parser of a value of a list, a signed literal after any
+/// whitespace, as `preceded(multispace0, context(CONSTANT_CONTEXT,
+/// map(integer, |c| c.value)))`.
+///
+/// # Returns
+/// The parser of the value.
+#[inline(always)]
+fn value<'src>()
+-> impl nom::Parser<Span<'src>, Output = i32, Error = ParseError<'src>>
+{
+	preceded(
+		multispace0,
+		context(CONSTANT_CONTEXT, map(integer, |c| c.value))
+	)
+}
+
+/// Parse the rest of a list of values after its first, the custom faces of
+/// dice or the list of a reroll or explode clause, as
+/// `many0(preceded(preceded(multispace0, char(',')), cut(value)))`: once a
+/// `,` is read, a value must follow it, so that a malformed value fails where
+/// it is, rather than ending the list before the `,`.
+///
+/// While recovering, a `,` that a `]` follows offers a repair at
+/// [`Site::TrailingComma`], whose fix retracts the comma, which then ends the
+/// list. Otherwise, the ordinary parse fails at the `]`, where it expects a
+/// value, and a value that fails may be [repaired](read_value).
+///
+/// # Parameters
+/// - `opener`: The byte offset of the `[` of the list.
+/// - `after`: The input after the first value.
+/// - `values`: The values, to which the rest are appended.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The input after the last value, or after the retracted comma, and the
+/// input before and after the retracted comma, if any.
+///
+/// # Errors
+/// The input after the last value that was read, and the error of the value
+/// that failed, if no repair supplied it.
+fn read_more_values<'src, R: Recovery<'src>, S: TokenSink>(
+	opener: usize,
+	mut after: Span<'src>,
+	values: &mut Vec<i32>,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
+) -> Result<
+	(Span<'src>, Option<(Span<'src>, Span<'src>)>),
+	(Span<'src>, nom::Err<ParseError<'src>>)
+>
+{
+	loop
+	{
+		let comma: IResult<Span, char, ParseError> =
+			preceded(multispace0, char(',')).parse_complete(after);
+		let Ok((next, _)) = comma
+		else
+		{
+			return Ok((after, None));
+		};
+		if rec.recovering()
+			&& skip_whitespace(next).fragment().starts_with(']')
+			&& rec.offer(
+				Site::TrailingComma,
+				nom::Err::Failure(ParseError::from_char(
+					skip_whitespace(after),
+					']'
+				)),
+				stack
+			)
+		{
+			// Continue as though the source lacked the comma.
+			return Ok((next, Some((after, next))));
+		}
+		after = read_value(opener, next, values, stack, rec)
+			.map_err(|e| (after, e))?;
+	}
+}
+
+/// Parse a value of a list, as `cut(value)`, and append it to the values.
+/// While recovering, a value that fails offers a repair at
+/// [`Site::FaceValue`], whose fix supplies [`PLACEHOLDER_FACE`].
+///
+/// # Parameters
+/// - `opener`: The byte offset of the `[` of the list.
+/// - `input`: The input of the value.
+/// - `values`: The values, to which the value is appended.
+/// - `stack`: The stack of suspended productions.
+/// - `rec`: The recovery state.
+///
+/// # Returns
+/// The input after the value.
+///
+/// # Errors
+/// * [`Err`](nom::Err) if the value could not be parsed, or repaired.
+fn read_value<'src, R: Recovery<'src>, S: TokenSink>(
+	opener: usize,
+	input: Span<'src>,
+	values: &mut Vec<i32>,
+	stack: &Stack<'src>,
+	rec: &mut Recoverer<'src, '_, R, S>
+) -> Result<Span<'src>, nom::Err<ParseError<'src>>>
+{
+	match cut(value()).parse_complete(input)
+	{
+		Ok((rest, value)) =>
+		{
+			values.push(value);
+			Ok(rest)
+		},
+		Err(e) =>
+		{
+			let at = rec.repair(Site::FaceValue { opener }, e, stack)?;
+			values.push(PLACEHOLDER_FACE);
+			Ok(at)
+		}
+	}
+}
+
+/// Report a list of values that the engine has read, but not a comma that a
+/// repair [retracted](read_more_values), since the source as repaired lacks
+/// it.
+///
+/// # Parameters
+/// - `input`: The input of the list, which begins with `[`.
+/// - `retracted`: The input before and after the retracted comma, if any.
+/// - `rest`: The input after the list.
+/// - `bracket`: The role of the brackets.
+/// - `rec`: The recovery state.
+fn report_list<'src, R: Recovery<'src>, S: TokenSink>(
+	input: Span<'src>,
+	retracted: Option<(Span<'src>, Span<'src>)>,
+	rest: Span<'src>,
+	bracket: Role,
+	rec: &mut Recoverer<'src, '_, R, S>
+)
+{
+	match retracted
+	{
+		Some((before, after)) =>
+		{
+			rec.report_literals(input, before, bracket);
+			rec.report_literals(after, rest, bracket);
+		},
+		None => rec.report_literals(input, rest, bracket)
+	}
 }
 
 /// Resume a reroll or explode clause with the outcome of the threshold of a
@@ -5678,10 +5851,12 @@ pub(crate) enum Site
 	/// The faces of a dice expression are missing after its dice operator.
 	Faces,
 
-	/// The first face of custom faces is missing.
+	/// A value of a list is missing or malformed, a face of custom faces or a
+	/// value of the list of a reroll or explode clause: the first, or one
+	/// after a `,`.
 	FaceValue
 	{
-		/// The byte offset of the `[` of the custom faces.
+		/// The byte offset of the `[` of the list.
 		opener: usize
 	},
 
@@ -5756,9 +5931,12 @@ pub(crate) enum Site
 	},
 
 	/// A `,` after an argument of a call is followed by the `)` of the call,
-	/// rather than by another argument. Only a [recovering](Recovery::ENABLED)
-	/// parse looks for this failure, since the ordinary parse fails at the `)`,
-	/// where it expects an argument, at a [goal](Site::Goal). The
+	/// rather than by another argument, or a `,` after a value of a list is
+	/// followed by the `]` of the list, rather than by another value. Only a
+	/// [recovering](Recovery::ENABLED) parse looks for this failure, since the
+	/// ordinary parse fails at the `)`, where it expects an argument, at a
+	/// [goal](Site::Goal), or at the `]`, where it expects a value, at a
+	/// [`Site::FaceValue`]. The
 	/// [position](FailureSite::position) of the failure is that of the comma.
 	/// Since the ordinary parse does not fail here,
 	/// [declining](Repair::Stop) the repair does not end recovery.
@@ -7489,17 +7667,10 @@ fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 {
 	let opener = input.location_offset();
 	let within = |e| with_context(input, CUSTOM_FACES_CONTEXT, e);
-	let face = || {
-		preceded(
-			multispace0,
-			context(CONSTANT_CONTEXT, map(integer, |c| c.value))
-		)
-	};
 	let (after, _) = char('[').parse_complete(input)?;
-	// The faces are `cut(separated_list1(comma, face))`: a missing first face
-	// is unrecoverable, but a comma without a face after it ends the list
-	// before the comma.
-	let (after, first) = match face().parse_complete(after)
+	// The faces are `cut(separated_list1(comma, cut(face)))`: a missing first
+	// face is unrecoverable, as is a comma without a face after it.
+	let (after, first) = match value().parse_complete(after)
 	{
 		Ok(parsed) => parsed,
 		Err(e) =>
@@ -7517,12 +7688,18 @@ fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 			}
 		}
 	};
-	let (after, rest) =
-		many0(preceded(preceded(multispace0, char(',')), face()))
-			.parse_complete(after)?;
-	let mut faces = Vec::with_capacity(rest.len() + 1);
-	faces.push(first);
-	faces.extend(rest);
+	let mut faces = vec![first];
+	let (after, retracted) =
+		match read_more_values(opener, after, &mut faces, stack, rec)
+		{
+			Ok(more) => more,
+			Err((at, e)) =>
+			{
+				// The faces were read, even though the parse fails.
+				rec.report_literals(input, at, Role::FacesBracket);
+				return Err(within(e));
+			}
+		};
 	let bracket: IResult<Span, char, ParseError> = cut(preceded(
 		multispace0,
 		context(CLOSING_BRACKET_CONTEXT, char(']'))
@@ -7551,7 +7728,7 @@ fn recover_custom_faces<'src, R: Recovery<'src>, S: TokenSink>(
 	};
 	// The supplied first face or `]` is not in the source, so is not
 	// reported.
-	rec.report_literals(input, rest, Role::FacesBracket);
+	report_list(input, retracted, rest, Role::FacesBracket, rec);
 	Ok((rest, faces))
 }
 

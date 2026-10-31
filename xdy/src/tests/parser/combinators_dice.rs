@@ -1809,3 +1809,65 @@ fn test_dangling_sign_messages()
 		);
 	}
 }
+
+/// Ensure that a value of a list, custom faces or the list of a reroll or
+/// explode clause, that a `,` or the `[` precedes, fails where it stands,
+/// rather than ending the list before the `,`.
+#[test]
+fn test_list_value_messages()
+{
+	for (input, expected) in [
+		(
+			"4d[1,-]",
+			"Parse error @ 1:7 (byte 6): expected digit, but found `]`"
+		),
+		(
+			"4d[1,]",
+			"Parse error @ 1:6 (byte 5): expected integer, but found `]`"
+		),
+		(
+			"4d[1, x]",
+			"Parse error @ 1:7 (byte 6): expected integer, but found `x`"
+		),
+		(
+			"4d6 reroll in [1,]",
+			"Parse error @ 1:18 (byte 17): expected integer, but found `]`"
+		),
+		(
+			"4d6 reroll in [1,-]",
+			"Parse error @ 1:19 (byte 18): expected digit, but found `]`"
+		),
+		(
+			"4d6 reroll in [-]",
+			"Parse error @ 1:17 (byte 16): expected digit, but found `]`"
+		),
+		(
+			"4d6 reroll in [x]",
+			"Parse error @ 1:16 (byte 15): expected integer, but found `x`"
+		),
+		(
+			"4d6 explode in [1,]",
+			"Parse error @ 1:19 (byte 18): expected integer, but found `]`"
+		),
+		// A missing first face is as it was.
+		(
+			"4d[]",
+			"Parse error @ 1:4 (byte 3): expected integer, but found `]`"
+		)
+	]
+	{
+		let error = Parser::parse(input).expect_err(input);
+		let rendered = error.to_string();
+		assert_eq!(
+			rendered.lines().next(),
+			Some(expected),
+			"Failed for input: {}",
+			input
+		);
+	}
+	// An empty list of a reroll or explode clause still parses.
+	for input in ["4d6 reroll in []", "4d6 explode in [ ]"]
+	{
+		assert!(Parser::parse(input).is_ok(), "Failed for input: {}", input);
+	}
+}

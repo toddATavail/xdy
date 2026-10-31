@@ -300,11 +300,12 @@ pub enum DiagnosticKind
 	/// `highest(1D20 1D20)`, `lowest(1, 2 3)`
 	MissingComma,
 
-	/// The last argument of a call of `highest` or `lowest` is followed by a
-	/// `,`.
+	/// The last argument of a call of `highest` or `lowest`, or the last value
+	/// of custom faces or of the list of a reroll or explode clause, is
+	/// followed by a `,`.
 	///
 	/// # Examples
-	/// `highest(1D20, 1D20,)`
+	/// `highest(1D20, 1D20,)`, `3D[1, 2, 3,]`, `4D6 reroll in [1, 2,]`
 	TrailingComma,
 
 	/// A call of `highest` or `lowest` stands ungrouped as a dice count, the
@@ -1619,7 +1620,13 @@ impl<'src> Doctor<'src>
 			{
 				('(', Site::Goal { .. }) => Some(Shape::Group),
 				('[', Site::Goal { .. }) => Some(Shape::Range),
-				('[', Site::FaceValue { .. }) => Some(Shape::CustomFaces),
+				// Only a face that is missing, not one that is malformed, e.g.,
+				// `x` in `3D[x]`, has a placeholder.
+				('[', Site::FaceValue { .. })
+					if at_eof || source[pos..].starts_with(']') =>
+				{
+					Some(Shape::CustomFaces)
+				},
 				('{', Site::VariableName { .. }) => Some(Shape::Variable),
 				_ => None
 			};
@@ -1777,9 +1784,19 @@ impl<'src> Doctor<'src>
 					- source[pos + 1..]
 						.trim_start_matches(is_token_space)
 						.len();
-				self.trailing_comma = Some((close, self.fixes.len()));
+				// Only a `)` belongs to a call, whose later fixes may
+				// supersede this one; a `]` closes a list of values.
+				let item = if source[close..].starts_with(')')
+				{
+					self.trailing_comma = Some((close, self.fixes.len()));
+					"argument"
+				}
+				else
+				{
+					"value"
+				};
 				Some(Analysis::Diagnosed(
-					make_trailing_comma(pos, close),
+					make_trailing_comma(pos, close, item),
 					Repair::Fix
 				))
 			},
@@ -3734,17 +3751,19 @@ fn make_missing_comma(source: &str, after: usize, pos: usize) -> Diagnostic
 	}
 }
 
-/// Create a diagnostic for a `,` after the last argument of a call. The fix
-/// removes the `,`, and the whitespace after it.
+/// Create a diagnostic for a `,` after the last argument of a call, or after
+/// the last value of a list: custom faces, or the list of a reroll or explode
+/// clause. The fix removes the `,`, and the whitespace after it.
 ///
 /// # Parameters
 /// - `comma`: The byte offset of the `,`.
-/// - `close`: The byte offset of the `)` after it.
+/// - `close`: The byte offset of the `)` or `]` after it.
+/// - `item`: What the `,` should precede, `argument` or `value`.
 ///
 /// # Returns
 /// A diagnostic with a `TrailingComma` kind and a suggestion that removes the
 /// `,`.
-fn make_trailing_comma(comma: usize, close: usize) -> Diagnostic
+fn make_trailing_comma(comma: usize, close: usize, item: &str) -> Diagnostic
 {
 	Diagnostic {
 		kind: DiagnosticKind::TrailingComma,
@@ -3752,7 +3771,7 @@ fn make_trailing_comma(comma: usize, close: usize) -> Diagnostic
 			start: comma,
 			end: comma + 1
 		},
-		message: "expected another argument after `,`".into(),
+		message: format!("expected another {} after `,`", item),
 		related: vec![],
 		suggestions: vec![Suggestion {
 			description: "remove `,`".into(),

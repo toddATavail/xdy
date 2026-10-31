@@ -270,7 +270,7 @@ fn test_canonical_repairs()
 		("[1:2", "[1:2]"),
 		("3d", "3d6"),
 		("3d[", "3d[0]"),
-		("3d[1,", "3d[1]"),
+		("3d[1,", "3d[1,0]"),
 		("3d6 drop", "3d6 droplowest"),
 		("x", "{x}"),
 		("x: x", "{x}: {x}"),
@@ -380,6 +380,12 @@ fn test_canonical_repairs()
 		("highest(1, 2,)", "highest(1, 2)"),
 		("highest(1, 2 , )", "highest(1, 2  )"),
 		("lowest(1,)", "lowest(1, 0)"),
+		("3d[1, 2,]", "3d[1, 2]"),
+		("3d[1, 2 , ]", "3d[1, 2  ]"),
+		("3d[1, -]", "3d[1, -0]"),
+		("3d6 reroll in [1,]", "3d6 reroll in [1]"),
+		("3d6 explode in [1, -]", "3d6 explode in [1, -0]"),
+		("3d6 reroll in [-]", "3d6 reroll in [-0]"),
 		("highest(4D6)", "highest(4D6, 0)"),
 		("3dhighest(1, 2)", "3d(highest(1, 2))"),
 		("3d highest(1 2", "3d (highest(1 ,2))"),
@@ -611,6 +617,20 @@ fn test_declining_call_offers_continues()
 	assert_eq!(recovered.as_deref(), Some("highest(1, 2, 0)"));
 	assert_eq!(sites[0].site, Site::TrailingComma);
 	assert_eq!(sites[0].position(), 12);
+	// Declined in a list, the comma takes a placeholder value instead.
+	let (recovered, sites) = recover("3d[1, 2,] reroll in [1,]", decline);
+	assert_eq!(recovered.as_deref(), Some("3D[1, 2, 0] reroll in [1, 0]"));
+	assert_eq!(
+		sites.iter().map(|site| site.site).collect::<Vec<_>>(),
+		[
+			Site::TrailingComma,
+			Site::FaceValue { opener: 2 },
+			Site::TrailingComma,
+			Site::FaceValue { opener: 20 }
+		]
+	);
+	assert_eq!(sites[0].position(), 7);
+	assert_eq!(sites[2].position(), 22);
 	let accept = |site: &FailureSite<'_>| match site.site
 	{
 		Site::UngroupedCall { .. }
@@ -1170,6 +1190,11 @@ pub(super) const FAMILIES: &[Family] = &[
 		name: "trailing commas",
 		source: |n| format!("1{}", " + lowest(1, 2,)".repeat(n)),
 		repairs: |n| n
+	},
+	Family {
+		name: "trailing list commas",
+		source: |n| format!("1{}", " + 3d[1, 2,] reroll in [1,]".repeat(n)),
+		repairs: |n| 2 * n
 	},
 	// An ungrouped call gains its `(` and its `)`.
 	Family {

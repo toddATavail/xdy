@@ -2343,6 +2343,51 @@ suggestion: 4D6
 suggestion: highest(4D6, 0)
 placeholder: 13..14 "argument" [integer, {variable}, (expression), dice expression]
 
+3D[1, 2,]
+=
+kind: TrailingComma
+span: 7..8
+message: expected another value after `,`
+rendered: trailing `,` (7..8): expected another value after `,`
+suggestion: 3D[1, 2]
+
+4D6 reroll in [1, 2 , ]
+=
+kind: TrailingComma
+span: 20..21
+message: expected another value after `,`
+rendered: trailing `,` (20..21): expected another value after `,`
+suggestion: 4D6 reroll in [1, 2 ]
+
+4D6 explode in [6,]
+=
+kind: TrailingComma
+span: 17..18
+message: expected another value after `,`
+rendered: trailing `,` (17..18): expected another value after `,`
+suggestion: 4D6 explode in [6]
+
+3D[x]
+=
+kind: UnexpectedToken
+span: 3..5
+message: unexpected `x]`
+rendered: unexpected token (3..5): unexpected `x]`
+
+3D[1, -]
+=
+kind: UnexpectedToken
+span: 7..8
+message: unexpected `]`
+rendered: unexpected token (7..8): unexpected `]`
+
+4D6 reroll in [-]
+=
+kind: UnexpectedToken
+span: 16..17
+message: unexpected `]`
+rendered: unexpected token (16..17): unexpected `]`
+
 highest(1 2)
 =
 kind: MissingComma

@@ -526,6 +526,25 @@ fn test_recovered_roles()
 			]
 		),
 		(
+			"3d[1, 2,] reroll in [1,]",
+			&[
+				("3", Constant),
+				("d", DiceOperator),
+				("[", FacesBracket),
+				("1", Face),
+				(",", Separator),
+				("2", Face),
+				(",", Unrecognized),
+				("]", FacesBracket),
+				("reroll", Reroll),
+				("in", Predicate),
+				("[", ListBracket),
+				("1", Face),
+				(",", Unrecognized),
+				("]", ListBracket)
+			]
+		),
+		(
 			"highest(1, 2,)",
 			&[
 				("highest", Call),
