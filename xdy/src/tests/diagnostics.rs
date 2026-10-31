@@ -41,6 +41,7 @@ pub(super) fn kind_name(kind: &DiagnosticKind) -> &'static str
 		DiagnosticKind::BareIdentifier => "BareIdentifier",
 		DiagnosticKind::ReservedName => "ReservedName",
 		DiagnosticKind::MissingDiceFaces => "MissingDiceFaces",
+		DiagnosticKind::DanglingSign => "DanglingSign",
 		DiagnosticKind::IncompleteDropClause => "IncompleteDropClause",
 		DiagnosticKind::MisplacedDropClause => "MisplacedDropClause",
 		DiagnosticKind::IncompleteKeepClause => "IncompleteKeepClause",

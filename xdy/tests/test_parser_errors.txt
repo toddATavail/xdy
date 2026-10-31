@@ -2376,17 +2376,145 @@ rendered: unexpected token (3..5): unexpected `x]`
 
 3D[1, -]
 =
-kind: UnexpectedToken
-span: 7..8
-message: unexpected `]`
-rendered: unexpected token (7..8): unexpected `]`
+kind: DanglingSign
+span: 6..7
+message: expected digits after `-`
+rendered: dangling sign (6..7): expected digits after `-`
+suggestion: 3D[1, -0]
+placeholder: 7..8 "digits" [digits]
+
+4d[-]
+=
+kind: DanglingSign
+span: 3..4
+message: expected digits after `-`
+rendered: dangling sign (3..4): expected digits after `-`
+suggestion: 4d[-0]
+placeholder: 4..5 "digits" [digits]
+
+3D[-, 1]
+=
+kind: DanglingSign
+span: 3..4
+message: expected digits after `-`
+rendered: dangling sign (3..4): expected digits after `-`
+suggestion: 3D[-0, 1]
+placeholder: 4..5 "digits" [digits]
+
+3D[1, - ]
+=
+kind: DanglingSign
+span: 6..7
+message: expected digits after `-`
+rendered: dangling sign (6..7): expected digits after `-`
+suggestion: 3D[1, -0 ]
+placeholder: 7..8 "digits" [digits]
 
 4D6 reroll in [-]
 =
-kind: UnexpectedToken
+kind: DanglingSign
+span: 15..16
+message: expected digits after `-`
+rendered: dangling sign (15..16): expected digits after `-`
+suggestion: 4D6 reroll in [-0]
+placeholder: 16..17 "digits" [digits]
+
+4D6 reroll in [1, -]
+=
+kind: DanglingSign
+span: 18..19
+message: expected digits after `-`
+rendered: dangling sign (18..19): expected digits after `-`
+suggestion: 4D6 reroll in [1, -0]
+placeholder: 19..20 "digits" [digits]
+
+4D6 explode in [-, 6]
+=
+kind: DanglingSign
 span: 16..17
-message: unexpected `]`
-rendered: unexpected token (16..17): unexpected `]`
+message: expected digits after `-`
+rendered: dangling sign (16..17): expected digits after `-`
+suggestion: 4D6 explode in [-0, 6]
+placeholder: 17..18 "digits" [digits]
+
+3D[1, -
+=
+kind: DanglingSign
+span: 6..7
+message: expected digits after `-`
+rendered: dangling sign (6..7): expected digits after `-`
+suggestion: 3D[1, -0
+placeholder: 7..8 "digits" [digits]
+---
+kind: UnclosedDelimiter
+span: 2..3
+message: expected `]` to close `[`
+rendered: unclosed `[` (2..3): expected `]` to close `[`
+suggestion: 3D[1, -0]
+
+4d-
+=
+kind: DanglingSign
+span: 2..3
+message: expected digits after `-`
+rendered: dangling sign (2..3): expected digits after `-`
+suggestion: 4d-6
+placeholder: 3..4 "digits" [digits]
+
+(4d-) + 1
+=
+kind: DanglingSign
+span: 3..4
+message: expected digits after `-`
+rendered: dangling sign (3..4): expected digits after `-`
+suggestion: (4d-6) + 1
+placeholder: 4..5 "digits" [digits]
+
+4d- drop lowest
+=
+kind: DanglingSign
+span: 2..3
+message: expected digits after `-`
+rendered: dangling sign (2..3): expected digits after `-`
+suggestion: 4d-6 drop lowest
+placeholder: 3..4 "digits" [digits]
+
+4d- reroll = 1
+=
+kind: DanglingSign
+span: 2..3
+message: expected digits after `-`
+rendered: dangling sign (2..3): expected digits after `-`
+suggestion: 4d-6 reroll = 1
+placeholder: 3..4 "digits" [digits]
+
+3D[1, - 2]
+=
+kind: DanglingSign
+span: 6..7
+message: expected digits after `-`
+rendered: dangling sign (6..7): expected digits after `-`
+
+3D - 6
+=
+kind: DanglingSign
+span: 3..4
+message: expected digits after `-`
+rendered: dangling sign (3..4): expected digits after `-`
+
+3D[1, -x]
+=
+kind: UnexpectedToken
+span: 7..9
+message: unexpected `x]`
+rendered: unexpected token (7..9): unexpected `x]`
+
+1d-∞
+=
+kind: UnexpectedToken
+span: 3..6
+message: unexpected `∞`
+rendered: unexpected token (3..6): unexpected `∞`
 
 highest(1 2)
 =

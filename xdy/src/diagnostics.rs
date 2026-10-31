@@ -158,6 +158,14 @@ pub enum DiagnosticKind
 	/// `3D`, `3d`
 	MissingDiceFaces,
 
+	/// A `-` begins a value that has no digits: standard faces, a face of
+	/// custom dice, or a value of the list of a reroll or explode clause. A
+	/// sign must abut its digits.
+	///
+	/// # Examples
+	/// `4d-`, `3D[1, -]`, `4D6 reroll in [-]`, `3D[1, - 2]`
+	DanglingSign,
+
 	/// A `drop` keyword is not followed by `lowest` or `highest`.
 	///
 	/// # Examples
@@ -441,6 +449,7 @@ impl Display for DiagnosticKind
 			Self::BareIdentifier => write!(f, "bare identifier"),
 			Self::ReservedName => write!(f, "reserved name"),
 			Self::MissingDiceFaces => write!(f, "missing dice faces"),
+			Self::DanglingSign => write!(f, "dangling sign"),
 			Self::IncompleteDropClause =>
 			{
 				write!(f, "incomplete drop clause")
@@ -740,6 +749,9 @@ const FACE_COUNT_KINDS: &[&str] = &["integer", "{variable}", "(expression)"];
 
 /// Valid expression kinds for positions that only a dice expression may fill.
 const DICE_KINDS: &[&str] = &["dice expression"];
+
+/// Valid kinds for the digits after the sign of a value.
+const DIGITS_KINDS: &[&str] = &["digits"];
 
 /// Valid kinds for the direction of a drop or keep clause.
 const DIRECTION_KINDS: &[&str] = &["lowest", "highest"];
@@ -1572,6 +1584,40 @@ impl<'src> Doctor<'src>
 			&& let Some(diagnostic) = make_reserved_name(source, opener)
 		{
 			return Analysis::Diagnosed(diagnostic, Repair::Stop);
+		}
+
+		// Pattern: a `-` that begins standard faces or a value of a list, but
+		// that no digits follow → dangling sign. Where no value follows, the
+		// fix supplies placeholder digits after the sign; where digits follow
+		// after whitespace, which a sign must abut, there is no fix. A sign
+		// before something else that may begin an operand, e.g., `x` in
+		// `3D[-x]`, is no dangling sign, but a malformed value; but a clause,
+		// e.g., `drop` in `4d- drop lowest`, may follow faces.
+		if matches!(site.site, Site::Faces | Site::FaceValue { .. })
+			&& source[..pos].ends_with('-')
+		{
+			let after = source[pos..].trim_start_matches(is_token_space);
+			let spaced = after.len() < source.len() - pos
+				&& after.starts_with(|c: char| c.is_ascii_digit());
+			let clause = begins_verb(after, "drop")
+				|| begins_misplaced_clause(after).is_some();
+			let missing = at_eof
+				|| clause
+				|| !(begins_operand(after) || after.starts_with('∞'));
+			if spaced || missing
+			{
+				let digits = match site.site
+				{
+					_ if spaced => None,
+					Site::Faces => Some("6"),
+					_ => Some("0")
+				};
+				let repair = if spaced { Repair::Stop } else { Repair::Fix };
+				return Analysis::Diagnosed(
+					make_dangling_sign(pos - 1, digits),
+					repair
+				);
+			}
 		}
 
 		// Pattern: expression or identifier expected after delimiter/operator.
@@ -3128,6 +3174,52 @@ fn make_missing_dice_faces(source: &str, d_pos: usize) -> Diagnostic
 				}]
 			}]
 		}]
+	}
+}
+
+/// Create a diagnostic for a `-` that begins a value, but that no digits
+/// follow: standard faces, a face of custom dice, or a value of the list of a
+/// reroll or explode clause. Where no value follows the sign, the fix inserts
+/// placeholder digits just after it, which the sign must abut, e.g., `4d-6` for
+/// `4d-` and `3D[1, -0]` for `3D[1, -]`; where digits follow it after
+/// whitespace, e.g., `3D[1, - 2]`, there is no fix.
+///
+/// # Parameters
+/// - `sign`: The byte offset of the `-`.
+/// - `digits`: The placeholder digits that the fix inserts, if any.
+///
+/// # Returns
+/// A diagnostic with a `DanglingSign` kind, and a suggestion that inserts the
+/// digits, if any.
+fn make_dangling_sign(sign: usize, digits: Option<&str>) -> Diagnostic
+{
+	let at = sign + 1;
+	Diagnostic {
+		kind: DiagnosticKind::DanglingSign,
+		span: SourceSpan {
+			start: sign,
+			end: at
+		},
+		message: "expected digits after `-`".into(),
+		related: vec![],
+		suggestions: digits
+			.map(|digits| Suggestion {
+				description: "insert digits".into(),
+				edits: vec![Edit {
+					span: SourceSpan { start: at, end: at },
+					replacement: digits.into(),
+					placeholders: vec![Placeholder {
+						span: SourceSpan {
+							start: 0,
+							end: digits.len()
+						},
+						description: "digits",
+						valid_kinds: DIGITS_KINDS
+					}]
+				}]
+			})
+			.into_iter()
+			.collect()
 	}
 }
 

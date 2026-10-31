@@ -179,7 +179,9 @@
 //!   default.
 //! * [`diagnostics::DiagnosticKind`] gains the kinds that diagnose malformed
 //!   keep, reroll, and explode clauses, and malformed calls of `highest` and
-//!   `lowest`.
+//!   `lowest`, and [`DanglingSign`](diagnostics::DiagnosticKind::DanglingSign),
+//!   which diagnoses a `-` that begins faces or a value of a list but that no
+//!   digits follow, as in `4d-` or `3D[1, -]`.
 //! * A name may no longer begin with `#`, even after whitespace, so `{#x}` and
 //!   `{ #x}` no longer parse: braced text that begins with `#` is reserved for
 //!   notation to come. A name may still contain `#`, so rename `{#bonus}` to,

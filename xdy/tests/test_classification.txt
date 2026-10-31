@@ -1189,7 +1189,7 @@ x@(3D6)
 =
 0..1 Constant "4"
 1..2 DiceOperator "d"
-2..3 Unrecognized "-"
+2..3 Face "-"
 
 4d[1,-]
 =
@@ -1197,7 +1197,40 @@ x@(3D6)
 1..2 DiceOperator "d"
 2..3 FacesBracket 0 "["
 3..4 Face "1"
-4..7 Unrecognized ",-]"
+4..5 Separator ","
+5..6 Face "-"
+6..7 FacesBracket 0 "]"
+
+4D6 reroll in [-, 6]
+=
+0..1 Constant "4"
+1..2 DiceOperator "D"
+2..3 Face "6"
+4..10 Reroll "reroll"
+11..13 Predicate "in"
+14..15 ListBracket 0 "["
+15..16 Face "-"
+16..17 Separator ","
+18..19 Face "6"
+19..20 ListBracket 0 "]"
+
+4d- drop lowest
+=
+0..1 Constant "4"
+1..2 DiceOperator "d"
+2..3 Face "-"
+4..8 Selection "drop"
+9..15 Direction "lowest"
+
+3D[1, - 2]
+=
+0..1 Constant "3"
+1..2 DiceOperator "D"
+2..3 FacesBracket 0 "["
+3..4 Face "1"
+4..5 Unrecognized ","
+6..7 Unrecognized "-"
+8..10 Unrecognized "2]"
 
 3D[1, 2,]
 =
