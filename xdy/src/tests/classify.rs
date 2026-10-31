@@ -19,6 +19,11 @@
 //! closers are missing, and resolution past deep nesting, which `just stress`
 //! runs. That resolution and depth agree with the tree of every random program
 //! is a [property](super::property) test.
+//!
+//! Herein too is the test of the [golden corpus](GOLDEN) of classifications,
+//! which covers every role, and which `just bless-classification` extends.
+
+use std::{collections::HashSet, env, fs, path::Path};
 
 use pretty_assertions::assert_eq;
 
@@ -1043,3 +1048,186 @@ fn resolve_deep(nesting: Nesting)
 		}
 	});
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                               Golden corpus.                               //
+////////////////////////////////////////////////////////////////////////////////
+
+/// The path of the golden corpus of classifications, relative to the crate.
+const GOLDEN: &str = "tests/test_classification.txt";
+
+/// The environment variable that, when set, makes
+/// [`test_golden_classifications`] write the classification of each source of
+/// the [golden corpus](GOLDEN) that has none, as `just bless-classification`
+/// sets it.
+const BLESS: &str = "XDY_BLESS_CLASSIFICATION";
+
+/// Ensure that classification of each source of the [golden corpus](GOLDEN) is
+/// exactly its expected classification, and that the corpus, between its
+/// sources, classifies a token with every role.
+///
+/// The corpus is a series of blocks, separated by blank lines, each a source,
+/// on a line of its own, and, after a line that holds only `=`, its expected
+/// classification, one [rendered](render_token) token per line. A source
+/// without a classification is unblessed. If [`BLESS`] is set, the test writes
+/// the classification of every unblessed source; otherwise, an unblessed source
+/// fails the test. Blessing never rewrites a classification, so that it cannot
+/// hide a regression: a source whose classification disagrees fails the test
+/// either way, and a deliberate change must delete the classification and
+/// bless the source again.
+#[test]
+fn test_golden_classifications()
+{
+	let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
+	let text = fs::read_to_string(&path).unwrap();
+	let bless = env::var_os(BLESS).is_some();
+	let mut sources = HashSet::new();
+	let mut blocks = Vec::new();
+	let mut unblessed = Vec::new();
+	let mut expected = String::new();
+	let mut actual = String::new();
+	let mut roles = HashSet::new();
+	for block in text.trim_end().split("\n\n")
+	{
+		let (source, classification) = match block.split_once("\n=\n")
+		{
+			Some((source, classification)) => (source, Some(classification)),
+			None => (block, None)
+		};
+		assert!(
+			!source.is_empty() && !source.contains('\n'),
+			"malformed block in {GOLDEN}: {block:?}"
+		);
+		assert!(sources.insert(source), "duplicate source: {source:?}");
+		let tokens = classify(source);
+		roles.extend(tokens.iter().map(|token| token.role));
+		let rendered = tokens
+			.iter()
+			.map(|token| render_token(source, token))
+			.collect::<Vec<_>>()
+			.join("\n");
+		match classification
+		{
+			Some(classification) =>
+			{
+				if classification != rendered
+				{
+					expected += &format!("{source}\n{classification}\n\n");
+					actual += &format!("{source}\n{rendered}\n\n");
+				}
+				blocks.push(block.to_owned());
+			},
+			None =>
+			{
+				unblessed.push(source);
+				blocks.push(format!("{source}\n=\n{rendered}"));
+			}
+		}
+	}
+	if bless && !unblessed.is_empty()
+	{
+		fs::write(&path, blocks.join("\n\n") + "\n").unwrap();
+	}
+	assert_eq!(
+		expected, actual,
+		"classifications disagree with {GOLDEN}; if a change is deliberate, \
+		 delete the classification of its source and bless it again with \
+		 `just bless-classification`"
+	);
+	assert!(
+		bless || unblessed.is_empty(),
+		"unblessed sources in {GOLDEN}, so bless them with \
+		 `just bless-classification`: {unblessed:?}"
+	);
+	let missing = ALL_ROLES
+		.iter()
+		.filter(|role| !roles.contains(role))
+		.collect::<Vec<_>>();
+	assert!(
+		missing.is_empty(),
+		"roles missing from {GOLDEN}: {missing:?}"
+	);
+}
+
+/// Render a token of the [golden corpus](GOLDEN): its span, its role, its depth
+/// if it has one, and its text, quoted and escaped as by [`Debug`], e.g.,
+/// `0..1 Parenthesis 0 "("`.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `token`: The token.
+///
+/// # Returns
+/// The rendered token.
+fn render_token(source: &str, token: &Token) -> String
+{
+	let SourceSpan { start, end } = token.span;
+	let depth = token
+		.depth
+		.map(|depth| format!(" {depth}"))
+		.unwrap_or_default();
+	format!(
+		"{start}..{end} {:?}{depth} {:?}",
+		token.role,
+		&source[start..end]
+	)
+}
+
+/// Define [`ALL_ROLES`], which lists every role, and a function that matches a
+/// role exhaustively against the same list, so that a new role fails to
+/// compile until the list, and so the [golden corpus](GOLDEN), covers it.
+///
+/// # Parameters
+/// - `roles`: The name of every role.
+macro_rules! all_roles {
+	($($role:ident),* $(,)?) => {
+		/// Every role, which the [golden corpus](GOLDEN) must cover.
+		const ALL_ROLES: &[Role] = &[$(Role::$role),*];
+
+		/// Match a role exhaustively against [`ALL_ROLES`], which therefore
+		/// lists every role.
+		///
+		/// # Parameters
+		/// - `role`: The role.
+		#[allow(dead_code)]
+		const fn listed(role: Role)
+		{
+			match role
+			{
+				$(Role::$role)|* => {}
+			}
+		}
+	};
+}
+
+all_roles!(
+	Constant,
+	Face,
+	DiceOperator,
+	Selection,
+	Reroll,
+	Explode,
+	Direction,
+	Call,
+	Predicate,
+	RangeOperator,
+	Limit,
+	Additive,
+	Multiplicative,
+	Exponent,
+	Negation,
+	Bind,
+	Separator,
+	Parenthesis,
+	RangeBracket,
+	FacesBracket,
+	ListBracket,
+	NameBrace,
+	ParameterDeclaration,
+	ParameterReference,
+	BindingDeclaration,
+	BindingReference,
+	External,
+	Unresolved,
+	Unrecognized
+);

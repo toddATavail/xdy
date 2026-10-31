@@ -20,6 +20,7 @@
 	* [Dice budgets](#dice-budgets)
 	* [Probability distributions](#probability-distributions)
 	* [Diagnostics](#diagnostics)
+	* [Classification](#classification)
 * [Performance](#performance)
 * [Safety](#safety)
 * [Cargo features](#cargo-features)
@@ -48,7 +49,7 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 
 ## Upgrading from 0.14
 
-`0.15.0` adds keep, reroll, and explode clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). A reroll changes the value of a die after the roll, and an explode adds dice to it, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
+`0.15.0` adds keep, reroll, and explode clauses, and the greatest and least of expressions, `highest(…)` and `lowest(…)` (see [Language features](#language-features)). It also adds source classification, which tags the tokens of an expression with their semantic roles, for editors and syntax highlighters (see [Classification](#classification)), and guarantees which characters may occur in an expression outside braces, for hosts that embed expressions in text of their own. A reroll changes the value of a die after the roll, and an explode adds dice to it, which the counts of the lowest and highest dice dropped, by which a rolling record described its drops, cannot express. So a rolling record now holds its dice in the order rolled, each kept or crossed out. Every expression that `0.14` accepts answers the same totals, bounds, and distributions, but code that reads rolling records, or that matches or visits the IR, the AST, or diagnostics exhaustively, must change. I regret the churn, and hope that the steps below make the move painless:
 
 * `RollingRecord::dice`, a `Vec<Die>` in the order rolled, replaces `results`, `lowest_dropped`, and `highest_dropped`. Each `Die` holds its `value`; its `fate`, which is `Fate::Kept`, `Fate::Dropped` if a drop or keep crossed it out, or `Fate::Rerolled` if a reroll did; and its `origin`, which is `Origin::Rolled` if the roll rolled it, `Origin::Replaces` with the index of the die that it replaces if a reroll rolled it, `Origin::Extends` with the index of the die that it extends if an explode rolled it, or `Origin::Saturates` with the index of the die after which it stands for the endless dice of a saturated chain. `Origin::link` answers the index that any origin but `Rolled` names, and `Die::kept`, `replacing`, `extending`, and `saturating` build each kind of die. Where you read `record.results`, read `record.dice.iter().map(|die| die.value)`, but mind that a reroll appends its replacements, and an explode its extensions, so a record may hold more dice than its roll did.
 * `RollingRecord::dropped` replaces the methods `lowest_dropped` and `highest_dropped`, answering every die that a drop or keep crossed out, in the order rolled. Once keeps and rerolls may come between drops, the dice crossed out at each end no longer stand apart, so the record no longer says which end each came from. The new `rerolled` answers the dice that rerolls crossed out.
@@ -59,9 +60,11 @@ Or run `cargo add xdy rand@0.10`. See [Cargo features](#cargo-features) for the 
 * A drop crosses out the lowest or highest of the dice still kept, and of equal dice, the first rolled. The new `RollingRecord::keep_lowest`, `keep_highest`, and `reroll` apply keeps and rerolls to a record, as `drop_lowest` and `drop_highest` apply drops.
 * `Instruction` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Min`, and `InstructionVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_min`. A `Reroll` holds a `Predicate` and a `Limit`, and its predicate resolves to the `Criterion` that `RollingRecord::reroll` takes. A `Min` answers the lesser of its operands, as `Max` answers the greater. `AssemblyError` gains `KeepSourceMismatch` and `RerollSourceMismatch`, as it has `DropSourceMismatch`.
 * `Instruction` gains `Explode`, and `InstructionVisitor` requires `visit_explode`. An `Explode` holds a `Predicate` and a `Limit`, as a `Reroll` does, and `RollingRecord::explode` applies it to a record, appending dice whose `origin` is `Origin::Extends` or `Origin::Saturates`. `AssemblyError` gains `ExplodeSourceMismatch`, and `BuildError` gains `Unbounded`, with which the forward pass refuses a function in which an explode without limit, which does not match every face, may grow a chain without bound. It builds the exact distributions of limited explodes, and of unlimited ones that match every face, and so saturate. The estimate prices every function that the pass builds: every explode whose chains no later reroll or explode reads, which reduce to their totals at once, and every explode and reroll of whole chains, for a later reroll or explode, whether before or after a drop or keep, on results that a split fixed, or on chains that an explode without limit saturated, and every split of whole chains. The estimate of a function that the pass refuses as `Unbounded` saturates every quantity, but its class still says that it explodes.
-* `ast::DiceExpression` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Explode`, and `ast::ASTVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_explode`. An `ast::Explode` holds an `ast::Predicate` and an `ast::Limit`, as an `ast::Reroll` does.
+* `ast::DiceExpression` gains `KeepLowest`, `KeepHighest`, `Reroll`, and `Explode`, and `ast::ASTVisitor` requires `visit_keep_lowest`, `visit_keep_highest`, `visit_reroll`, and `visit_explode`. An `ast::Explode` holds an `ast::Predicate` and an `ast::Limit`, as an `ast::Reroll` does. `ast::ASTVisitor` also offers `enter_keep_lowest`, `enter_keep_highest`, `enter_reroll`, and `enter_explode`, which do nothing by default.
+* `s_expr::SExprError` gains `UnknownPredicate` and `UnknownLimit`, for the predicate or limit of a `(reroll …)` or an `(explode …)` that opens with an unknown keyword.
 * `ast::Expression` gains `Extremum`, whose `ast::Extremum` holds a `Direction`, `Highest` or `Lowest`, and its arguments in the order written. `ast::ASTVisitor` requires `visit_extremum`, which receives the outputs of the arguments in order, and offers `enter_extremum`, which does nothing by default.
 * `diagnostics::DiagnosticKind` gains the kinds that diagnose malformed keep, reroll, and explode clauses, and malformed calls of `highest` and `lowest`.
+* A name may no longer begin with `#`, even after whitespace, so `{#x}` and `{ #x}` no longer parse: braced text that begins with `#` is reserved for notation to come. A name may still contain `#`, so rename `{#bonus}` to, e.g., `{bonus#}`. The doctor diagnoses such text as the new `DiagnosticKind::ReservedName`, without a fix.
 * `Class` gains `rerolls`, which says whether some reroll may reroll or cross out a die, and `explodes`, which says whether some explode may extend or saturate a chain.
 
 ## Upgrading from 0.13
@@ -537,6 +540,43 @@ assert!(matches!(
 ));
 assert_eq!(result.corrected_source.as_deref(), Some("4D6 keep highest"));
 ```
+
+### Classification
+
+For syntax highlighting, `classify::classify` tags the tokens of an expression's source with their semantic roles. A `Role` says what a token _is_, never how to show it, so a host maps roles into its own styles. The roles tell apart what the grammar does: counts and constants from faces, the dice operator, the keywords of each kind of clause, the arithmetic operators grouped by precedence, each kind of delimiter, and names, resolved as formal parameters, local bindings, or external variables, and as declarations or references. Each `Token` holds its span, as byte offsets into the source, its role, and, for a parenthesis or bracket, its nesting depth, so that a surface may color delimiters by depth. Classification derives every token from the parser itself, so it never disagrees with the language. It is total: malformed or unfinished text, such as an editor's buffer mid-keystroke, is read by the doctor's recovering parse, and whatever that cannot make sense of is `Unrecognized`. It neither compiles nor optimizes, and takes time linear in the length of the source, so it may run on every keystroke:
+
+```rust
+use xdy::classify::{Role, classify};
+
+let source = "{x}@(4D6 drop lowest) + {x";
+let tokens = classify(source);
+let roles = tokens
+    .iter()
+    .map(|token| (&source[token.span.start..token.span.end], token.role))
+    .collect::<Vec<_>>();
+assert_eq!(
+    roles,
+    [
+        ("{", Role::NameBrace),
+        ("x", Role::BindingDeclaration),
+        ("}", Role::NameBrace),
+        ("@", Role::Bind),
+        ("(", Role::Parenthesis),
+        ("4", Role::Constant),
+        ("D", Role::DiceOperator),
+        ("6", Role::Face),
+        ("drop", Role::Selection),
+        ("lowest", Role::Direction),
+        (")", Role::Parenthesis),
+        ("+", Role::Additive),
+        ("{", Role::NameBrace),
+        ("x", Role::BindingReference)
+    ]
+);
+assert_eq!(tokens[4].depth, Some(0));
+```
+
+A host that embeds expressions need not classify one to find where it ends: the [embedding guarantee](#language-features) settles that by lexis alone.
 
 ## Performance
 

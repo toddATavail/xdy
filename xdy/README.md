@@ -248,6 +248,33 @@ graph TD
 
 **Semantic pass.** Instead, the doctor runs the `Validator` on the parsed AST — but **only when the original source parsed cleanly**, that is, when no fixes were applied. Semantic diagnostics point at spans the user actually typed; running the validator on a fix-synthesized source would attach diagnostics to characters the user never wrote, which is confusing, so semantic checks wait for a syntactically valid source.
 
+### Classification
+
+The `classify` module tags the tokens of a source with their semantic `Role`s, for editors and syntax highlighters. It derives every token from the parser itself, rather than from a lexer of its own, which would be one more reader of the grammar, beside the `nom` parser and `tree-sitter-xdy`, to drift from it.
+
+```mermaid
+graph TD
+    S["Source Code<br/><code>&str</code>"] --> P["Parser::parse_recovering<br/>Strict policy, token sink"]
+    P -->|OK| RES["resolve<br/>names and depths"]
+    P -->|Err| R["diagnostics::recover<br/>doctor's policy, token sink"]
+    R --> RES2["resolve<br/>names and depths"]
+    RES2 --> F["fill<br/>gaps become Unrecognized"]
+    RES --> DONE["Vec&lt;Token&gt;"]
+    F --> DONE
+    style S fill:#f9f,stroke:#333,color:#000
+    style DONE fill:#9f9,stroke:#333,color:#000
+    style P fill:#ffd,stroke:#333,color:#000
+    style R fill:#ffd,stroke:#333,color:#000
+```
+
+**Token sink.** The parsing engine reports each token where a leaf of the grammar reads it, with its role, to a `TokenSink`, once the alternative that reads it has committed, so tokens arrive in source order. A catching frame that abandons an alternative retracts every token reported since the alternative began. `TokenSink::ENABLED`, like `Recovery::ENABLED`, is a constant: `Silent`, the sink of the ordinary parse and of the doctor, sets it to `false`, which removes every report from the engine at compile time, so classification costs the ordinary parse nothing.
+
+**Tolerance.** `classify` parses the source once with the `Strict` policy, which repairs nothing; if that succeeds, the tokens are exactly those of the parse. Otherwise it parses again in the doctor's recovery mode, which repairs each failure that it can fix. The engine never reports a token that a repair supplied, nor source that a repair discarded or read as something else, such as a name without its braces, and it retracts the tokens of an attempt that a repair parses again. So the tokens of a recovering parse may leave gaps, which `fill` covers with `Unrecognized` tokens, one for each run of text between whitespace that may separate tokens.
+
+**Resolution and depth.** The engine reports each name as it reads it: a declaration as a parameter or binding declaration, and every reference as `Unresolved`. `resolve` then places every name by the scoping rules of the `Validator`, in two passes over the tokens, and gives each parenthesis and bracket its depth, counted across every kind, pairing a closer with the nearest open delimiter of its own role, so that the closers that a repair supplied need not be reported. Neither pass recurses, so classification, like the parser, consumes no more stack for deep input than for shallow.
+
+**Tests.** `tests/test_classification.txt` is a golden corpus of classifications, one rendered token per line, which `test_golden_classifications` checks, and which `tree-sitter-xdy`'s highlight queries can later be checked against. Its sources are written by hand, and their classifications written by `just bless-classification`, which only fills in a source that has none: it never rewrites a classification, so a regression cannot be blessed by accident. To change one deliberately, delete it and bless the source again, and review the result. The test also requires the corpus to classify a token with every role, and lists the roles in a macro that matches them exhaustively, so a new role does not compile until the corpus covers it. Beyond the corpus, tables in `tests/classify.rs` cover every path of recovery and every outcome of resolution; property tests check that the tokens of every random program tile the source, and that resolution and depths agree with its tree; and `just stress` classifies every input of the differential corpus, and resolves past deep nesting on a small stack.
+
 ### Textual formats
 
 Two modules give the compiler's data structures textual forms that read back exactly, which the test corpora under `tests/` rely on:

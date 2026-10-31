@@ -56,15 +56,19 @@
 //!
 //! `0.15.0` adds keep, reroll, and explode clauses, and the greatest and least
 //! of expressions, `highest(…)` and `lowest(…)` (see [Language
-//! features](#language-features)). A reroll changes the value of a die after
-//! the roll, and an explode adds dice to it, which the counts of the lowest and
-//! highest dice dropped, by which a rolling record described its drops, cannot
-//! express. So a [`RollingRecord`] now holds its dice in the order rolled, each
-//! kept or crossed out. Every expression that `0.14` accepts answers the same
-//! totals, bounds, and distributions, but code that reads rolling records, or
-//! that matches or visits the IR, the AST, or diagnostics exhaustively, must
-//! change. I regret the churn, and hope that the steps below make the move
-//! painless:
+//! features](#language-features)). It also adds source classification, which
+//! tags the tokens of an expression with their semantic roles, for editors and
+//! syntax highlighters (see [Classification](#classification)), and guarantees
+//! which characters may occur in an expression outside braces, for hosts that
+//! embed expressions in text of their own. A reroll changes the value of a die
+//! after the roll, and an explode adds dice to it, which the counts of the
+//! lowest and highest dice dropped, by which a rolling record described its
+//! drops, cannot express. So a [`RollingRecord`] now holds its dice in the
+//! order rolled, each kept or crossed out. Every expression that `0.14`
+//! accepts answers the same totals, bounds, and distributions, but code that
+//! reads rolling records, or that matches or visits the IR, the AST, or
+//! diagnostics exhaustively, must change. I regret the churn, and hope that the
+//! steps below make the move painless:
 //!
 //! * [`RollingRecord::dice`], a vector of [`Die`]s in the order rolled,
 //!   replaces `results`, `lowest_dropped`, and `highest_dropped`. Each [`Die`]
@@ -155,7 +159,17 @@
 //!   [`visit_reroll`](ast::ASTVisitor::visit_reroll), and
 //!   [`visit_explode`](ast::ASTVisitor::visit_explode). An [`ast::Explode`]
 //!   holds an [`ast::Predicate`] and an [`ast::Limit`], as an [`ast::Reroll`]
-//!   does.
+//!   does. [`ast::ASTVisitor`] also offers
+//!   [`enter_keep_lowest`](ast::ASTVisitor::enter_keep_lowest),
+//!   [`enter_keep_highest`](ast::ASTVisitor::enter_keep_highest),
+//!   [`enter_reroll`](ast::ASTVisitor::enter_reroll), and
+//!   [`enter_explode`](ast::ASTVisitor::enter_explode), which do nothing by
+//!   default.
+//! * [`s_expr::SExprError`] gains
+//!   [`UnknownPredicate`](s_expr::SExprError::UnknownPredicate) and
+//!   [`UnknownLimit`](s_expr::SExprError::UnknownLimit), for the predicate or
+//!   limit of a `(reroll …)` or an `(explode …)` that opens with an unknown
+//!   keyword.
 //! * [`ast::Expression`] gains [`Extremum`](ast::Expression::Extremum), whose
 //!   [`ast::Extremum`] holds a [`Direction`](ast::Direction), `Highest` or
 //!   `Lowest`, and its arguments in the order written. [`ast::ASTVisitor`]
@@ -166,6 +180,12 @@
 //! * [`diagnostics::DiagnosticKind`] gains the kinds that diagnose malformed
 //!   keep, reroll, and explode clauses, and malformed calls of `highest` and
 //!   `lowest`.
+//! * A name may no longer begin with `#`, even after whitespace, so `{#x}` and
+//!   `{ #x}` no longer parse: braced text that begins with `#` is reserved for
+//!   notation to come. A name may still contain `#`, so rename `{#bonus}` to,
+//!   e.g., `{bonus#}`. The doctor diagnoses such text as the new
+//!   [`ReservedName`](diagnostics::DiagnosticKind::ReservedName), without a
+//!   fix.
 //! * [`Class`] gains [`rerolls`](Class::rerolls), which says whether some
 //!   reroll may reroll or cross out a die, and [`explodes`](Class::explodes),
 //!   which says whether some explode may extend or saturate a chain.
@@ -931,6 +951,60 @@
 //! offers uniform `span()` access plus an `untethered()` operation for
 //! position-independent structural comparison (useful for tests and for the
 //! S-expression round-trip in the [`s_expr`] module).
+//!
+//! ## Classification
+//!
+//! For syntax highlighting, [`classify::classify`] tags the tokens of an
+//! expression's source with their semantic roles. A [`Role`](classify::Role)
+//! says what a token _is_, never how to show it, so a host maps roles into its
+//! own styles. The roles tell apart what the grammar does: counts and constants
+//! from faces, the dice operator, the keywords of each kind of clause, the
+//! arithmetic operators grouped by precedence, each kind of delimiter, and
+//! names, resolved as formal parameters, local bindings, or external variables,
+//! and as declarations or references. Each [`Token`](classify::Token) holds
+//! its span, as byte offsets into the source, its role, and, for a parenthesis
+//! or bracket, its nesting [depth](classify::Token::depth), so that a surface
+//! may color delimiters by depth. Classification derives every token from the
+//! parser itself, so it never disagrees with the language. It is total:
+//! malformed or unfinished text, such as an editor's buffer mid-keystroke, is
+//! read by the doctor's recovering parse, and whatever that cannot make sense
+//! of is [`Unrecognized`](classify::Role::Unrecognized). It neither compiles
+//! nor optimizes, and takes time linear in the length of the source, so it may
+//! run on every keystroke:
+//!
+//! ```rust
+//! use xdy::classify::{Role, classify};
+//!
+//! let source = "{x}@(4D6 drop lowest) + {x";
+//! let tokens = classify(source);
+//! let roles = tokens
+//!     .iter()
+//!     .map(|token| (&source[token.span.start..token.span.end], token.role))
+//!     .collect::<Vec<_>>();
+//! assert_eq!(
+//!     roles,
+//!     [
+//!         ("{", Role::NameBrace),
+//!         ("x", Role::BindingDeclaration),
+//!         ("}", Role::NameBrace),
+//!         ("@", Role::Bind),
+//!         ("(", Role::Parenthesis),
+//!         ("4", Role::Constant),
+//!         ("D", Role::DiceOperator),
+//!         ("6", Role::Face),
+//!         ("drop", Role::Selection),
+//!         ("lowest", Role::Direction),
+//!         (")", Role::Parenthesis),
+//!         ("+", Role::Additive),
+//!         ("{", Role::NameBrace),
+//!         ("x", Role::BindingReference)
+//!     ]
+//! );
+//! assert_eq!(tokens[4].depth, Some(0));
+//! ```
+//!
+//! A host that embeds expressions need not classify one to find where it ends:
+//! the [embedding guarantee](parser#embedding) settles that by lexis alone.
 //!
 //! ## Performance
 //!

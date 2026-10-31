@@ -75,6 +75,12 @@ oracle *args: lean
 railroad:
     XDY_REGENERATE_RAILROAD=1 cargo test -p xdy --lib tests::railroad
 
+# Bless the classification of every source of the golden corpus of
+# classifications, xdy/tests/test_classification.txt, that has none. Never
+# rewrites a classification; a test fails while one disagrees.
+bless-classification:
+    XDY_BLESS_CLASSIFICATION=1 cargo test -p xdy --lib tests::classify::test_golden_classifications
+
 # Build documentation.
 doc *args:
     cargo doc --workspace --no-deps {{args}}
