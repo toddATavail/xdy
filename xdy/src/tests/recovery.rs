@@ -110,7 +110,8 @@ impl<'src> Recovery<'src> for Canonical<'src>
 		let at = site.position();
 		// At a goal or faces, read a bare word as a variable, unless it
 		// follows the `-` that begins the faces; after the comma of a formal
-		// parameter, read it as the parameter.
+		// parameter, read it as the parameter. No name may begin with `#`, so
+		// a bare word that does is never read as one.
 		let signed = self.source[..at].trim_end().ends_with('-');
 		let variable = match site.site
 		{
@@ -130,7 +131,9 @@ impl<'src> Recovery<'src> for Canonical<'src>
 			Site::ParameterName => site.input().take_from(start - at),
 			_ => site.input()
 		};
-		if variable && let Ok((_, name)) = bare_word(input)
+		if variable
+			&& let Ok((_, name)) = bare_word(input)
+			&& !name.fragment().starts_with('#')
 		{
 			let end = name.location_offset() + name.fragment().len();
 			self.insert(name.location_offset(), "{");

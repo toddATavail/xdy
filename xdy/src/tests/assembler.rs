@@ -877,9 +877,9 @@ fn test_reject_empty_name()
 }
 
 /// A name must be a canonical identifier of the source language: no space may
-/// begin or end it, it may contain no whitespace but single spaces, and it may
-/// not contain a character that no identifier may contain. Each such name
-/// yields [`AssemblyError::Syntax`].
+/// begin or end it, it may contain no whitespace but single spaces, it may not
+/// contain a character that no identifier may contain, and it may not begin
+/// with `#`. Each such name yields [`AssemblyError::Syntax`].
 #[test]
 fn test_reject_invalid_name()
 {
@@ -890,7 +890,9 @@ fn test_reject_invalid_name()
 		"{a  b}",
 		"{a\tb}",
 		"{a\u{200B}b}",
-		"{a\u{A0}b}"
+		"{a\u{A0}b}",
+		"{#x}",
+		"{# x}"
 	]
 	{
 		for text in [

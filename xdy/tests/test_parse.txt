@@ -478,9 +478,9 @@
 =
 (function [] (binding {weapon|melee} 3))
 
-{#tag|a}@(2D6) + {#tag|a}
+{tag#a}@(2D6) + {tag#a}
 =
-(function [] (add (binding {#tag|a} (standard-dice 2 6)) {#tag|a}))
+(function [] (add (binding {tag#a} (standard-dice 2 6)) {tag#a}))
 
 {'dragon~breath!}
 =

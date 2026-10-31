@@ -398,10 +398,12 @@ module.exports = grammar({
     // controls, and the other invisible characters enumerated below.
     // Whitespace of any kind (White_Space, per char::is_whitespace) may occur
     // within an identifier, but not at either end: the whitespace around it,
-    // inside its braces, is not part of it. The nom parser collapses each run
+    // inside its braces, is not part of it. An identifier may not begin with
+    // `#`, which is reserved for braced notation other than names (see
+    // parser::combinators::is_identifier_start). The nom parser collapses each run
     // of whitespace within a name to a single space (see
     // parser::combinators::canonical_name).
     identifier: ($) =>
-      /[^{}\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0](\p{White_Space}*[^{}\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0])*/u,
+      /[^{}#\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0](\p{White_Space}*[^{}\p{Cc}\p{White_Space}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u00AD\u115F\u1160\u180E\u200B\u2060-\u2064\u3164\uFEFF\uFFA0])*/u,
   },
 });

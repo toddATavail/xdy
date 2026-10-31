@@ -311,6 +311,11 @@ fn test_identifier()
 		("1d6 drop lowest", "1d6 drop lowest"),
 		("$env|weapon", "$env|weapon"),
 		("|selector", "|selector"),
+		// A `#` may follow the first character, even after whitespace.
+		("a#b", "a#b"),
+		("tag#", "tag#"),
+		("x #", "x #"),
+		("x # y", "x # y"),
 		("日本語", "日本語"),
 		("🎲", "🎲"),
 		// Joiners join visible characters.
@@ -353,7 +358,12 @@ fn test_identifier()
 		"\u{0}",
 		"\u{200B}",
 		"\u{FEFF}",
-		"\u{2066}"
+		"\u{2066}",
+		// An identifier never begins with `#`.
+		"#",
+		"#x",
+		"# x",
+		"##"
 	]
 	{
 		let span = Span::new(input);
@@ -417,7 +427,9 @@ fn test_identifier_char_classes()
 		"weapon: 2/3",
 		"-1",
 		"🎲",
-		"👨\u{200D}👩"
+		"👨\u{200D}👩",
+		"a#b",
+		"x #"
 	]
 	{
 		assert!(is_canonical_name(name), "Failed to accept {:?}", name);
@@ -434,10 +446,32 @@ fn test_identifier_char_classes()
 		"a}",
 		"{x",
 		"a\u{0}b",
-		"\u{200B}"
+		"\u{200B}",
+		"#",
+		"#x",
+		"# x"
 	]
 	{
 		assert!(!is_canonical_name(name), "Failed to reject {:?}", name);
+	}
+}
+
+/// Ensure that [`is_identifier_start`] admits exactly the
+/// [identifier characters](is_identifier_char) but whitespace and `#`.
+#[test]
+fn test_identifier_start()
+{
+	for c in ['a', '0', '-', '$', '|', '🎲', '\u{200D}']
+	{
+		assert!(is_identifier_start(c), "expected {:?} to begin a name", c);
+	}
+	for c in ['#', ' ', '\t', '\n', '\u{A0}', '{', '}', '\0', '\u{200B}']
+	{
+		assert!(
+			!is_identifier_start(c),
+			"expected {:?} not to begin a name",
+			c
+		);
 	}
 }
 

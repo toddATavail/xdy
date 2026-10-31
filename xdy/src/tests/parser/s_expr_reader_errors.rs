@@ -203,7 +203,7 @@ fn test_reader_rejects_bare_identifier()
 /// "invalid identifier", and the offset points at the opening brace: the
 /// braces admit no whitespace around the name, nor an empty name, nor any
 /// whitespace within it but single spaces, nor a character that no identifier
-/// may contain.
+/// may contain, nor a `#` that begins it.
 #[test]
 fn test_reader_rejects_invalid_identifier()
 {
@@ -214,7 +214,8 @@ fn test_reader_rejects_invalid_identifier()
 		("(function [{a  b}] 1)", "invalid identifier \"a  b\""),
 		("(function [{a\tb}] 1)", "invalid identifier \"a\\tb\""),
 		("(function [{a\nb}] 1)", "invalid identifier \"a\\nb\""),
-		("(function [{{x}] 1)", "invalid identifier \"{x\"")
+		("(function [{{x}] 1)", "invalid identifier \"{x\""),
+		("(function [{#x}] 1)", "invalid identifier \"#x\"")
 	]
 	{
 		assert_reader_error(input, message, 11);

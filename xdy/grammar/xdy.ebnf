@@ -62,7 +62,9 @@
 
 <drop_expression> ::= <CONSTANT> | <variable> | <binding> | <group>
 
-<IDENTIFIER> ::= <NAME_CHAR> (<NAME_CHAR> | <WHITESPACE>+ <NAME_CHAR>)*
+<IDENTIFIER> ::= <NAME_START> (<NAME_CHAR> | <WHITESPACE>+ <NAME_CHAR>)*
+
+<NAME_START> ::= "any character that may begin an identifier (is_identifier_start): a name character but #"
 
 <NAME_CHAR> ::= "any identifier character (is_identifier_char) except whitespace"
 

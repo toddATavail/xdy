@@ -388,6 +388,16 @@ fn test_recovered_roles()
 				("2", Constant)
 			]
 		),
+		// A name that begins with `#`, which no repair reads, so that the
+		// recovering parse stops at its `{`.
+		(
+			"{#x} + 1",
+			&[
+				("{#x}", Unrecognized),
+				("+", Unrecognized),
+				("1", Unrecognized)
+			]
+		),
 		// A missing name.
 		(
 			"{ }D6",

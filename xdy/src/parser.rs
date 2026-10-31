@@ -43,7 +43,9 @@
 //! CONSTANT       ::= DIGIT+
 //! INTEGER        ::= '-'? DIGIT+
 //! D_OPERATOR     ::= 'd' | 'D'
-//! IDENTIFIER     ::= NAME_CHAR (NAME_CHAR | WHITESPACE+ NAME_CHAR)*
+//! IDENTIFIER     ::= NAME_START (NAME_CHAR | WHITESPACE+ NAME_CHAR)*
+//! NAME_START     ::= any character that may begin an identifier
+//!                    (is_identifier_start): a NAME_CHAR but '#'
 //! NAME_CHAR      ::= any identifier character (is_identifier_char) except
 //!                    whitespace
 //! WHITESPACE     ::= any whitespace (char::is_whitespace), e.g., ' ', '\t',
@@ -128,9 +130,13 @@
 //! whitespace: the whitespace inside the braces, around the identifier, is not
 //! part of it, and every run of whitespace within it collapses to a single
 //! space, so `{ a b }`, `{a  b}`, and `{a`, a line feed, and `   b}` all name
-//! `a b`. The identifier character set is defined once, by
-//! [`is_identifier_char`], which the parser, the [S-expression](crate::s_expr)
-//! reader, and the assembler share, and a name is canonicalized once, by
+//! `a b`. A name may contain `#`, as in `{tag#a}`, but may not begin with one,
+//! even after whitespace, so `{#x}` and `{ #x}` are no names: braced text that
+//! begins with `#` is reserved for notation other than names. The identifier
+//! character set is defined once, by [`is_identifier_char`], and the
+//! characters that may begin an identifier by [`is_identifier_start`], which
+//! the parser, the [S-expression](crate::s_expr) reader, and the assembler
+//! share, and a name is canonicalized once, by
 //! [`canonical_name`]. The S-expression reader and the assembler accept only
 //! [canonical](is_canonical_name) names, as their writers emit. The
 //! [diagnostics](crate::diagnostics) also look for names that lack their

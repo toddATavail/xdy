@@ -150,14 +150,37 @@ External: $env start
 (function (variable (identifier)))
 
 ==================
-External: #tag start
+External: # within
+==================
+
+{tag#a} + {tag#} + { x # }
+
+---
+
+(function
+	(add
+		(add
+			(variable (identifier))
+			(variable (identifier)))
+		(variable (identifier))))
+
+==================
+External: # start is rejected
+:error
 ==================
 
 {#tag}
 
 ---
 
-(function (variable (identifier)))
+==================
+External: # start after whitespace is rejected
+:error
+==================
+
+{ #tag}
+
+---
 
 ==================
 External: 'quote start

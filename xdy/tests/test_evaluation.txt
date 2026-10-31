@@ -3401,9 +3401,9 @@ value ∈ [5, 15], count = 6, dice = 1
 externs: $weapon|melee=5
 value ∈ [5, 5], count = 1, dice = 0
 
-{$weapon|melee} + {#bonus}
+{$weapon|melee} + {bonus#1}
 =
-externs: $weapon|melee=5, #bonus=3
+externs: $weapon|melee=5, bonus#1=3
 value ∈ [8, 8], count = 1, dice = 0
 
 {$env|count}D6

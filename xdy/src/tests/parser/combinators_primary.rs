@@ -371,6 +371,8 @@ fn test_variable()
 		("{\u{00A0}a\u{2028}b\u{00A0}}", "{a b}"),
 		("{a + b}", "{a + b}"),
 		("{x@(1)}", "{x@(1)}"),
+		("{a#b}", "{a#b}"),
+		("{ x # }", "{x #}"),
 		("{नमस्ते दुनिया}", "{नमस्ते दुनिया}")
 	]
 	{
@@ -407,7 +409,14 @@ fn test_variable()
 		"{a\u{0}b}",
 		"{a\u{202E}b}",
 		"x{}",
-		"{x}y"
+		"{x}y",
+		// Braced text that begins with `#` is reserved, even after
+		// whitespace.
+		"{#}",
+		"{#x}",
+		"{ #x}",
+		"{\n# x}",
+		"{\u{00A0}#x}"
 	]
 	{
 		let span = Span::new(input);

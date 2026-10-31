@@ -17,7 +17,7 @@ use pretty_assertions::assert_eq;
 
 use crate::{
 	Parser,
-	parser::{FailureSite, Recovery, Repair, Silent, Site},
+	parser::{FailureSite, Recovery, Repair, Silent, Site, is_token_space},
 	tests::{corpus::corpus, recovery::Canonical}
 };
 
@@ -95,8 +95,9 @@ fn test_declining_recovery_matches_parse()
 
 /// Ensure that, for every input in the corpus, the source with the edits of
 /// the [canonical](Canonical) policy's repairs applied parses to the function
-/// that recovery mode produced. Only an input that begins with a comma, which
-/// has no repair, may fail to recover.
+/// that recovery mode produced. Only an input that begins with a comma, or
+/// that has a `#` outside a name, neither of which has a repair, may fail to
+/// recover, at the comma or the `#`.
 #[test]
 fn test_canonical_recovery_matches_edited_parse()
 {
@@ -123,13 +124,12 @@ fn test_canonical_recovery_matches_edited_parse()
 				);
 			},
 			Err(_) => assert!(
-				matches!(
-					policy.sites.last(),
-					Some(FailureSite {
-						site: Site::LeadingComma,
-						..
-					})
-				),
+				policy.sites.last().is_some_and(|site| {
+					site.site == Site::LeadingComma
+						|| input[site.position()..]
+							.trim_start_matches(is_token_space)
+							.starts_with('#')
+				}),
 				"input {:?} failed to recover at {:?}",
 				input,
 				policy.sites.last()

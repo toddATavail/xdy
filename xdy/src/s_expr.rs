@@ -1314,8 +1314,8 @@ pub enum SExprError
 
 	/// A braced identifier is not a
 	/// [canonical identifier](crate::parser::is_canonical_name): it is empty,
-	/// begins or ends with whitespace, contains whitespace other than single
-	/// spaces, or contains a character that
+	/// begins or ends with whitespace, begins with `#`, contains whitespace
+	/// other than single spaces, or contains a character that
 	/// [`is_identifier_char`](crate::parser::is_identifier_char) excludes.
 	InvalidIdent
 	{

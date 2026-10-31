@@ -144,6 +144,14 @@ pub enum DiagnosticKind
 	/// `xD6`, `abcD12`
 	BareIdentifier,
 
+	/// Braced text begins with `#`, which no name may, since braced text that
+	/// begins with `#` is reserved for notation other than names. There is no
+	/// fix.
+	///
+	/// # Examples
+	/// `{#x}`, `{ # x} + 1`
+	ReservedName,
+
 	/// A dice operator has no face specification.
 	///
 	/// # Examples
@@ -430,6 +438,7 @@ impl Display for DiagnosticKind
 				write!(f, "missing left operand of `{}`", operator)
 			},
 			Self::BareIdentifier => write!(f, "bare identifier"),
+			Self::ReservedName => write!(f, "reserved name"),
 			Self::MissingDiceFaces => write!(f, "missing dice faces"),
 			Self::IncompleteDropClause =>
 			{
@@ -1527,12 +1536,18 @@ impl<'src> Doctor<'src>
 		}
 
 		// Pattern: formal parameter expected after `,`, and the text after
-		// the `,` is an identifier → bare identifier as formal parameter; or
-		// the text after the `,` is another `,` or the `:` → a stray comma.
+		// the `,` is braced text that begins with `#` → reserved name; or an
+		// identifier → bare identifier as formal parameter; or another `,` or
+		// the `:` → a stray comma.
 		if site.site == Site::ParameterName
 		{
 			let start = source.len()
 				- source[pos..].trim_start_matches(is_token_space).len();
+			if source[start..].starts_with('{')
+				&& let Some(diagnostic) = make_reserved_name(source, start)
+			{
+				return Analysis::Diagnosed(diagnostic, Repair::Stop);
+			}
 			if let Some((diagnostic, end)) =
 				self.bare_identifier_at(start, Place::Parameters)
 			{
@@ -1549,6 +1564,13 @@ impl<'src> Doctor<'src>
 					Repair::Retract
 				);
 			}
+		}
+
+		// Pattern: a name that begins with `#` → reserved name, with no fix.
+		if let Site::VariableName { opener } = site.site
+			&& let Some(diagnostic) = make_reserved_name(source, opener)
+		{
+			return Analysis::Diagnosed(diagnostic, Repair::Stop);
 		}
 
 		// Pattern: expression or identifier expected after delimiter/operator.
@@ -1974,7 +1996,8 @@ impl<'src> Doctor<'src>
 	{
 		let ident_end = self.bare_word_end(pos)?;
 		let name = self.source[pos..ident_end].trim_end_matches(is_token_space);
-		if name.is_empty()
+		// No name may begin with `#`, so bracing one would fix nothing.
+		if name.is_empty() || name.starts_with('#')
 		{
 			return None;
 		}
@@ -3830,6 +3853,47 @@ fn make_unopened_delimiter(closer: char, pos: usize) -> Diagnostic
 			edits: vec![replacement(pos, pos + closer.len_utf8(), "")]
 		}]
 	}
+}
+
+/// Create a diagnostic for braced text that begins with `#`, which no name
+/// may, e.g., `{#x}` or `{ # x}`. Braced text that begins with `#` is reserved
+/// for notation other than names, so there is no fix.
+///
+/// # Parameters
+/// - `source`: The source.
+/// - `opener`: The byte offset of the `{`.
+///
+/// # Returns
+/// A diagnostic with a `ReservedName` kind, which spans the braced text,
+/// through its `}`, or else through the end of the text before the next `{`
+/// or the end of the source, if the text begins with `#`; `None` otherwise.
+fn make_reserved_name(source: &str, opener: usize) -> Option<Diagnostic>
+{
+	let after = &source[opener + 1..];
+	if !after
+		.trim_start_matches(char::is_whitespace)
+		.starts_with('#')
+	{
+		return None;
+	}
+	let end = match after.find(['{', '}'])
+	{
+		Some(at) if after[at..].starts_with('}') => at + 1,
+		Some(at) => after[..at].trim_end_matches(is_token_space).len(),
+		None => after.trim_end_matches(is_token_space).len()
+	};
+	Some(Diagnostic {
+		kind: DiagnosticKind::ReservedName,
+		span: SourceSpan {
+			start: opener,
+			end: opener + 1 + end
+		},
+		message: "a name may not begin with `#`; braced text that begins with \
+			`#` is reserved"
+			.into(),
+		related: vec![],
+		suggestions: vec![]
+	})
 }
 
 /// Create a diagnostic for a character of [stray whitespace](stray_whitespace).

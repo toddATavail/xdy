@@ -376,6 +376,63 @@ rendered: unclosed `{` (0..1): expected `}` to close `{`
 suggestion: {x}
 placeholder: 1..2 "identifier" [identifier]
 
+{#x}
+=
+kind: ReservedName
+span: 0..4
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (0..4): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+{ # x} + 1
+=
+kind: ReservedName
+span: 0..6
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (0..6): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+{#x
+=
+kind: ReservedName
+span: 0..3
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (0..3): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+{#a {b}
+=
+kind: ReservedName
+span: 0..3
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (0..3): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+2D{#x}
+=
+kind: ReservedName
+span: 2..6
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (2..6): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+{x}, {#y}: {x}
+=
+kind: ReservedName
+span: 5..9
+message: a name may not begin with `#`; braced text that begins with `#` is reserved
+rendered: reserved name (5..9): a name may not begin with `#`; braced text that begins with `#` is reserved
+
+#bonus + 1
+=
+kind: UnexpectedToken
+span: 0..6
+message: unexpected `#bonus`
+rendered: unexpected token (0..6): unexpected `#bonus`
+
+a#b + 1
+=
+kind: BareIdentifier
+span: 0..3
+message: bare identifier `a#b` is not valid here; variables must be wrapped in `{}`
+rendered: bare identifier (0..3): bare identifier `a#b` is not valid here; variables must be wrapped in `{}`
+suggestion: {a#b} + 1
+
 [1:
 =
 kind: UnclosedDelimiter

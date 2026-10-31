@@ -925,7 +925,8 @@ pub fn d_operator(input: Span) -> IResult<Span, char, ParseError>
 ///
 /// This predicate is the single source of truth for the identifier character
 /// set, which [`identifier`], [`is_canonical_name`], the
-/// [S-expression](crate::s_expr) reader, and the assembler share.
+/// [S-expression](crate::s_expr) reader, and the assembler share, as they
+/// share [`is_identifier_start`], which narrows it for the first character.
 ///
 /// # Parameters
 /// - `c`: The character to classify.
@@ -958,10 +959,28 @@ pub fn is_identifier_char(c: char) -> bool
 			))
 }
 
+/// Answer whether `c` may begin an [identifier]: whether it is an
+/// [identifier character](is_identifier_char), but neither whitespace, which
+/// pads an identifier inside its braces rather than belonging to it, nor `#`.
+/// A name may contain `#`, as in `{a#b}` or `{x #}`, but may not begin with
+/// one, even after whitespace, as in `{ #x}`, so that braced text that begins
+/// with `#` is free for notation other than names.
+///
+/// # Parameters
+/// - `c`: The character to classify.
+///
+/// # Returns
+/// `true` if `c` may begin an identifier; `false` otherwise.
+pub fn is_identifier_start(c: char) -> bool
+{
+	!c.is_whitespace() && c != '#' && is_identifier_char(c)
+}
+
 /// Answer whether `name` is a canonical [identifier], as [`canonical_name`]
 /// produces it: a nonempty run of [identifier characters](is_identifier_char)
 /// whose only whitespace is single U+0020 SPACE characters between the words,
-/// so that it neither begins nor ends with one. Wherever a name is written
+/// so that it neither begins nor ends with one, and whose first character
+/// [may begin](is_identifier_start) an identifier. Wherever a name is written
 /// without the source language's leniency about whitespace, as in the
 /// [S-expression](crate::s_expr) format and the assembler, it must be
 /// canonical.
@@ -973,12 +992,13 @@ pub fn is_identifier_char(c: char) -> bool
 /// `true` if `name` is a canonical identifier; `false` otherwise.
 pub fn is_canonical_name(name: &str) -> bool
 {
-	name.split(' ').all(|word| {
-		!word.is_empty()
-			&& word
-				.chars()
-				.all(|c| !c.is_whitespace() && is_identifier_char(c))
-	})
+	name.starts_with(is_identifier_start)
+		&& name.split(' ').all(|word| {
+			!word.is_empty()
+				&& word
+					.chars()
+					.all(|c| !c.is_whitespace() && is_identifier_char(c))
+		})
 }
 
 /// Canonicalize the [identifier] `name`, exactly as written, to the name that
@@ -1015,11 +1035,13 @@ pub fn canonical_name(name: &str) -> Cow<'_, str>
 
 /// Parse an identifier, without leading whitespace. An identifier is a run of
 /// [identifier characters](is_identifier_char), which may include whitespace,
-/// but neither begins nor ends with any: the trailing whitespace remains in
-/// the input. Every identifier in the language is [braced](braced_name), so an
-/// identifier ends at its closing brace, e.g., `{an external variable}` or
-/// `{weapon: 2/3}`. The identifier is exactly as written, so it may differ
-/// from the name that it denotes, which [`canonical_name`] produces.
+/// but neither begins nor ends with any, and which begins with a character
+/// that [may begin](is_identifier_start) one, so never with `#`: the trailing
+/// whitespace remains in the input. Every identifier in the language is
+/// [braced](braced_name), so an identifier ends at its closing brace, e.g.,
+/// `{an external variable}` or `{weapon: 2/3}`. The identifier is exactly as
+/// written, so it may differ from the name that it denotes, which
+/// [`canonical_name`] produces.
 ///
 /// # Parameters
 /// - `input`: The input text to parse.
@@ -1032,9 +1054,7 @@ pub fn canonical_name(name: &str) -> Cow<'_, str>
 pub fn identifier(input: Span) -> IResult<Span, Span, ParseError>
 {
 	let (_, run) = recognize(pair(
-		take_while_m_n(1, 1, |c: char| {
-			!c.is_whitespace() && is_identifier_char(c)
-		}),
+		take_while_m_n(1, 1, is_identifier_start),
 		take_while(is_identifier_char)
 	))
 	.parse_complete(input)?;

@@ -969,9 +969,9 @@ static const TSCharacterRange sym__close_brace_character_set_2[] = {
 };
 
 static const TSCharacterRange sym_identifier_character_set_1[] = {
-  {'!', 'z'}, {'|', '|'}, {'~', '~'}, {0xa1, 0xac}, {0xae, 0x61b}, {0x61d, 0x115e}, {0x1161, 0x167f}, {0x1681, 0x180d},
-  {0x180f, 0x1fff}, {0x200c, 0x200d}, {0x2010, 0x2027}, {0x2030, 0x205e}, {0x2065, 0x2065}, {0x206a, 0x2fff}, {0x3001, 0x3163}, {0x3165, 0xfefe},
-  {0xff00, 0xff9f}, {0xffa1, 0x10ffff},
+  {'!', '"'}, {'$', 'z'}, {'|', '|'}, {'~', '~'}, {0xa1, 0xac}, {0xae, 0x61b}, {0x61d, 0x115e}, {0x1161, 0x167f},
+  {0x1681, 0x180d}, {0x180f, 0x1fff}, {0x200c, 0x200d}, {0x2010, 0x2027}, {0x2030, 0x205e}, {0x2065, 0x2065}, {0x206a, 0x2fff}, {0x3001, 0x3163},
+  {0x3165, 0xfefe}, {0xff00, 0xff9f}, {0xffa1, 0x10ffff},
 };
 
 static const TSCharacterRange sym_identifier_character_set_2[] = {
@@ -1178,7 +1178,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead == '\n' ||
           lookahead == '\r' ||
           lookahead == ' ') SKIP(45);
-      if (set_contains(sym_identifier_character_set_1, 18, lookahead)) ADVANCE(92);
+      if (set_contains(sym_identifier_character_set_1, 19, lookahead)) ADVANCE(92);
       END_STATE();
     case 46:
       if (('0' <= lookahead && lookahead <= '9')) ADVANCE(87);
