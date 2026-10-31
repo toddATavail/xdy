@@ -3720,6 +3720,15 @@ const SEEDS: [u64; 4] = [0, 1, 2, 3];
 /// abstains.
 const DICE: u64 = 10_000;
 
+/// The allowance of work of the [reference](RerollProgram::reference) of each
+/// case of the properties that check the pass against it, beyond which they
+/// abstain. The reference enumerates the multisets of chains still kept, which
+/// a few random programs make so many that it would run for minutes in a debug
+/// build. Each unit takes about 9 µs in a debug build, so the allowance bounds
+/// each case at about a second; of the cases that the reference checks, about
+/// 1 in 500 exceeds it.
+const REFERENCE_WORK: usize = 100_000;
+
 /// Ensure that the pass answers every random [static program](static_program)
 /// that compiles, optimized and not, over random bindings, soundly and alike,
 /// whenever it fits [`BUDGET`].
@@ -5604,7 +5613,11 @@ impl Chance
 	/// The chance.
 	fn one_in(n: usize) -> Self { Self::new(Weight::ONE, Weight::from(n)) }
 
-	/// Answer the product of two chances.
+	/// Answer the product of two chances, reduced. Each numerator shares no
+	/// factor with its own denominator, so the product is reduced once each
+	/// numerator is divided by its greatest common divisor with the other
+	/// denominator, which keeps the factors small, rather than the product
+	/// reduced by its own.
 	///
 	/// # Parameters
 	/// - `other`: The other chance.
@@ -5613,23 +5626,84 @@ impl Chance
 	/// The product.
 	fn times(&self, other: &Self) -> Self
 	{
-		Self::new(
-			&self.numerator * &other.numerator,
-			&self.denominator * &other.denominator
-		)
+		if self.numerator.is_zero() || other.numerator.is_zero()
+		{
+			return Self {
+				numerator: Weight::ZERO,
+				denominator: Weight::ONE
+			}
+		}
+		let left = self.numerator.gcd(&other.denominator);
+		let right = other.numerator.gcd(&self.denominator);
+		Self {
+			numerator: &self.numerator.exact_div(&left)
+				* &other.numerator.exact_div(&right),
+			denominator: &self.denominator.exact_div(&right)
+				* &other.denominator.exact_div(&left)
+		}
 	}
 
-	/// Add another chance to this one.
+	/// Add another chance to this one, reduced. Over a common denominator, the
+	/// least common multiple of the two, the sum shares a factor with the
+	/// denominator only within the greatest common divisor of the two, so
+	/// that, of denominators that are equal, as the chances of the branches
+	/// of a roll are, only the sum of the numerators and the denominator need
+	/// be reduced.
 	///
 	/// # Parameters
 	/// - `other`: The other chance.
 	fn add(&mut self, other: &Self)
 	{
-		*self = Self::new(
-			&self.numerator * &other.denominator
-				+ &other.numerator * &self.denominator,
-			&self.denominator * &other.denominator
-		);
+		let common = self.denominator.gcd(&other.denominator);
+		let numerator = &self.numerator * &other.denominator.exact_div(&common)
+			+ &other.numerator * &self.denominator.exact_div(&common);
+		let reduce = numerator.gcd(&common);
+		*self = Self {
+			numerator: numerator.exact_div(&reduce),
+			denominator: &self.denominator.exact_div(&common)
+				* &other.denominator.exact_div(&reduce)
+		};
+	}
+}
+
+/// Ensure that the products and sums of chances are those of their fractions,
+/// reduced: of every pair of reduced fractions over small numerators and
+/// denominators, some equal, some zero, and some beyond `u128`, each product
+/// and sum is the reduction of the product or sum by cross-multiplication.
+#[test]
+fn test_chance_arithmetic()
+{
+	let big = Weight::from(u128::MAX);
+	let mut chances = Vec::new();
+	for denominator in 1..=12u32
+	{
+		for numerator in 0..=denominator
+		{
+			chances.push(Chance::new(
+				Weight::from(numerator),
+				Weight::from(denominator)
+			));
+		}
+	}
+	chances.push(Chance::new(Weight::from(6u32), &big * &Weight::from(4u32)));
+	chances.push(Chance::new(&big * &Weight::from(3u32), &big * &big));
+	for a in &chances
+	{
+		for b in &chances
+		{
+			let product = Chance::new(
+				&a.numerator * &b.numerator,
+				&a.denominator * &b.denominator
+			);
+			assert_eq!(a.times(b), product, "{a:?} × {b:?}");
+			let sum = Chance::new(
+				&a.numerator * &b.denominator + &b.numerator * &a.denominator,
+				&a.denominator * &b.denominator
+			);
+			let mut added = a.clone();
+			added.add(b);
+			assert_eq!(added, sum, "{a:?} + {b:?}");
+		}
 	}
 }
 
@@ -5809,7 +5883,12 @@ impl RerollProgram
 	/// Answer the law of the program's answer, by enumerating every value of
 	/// its registers, every roll of its dice, every reroll that each die still
 	/// kept may make, and every extension that each chain still kept may
-	/// grow, independently of the forward pass.
+	/// grow, independently of the forward pass, within an allowance of work,
+	/// of which each state that the enumeration weighs takes one unit.
+	///
+	/// # Parameters
+	/// - `work`: The allowance of work, which the enumeration reduces by the
+	///   work that it does.
 	///
 	/// # Panics
 	/// If an explode without limit, whose predicate does not match every face,
@@ -5817,8 +5896,8 @@ impl RerollProgram
 	///
 	/// # Returns
 	/// The law, as a distribution, which agrees with the program's in
-	/// probability.
-	fn reference(&self) -> Distribution
+	/// probability, or `None` if the allowance runs out first.
+	fn reference(&self, work: &mut usize) -> Option<Distribution>
 	{
 		let mut assignments = vec![(Vec::<i32>::new(), Chance::one_in(1))];
 		for &(count, faces, offset) in &self.registers
@@ -5854,7 +5933,7 @@ impl RerollProgram
 		let mut answers = Law::<i32>::new();
 		for (values, chance) in assignments
 		{
-			for (sum, sum_chance) in self.sums(&values)
+			for (sum, sum_chance) in self.sums(&values, work)?
 			{
 				weigh(&mut answers, sum, chance.times(&sum_chance));
 			}
@@ -5862,24 +5941,31 @@ impl RerollProgram
 		let denominator = answers
 			.values()
 			.fold(Weight::ONE, |lcm, chance| lcm.lcm(&chance.denominator));
-		Distribution::from_weights(answers.into_iter().map(|(sum, chance)| {
-			(
-				sum,
-				chance.numerator * denominator.exact_div(&chance.denominator)
-			)
-		}))
-		.unwrap()
+		let distribution = Distribution::from_weights(answers.into_iter().map(
+			|(sum, chance)| {
+				(
+					sum,
+					chance.numerator
+						* denominator.exact_div(&chance.denominator)
+				)
+			}
+		))
+		.unwrap();
+		Some(distribution)
 	}
 
 	/// Answer the law of the sum of the record, given the values of the
-	/// registers.
+	/// registers, within an allowance of work, as
+	/// [`reference`](Self::reference) does.
 	///
 	/// # Parameters
 	/// - `values`: The values of the registers.
+	/// - `work`: The allowance of work, which the enumeration reduces by the
+	///   work that it does.
 	///
 	/// # Returns
-	/// The law of the sum.
-	fn sums(&self, values: &[i32]) -> Law<i32>
+	/// The law of the sum, or `None` if the allowance runs out first.
+	fn sums(&self, values: &[i32], work: &mut usize) -> Option<Law<i32>>
 	{
 		let value = |op: AddressingMode| match op
 		{
@@ -5914,6 +6000,7 @@ impl RerollProgram
 			let mut next = Law::new();
 			for (kept, chance) in &states
 			{
+				charge(work, faces.len())?;
 				for face in &faces
 				{
 					let mut kept = kept.clone();
@@ -5989,6 +6076,7 @@ impl RerollProgram
 						.collect()
 					},
 				};
+				charge(work, outcomes.len())?;
 				for (kept, outcome_chance) in outcomes
 				{
 					weigh(&mut next, kept, chance.times(&outcome_chance));
@@ -6005,8 +6093,23 @@ impl RerollProgram
 				.fold(0i32, |sum, chain| sum.saturating_add(chain.total));
 			weigh(&mut sums, sum, chance);
 		}
-		sums
+		Some(sums)
 	}
+}
+
+/// Charge work to an allowance of work, as the reference does.
+///
+/// # Parameters
+/// - `work`: The allowance of work.
+/// - `units`: The units of work to charge.
+///
+/// # Returns
+/// `Some(())` if the allowance covers the work, which it then excludes, or
+/// `None` if it does not.
+fn charge(work: &mut usize, units: usize) -> Option<()>
+{
+	*work = work.checked_sub(units)?;
+	Some(())
 }
 
 /// A chain still kept of the reference, ordered as drops and keeps order
@@ -6672,17 +6775,27 @@ proptest! {
 	/// Rerolls answer the law of their definition, optimized or not, whether
 	/// before or after drops and keeps, of every predicate form, limited or
 	/// not, with fixed or random operands, some of them shared, and their
-	/// totals are the counts of outcomes that their bounds report.
+	/// totals are the counts of outcomes that their bounds report, whenever the
+	/// pass fits [`BUDGET`] and the reference [`REFERENCE_WORK`].
 	#[test]
 	fn test_rerolls_agree_with_reference(program in reroll_program())
 	{
 		let assembly = program.assembly();
 		let function = Assembler::assemble(&assembly).unwrap();
-		let expected = program.reference();
+		let mut work = REFERENCE_WORK;
+		let Some(expected) = program.reference(&mut work)
+		else
+		{
+			return Ok(())
+		};
 		for function in [function.clone(), optimize(function, Passes::all())]
 		{
 			let evaluator = Evaluator::new(function);
-			let propagated = propagate(&evaluator, []).unwrap();
+			let propagated = match propagate_within(&evaluator, &[], BUDGET)
+			{
+				Err(PropagationError::Exhausted(_)) => continue,
+				result => result.unwrap().0
+			};
 			prop_assert!(
 				agree(&propagated, &expected),
 				"{assembly}\npropagated:\n{propagated}\nexpected:\n{expected}"
@@ -6763,7 +6876,9 @@ proptest! {
 	/// limit. The optimizer may fold away an explode without limit that the
 	/// pass refuses, as when a later drop crosses out every chain, which the
 	/// reference cannot follow, so the optimized distribution must then hold
-	/// every result of the unoptimized function, sampled.
+	/// every result of the unoptimized function, sampled. The property abstains
+	/// wherever the pass exceeds [`BUDGET`] or the reference
+	/// [`REFERENCE_WORK`].
 	#[test]
 	fn test_explodes_agree_with_reference(program in explode_program())
 	{
@@ -6774,8 +6889,9 @@ proptest! {
 		for optimized in [function.clone(), optimize(function.clone(), Passes::all())]
 		{
 			let evaluator = Evaluator::new(optimized);
-			let propagated = match propagate(&evaluator, [])
+			let propagated = match propagate_within(&evaluator, &[], BUDGET)
 			{
+				Err(PropagationError::Exhausted(_)) => continue,
 				Err(PropagationError::Unbounded) =>
 				{
 					prop_assert!(
@@ -6786,7 +6902,7 @@ proptest! {
 					refused = true;
 					continue
 				},
-				result => result.unwrap()
+				result => result.unwrap().0
 			};
 			if refused
 			{
@@ -6805,7 +6921,14 @@ proptest! {
 				}
 				continue
 			}
-			let expected = expected.get_or_init(|| program.reference());
+			let Some(expected) = expected.get_or_init(|| {
+				let mut work = REFERENCE_WORK;
+				program.reference(&mut work)
+			})
+			else
+			{
+				return Ok(())
+			};
 			prop_assert!(
 				agree(&propagated, expected),
 				"{assembly}\npropagated:\n{propagated}\nexpected:\n{expected}"
